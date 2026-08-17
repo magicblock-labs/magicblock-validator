@@ -1,3 +1,6 @@
+use std::sync::{Arc, atomic::AtomicU64};
+
+use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountBuilder, AccountMode};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
@@ -9,8 +12,15 @@ type TestFetchCloner = FetchCloner<ChainRpcClientMock, ChainPubsubClientMock>;
 
 use crate::{
     cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
-    remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
-    testing::{context::TestContext, rpc_client_mock::ChainRpcClientMock},
+    remote_account_provider::{
+        RemoteAccountProvider,
+        chain_pubsub_client::mock::ChainPubsubClientMock,
+        config::RemoteAccountProviderConfig,
+    },
+    testing::{
+        rpc_client_mock::{ChainRpcClientMock, ChainRpcClientMockBuilder},
+        utils::create_test_subscribed_accounts_with_config,
+    },
 };
 
 fn request(account: AccountBuilder) -> AccountCloneRequest {
@@ -191,8 +201,30 @@ fn replay_recovery_request_scan_is_slot_and_type_bounded() {
 }
 
 #[tokio::test]
-async fn request_scan_partitions_after_global_failure() {
-    let context = TestContext::init(42).await;
+async fn request_scan_recursively_partitions_failed_bucket() {
+    let rpc_client = ChainRpcClientMockBuilder::new().slot(42).build();
+    let (updates_sender, updates_receiver) = mpsc::channel(100);
+    let pubsub_client =
+        ChainPubsubClientMock::new(updates_sender, updates_receiver);
+    let (forward_sender, _forward_receiver) = mpsc::channel(100);
+    let config = RemoteAccountProviderConfig::default_with_lifecycle_mode(
+        LifecycleMode::Ephemeral,
+    );
+    let subscribed_accounts =
+        create_test_subscribed_accounts_with_config(&config);
+    let remote_account_provider =
+        RemoteAccountProvider::try_from_clients_and_mode(
+            rpc_client.clone(),
+            pubsub_client,
+            forward_sender,
+            &config,
+            subscribed_accounts,
+            Arc::<AtomicU64>::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    let validator_pubkey = Pubkey::new_unique();
     let delegated_account = Pubkey::new_unique();
     let record_pda =
         delegation_record_pda_from_delegated_account(&delegated_account);
@@ -200,7 +232,7 @@ async fn request_scan_partitions_after_global_failure() {
         undelegation_request_pda_from_delegated_account(&delegated_account);
     let mut record = delegation_record_account(1);
     let record_data = DelegationRecord {
-        authority: context.validator_pubkey,
+        authority: validator_pubkey,
         owner: Pubkey::new_unique(),
         delegation_slot: 1,
         lamports: 1,
@@ -209,24 +241,28 @@ async fn request_scan_partitions_after_global_failure() {
     record_data
         .to_bytes_with_discriminator(&mut record.data)
         .unwrap();
-    context.rpc_client.add_account(record_pda, record);
-    context.rpc_client.add_account(
+    rpc_client.add_account(record_pda, record);
+    rpc_client.add_account(
         request_pda,
         undelegation_request_account(delegated_account, 100),
     );
-    context
-        .rpc_client
-        .fail_unpartitioned_undelegation_request_scan();
-    let baseline = context.rpc_client.program_account_fetches();
+    rpc_client.fail_unpartitioned_undelegation_request_scan();
+    rpc_client.fail_single_byte_undelegation_request_prefix(
+        delegated_account.to_bytes()[0],
+    );
+    let baseline = rpc_client.program_account_fetches();
 
-    let requests = context
-        .chainlink
-        .fetch_undelegation_requests()
-        .await
-        .expect("partitioned request scan should succeed");
+    let scan = scan_undelegation_requests_with_provider(
+        &remote_account_provider,
+        validator_pubkey,
+        0,
+    )
+    .await
+    .expect("recursively partitioned request scan should succeed");
 
+    assert_eq!(scan.incomplete_partitions, 0);
     assert_eq!(
-        requests,
+        scan.requests,
         vec![ObservedUndelegationRequest {
             request_pda,
             delegated_account,
@@ -234,7 +270,21 @@ async fn request_scan_partitions_after_global_failure() {
             observed_slot: 42,
         }]
     );
-    assert_eq!(context.rpc_client.program_account_fetches() - baseline, 257);
+    assert_eq!(rpc_client.program_account_fetches() - baseline, 515);
+
+    rpc_client.fail_all_undelegation_request_scans();
+    let baseline = rpc_client.program_account_fetches();
+    let unavailable = scan_undelegation_requests_with_provider(
+        &remote_account_provider,
+        validator_pubkey,
+        0,
+    )
+    .await
+    .expect("systemic scan failure should remain a partial result");
+
+    assert!(unavailable.requests.is_empty());
+    assert_eq!(unavailable.incomplete_partitions, 1);
+    assert_eq!(rpc_client.program_account_fetches() - baseline, 2);
 }
 
 #[test]

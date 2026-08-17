@@ -135,6 +135,12 @@ impl ChainRpcClientMockBuilder {
             fail_unpartitioned_undelegation_request_scan: Arc::new(
                 AtomicBool::new(false),
             ),
+            fail_single_byte_undelegation_request_prefix: Arc::new(
+                AtomicU64::new(u8::MAX as u64 + 1),
+            ),
+            fail_all_undelegation_request_scans: Arc::new(AtomicBool::new(
+                false,
+            )),
             multi_account_response_truncate: self
                 .multi_account_response_truncate,
         };
@@ -164,6 +170,8 @@ pub struct ChainRpcClientMock {
     block_fetches: Arc<AtomicBool>,
     fetch_block_notify: Arc<Notify>,
     fail_unpartitioned_undelegation_request_scan: Arc<AtomicBool>,
+    fail_single_byte_undelegation_request_prefix: Arc<AtomicU64>,
+    fail_all_undelegation_request_scans: Arc<AtomicBool>,
     multi_account_response_truncate: Option<usize>,
 }
 
@@ -182,6 +190,12 @@ impl ChainRpcClientMock {
             fail_unpartitioned_undelegation_request_scan: Arc::new(
                 AtomicBool::new(false),
             ),
+            fail_single_byte_undelegation_request_prefix: Arc::new(
+                AtomicU64::new(u8::MAX as u64 + 1),
+            ),
+            fail_all_undelegation_request_scans: Arc::new(AtomicBool::new(
+                false,
+            )),
             multi_account_response_truncate: None,
         }
     }
@@ -300,6 +314,16 @@ impl ChainRpcClientMock {
 
     pub fn fail_unpartitioned_undelegation_request_scan(&self) {
         self.fail_unpartitioned_undelegation_request_scan
+            .store(true, Ordering::Relaxed);
+    }
+
+    pub fn fail_single_byte_undelegation_request_prefix(&self, prefix: u8) {
+        self.fail_single_byte_undelegation_request_prefix
+            .store(prefix as u64, Ordering::Relaxed);
+    }
+
+    pub fn fail_all_undelegation_request_scans(&self) {
+        self.fail_all_undelegation_request_scans
             .store(true, Ordering::Relaxed);
     }
 
@@ -461,6 +485,28 @@ impl ChainRpcClient for ChainRpcClientMock {
         self.wait_if_fetches_blocked().await;
 
         if self
+            .fail_all_undelegation_request_scans
+            .load(Ordering::Relaxed)
+            && pubkey == &dlp_api::id()
+            && config.filters.as_ref().is_some_and(|filters| {
+                filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        RpcFilterType::DataSize(size)
+                            if *size
+                                == UndelegationRequest::size_with_discriminator()
+                                    as u64
+                    )
+                })
+            })
+        {
+            return Err(client_error::ErrorKind::Custom(
+                "all undelegation request scans failed".to_string(),
+            )
+            .into());
+        }
+
+        if self
             .fail_unpartitioned_undelegation_request_scan
             .load(Ordering::Relaxed)
             && pubkey == &dlp_api::id()
@@ -483,6 +529,39 @@ impl ChainRpcClient for ChainRpcClientMock {
         {
             return Err(client_error::ErrorKind::Custom(
                 "unpartitioned undelegation request scan failed".to_string(),
+            )
+            .into());
+        }
+
+        let failed_prefix = self
+            .fail_single_byte_undelegation_request_prefix
+            .load(Ordering::Relaxed);
+        if failed_prefix <= u8::MAX as u64
+            && pubkey == &dlp_api::id()
+            && config.filters.as_ref().is_some_and(|filters| {
+                filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        RpcFilterType::DataSize(size)
+                            if *size
+                                == UndelegationRequest::size_with_discriminator()
+                                    as u64
+                    )
+                }) && filters.iter().any(|filter| {
+                    matches!(
+                        filter,
+                        RpcFilterType::Memcmp(memcmp)
+                            if memcmp.offset() == 8
+                                && memcmp.bytes().is_some_and(|bytes| {
+                                    bytes.as_slice() == [failed_prefix as u8]
+                                })
+                    )
+                })
+            })
+        {
+            return Err(client_error::ErrorKind::Custom(
+                "single-byte undelegation request partition failed"
+                    .to_string(),
             )
             .into());
         }

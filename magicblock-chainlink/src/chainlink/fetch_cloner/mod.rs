@@ -46,7 +46,7 @@ use solana_account_decoder_client_types::{
     UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_keypair::Keypair;
-use solana_pubkey::Pubkey;
+use solana_pubkey::{PUBKEY_BYTES, Pubkey};
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcBlockConfig, RpcProgramAccountsConfig},
     filter::{Memcmp, RpcFilterType},
@@ -337,6 +337,11 @@ struct UndelegationRequestScan {
     incomplete_partitions: usize,
 }
 
+enum UndelegationRequestPartitionError {
+    Scan(ChainlinkError),
+    Records(ChainlinkError),
+}
+
 fn records_in_replay_gap(
     records: impl IntoIterator<Item = (Pubkey, Account)>,
     range: ReplayRecoveryRange,
@@ -374,6 +379,265 @@ fn delegation_record_has_local_authority(
 ) -> bool {
     record.authority == validator_pubkey
         || record.authority == Pubkey::default()
+}
+
+async fn scan_undelegation_requests_with_provider<T, U>(
+    remote_account_provider: &RemoteAccountProvider<T, U>,
+    validator_pubkey: Pubkey,
+    min_context_slot: u64,
+) -> ChainlinkResult<UndelegationRequestScan>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let observed_slot = remote_account_provider
+        .get_slot()
+        .await?
+        .max(min_context_slot);
+    match fetch_undelegation_request_partition(
+        remote_account_provider,
+        validator_pubkey,
+        observed_slot,
+        None,
+    )
+    .await
+    {
+        Ok(requests) => {
+            return Ok(UndelegationRequestScan {
+                requests,
+                incomplete_partitions: 0,
+            });
+        }
+        Err(UndelegationRequestPartitionError::Scan(error)) => warn!(
+            ?error,
+            "global undelegation request scan failed; retrying with recursive partitions"
+        ),
+        Err(UndelegationRequestPartitionError::Records(error)) => {
+            return Err(error);
+        }
+    }
+    Ok(scan_undelegation_request_subtree(
+        remote_account_provider,
+        validator_pubkey,
+        observed_slot,
+        Vec::new(),
+    )
+    .await)
+}
+
+fn scan_undelegation_request_subtree<'a, T, U>(
+    remote_account_provider: &'a RemoteAccountProvider<T, U>,
+    validator_pubkey: Pubkey,
+    observed_slot: u64,
+    prefix: Vec<u8>,
+) -> Pin<Box<dyn Future<Output = UndelegationRequestScan> + Send + 'a>>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    Box::pin(async move {
+        let probe = Pubkey::default();
+        let probe_config =
+            undelegation_request_config(observed_slot, Some(probe.as_ref()));
+        if let Err(error) = remote_account_provider
+            .get_program_accounts_with_config(&dlp_api::id(), probe_config)
+            .await
+        {
+            warn!(
+                ?error,
+                prefix_len = prefix.len(),
+                "undelegation request partition health probe failed; deferring subtree"
+            );
+            return UndelegationRequestScan {
+                requests: Vec::new(),
+                incomplete_partitions: 1,
+            };
+        }
+
+        let mut partitions = stream::iter(u8::MIN..=u8::MAX)
+            .map(|next_byte| {
+                let mut child_prefix = prefix.clone();
+                child_prefix.push(next_byte);
+                async move {
+                    let partition = fetch_undelegation_request_partition(
+                        remote_account_provider,
+                        validator_pubkey,
+                        observed_slot,
+                        Some(&child_prefix),
+                    )
+                    .await;
+                    (child_prefix, partition)
+                }
+            })
+            .buffer_unordered(UNDELEGATION_REQUEST_PARTITION_CONCURRENCY);
+        let mut requests = Vec::new();
+        let mut failed_prefixes = Vec::new();
+        let mut incomplete_partitions = 0usize;
+        while let Some((child_prefix, partition)) = partitions.next().await {
+            match partition {
+                Ok(mut partition_requests) => {
+                    requests.append(&mut partition_requests);
+                }
+                Err(UndelegationRequestPartitionError::Scan(error)) => {
+                    warn!(
+                        ?error,
+                        prefix = ?child_prefix,
+                        "undelegation request partition failed; subdividing"
+                    );
+                    failed_prefixes.push(child_prefix);
+                }
+                Err(UndelegationRequestPartitionError::Records(error)) => {
+                    incomplete_partitions =
+                        incomplete_partitions.saturating_add(1);
+                    warn!(
+                        ?error,
+                        prefix = ?child_prefix,
+                        "undelegation request record verification failed; deferring partition"
+                    );
+                }
+            }
+        }
+
+        for failed_prefix in failed_prefixes {
+            if failed_prefix.len() >= PUBKEY_BYTES {
+                incomplete_partitions = incomplete_partitions.saturating_add(1);
+                warn!(
+                    prefix = ?failed_prefix,
+                    "exact undelegation request partition failed; deferring"
+                );
+                continue;
+            }
+            let mut nested = scan_undelegation_request_subtree(
+                remote_account_provider,
+                validator_pubkey,
+                observed_slot,
+                failed_prefix,
+            )
+            .await;
+            requests.append(&mut nested.requests);
+            incomplete_partitions = incomplete_partitions
+                .saturating_add(nested.incomplete_partitions);
+        }
+        UndelegationRequestScan {
+            requests,
+            incomplete_partitions,
+        }
+    })
+}
+
+async fn fetch_undelegation_request_partition<T, U>(
+    remote_account_provider: &RemoteAccountProvider<T, U>,
+    validator_pubkey: Pubkey,
+    observed_slot: u64,
+    delegated_account_prefix: Option<&[u8]>,
+) -> Result<Vec<ObservedUndelegationRequest>, UndelegationRequestPartitionError>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let delegation_program = dlp_api::id();
+    let config =
+        undelegation_request_config(observed_slot, delegated_account_prefix);
+    let accounts = remote_account_provider
+        .get_program_accounts_with_config(&delegation_program, config)
+        .await
+        .map_err(|error| {
+            UndelegationRequestPartitionError::Scan(error.into())
+        })?;
+    let mut parsed_requests = Vec::with_capacity(accounts.len());
+    for (request_pda, account) in accounts {
+        let Ok(request) =
+            UndelegationRequest::try_from_bytes_with_discriminator(
+                &account.data,
+            )
+        else {
+            warn!(
+                request_pda = %request_pda,
+                data_len = account.data.len(),
+                "Skipping malformed DLP undelegation request account"
+            );
+            continue;
+        };
+        if undelegation_request_pda_from_delegated_account(
+            &request.delegated_account,
+        ) != request_pda
+        {
+            warn!(
+                %request_pda,
+                delegated_account = %request.delegated_account,
+                "Skipping undelegation request with invalid PDA"
+            );
+            continue;
+        }
+        parsed_requests.push((
+            request_pda,
+            request.delegated_account,
+            request.expires_at_slot,
+        ));
+    }
+
+    let record_pubkeys = parsed_requests
+        .iter()
+        .map(|(_, delegated_account, _)| {
+            delegation_record_pda_from_delegated_account(delegated_account)
+        })
+        .collect::<Vec<_>>();
+    let records = remote_account_provider
+        .fetch_multi_rpc_only_chunked(
+            &record_pubkeys,
+            observed_slot,
+            AccountFetchContext::rpc_get_multiple_accounts(),
+        )
+        .await
+        .map_err(|error| {
+            UndelegationRequestPartitionError::Records(error.into())
+        })?;
+
+    let mut requests = Vec::with_capacity(parsed_requests.len());
+    for ((request_pda, delegated_account, expires_at_slot), record) in
+        parsed_requests.into_iter().zip(records)
+    {
+        let Some(record_account) = record.fresh_account() else {
+            trace!(
+                %delegated_account,
+                "Ignoring undelegation request without a delegation record"
+            );
+            continue;
+        };
+        if record_account.owner() != &delegation_program {
+            warn!(
+                %delegated_account,
+                owner = %record_account.owner(),
+                "Ignoring undelegation request with an invalid record owner"
+            );
+            continue;
+        }
+        let Ok(record) = DelegationRecord::try_from_bytes_with_discriminator(
+            record_account.data(),
+        ) else {
+            warn!(
+                %delegated_account,
+                "Ignoring undelegation request with an invalid delegation record"
+            );
+            continue;
+        };
+        if !delegation_record_has_local_authority(record, validator_pubkey) {
+            trace!(
+                %delegated_account,
+                authority = %record.authority,
+                "Ignoring undelegation request without local authority"
+            );
+            continue;
+        }
+        requests.push(ObservedUndelegationRequest {
+            request_pda,
+            delegated_account,
+            expires_at_slot,
+            observed_slot,
+        });
+    }
+
+    Ok(requests)
 }
 
 impl<T, U> Clone for FetchCloner<T, U>
@@ -973,173 +1237,12 @@ where
         &self,
         min_context_slot: u64,
     ) -> ChainlinkResult<UndelegationRequestScan> {
-        let observed_slot = self
-            .remote_account_provider
-            .get_slot()
-            .await?
-            .max(min_context_slot);
-        match self
-            .fetch_undelegation_request_partition(observed_slot, None)
-            .await
-        {
-            Ok(requests) => {
-                return Ok(UndelegationRequestScan {
-                    requests,
-                    incomplete_partitions: 0,
-                });
-            }
-            Err(error) => warn!(
-                ?error,
-                "global undelegation request scan failed; retrying with bounded partitions"
-            ),
-        }
-        let mut partitions = stream::iter(u8::MIN..=u8::MAX)
-            .map(|prefix| async move {
-                (
-                    prefix,
-                    self.fetch_undelegation_request_partition(
-                        observed_slot,
-                        Some(prefix),
-                    )
-                    .await,
-                )
-            })
-            .buffer_unordered(UNDELEGATION_REQUEST_PARTITION_CONCURRENCY);
-        let mut requests = Vec::new();
-        let mut incomplete_partitions = 0usize;
-        while let Some((prefix, partition)) = partitions.next().await {
-            match partition {
-                Ok(mut partition_requests) => {
-                    requests.append(&mut partition_requests);
-                }
-                Err(error) => {
-                    incomplete_partitions =
-                        incomplete_partitions.saturating_add(1);
-                    warn!(
-                        ?error,
-                        prefix,
-                        "undelegation request partition failed; continuing"
-                    );
-                }
-            }
-        }
-        Ok(UndelegationRequestScan {
-            requests,
-            incomplete_partitions,
-        })
-    }
-
-    async fn fetch_undelegation_request_partition(
-        &self,
-        observed_slot: u64,
-        delegated_account_prefix: Option<u8>,
-    ) -> ChainlinkResult<Vec<ObservedUndelegationRequest>> {
-        let delegation_program = dlp_api::id();
-        let config = undelegation_request_config(
-            observed_slot,
-            delegated_account_prefix.as_ref().map(std::slice::from_ref),
-        );
-        let accounts = self
-            .remote_account_provider
-            .get_program_accounts_with_config(&delegation_program, config)
-            .await?;
-        let mut parsed_requests = Vec::with_capacity(accounts.len());
-        for (request_pda, account) in accounts {
-            let Ok(request) =
-                UndelegationRequest::try_from_bytes_with_discriminator(
-                    &account.data,
-                )
-            else {
-                warn!(
-                    request_pda = %request_pda,
-                    data_len = account.data.len(),
-                    "Skipping malformed DLP undelegation request account"
-                );
-                continue;
-            };
-            if undelegation_request_pda_from_delegated_account(
-                &request.delegated_account,
-            ) != request_pda
-            {
-                warn!(
-                    %request_pda,
-                    delegated_account = %request.delegated_account,
-                    "Skipping undelegation request with invalid PDA"
-                );
-                continue;
-            }
-            parsed_requests.push((
-                request_pda,
-                request.delegated_account,
-                request.expires_at_slot,
-            ));
-        }
-
-        let record_pubkeys = parsed_requests
-            .iter()
-            .map(|(_, delegated_account, _)| {
-                delegation_record_pda_from_delegated_account(delegated_account)
-            })
-            .collect::<Vec<_>>();
-        let records = self
-            .remote_account_provider
-            .fetch_multi_rpc_only_chunked(
-                &record_pubkeys,
-                observed_slot,
-                AccountFetchContext::rpc_get_multiple_accounts(),
-            )
-            .await?;
-
-        let mut requests = Vec::with_capacity(parsed_requests.len());
-        for ((request_pda, delegated_account, expires_at_slot), record) in
-            parsed_requests.into_iter().zip(records)
-        {
-            let Some(record_account) = record.fresh_account() else {
-                trace!(
-                    %delegated_account,
-                    "Ignoring undelegation request without a delegation record"
-                );
-                continue;
-            };
-            if record_account.owner() != &delegation_program {
-                warn!(
-                    %delegated_account,
-                    owner = %record_account.owner(),
-                    "Ignoring undelegation request with an invalid record owner"
-                );
-                continue;
-            }
-            let Ok(record) =
-                DelegationRecord::try_from_bytes_with_discriminator(
-                    record_account.data(),
-                )
-            else {
-                warn!(
-                    %delegated_account,
-                    "Ignoring undelegation request with an invalid delegation record"
-                );
-                continue;
-            };
-            if !delegation_record_has_local_authority(
-                record,
-                self.validator_pubkey,
-            ) {
-                trace!(
-                    %delegated_account,
-                    authority = %record.authority,
-                    "Ignoring undelegation request without local authority"
-                );
-                continue;
-            }
-            requests.push(ObservedUndelegationRequest {
-                request_pda,
-                delegated_account,
-                expires_at_slot,
-                observed_slot,
-            });
-        }
-
-        Ok(requests)
+        scan_undelegation_requests_with_provider(
+            self.remote_account_provider.as_ref(),
+            self.validator_pubkey,
+            min_context_slot,
+        )
+        .await
     }
 
     pub(crate) fn engine(&self) -> &Engine {
