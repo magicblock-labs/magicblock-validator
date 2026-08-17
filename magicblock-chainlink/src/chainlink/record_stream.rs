@@ -172,6 +172,10 @@ impl RecordStream {
     /// mirrored state before the fresh stream is trusted.
     async fn reconnect(&mut self) -> bool {
         tracing::warn!("record stream ended; reconnecting");
+        self.watermark = 0;
+        if !self.send_interrupted().await {
+            return false;
+        }
         let mut delay = RECONNECT_BASE_DELAY;
         loop {
             if self.updates.is_closed() {
@@ -188,10 +192,7 @@ impl RecordStream {
                         from_slot = ?resume_slot,
                         "record stream reconnected"
                     );
-                    if resume_slot.is_none() {
-                        return self.send_interrupted().await;
-                    }
-                    return true;
+                    return self.send_interrupted().await;
                 }
                 Err(error) => tracing::warn!(
                     ?error,

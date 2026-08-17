@@ -17,6 +17,7 @@ use crate::{
 };
 
 const MIRROR_EVENT_CHANNEL_CAPACITY: usize = 4096;
+const MIRROR_RECONCILIATION_CHANNEL_CAPACITY: usize = 1;
 
 #[derive(Debug, Clone, Copy)]
 pub struct DiscoveredDelegation {
@@ -38,6 +39,8 @@ pub struct DelegationRecordMirror {
     undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
     undelegation_requests_rx:
         Mutex<Option<Receiver<ObservedUndelegationRequest>>>,
+    reconciliations_tx: Sender<()>,
+    reconciliations_rx: Mutex<Option<Receiver<()>>>,
 }
 
 struct MirrorState {
@@ -116,6 +119,8 @@ impl DelegationRecordMirror {
             mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
         let (undelegation_requests_tx, undelegation_requests_rx) =
             mpsc::channel(MIRROR_EVENT_CHANNEL_CAPACITY);
+        let (reconciliations_tx, reconciliations_rx) =
+            mpsc::channel(MIRROR_RECONCILIATION_CHANNEL_CAPACITY);
         Self {
             inner: Mutex::new(MirrorState {
                 entries: LruCache::new(capacity),
@@ -128,6 +133,8 @@ impl DelegationRecordMirror {
             undelegation_requests_rx: Mutex::new(Some(
                 undelegation_requests_rx,
             )),
+            reconciliations_tx,
+            reconciliations_rx: Mutex::new(Some(reconciliations_rx)),
         }
     }
 
@@ -139,6 +146,10 @@ impl DelegationRecordMirror {
         &self,
     ) -> Option<Receiver<ObservedUndelegationRequest>> {
         self.undelegation_requests_rx.lock().take()
+    }
+
+    pub fn take_reconciliations(&self) -> Option<Receiver<()>> {
+        self.reconciliations_rx.lock().take()
     }
 
     async fn consume(&self, update: RecordStreamUpdate) {
@@ -213,6 +224,7 @@ impl DelegationRecordMirror {
             | RecordStreamUpdate::SyncTerminated => {
                 self.clear();
                 metrics::set_record_mirror_live(false);
+                let _ = self.reconciliations_tx.try_send(());
             }
         }
     }
@@ -430,10 +442,12 @@ mod tests {
     #[test]
     fn interruption_clears_entries_and_watermark() {
         let mirror = DelegationRecordMirror::with_capacity(16);
+        let mut reconciliations = mirror.take_reconciliations().unwrap();
         let record = Pubkey::new_unique();
         mirror.insert(record, 50, Some(vec![1]));
         mirror.apply(RecordStreamUpdate::SlotAdvanced(120));
         mirror.apply(RecordStreamUpdate::SyncInterrupted);
+        assert_eq!(reconciliations.try_recv(), Ok(()));
         assert!(matches!(mirror.get(&record, 1), MirrorLookup::Miss));
         mirror.insert(record, 130, Some(vec![2]));
         assert!(matches!(mirror.get(&record, 140), MirrorLookup::Miss));

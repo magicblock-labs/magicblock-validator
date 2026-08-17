@@ -363,69 +363,130 @@ where
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
 
-        if let Some(discoveries) = me
-            .record_mirror
-            .as_ref()
-            .and_then(|mirror| mirror.take_discoveries())
-        {
-            me.clone().start_discovery_listener(discoveries);
-            me.clone().start_authority_record_sweep();
+        if let Some(mirror) = &me.record_mirror {
+            if let Some(discoveries) = mirror.take_discoveries() {
+                me.clone().start_discovery_listener(discoveries);
+            }
+            if let Some(reconciliations) = mirror.take_reconciliations() {
+                me.clone().start_authority_record_sweep(reconciliations);
+            }
         }
 
         me
     }
 
-    fn start_authority_record_sweep(self: Arc<Self>) {
+    fn start_authority_record_sweep(
+        self: Arc<Self>,
+        mut reconciliations: mpsc::Receiver<()>,
+    ) {
         let weak = Arc::downgrade(&self);
         drop(self);
         task::spawn(async move {
+            let mut interval =
+                tokio::time::interval(AUTHORITY_RECORD_SWEEP_INTERVAL);
             loop {
-                tokio::time::sleep(AUTHORITY_RECORD_SWEEP_INTERVAL).await;
-                let Some(this) = weak.upgrade() else { return };
-                let config = RpcProgramAccountsConfig {
-                    filters: Some(vec![
-                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                            0,
-                            AccountDiscriminator::DelegationRecord
-                                .to_bytes()
-                                .to_vec(),
-                        )),
-                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                            8,
-                            this.validator_pubkey.to_bytes().to_vec(),
-                        )),
-                    ]),
-                    account_config: RpcAccountInfoConfig {
-                        encoding: Some(UiAccountEncoding::Base64Zstd),
-                        data_slice: Some(UiDataSliceConfig {
-                            offset: 0,
-                            length: 0,
-                        }),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
-                match this
-                    .remote_account_provider
-                    .get_program_accounts_with_config(&dlp_api::id(), config)
-                    .await
-                {
-                    Ok(records) => {
-                        let count = records
-                            .iter()
-                            .filter(|(pubkey, _)| {
-                                !this.contains_account(pubkey)
-                            })
-                            .count();
-                        metrics::set_authority_records_on_chain(count as i64);
+                tokio::select! {
+                    _ = interval.tick() => {}
+                    signal = reconciliations.recv() => {
+                        if signal.is_none() {
+                            return;
+                        }
                     }
-                    Err(error) => warn!(
-                        ?error,
-                        "authority record sweep failed; retrying next interval"
-                    ),
                 }
+                let Some(this) = weak.upgrade() else { return };
+                this.reconcile_authority_records().await;
             }
         });
+    }
+
+    async fn reconcile_authority_records(&self) {
+        let empty_data = Some(UiDataSliceConfig {
+            offset: 0,
+            length: 0,
+        });
+        let mut record_pubkeys = HashSet::new();
+        for authority in [self.validator_pubkey, Pubkey::default()] {
+            let config = RpcProgramAccountsConfig {
+                filters: Some(vec![
+                    RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                        0,
+                        AccountDiscriminator::DelegationRecord
+                            .to_bytes()
+                            .to_vec(),
+                    )),
+                    RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                        8,
+                        authority.to_bytes().to_vec(),
+                    )),
+                ]),
+                account_config: RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    data_slice: empty_data,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            match self
+                .remote_account_provider
+                .get_program_accounts_with_config(&dlp_api::id(), config)
+                .await
+            {
+                Ok(records) => {
+                    record_pubkeys
+                        .extend(records.into_iter().map(|(pubkey, _)| pubkey));
+                }
+                Err(error) => {
+                    warn!(
+                        ?error,
+                        %authority,
+                        "authority record sweep failed; retrying next interval"
+                    );
+                    return;
+                }
+            }
+        }
+
+        let config = RpcProgramAccountsConfig {
+            account_config: RpcAccountInfoConfig {
+                encoding: Some(UiAccountEncoding::Base64Zstd),
+                data_slice: empty_data,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let accounts = match self
+            .remote_account_provider
+            .get_program_accounts_with_config(&dlp_api::id(), config)
+            .await
+        {
+            Ok(accounts) => accounts,
+            Err(error) => {
+                warn!(
+                    ?error,
+                    "delegated account sweep failed; retrying next interval"
+                );
+                return;
+            }
+        };
+        let candidates = accounts
+            .into_iter()
+            .map(|(pubkey, _)| pubkey)
+            .filter(|pubkey| {
+                record_pubkeys.contains(
+                    &delegation_record_pda_from_delegated_account(pubkey),
+                ) && !self
+                    .read_account(pubkey, |account| {
+                        account.is(AccountMode::Delegated)
+                    })
+                    .unwrap_or(false)
+            })
+            .collect::<Vec<_>>();
+        metrics::set_authority_records_on_chain(candidates.len() as i64);
+
+        let slot = self.remote_account_provider.chain_slot();
+        for pubkey in candidates {
+            self.clone_colliding_delegated_account(pubkey, slot).await;
+        }
     }
 
     fn start_discovery_listener(
