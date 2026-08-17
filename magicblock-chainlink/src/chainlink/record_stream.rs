@@ -9,8 +9,8 @@ use futures_util::StreamExt;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError, StreamHandle, client,
     grpc::{
-        CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-        SubscribeRequestFilterAccountsFilter,
+        CommitmentLevel, SlotStatus, SubscribeRequest,
+        SubscribeRequestFilterAccounts, SubscribeRequestFilterAccountsFilter,
         SubscribeRequestFilterAccountsFilterMemcmp,
         SubscribeRequestFilterSlots, SubscribeRequestFilterTransactions,
         SubscribeUpdate, SubscribeUpdateAccount, SubscribeUpdateTransaction,
@@ -44,8 +44,8 @@ const MAX_RECONNECT_ATTEMPTS: u32 = 16;
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
-/// Laserstream is not slot ordered. Watermarks and resume points trail the
-/// newest observed slot so updates still in flight cannot be skipped.
+/// Replay resumes behind the newest observed slot so updates near a disconnect
+/// are not skipped.
 const RESUME_SAFETY_MARGIN_SLOTS: u64 = 32;
 
 type PubkeyBytes = [u8; PUBKEY_LEN];
@@ -257,12 +257,18 @@ impl RecordStream {
                 self.handle_account_update(account).await
             }
             UpdateOneof::Slot(slot) => {
-                self.slot = slot.slot;
-                let watermark =
-                    self.slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS);
-                if watermark > self.watermark {
-                    self.watermark = watermark;
-                    self.deliver(RecordStreamUpdate::SlotAdvanced(watermark))
+                if SlotStatus::try_from(slot.status)
+                    != Ok(SlotStatus::SlotConfirmed)
+                {
+                    return;
+                }
+                // LaserStream guarantees that every confirmed account and
+                // transaction update through this slot precedes its confirmed
+                // slot notification, making this an exact completeness barrier.
+                self.slot = self.slot.max(slot.slot);
+                if slot.slot > self.watermark {
+                    self.watermark = slot.slot;
+                    self.deliver(RecordStreamUpdate::SlotAdvanced(slot.slot))
                         .await;
                 }
             }
@@ -279,13 +285,14 @@ impl RecordStream {
         }
     }
 
-    async fn check_watermark_violation(&mut self, slot: Slot) {
+    async fn interrupt_on_watermark_violation(&mut self, slot: Slot) {
         if self.watermark > 0 && slot <= self.watermark {
             tracing::warn!(
                 slot,
                 watermark = self.watermark,
                 "record update violated published watermark"
             );
+            self.watermark = 0;
             self.deliver(RecordStreamUpdate::SyncInterrupted).await;
         }
     }
@@ -313,8 +320,8 @@ impl RecordStream {
                 slot: update.slot,
             },
         };
+        self.interrupt_on_watermark_violation(update.slot).await;
         self.deliver(event).await;
-        self.check_watermark_violation(update.slot).await;
     }
 
     async fn handle_transaction_update(
@@ -415,8 +422,8 @@ impl RecordStream {
                     }
                 }
             };
+            self.interrupt_on_watermark_violation(update.slot).await;
             self.deliver(event).await;
-            self.check_watermark_violation(update.slot).await;
         }
     }
 
@@ -733,7 +740,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn late_update_voids_published_watermark() {
+    async fn late_update_interrupts_before_delivery() {
         use helius_laserstream::grpc::{
             SubscribeUpdateAccountInfo, SubscribeUpdateSlot,
         };
@@ -742,15 +749,15 @@ mod tests {
             .handle_update(Ok(SubscribeUpdate {
                 update_oneof: Some(UpdateOneof::Slot(SubscribeUpdateSlot {
                     slot: 100,
+                    status: SlotStatus::SlotConfirmed as i32,
                     ..Default::default()
                 })),
                 ..Default::default()
             }))
             .await;
-        let watermark = 100 - RESUME_SAFETY_MARGIN_SLOTS;
         assert!(matches!(
             updates.try_recv(),
-            Ok(RecordStreamUpdate::SlotAdvanced(slot)) if slot == watermark
+            Ok(RecordStreamUpdate::SlotAdvanced(100))
         ));
         stream
             .handle_update(Ok(SubscribeUpdate {
@@ -761,7 +768,7 @@ mod tests {
                             data: vec![1],
                             ..Default::default()
                         }),
-                        slot: watermark,
+                        slot: 100,
                         ..Default::default()
                     },
                 )),
@@ -770,11 +777,11 @@ mod tests {
             .await;
         assert!(matches!(
             updates.try_recv(),
-            Ok(RecordStreamUpdate::Record { slot, .. }) if slot == watermark
+            Ok(RecordStreamUpdate::SyncInterrupted)
         ));
         assert!(matches!(
             updates.try_recv(),
-            Ok(RecordStreamUpdate::SyncInterrupted)
+            Ok(RecordStreamUpdate::Record { slot, .. }) if slot == 100
         ));
     }
 }

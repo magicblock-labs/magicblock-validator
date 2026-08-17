@@ -100,7 +100,7 @@ impl DelegationRecordMirror {
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
             while let Some(update) = updates.recv().await {
-                consumer.apply(update);
+                consumer.consume(update).await;
             }
             consumer.clear();
             metrics::set_record_mirror_live(false);
@@ -141,14 +141,8 @@ impl DelegationRecordMirror {
         self.undelegation_requests_rx.lock().take()
     }
 
-    fn apply(&self, update: RecordStreamUpdate) {
+    async fn consume(&self, update: RecordStreamUpdate) {
         match update {
-            RecordStreamUpdate::Record { record, data, slot } => {
-                self.insert(Pubkey::new_from_array(record), slot, Some(data));
-            }
-            RecordStreamUpdate::RecordUndelegated { record, slot } => {
-                self.insert(Pubkey::new_from_array(record), slot, None);
-            }
             RecordStreamUpdate::DelegationObserved {
                 delegated_account,
                 record,
@@ -161,10 +155,10 @@ impl DelegationRecordMirror {
                     record: Pubkey::new_from_array(record),
                     slot,
                 };
-                if self.discoveries_tx.try_send(discovered).is_err() {
+                if self.discoveries_tx.send(discovered).await.is_err() {
                     warn!(
                         delegated_account = %discovered.delegated_account,
-                        "delegation discovery channel full"
+                        "delegation discovery receiver closed"
                     );
                 }
             }
@@ -183,12 +177,28 @@ impl DelegationRecordMirror {
                     observed_slot: slot,
                 };
                 let delegated_account = request.delegated_account;
-                if self.undelegation_requests_tx.try_send(request).is_err() {
+                if self.undelegation_requests_tx.send(request).await.is_err() {
                     warn!(
                         %delegated_account,
-                        "undelegation request channel full; poll backstop remains active"
+                        "undelegation request receiver closed; poll backstop remains active"
                     );
                 }
+            }
+            update => self.apply(update),
+        }
+    }
+
+    fn apply(&self, update: RecordStreamUpdate) {
+        match update {
+            RecordStreamUpdate::Record { record, data, slot } => {
+                self.insert(Pubkey::new_from_array(record), slot, Some(data));
+            }
+            RecordStreamUpdate::RecordUndelegated { record, slot } => {
+                self.insert(Pubkey::new_from_array(record), slot, None);
+            }
+            RecordStreamUpdate::DelegationObserved { .. }
+            | RecordStreamUpdate::UndelegationRequested { .. } => {
+                unreachable!("stream events are forwarded by consume")
             }
             RecordStreamUpdate::SlotAdvanced(slot) => {
                 let mut inner = self.inner.lock();
@@ -338,6 +348,42 @@ mod tests {
     use url::Url;
 
     use super::*;
+
+    #[tokio::test]
+    async fn discovery_backpressure_is_lossless() {
+        let mirror = Arc::new(DelegationRecordMirror::with_capacity(16));
+        let mut discoveries = mirror.take_discoveries().unwrap();
+        for slot in 0..MIRROR_EVENT_CHANNEL_CAPACITY as u64 {
+            mirror
+                .consume(RecordStreamUpdate::DelegationObserved {
+                    delegated_account: [1; 32],
+                    record: [2; 32],
+                    slot,
+                })
+                .await;
+        }
+
+        let blocked_mirror = Arc::clone(&mirror);
+        let blocked = tokio::spawn(async move {
+            blocked_mirror
+                .consume(RecordStreamUpdate::DelegationObserved {
+                    delegated_account: [1; 32],
+                    record: [2; 32],
+                    slot: MIRROR_EVENT_CHANNEL_CAPACITY as u64,
+                })
+                .await;
+        });
+        tokio::task::yield_now().await;
+        assert!(!blocked.is_finished());
+
+        assert_eq!(discoveries.recv().await.unwrap().slot, 0);
+        blocked.await.unwrap();
+        let mut last = None;
+        for _ in 0..MIRROR_EVENT_CHANNEL_CAPACITY {
+            last = discoveries.recv().await;
+        }
+        assert_eq!(last.unwrap().slot, MIRROR_EVENT_CHANNEL_CAPACITY as u64);
+    }
 
     #[test]
     fn hit_requires_entry_slot_or_live_watermark() {
