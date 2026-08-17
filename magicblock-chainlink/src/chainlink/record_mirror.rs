@@ -14,7 +14,10 @@ use magicblock_config::config::RecordSyncConfig;
 use magicblock_metrics::metrics::{self, RecordMirrorLookupOutcome};
 use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    watch,
+};
 use tracing::{info, trace, warn};
 
 use crate::{
@@ -51,6 +54,7 @@ pub struct DelegationRecordMirror {
     undelegation_requests_tx: Sender<ObservedUndelegationRequest>,
     undelegation_requests_rx:
         Mutex<Option<Receiver<ObservedUndelegationRequest>>>,
+    replay_recovery_slots: Mutex<Option<watch::Receiver<u64>>>,
 }
 
 struct MirrorState {
@@ -147,12 +151,14 @@ impl DelegationRecordMirror {
         let RecordStreamReceiver {
             mut updates,
             continuity_epoch,
+            replay_recovery_slots,
         } = receiver;
         let mirror = Arc::new(Self::with_capacity_and_epoch(
             capacity,
             validator_pubkey,
             continuity_epoch,
         ));
+        *mirror.replay_recovery_slots.lock() = Some(replay_recovery_slots);
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
             while let Some(message) = updates.recv().await {
@@ -210,6 +216,7 @@ impl DelegationRecordMirror {
             undelegation_requests_rx: Mutex::new(Some(
                 undelegation_requests_rx,
             )),
+            replay_recovery_slots: Mutex::new(None),
         }
     }
 
@@ -221,6 +228,12 @@ impl DelegationRecordMirror {
         &self,
     ) -> Option<Receiver<ObservedUndelegationRequest>> {
         self.undelegation_requests_rx.lock().take()
+    }
+
+    pub(crate) fn take_replay_recovery_slots(
+        &self,
+    ) -> Option<watch::Receiver<u64>> {
+        self.replay_recovery_slots.lock().take()
     }
 
     async fn consume_at_epoch(&self, update: RecordStreamUpdate, epoch: u64) {
@@ -583,6 +596,27 @@ mod tests {
         let mut data = vec![0; DelegationRecord::size_with_discriminator()];
         record.to_bytes_with_discriminator(&mut data).unwrap();
         data
+    }
+
+    #[tokio::test]
+    async fn replay_recovery_signal_reaches_fetch_cloner() {
+        let (_updates_tx, updates) = mpsc::channel(1);
+        let (recovery_tx, replay_recovery_slots) = watch::channel(0);
+        let mirror = DelegationRecordMirror::start_consumer(
+            RecordStreamReceiver {
+                updates,
+                continuity_epoch: Arc::new(AtomicU64::new(0)),
+                replay_recovery_slots,
+            },
+            16,
+            None,
+        );
+        let mut recovery_slots = mirror.take_replay_recovery_slots().unwrap();
+
+        recovery_tx.send_replace(42);
+
+        recovery_slots.changed().await.unwrap();
+        assert_eq!(*recovery_slots.borrow_and_update(), 42);
     }
 
     #[tokio::test]

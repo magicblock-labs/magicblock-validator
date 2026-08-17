@@ -29,6 +29,7 @@ use tokio::{
     sync::{
         OwnedSemaphorePermit, Semaphore,
         mpsc::{self, Receiver, Sender},
+        watch,
     },
     time,
 };
@@ -46,6 +47,7 @@ const UNDELEGATION_REQUEST_MIN_LEN: usize = 8 + 32 + 8;
 const MAX_PENDING_UPDATES: usize = 8192;
 const MAX_PENDING_PAYLOAD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_RECONNECT_ATTEMPTS: u32 = 16;
+const MAX_REPLAY_RECONNECT_FAILURES: usize = 5;
 const RECONNECT_BASE_DELAY: Duration = Duration::from_secs(1);
 const RECONNECT_MAX_DELAY: Duration = Duration::from_secs(60);
 
@@ -127,6 +129,7 @@ impl RecordStreamMessage {
 pub(super) struct RecordStreamReceiver {
     pub(super) updates: Receiver<RecordStreamMessage>,
     pub(super) continuity_epoch: Arc<AtomicU64>,
+    pub(super) replay_recovery_slots: watch::Receiver<Slot>,
 }
 
 struct LaserStream {
@@ -165,6 +168,7 @@ pub struct RecordStream {
     updates: Sender<RecordStreamMessage>,
     payload_budget: Arc<Semaphore>,
     continuity_epoch: Arc<AtomicU64>,
+    replay_recovery_slots: watch::Sender<Slot>,
     slot: Slot,
     watermark: Slot,
 }
@@ -182,8 +186,10 @@ impl RecordStream {
             replay: true,
         };
         let (updates, receiver) = mpsc::channel(MAX_PENDING_UPDATES);
+        let (replay_recovery_slots, replay_recovery_receiver) =
+            watch::channel(0);
         let continuity_epoch = Arc::new(AtomicU64::new(0));
-        let stream = Self::connect(config.clone(), None).await?;
+        let (stream, _) = Self::connect(config.clone(), None).await?;
         tokio::spawn(
             Self {
                 stream,
@@ -193,6 +199,7 @@ impl RecordStream {
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
                 continuity_epoch: Arc::clone(&continuity_epoch),
+                replay_recovery_slots,
                 slot: 0,
                 watermark: 0,
             }
@@ -201,6 +208,7 @@ impl RecordStream {
         Ok(RecordStreamReceiver {
             updates: receiver,
             continuity_epoch,
+            replay_recovery_slots: replay_recovery_receiver,
         })
     }
 
@@ -228,33 +236,39 @@ impl RecordStream {
         self.deliver(RecordStreamUpdate::SyncTerminated).await;
     }
 
-    /// Reconnects indefinitely with replay behind the observed slot. A fresh
-    /// stream is never trusted after continuity is lost.
+    /// Reconnects with replay behind the observed slot. If that anchor is no
+    /// longer retained, a fresh confirmed barrier requests RPC reconciliation.
     async fn reconnect(&mut self) -> bool {
         tracing::warn!("record stream continuity lost; reconnecting");
         let mut delay = RECONNECT_BASE_DELAY;
+        let mut replay_failures = 0usize;
         loop {
             if self.updates.is_closed() {
                 return false;
             }
-            let resume_slot =
-                self.slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS).max(1);
-            match Self::connect(self.config.clone(), Some(resume_slot)).await {
-                Ok(stream) => {
+            let from_slot = reconnect_from_slot(self.slot, replay_failures);
+            match Self::connect(self.config.clone(), from_slot).await {
+                Ok((stream, confirmed_slot)) => {
                     self.stream = stream;
                     self.watermark = 0;
-                    tracing::info!(
-                        from_slot = resume_slot,
-                        "record stream reconnected"
-                    );
+                    if let Some(from_slot) = from_slot {
+                        tracing::info!(from_slot, "record stream reconnected");
+                    } else {
+                        self.replay_recovery_slots.send_replace(confirmed_slot);
+                        tracing::warn!(
+                            confirmed_slot,
+                            "record stream replay anchor expired; requesting RPC recovery"
+                        );
+                    }
                     return true;
                 }
                 Err(error) => tracing::warn!(
                     ?error,
-                    from_slot = resume_slot,
+                    from_slot,
                     "record stream resume failed"
                 ),
             }
+            replay_failures = replay_failures.saturating_add(1);
 
             tokio::select! {
                 _ = self.updates.closed() => return false,
@@ -563,11 +577,11 @@ impl RecordStream {
     async fn connect(
         config: LaserstreamConfig,
         from_slot: Option<Slot>,
-    ) -> Result<LaserStream, RecordStreamError> {
+    ) -> Result<(LaserStream, Slot), RecordStreamError> {
         let (stream, handle) =
             client::subscribe(config, Self::subscribe_request(from_slot));
         let mut stream: Laser = Box::pin(stream);
-        let initial_updates = time::timeout(
+        let (initial_updates, confirmed_slot) = time::timeout(
             Duration::from_secs(5),
             buffer_until_confirmed_slot(&mut stream),
         )
@@ -581,16 +595,24 @@ impl RecordStream {
             futures_util::stream::iter(initial_updates.into_iter().map(Ok))
                 .chain(stream),
         );
-        Ok(LaserStream {
-            stream,
-            _handle: Some(handle),
-        })
+        Ok((
+            LaserStream {
+                stream,
+                _handle: Some(handle),
+            },
+            confirmed_slot,
+        ))
     }
+}
+
+fn reconnect_from_slot(slot: Slot, replay_failures: usize) -> Option<Slot> {
+    (replay_failures < MAX_REPLAY_RECONNECT_FAILURES)
+        .then(|| slot.saturating_sub(RESUME_SAFETY_MARGIN_SLOTS).max(1))
 }
 
 async fn buffer_until_confirmed_slot(
     stream: &mut Laser,
-) -> Result<Vec<SubscribeUpdate>, RecordStreamError> {
+) -> Result<(Vec<SubscribeUpdate>, Slot), RecordStreamError> {
     let mut initial_updates = Vec::new();
     let mut pending_payload_bytes = 0usize;
     loop {
@@ -610,15 +632,18 @@ async fn buffer_until_confirmed_slot(
                 ));
             }
         }
-        let confirmed_slot = matches!(
-            update.update_oneof.as_ref(),
+        let confirmed_slot = match update.update_oneof.as_ref() {
             Some(UpdateOneof::Slot(slot))
                 if SlotStatus::try_from(slot.status)
-                    == Ok(SlotStatus::SlotConfirmed)
-        );
+                    == Ok(SlotStatus::SlotConfirmed) =>
+            {
+                Some(slot.slot)
+            }
+            _ => None,
+        };
         initial_updates.push(update);
-        if confirmed_slot {
-            return Ok(initial_updates);
+        if let Some(confirmed_slot) = confirmed_slot {
+            return Ok((initial_updates, confirmed_slot));
         }
         if initial_updates.len() >= MAX_PENDING_UPDATES {
             return Err(RecordStreamError::Connection(
@@ -663,6 +688,7 @@ mod tests {
 
     fn test_stream() -> (RecordStream, Receiver<RecordStreamMessage>) {
         let (updates, receiver) = mpsc::channel(32);
+        let (replay_recovery_slots, _) = watch::channel(0);
         (
             RecordStream {
                 stream: LaserStream {
@@ -681,6 +707,7 @@ mod tests {
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
                 continuity_epoch: Arc::new(AtomicU64::new(0)),
+                replay_recovery_slots,
                 slot: 0,
                 watermark: 0,
             },
@@ -804,6 +831,14 @@ mod tests {
     }
 
     #[test]
+    fn reconnect_drops_expired_replay_anchor() {
+        assert_eq!(reconnect_from_slot(100, 0), Some(68));
+        assert_eq!(reconnect_from_slot(10, 4), Some(1));
+        assert_eq!(reconnect_from_slot(100, 5), None);
+        assert_eq!(reconnect_from_slot(100, usize::MAX), None);
+    }
+
+    #[test]
     fn parses_undelegation_request() {
         let delegated_account = [7; PUBKEY_LEN];
         let mut data =
@@ -856,8 +891,10 @@ mod tests {
                 ..Default::default()
             }),
         ]));
-        let buffered = buffer_until_confirmed_slot(&mut source).await.unwrap();
+        let (buffered, confirmed_slot) =
+            buffer_until_confirmed_slot(&mut source).await.unwrap();
         assert_eq!(buffered.len(), 2);
+        assert_eq!(confirmed_slot, 8);
 
         let mut source_without_barrier: Laser =
             Box::pin(futures_util::stream::iter([Ok(delegate_update(

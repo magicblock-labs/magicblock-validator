@@ -49,7 +49,7 @@ use solana_rpc_client_api::{
 };
 use solana_signer::Signer;
 use tokio::{
-    sync::{Semaphore, mpsc},
+    sync::{Semaphore, mpsc, watch},
     task,
     task::JoinSet,
 };
@@ -209,6 +209,7 @@ const PENDING_COLLISION_RECHECKS_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(16_384).expect("collision recheck capacity is non-zero");
 const COLLISION_OVERFLOW_RECONCILIATION_LIMIT: usize = 64;
 const AUTHORITY_RECORD_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
+const REPLAY_RECOVERY_RETRY_DELAY: Duration = Duration::from_secs(30);
 const COLLISION_RECHECK_DELAYS: [Duration; 3] = [
     Duration::from_secs(2),
     Duration::from_secs(8),
@@ -222,6 +223,47 @@ enum DlpProgramUpdateInterest {
     ProcessAtaProjection,
     ProcessDirectlyWatched,
     DiscoverDelegatedAccount,
+}
+
+fn authority_record_config(
+    authority: Pubkey,
+    min_context_slot: Option<u64>,
+) -> RpcProgramAccountsConfig {
+    RpcProgramAccountsConfig {
+        filters: Some(vec![
+            RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                0,
+                AccountDiscriminator::DelegationRecord.to_bytes().to_vec(),
+            )),
+            RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
+                8,
+                authority.to_bytes().to_vec(),
+            )),
+        ]),
+        account_config: RpcAccountInfoConfig {
+            encoding: Some(UiAccountEncoding::Base64Zstd),
+            data_slice: Some(UiDataSliceConfig {
+                offset: 0,
+                length: 0,
+            }),
+            min_context_slot,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn replay_recovery_candidates(
+    account_pubkeys: impl IntoIterator<Item = Pubkey>,
+    record_pdas: &HashSet<Pubkey>,
+) -> Vec<Pubkey> {
+    account_pubkeys
+        .into_iter()
+        .filter(|pubkey| {
+            record_pdas
+                .contains(&delegation_record_pda_from_delegated_account(pubkey))
+        })
+        .collect()
 }
 
 impl<T, U> Clone for FetchCloner<T, U>
@@ -378,8 +420,116 @@ where
             me.clone().start_discovery_listener(discoveries);
             me.clone().start_authority_record_sweep();
         }
+        if let Some(recovery_slots) = me
+            .record_mirror
+            .as_ref()
+            .and_then(|mirror| mirror.take_replay_recovery_slots())
+        {
+            me.clone().start_replay_recovery_listener(recovery_slots);
+        }
 
         me
+    }
+
+    fn start_replay_recovery_listener(
+        self: Arc<Self>,
+        mut recovery_slots: watch::Receiver<u64>,
+    ) {
+        let weak = Arc::downgrade(&self);
+        drop(self);
+        task::spawn(async move {
+            while recovery_slots.changed().await.is_ok() {
+                let mut recovery_slot = *recovery_slots.borrow_and_update();
+                loop {
+                    let Some(this) = weak.upgrade() else { return };
+                    match this.reconcile_replay_gap(recovery_slot).await {
+                        Ok(count) => {
+                            info!(
+                                recovery_slot,
+                                count, "record replay gap reconciled"
+                            );
+                            break;
+                        }
+                        Err(error) => warn!(
+                            ?error,
+                            recovery_slot,
+                            "record replay gap recovery failed; retrying"
+                        ),
+                    }
+                    drop(this);
+
+                    tokio::select! {
+                        changed = recovery_slots.changed() => {
+                            if changed.is_err() {
+                                return;
+                            }
+                            recovery_slot = *recovery_slots.borrow_and_update();
+                        }
+                        _ = tokio::time::sleep(REPLAY_RECOVERY_RETRY_DELAY) => {}
+                    }
+                }
+            }
+        });
+    }
+
+    async fn reconcile_replay_gap(
+        &self,
+        min_context_slot: u64,
+    ) -> ChainlinkResult<usize> {
+        let delegation_program = dlp_api::id();
+        let local_records = self
+            .remote_account_provider
+            .get_program_accounts_with_config(
+                &delegation_program,
+                authority_record_config(
+                    self.validator_pubkey,
+                    Some(min_context_slot),
+                ),
+            );
+        let confined_records = self
+            .remote_account_provider
+            .get_program_accounts_with_config(
+                &delegation_program,
+                authority_record_config(
+                    Pubkey::default(),
+                    Some(min_context_slot),
+                ),
+            );
+        let (local_records, confined_records) =
+            tokio::try_join!(local_records, confined_records)?;
+        let record_pdas = local_records
+            .into_iter()
+            .chain(confined_records)
+            .map(|(pubkey, _)| pubkey)
+            .collect::<HashSet<_>>();
+
+        let accounts = self
+            .remote_account_provider
+            .get_program_accounts_with_config(
+                &delegation_program,
+                RpcProgramAccountsConfig {
+                    account_config: RpcAccountInfoConfig {
+                        encoding: Some(UiAccountEncoding::Base64Zstd),
+                        data_slice: Some(UiDataSliceConfig {
+                            offset: 0,
+                            length: 0,
+                        }),
+                        min_context_slot: Some(min_context_slot),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let candidates = replay_recovery_candidates(
+            accounts.into_iter().map(|(pubkey, _)| pubkey),
+            &record_pdas,
+        );
+        for pubkey in candidates.iter().copied() {
+            self.resolve_internal_dlp_collision(pubkey, min_context_slot)
+                .await;
+        }
+        Ok(candidates.len())
     }
 
     fn start_authority_record_sweep(self: Arc<Self>) {
@@ -389,29 +539,8 @@ where
             loop {
                 tokio::time::sleep(AUTHORITY_RECORD_SWEEP_INTERVAL).await;
                 let Some(this) = weak.upgrade() else { return };
-                let config = RpcProgramAccountsConfig {
-                    filters: Some(vec![
-                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                            0,
-                            AccountDiscriminator::DelegationRecord
-                                .to_bytes()
-                                .to_vec(),
-                        )),
-                        RpcFilterType::Memcmp(Memcmp::new_raw_bytes(
-                            8,
-                            this.validator_pubkey.to_bytes().to_vec(),
-                        )),
-                    ]),
-                    account_config: RpcAccountInfoConfig {
-                        encoding: Some(UiAccountEncoding::Base64Zstd),
-                        data_slice: Some(UiDataSliceConfig {
-                            offset: 0,
-                            length: 0,
-                        }),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                };
+                let config =
+                    authority_record_config(this.validator_pubkey, None);
                 match this
                     .remote_account_provider
                     .get_program_accounts_with_config(&dlp_api::id(), config)

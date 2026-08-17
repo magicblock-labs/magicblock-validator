@@ -35,6 +35,45 @@ fn account() -> AccountBuilder {
 }
 
 #[test]
+fn replay_recovery_selects_only_accounts_with_authorized_records() {
+    let local = Pubkey::new_unique();
+    let confined = Pubkey::new_unique();
+    let foreign = Pubkey::new_unique();
+    let internal = Pubkey::new_unique();
+    let record_pdas = HashSet::from([
+        delegation_record_pda_from_delegated_account(&local),
+        delegation_record_pda_from_delegated_account(&confined),
+        internal,
+    ]);
+
+    let candidates = replay_recovery_candidates(
+        [local, foreign, confined, internal],
+        &record_pdas,
+    );
+
+    assert_eq!(candidates, vec![local, confined]);
+}
+
+#[test]
+fn replay_recovery_record_scan_is_slot_and_authority_bounded() {
+    let authority = Pubkey::new_unique();
+    let config = authority_record_config(authority, Some(42));
+
+    assert_eq!(config.account_config.min_context_slot, Some(42));
+    assert_eq!(config.account_config.data_slice.unwrap().length, 0);
+    let filters = config.filters.unwrap();
+    assert_eq!(filters.len(), 2);
+    assert!(matches!(
+        &filters[1],
+        RpcFilterType::Memcmp(memcmp)
+            if memcmp.offset() == 8
+                && memcmp.bytes().is_some_and(|bytes| {
+                    bytes.as_slice() == authority.as_ref()
+                })
+    ));
+}
+
+#[test]
 fn clone_request_classification() {
     let empty = request(AccountBuilder::default());
     assert!(TestFetchCloner::is_empty_placeholder_account(
