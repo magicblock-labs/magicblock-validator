@@ -217,8 +217,10 @@ impl DelegationRecordMirror {
             } => {
                 let delegated_account =
                     Pubkey::new_from_array(delegated_account);
-                if !self.should_forward_undelegation_request(&delegated_account)
-                {
+                if !self.should_forward_undelegation_request(
+                    &delegated_account,
+                    slot,
+                ) {
                     trace!(
                         %delegated_account,
                         "Ignoring undelegation request without local mirrored authority"
@@ -246,6 +248,7 @@ impl DelegationRecordMirror {
     fn should_forward_undelegation_request(
         &self,
         delegated_account: &Pubkey,
+        observed_slot: u64,
     ) -> bool {
         let Some(validator_pubkey) = self.validator_pubkey else {
             return true;
@@ -253,13 +256,17 @@ impl DelegationRecordMirror {
         let record =
             delegation_record_pda_from_delegated_account(delegated_account);
         let inner = self.inner.lock();
-        let Some(data) = inner
-            .entries
-            .peek(&record)
-            .and_then(|entry| entry.data.as_deref())
-        else {
+        let Some(entry) = inner.entries.peek(&record) else {
             // Missing and tombstoned entries are uncertain, not evidence that
             // the request belongs to another validator.
+            return true;
+        };
+        let authority_is_current = entry.slot >= observed_slot
+            || (inner.live && inner.watermark >= observed_slot);
+        if !authority_is_current {
+            return true;
+        }
+        let Some(data) = entry.data.as_deref() else {
             return true;
         };
         let Ok(record) =
@@ -268,6 +275,12 @@ impl DelegationRecordMirror {
             return true;
         };
         record.authority == validator_pubkey
+            || record.authority == Pubkey::default()
+    }
+
+    pub(crate) fn is_complete_through(&self, slot: u64) -> bool {
+        let inner = self.inner.lock();
+        inner.live && inner.watermark >= slot
     }
 
     fn apply(&self, update: RecordStreamUpdate) {
@@ -526,7 +539,7 @@ mod tests {
         let foreign_account = Pubkey::new_unique();
         mirror.insert(
             delegation_record_pda_from_delegated_account(&foreign_account),
-            1,
+            2,
             Some(delegation_record_data(Pubkey::new_unique())),
         );
         mirror
@@ -560,6 +573,25 @@ mod tests {
             requests.recv().await.unwrap().delegated_account,
             local_account
         );
+
+        let confined_account = Pubkey::new_unique();
+        mirror.insert(
+            delegation_record_pda_from_delegated_account(&confined_account),
+            2,
+            Some(delegation_record_data(Pubkey::default())),
+        );
+        mirror
+            .consume(RecordStreamUpdate::UndelegationRequested {
+                request_pda: Pubkey::new_unique().to_bytes(),
+                delegated_account: confined_account.to_bytes(),
+                expires_at_slot: 10,
+                slot: 2,
+            })
+            .await;
+        assert_eq!(
+            requests.recv().await.unwrap().delegated_account,
+            confined_account
+        );
     }
 
     #[tokio::test]
@@ -570,6 +602,35 @@ mod tests {
         ));
         let mut requests = mirror.take_undelegation_requests().unwrap();
         let delegated_account = Pubkey::new_unique();
+        mirror
+            .consume(RecordStreamUpdate::UndelegationRequested {
+                request_pda: Pubkey::new_unique().to_bytes(),
+                delegated_account: delegated_account.to_bytes(),
+                expires_at_slot: 10,
+                slot: 2,
+            })
+            .await;
+
+        assert_eq!(
+            requests.recv().await.unwrap().delegated_account,
+            delegated_account
+        );
+    }
+
+    #[tokio::test]
+    async fn stale_foreign_authority_falls_back_to_verification() {
+        let validator = Pubkey::new_unique();
+        let mirror = Arc::new(DelegationRecordMirror::with_capacity(
+            16,
+            Some(validator),
+        ));
+        let mut requests = mirror.take_undelegation_requests().unwrap();
+        let delegated_account = Pubkey::new_unique();
+        mirror.insert(
+            delegation_record_pda_from_delegated_account(&delegated_account),
+            1,
+            Some(delegation_record_data(Pubkey::new_unique())),
+        );
         mirror
             .consume(RecordStreamUpdate::UndelegationRequested {
                 request_pda: Pubkey::new_unique().to_bytes(),

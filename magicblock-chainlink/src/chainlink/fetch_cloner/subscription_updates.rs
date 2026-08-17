@@ -621,10 +621,20 @@ where
             return;
         };
         let record_pda = delegation_record_pda_from_delegated_account(&pubkey);
-        if matches!(mirror.probe(&record_pda, slot), MirrorLookup::Hit { .. }) {
-            self.clone_colliding_delegated_account(pubkey, slot).await;
-        } else {
-            self.schedule_collision_recheck(pubkey, slot).await;
+        match mirror.probe(&record_pda, slot) {
+            MirrorLookup::Hit { .. } => {
+                if !self.clone_colliding_delegated_account(pubkey, slot).await {
+                    self.schedule_collision_recheck(
+                        pubkey,
+                        slot.saturating_add(1),
+                    )
+                    .await;
+                }
+            }
+            MirrorLookup::Tombstone { .. } => {}
+            MirrorLookup::Miss => {
+                self.schedule_collision_recheck(pubkey, slot).await;
+            }
         }
     }
 
@@ -673,11 +683,10 @@ where
 
         let this = self.clone();
         task::spawn(async move {
-            let mut generation_probes = 0usize;
-            let mut probed_slot = None;
+            let mut probe_count = 0usize;
             loop {
                 let delay = COLLISION_RECHECK_DELAYS
-                    [generation_probes.min(COLLISION_RECHECK_DELAYS.len() - 1)];
+                    [probe_count.min(COLLISION_RECHECK_DELAYS.len() - 1)];
                 tokio::time::sleep(delay).await;
 
                 let candidate = this
@@ -688,63 +697,44 @@ where
                 let Some((pubkey, slot)) = candidate else {
                     return;
                 };
-                let hit = this.record_mirror.as_ref().is_some_and(|mirror| {
-                    matches!(
-                        mirror.probe(&record_pda, slot),
-                        MirrorLookup::Hit { .. }
-                    )
-                });
-                if hit {
-                    let owned = {
-                        let mut rechecks =
-                            this.pending_collision_rechecks.lock();
-                        let matches = rechecks.peek(&record_pda).is_some_and(
-                            |&(_, pending_slot)| pending_slot == slot,
-                        );
-                        if matches {
-                            rechecks.pop(&record_pda);
-                        }
-                        matches
-                    };
-                    if owned {
-                        this.clone_colliding_delegated_account(pubkey, slot)
-                            .await;
-                        return;
-                    }
-                    generation_probes = 0;
-                    probed_slot = None;
+                let Some(mirror) = &this.record_mirror else {
+                    return;
+                };
+                let action = collision_recheck_action(
+                    &mirror.probe(&record_pda, slot),
+                    mirror.is_complete_through(slot),
+                );
+                if action == CollisionRecheckAction::Wait {
+                    probe_count = probe_count.saturating_add(1);
                     continue;
                 }
 
-                if probed_slot == Some(slot) {
-                    generation_probes += 1;
-                } else {
-                    generation_probes = 1;
-                    probed_slot = Some(slot);
-                }
-                if generation_probes >= COLLISION_RECHECK_DELAYS.len() {
-                    let dropped = {
-                        let mut rechecks =
-                            this.pending_collision_rechecks.lock();
-                        let matches = rechecks.peek(&record_pda).is_some_and(
-                            |&(_, pending_slot)| pending_slot == slot,
-                        );
-                        if matches {
-                            rechecks.pop(&record_pda);
-                        }
-                        matches
-                    };
-                    if dropped {
-                        trace!(
-                            pubkey = %pubkey,
-                            slot,
-                            "Dropping collision candidate after mirror rechecks"
-                        );
-                        return;
+                let owned = {
+                    let mut rechecks = this.pending_collision_rechecks.lock();
+                    let matches = rechecks
+                        .peek(&record_pda)
+                        .is_some_and(|&(_, pending_slot)| pending_slot == slot);
+                    if matches {
+                        rechecks.pop(&record_pda);
                     }
-                    generation_probes = 0;
-                    probed_slot = None;
+                    matches
+                };
+                if !owned {
+                    probe_count = 0;
+                    continue;
                 }
+                if action == CollisionRecheckAction::Resolve
+                    && !this
+                        .clone_colliding_delegated_account(pubkey, slot)
+                        .await
+                {
+                    this.schedule_collision_recheck(
+                        pubkey,
+                        slot.saturating_add(1),
+                    )
+                    .await;
+                }
+                return;
             }
         });
     }
@@ -753,14 +743,14 @@ where
         &self,
         pubkey: Pubkey,
         slot: u64,
-    ) {
+    ) -> bool {
         let fresh_delegated = self
             .read_account(&pubkey, |account| {
                 account.is(AccountMode::Delegated) && account.slot() >= slot
             })
             .unwrap_or(false);
         if fresh_delegated {
-            return;
+            return true;
         }
 
         let fetch_context = AccountFetchContext::subscription_update(
@@ -784,13 +774,13 @@ where
             )
             .await
         else {
-            return;
+            return false;
         };
         if deleg_record.authority != self.validator_pubkey
             && deleg_record.authority != Pubkey::default()
         {
             metrics::inc_discovered_dlp_update_delegated_elsewhere();
-            return;
+            return true;
         }
 
         const MAX_CLONE_ATTEMPTS: usize = 3;
@@ -808,7 +798,7 @@ where
                 })
                 .unwrap_or(false);
             if still_undelegating {
-                return;
+                return true;
             }
 
             let result = match self
@@ -825,7 +815,7 @@ where
                 Ok(result) => result,
                 Err(error) => {
                     warn!(pubkey = %pubkey, %error, "Collision clone failed");
-                    return;
+                    return false;
                 }
             };
             if result
@@ -834,7 +824,7 @@ where
                 .chain(result.missing_delegation_record.iter())
                 .any(|(missing, _)| missing == &pubkey)
             {
-                return;
+                return false;
             }
             let state = self.read_account(&pubkey, |account| {
                 let settled = account.slot() > slot
@@ -845,7 +835,7 @@ where
                 (settled, stale_transient)
             });
             if state.is_some_and(|(settled, _)| settled) {
-                return;
+                return true;
             }
             if state.is_some_and(|(_, stale)| stale) {
                 break;
@@ -857,8 +847,7 @@ where
             slot,
             "Collision clone did not settle; waiting for newer record evidence"
         );
-        self.schedule_collision_recheck(pubkey, slot.saturating_add(1))
-            .await;
+        false
     }
 }
 
@@ -867,6 +856,27 @@ enum CollisionRecheckEnqueue {
     Inserted,
     Updated,
     Full,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CollisionRecheckAction {
+    Wait,
+    Resolve,
+    Discard,
+}
+
+fn collision_recheck_action(
+    lookup: &MirrorLookup,
+    complete_through_slot: bool,
+) -> CollisionRecheckAction {
+    match lookup {
+        MirrorLookup::Hit { .. } => CollisionRecheckAction::Resolve,
+        MirrorLookup::Tombstone { .. } => CollisionRecheckAction::Discard,
+        MirrorLookup::Miss if complete_through_slot => {
+            CollisionRecheckAction::Resolve
+        }
+        MirrorLookup::Miss => CollisionRecheckAction::Wait,
+    }
 }
 
 fn try_enqueue_collision_recheck(
@@ -1514,6 +1524,25 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collision_recheck_waits_for_slot_completeness() {
+        assert_eq!(
+            collision_recheck_action(&MirrorLookup::Miss, false),
+            CollisionRecheckAction::Wait
+        );
+        assert_eq!(
+            collision_recheck_action(&MirrorLookup::Miss, true),
+            CollisionRecheckAction::Resolve
+        );
+        assert_eq!(
+            collision_recheck_action(
+                &MirrorLookup::Tombstone { slot: 1 },
+                false,
+            ),
+            CollisionRecheckAction::Discard
+        );
+    }
 
     #[test]
     fn collision_recheck_capacity_never_evicts_a_candidate() {
