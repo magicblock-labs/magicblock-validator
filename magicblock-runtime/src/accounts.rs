@@ -9,7 +9,6 @@ use solana_program_option::COption;
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
-use solana_sdk_ids::system_program;
 use spl_token::{native_mint, state::Mint};
 
 /// Builds validator-controlled accounts that must exist before execution starts.
