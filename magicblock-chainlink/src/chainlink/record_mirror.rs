@@ -1,4 +1,10 @@
-use std::{num::NonZeroUsize, sync::Arc};
+use std::{
+    num::NonZeroUsize,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+};
 
 use dlp_api::{
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
@@ -15,7 +21,7 @@ use crate::{
     chainlink::{
         ObservedUndelegationRequest,
         record_stream::{
-            RecordStream, RecordStreamMessage, RecordStreamUpdate,
+            RecordStream, RecordStreamReceiver, RecordStreamUpdate,
         },
     },
     remote_account_provider::{Endpoint, Endpoints},
@@ -38,6 +44,7 @@ pub struct DiscoveredDelegation {
 /// as "not delegated".
 pub struct DelegationRecordMirror {
     inner: Mutex<MirrorState>,
+    continuity_epoch: Arc<AtomicU64>,
     validator_pubkey: Option<Pubkey>,
     discoveries_tx: Sender<DiscoveredDelegation>,
     discoveries_rx: Mutex<Option<Receiver<DiscoveredDelegation>>>,
@@ -52,6 +59,7 @@ struct MirrorState {
     max_retained_data_bytes: usize,
     watermark: u64,
     live: bool,
+    applied_epoch: u64,
 }
 
 struct RecordEntry {
@@ -132,15 +140,24 @@ impl DelegationRecordMirror {
     }
 
     fn start_consumer(
-        mut updates: Receiver<RecordStreamMessage>,
+        receiver: RecordStreamReceiver,
         capacity: usize,
         validator_pubkey: Option<Pubkey>,
     ) -> Arc<Self> {
-        let mirror = Arc::new(Self::with_capacity(capacity, validator_pubkey));
+        let RecordStreamReceiver {
+            mut updates,
+            continuity_epoch,
+        } = receiver;
+        let mirror = Arc::new(Self::with_capacity_and_epoch(
+            capacity,
+            validator_pubkey,
+            continuity_epoch,
+        ));
         let consumer = Arc::clone(&mirror);
         tokio::spawn(async move {
-            while let Some(update) = updates.recv().await {
-                consumer.consume(update.into_update()).await;
+            while let Some(message) = updates.recv().await {
+                let (update, epoch) = message.into_parts();
+                consumer.consume_at_epoch(update, epoch).await;
             }
             consumer.clear();
             metrics::set_record_mirror_live(false);
@@ -149,10 +166,24 @@ impl DelegationRecordMirror {
         mirror
     }
 
+    #[cfg(any(test, feature = "dev-context"))]
     fn with_capacity(
         capacity: usize,
         validator_pubkey: Option<Pubkey>,
     ) -> Self {
+        Self::with_capacity_and_epoch(
+            capacity,
+            validator_pubkey,
+            Arc::new(AtomicU64::new(0)),
+        )
+    }
+
+    fn with_capacity_and_epoch(
+        capacity: usize,
+        validator_pubkey: Option<Pubkey>,
+        continuity_epoch: Arc<AtomicU64>,
+    ) -> Self {
+        let applied_epoch = continuity_epoch.load(Ordering::Acquire);
         let capacity = NonZeroUsize::new(capacity)
             .unwrap_or(NonZeroUsize::new(1).expect("1 is non-zero"));
         let (discoveries_tx, discoveries_rx) =
@@ -169,7 +200,9 @@ impl DelegationRecordMirror {
                 max_retained_data_bytes,
                 watermark: 0,
                 live: false,
+                applied_epoch,
             }),
+            continuity_epoch,
             validator_pubkey,
             discoveries_tx,
             discoveries_rx: Mutex::new(Some(discoveries_rx)),
@@ -190,7 +223,7 @@ impl DelegationRecordMirror {
         self.undelegation_requests_rx.lock().take()
     }
 
-    async fn consume(&self, update: RecordStreamUpdate) {
+    async fn consume_at_epoch(&self, update: RecordStreamUpdate, epoch: u64) {
         match update {
             RecordStreamUpdate::DelegationObserved {
                 delegated_account,
@@ -243,8 +276,14 @@ impl DelegationRecordMirror {
                     );
                 }
             }
-            update => self.apply(update),
+            update => self.apply_at_epoch(update, epoch),
         }
+    }
+
+    #[cfg(test)]
+    async fn consume(&self, update: RecordStreamUpdate) {
+        let epoch = self.continuity_epoch.load(Ordering::Acquire);
+        self.consume_at_epoch(update, epoch).await;
     }
 
     fn should_forward_undelegation_request(
@@ -258,6 +297,9 @@ impl DelegationRecordMirror {
         let record =
             delegation_record_pda_from_delegated_account(delegated_account);
         let inner = self.inner.lock();
+        if !self.continuity_is_current(&inner) {
+            return true;
+        }
         let Some(entry) = inner.entries.peek(&record) else {
             // Missing and tombstoned entries are uncertain, not evidence that
             // the request belongs to another validator.
@@ -282,16 +324,28 @@ impl DelegationRecordMirror {
 
     pub(crate) fn is_complete_through(&self, slot: u64) -> bool {
         let inner = self.inner.lock();
-        inner.live && inner.watermark >= slot
+        self.continuity_is_current(&inner)
+            && inner.live
+            && inner.watermark >= slot
     }
 
-    fn apply(&self, update: RecordStreamUpdate) {
+    fn apply_at_epoch(&self, update: RecordStreamUpdate, epoch: u64) {
         match update {
             RecordStreamUpdate::Record { record, data, slot } => {
-                self.insert(Pubkey::new_from_array(record), slot, Some(data));
+                self.insert_at_epoch(
+                    Pubkey::new_from_array(record),
+                    slot,
+                    Some(data),
+                    epoch,
+                );
             }
             RecordStreamUpdate::RecordUndelegated { record, slot } => {
-                self.insert(Pubkey::new_from_array(record), slot, None);
+                self.insert_at_epoch(
+                    Pubkey::new_from_array(record),
+                    slot,
+                    None,
+                    epoch,
+                );
             }
             RecordStreamUpdate::DelegationObserved { .. }
             | RecordStreamUpdate::UndelegationRequested { .. } => {
@@ -300,22 +354,44 @@ impl DelegationRecordMirror {
             RecordStreamUpdate::SlotAdvanced(slot) => {
                 let mut inner = self.inner.lock();
                 inner.watermark = inner.watermark.max(slot);
-                inner.live = true;
+                inner.applied_epoch = epoch;
+                inner.live =
+                    self.continuity_epoch.load(Ordering::Acquire) == epoch;
                 let watermark = inner.watermark;
+                let live = inner.live;
                 drop(inner);
-                metrics::set_record_mirror_live(true);
+                metrics::set_record_mirror_live(live);
                 metrics::set_record_mirror_watermark(watermark);
             }
             RecordStreamUpdate::SyncInterrupted
             | RecordStreamUpdate::SyncTerminated => {
-                self.clear();
+                self.clear_at_epoch(epoch);
                 metrics::set_record_mirror_live(false);
             }
         }
     }
 
+    #[cfg(any(test, feature = "dev-context"))]
+    fn apply(&self, update: RecordStreamUpdate) {
+        let epoch = self.continuity_epoch.load(Ordering::Acquire);
+        self.apply_at_epoch(update, epoch);
+    }
+
+    #[cfg(any(test, feature = "dev-context"))]
     fn insert(&self, record: Pubkey, slot: u64, data: Option<Vec<u8>>) {
+        let epoch = self.continuity_epoch.load(Ordering::Acquire);
+        self.insert_at_epoch(record, slot, data, epoch);
+    }
+
+    fn insert_at_epoch(
+        &self,
+        record: Pubkey,
+        slot: u64,
+        data: Option<Vec<u8>>,
+        epoch: u64,
+    ) {
         let mut inner = self.inner.lock();
+        inner.applied_epoch = epoch;
         if let Some(existing) = inner.entries.peek(&record) {
             if existing.slot > slot {
                 return;
@@ -363,12 +439,18 @@ impl DelegationRecordMirror {
         }
     }
 
-    fn clear(&self) {
+    fn clear_at_epoch(&self, epoch: u64) {
         let mut inner = self.inner.lock();
         inner.entries.clear();
         inner.retained_data_bytes = 0;
         inner.watermark = 0;
         inner.live = false;
+        inner.applied_epoch = epoch;
+    }
+
+    fn clear(&self) {
+        let epoch = self.continuity_epoch.load(Ordering::Acquire);
+        self.clear_at_epoch(epoch);
     }
 
     pub fn get(&self, record: &Pubkey, min_context_slot: u64) -> MirrorLookup {
@@ -393,6 +475,12 @@ impl DelegationRecordMirror {
         min_context_slot: u64,
     ) -> (MirrorLookup, Option<RecordMirrorLookupOutcome>) {
         let mut inner = self.inner.lock();
+        if !self.continuity_is_current(&inner) {
+            return (
+                MirrorLookup::Miss,
+                Some(RecordMirrorLookupOutcome::Stale),
+            );
+        }
         let watermark_is_fresh =
             inner.live && inner.watermark >= min_context_slot;
         let Some(entry) = inner.entries.get(record) else {
@@ -417,6 +505,10 @@ impl DelegationRecordMirror {
                 Some(RecordMirrorLookupOutcome::Tombstone),
             ),
         }
+    }
+
+    fn continuity_is_current(&self, inner: &MirrorState) -> bool {
+        inner.applied_epoch == self.continuity_epoch.load(Ordering::Acquire)
     }
 
     pub fn invalidate(&self, record: &Pubkey) {
@@ -704,6 +796,20 @@ mod tests {
         assert!(matches!(mirror.get(&record, 1), MirrorLookup::Miss));
         mirror.insert(record, 130, Some(vec![2]));
         assert!(matches!(mirror.get(&record, 140), MirrorLookup::Miss));
+    }
+
+    #[test]
+    fn continuity_epoch_invalidates_before_queue_drain() {
+        let mirror = DelegationRecordMirror::with_capacity(16, None);
+        let record = Pubkey::new_unique();
+        mirror.insert(record, 50, Some(vec![1]));
+        mirror.apply(RecordStreamUpdate::SlotAdvanced(120));
+        assert!(matches!(mirror.get(&record, 100), MirrorLookup::Hit { .. }));
+
+        mirror.continuity_epoch.fetch_add(1, Ordering::AcqRel);
+
+        assert!(matches!(mirror.get(&record, 1), MirrorLookup::Miss));
+        assert!(!mirror.is_complete_through(120));
     }
 
     #[test]

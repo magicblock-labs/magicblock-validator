@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     ops::{Deref, DerefMut},
     pin::Pin,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::Duration,
 };
 
@@ -20,6 +23,7 @@ use helius_laserstream::{
         subscribe_update::UpdateOneof,
     },
 };
+use magicblock_metrics::metrics;
 use solana_system_interface::MAX_PERMITTED_DATA_LENGTH;
 use tokio::{
     sync::{
@@ -105,13 +109,24 @@ impl RecordStreamUpdate {
 
 pub(super) struct RecordStreamMessage {
     update: RecordStreamUpdate,
+    epoch: u64,
     _payload_permit: Option<OwnedSemaphorePermit>,
 }
 
 impl RecordStreamMessage {
+    #[cfg(test)]
     pub(super) fn into_update(self) -> RecordStreamUpdate {
         self.update
     }
+
+    pub(super) fn into_parts(self) -> (RecordStreamUpdate, u64) {
+        (self.update, self.epoch)
+    }
+}
+
+pub(super) struct RecordStreamReceiver {
+    pub(super) updates: Receiver<RecordStreamMessage>,
+    pub(super) continuity_epoch: Arc<AtomicU64>,
 }
 
 struct LaserStream {
@@ -149,6 +164,7 @@ pub struct RecordStream {
     config: LaserstreamConfig,
     updates: Sender<RecordStreamMessage>,
     payload_budget: Arc<Semaphore>,
+    continuity_epoch: Arc<AtomicU64>,
     slot: Slot,
     watermark: Slot,
 }
@@ -157,7 +173,7 @@ impl RecordStream {
     pub async fn start(
         endpoint: String,
         api_key: String,
-    ) -> Result<Receiver<RecordStreamMessage>, RecordStreamError> {
+    ) -> Result<RecordStreamReceiver, RecordStreamError> {
         let config = LaserstreamConfig {
             api_key,
             endpoint,
@@ -166,6 +182,7 @@ impl RecordStream {
             replay: true,
         };
         let (updates, receiver) = mpsc::channel(MAX_PENDING_UPDATES);
+        let continuity_epoch = Arc::new(AtomicU64::new(0));
         let stream = Self::connect(config.clone(), None).await?;
         tokio::spawn(
             Self {
@@ -175,12 +192,16 @@ impl RecordStream {
                 payload_budget: Arc::new(Semaphore::new(
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
+                continuity_epoch: Arc::clone(&continuity_epoch),
                 slot: 0,
                 watermark: 0,
             }
             .run(),
         );
-        Ok(receiver)
+        Ok(RecordStreamReceiver {
+            updates: receiver,
+            continuity_epoch,
+        })
     }
 
     async fn run(mut self) {
@@ -203,6 +224,7 @@ impl RecordStream {
                 }
             }
         }
+        self.invalidate_continuity();
         self.deliver(RecordStreamUpdate::SyncTerminated).await;
     }
 
@@ -243,8 +265,14 @@ impl RecordStream {
     }
 
     async fn interrupt(&mut self) -> bool {
-        self.watermark = 0;
+        self.invalidate_continuity();
         self.enqueue(RecordStreamUpdate::SyncInterrupted).await
+    }
+
+    fn invalidate_continuity(&mut self) {
+        self.watermark = 0;
+        self.continuity_epoch.fetch_add(1, Ordering::AcqRel);
+        metrics::set_record_mirror_live(false);
     }
 
     async fn handle_update(
@@ -322,6 +350,7 @@ impl RecordStream {
         self.updates
             .send(RecordStreamMessage {
                 update,
+                epoch: self.continuity_epoch.load(Ordering::Acquire),
                 _payload_permit: payload_permit,
             })
             .await
@@ -343,7 +372,7 @@ impl RecordStream {
             );
             // Rewind replay to the interval whose ordering guarantee failed.
             self.slot = slot;
-            self.watermark = 0;
+            self.invalidate_continuity();
             self.deliver(RecordStreamUpdate::SyncInterrupted).await;
             true
         } else {
@@ -651,6 +680,7 @@ mod tests {
                 payload_budget: Arc::new(Semaphore::new(
                     MAX_PENDING_PAYLOAD_BYTES,
                 )),
+                continuity_epoch: Arc::new(AtomicU64::new(0)),
                 slot: 0,
                 watermark: 0,
             },
@@ -1025,5 +1055,23 @@ mod tests {
             try_recv_update(&mut updates),
             Ok(RecordStreamUpdate::SyncInterrupted)
         ));
+    }
+
+    #[tokio::test]
+    async fn continuity_invalidates_before_control_enqueue() {
+        let (mut stream, _updates) = test_stream();
+        for slot in 0..32 {
+            stream.deliver(RecordStreamUpdate::SlotAdvanced(slot)).await;
+        }
+        let continuity_epoch = Arc::clone(&stream.continuity_epoch);
+        let interrupt = stream.interrupt();
+        tokio::pin!(interrupt);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(10), &mut interrupt)
+                .await
+                .is_err()
+        );
+        assert_eq!(continuity_epoch.load(Ordering::Acquire), 1);
     }
 }
