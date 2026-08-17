@@ -530,6 +530,7 @@ where
                     effective_slot,
                     ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
+                    false,
                 )
                 .map(move |res| (ata_pubkey, eata, effective_slot, res)),
             );
@@ -548,6 +549,7 @@ where
                     effective_slot,
                     ata_projection_context.clone(),
                     ChainlinkCompanionFetchKind::AtaProjection,
+                    false,
                 )
                 .map(move |res| {
                     (ata_pubkey, companion_pubkey, effective_slot, res)

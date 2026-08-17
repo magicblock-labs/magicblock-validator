@@ -1182,6 +1182,7 @@ where
                             AccountFetchReason::DelegationRecord,
                         ),
                         ChainlinkCompanionFetchKind::DelegationRecord,
+                        false,
                     )
                     .await
                 {

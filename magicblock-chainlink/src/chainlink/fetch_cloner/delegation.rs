@@ -24,7 +24,7 @@ use crate::{
     },
     cloner::DelegationActions,
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, SubscriptionReason,
     },
 };
 
