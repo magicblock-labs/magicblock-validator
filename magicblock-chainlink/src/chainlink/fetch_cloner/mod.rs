@@ -444,17 +444,22 @@ fn records_in_replay_gap(
     for (pubkey, account) in records {
         let record_size = DelegationRecord::size_with_discriminator();
         if account.data.len() < record_size {
-            return Err(ChainlinkError::InvalidDelegationRecord(
-                pubkey,
-                solana_program::program_error::ProgramError::InvalidAccountData,
-            ));
+            warn!(
+                %pubkey,
+                data_len = account.data.len(),
+                "Skipping replay census entry shorter than a delegation record"
+            );
+            continue;
         }
-        let record = DelegationRecord::try_from_bytes_with_discriminator(
+        let Ok(record) = DelegationRecord::try_from_bytes_with_discriminator(
             &account.data[..record_size],
-        )
-        .map_err(|error| {
-            ChainlinkError::InvalidDelegationRecord(pubkey, error)
-        })?;
+        ) else {
+            warn!(
+                %pubkey,
+                "Skipping malformed replay census delegation-record collision"
+            );
+            continue;
+        };
         if record.delegation_slot > range.after_slot
             && record.delegation_slot <= range.through_slot
         {

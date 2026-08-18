@@ -249,6 +249,7 @@ fn replay_recovery_selects_only_records_created_inside_gap() {
     let inside = Pubkey::new_unique();
     let through = Pubkey::new_unique();
     let after = Pubkey::new_unique();
+    let collision = Pubkey::new_unique();
     let range = ReplayRecoveryRange {
         after_slot: 10,
         through_slot: 20,
@@ -260,6 +261,16 @@ fn replay_recovery_selects_only_records_created_inside_gap() {
             (inside, delegation_record_account(11)),
             (through, delegation_record_account(20)),
             (after, delegation_record_account(21)),
+            (
+                collision,
+                Account {
+                    data: AccountDiscriminator::DelegationRecord
+                        .to_bytes()
+                        .to_vec(),
+                    owner: dlp_api::id(),
+                    ..Default::default()
+                },
+            ),
         ],
         range,
     )
@@ -268,6 +279,11 @@ fn replay_recovery_selects_only_records_created_inside_gap() {
     assert_eq!(records[&11], HashSet::from([inside]));
     assert_eq!(records[&20], HashSet::from([through]));
     assert_eq!(records.len(), 2);
+    assert!(
+        records
+            .values()
+            .all(|records| !records.contains(&collision))
+    );
 }
 
 #[test]

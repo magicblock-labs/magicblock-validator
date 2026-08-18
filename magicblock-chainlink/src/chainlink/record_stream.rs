@@ -9,6 +9,7 @@ use std::{
     time::Duration,
 };
 
+use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use futures_util::StreamExt;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError, StreamHandle, client,
@@ -471,20 +472,44 @@ impl RecordStream {
         else {
             return;
         };
-        let event = match parse_undelegation_request(&account.data) {
-            Some((delegated_account, expires_at_slot)) => {
-                RecordStreamUpdate::UndelegationRequested {
-                    request_pda: pubkey,
-                    delegated_account,
-                    expires_at_slot,
-                    slot: update.slot,
-                }
+        let event = if account.data.get(..DISCRIMINATOR_LEN)
+            == Some(UNDELEGATION_REQUEST_DISCRIMINATOR.to_le_bytes().as_slice())
+        {
+            let Some((delegated_account, expires_at_slot)) =
+                parse_undelegation_request(&account.data)
+            else {
+                tracing::warn!(
+                    request_pda = %Pubkey::new_from_array(pubkey),
+                    data_len = account.data.len(),
+                    "ignoring malformed undelegation request account update"
+                );
+                return;
+            };
+            let delegated_account_pubkey =
+                Pubkey::new_from_array(delegated_account);
+            if undelegation_request_pda_from_delegated_account(
+                &delegated_account_pubkey,
+            ) != Pubkey::new_from_array(pubkey)
+            {
+                tracing::warn!(
+                    request_pda = %Pubkey::new_from_array(pubkey),
+                    delegated_account = %delegated_account_pubkey,
+                    "ignoring undelegation request account update with invalid PDA"
+                );
+                return;
             }
-            None => RecordStreamUpdate::Record {
+            RecordStreamUpdate::UndelegationRequested {
+                request_pda: pubkey,
+                delegated_account,
+                expires_at_slot,
+                slot: update.slot,
+            }
+        } else {
+            RecordStreamUpdate::Record {
                 record: pubkey,
                 data: account.data,
                 slot: update.slot,
-            },
+            }
         };
         self.deliver(event).await;
     }
@@ -1025,6 +1050,35 @@ mod tests {
             parse_undelegation_request(&data),
             Some((delegated_account, 42))
         );
+    }
+
+    #[tokio::test]
+    async fn rejects_undelegation_request_with_noncanonical_pda() {
+        use helius_laserstream::grpc::SubscribeUpdateAccountInfo;
+
+        let delegated_account = Pubkey::new_unique();
+        let mut data =
+            UNDELEGATION_REQUEST_DISCRIMINATOR.to_le_bytes().to_vec();
+        data.extend_from_slice(delegated_account.as_ref());
+        data.extend_from_slice(&42u64.to_le_bytes());
+        let (mut stream, mut updates) = test_stream();
+
+        stream
+            .handle_account_update(SubscribeUpdateAccount {
+                account: Some(SubscribeUpdateAccountInfo {
+                    pubkey: Pubkey::new_unique().to_bytes().to_vec(),
+                    data,
+                    ..Default::default()
+                }),
+                slot: 7,
+                ..Default::default()
+            })
+            .await;
+
+        assert!(matches!(
+            updates.try_recv(),
+            Err(mpsc::error::TryRecvError::Empty)
+        ));
     }
 
     #[tokio::test]
