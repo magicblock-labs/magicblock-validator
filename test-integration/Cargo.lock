@@ -119,8 +119,9 @@ dependencies = [
 [[package]]
 name = "agave-transaction-view"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
+ "ahash 0.8.12",
  "solana-hash 4.4.0",
  "solana-message 4.2.4",
  "solana-packet 4.2.0",
@@ -1974,7 +1975,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3411,8 +3412,8 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
 name = "magic-root-interface"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "solana-account 4.3.1",
  "solana-instruction 3.4.0",
@@ -3422,8 +3423,8 @@ dependencies = [
 
 [[package]]
 name = "magic-root-program"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "magic-root-interface",
  "magicblock-engine-nucleus",
@@ -3438,8 +3439,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accountsdb"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "ahash 0.8.12",
  "bincode",
@@ -3658,7 +3659,7 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
@@ -3690,13 +3691,13 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum",
- "thiserror 1.0.69",
+ "thiserror 2.0.20",
 ]
 
 [[package]]
 name = "magicblock-engine"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -3727,8 +3728,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-engine-nucleus"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -3760,8 +3761,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-keeper"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "agave-feature-set",
  "ahash 0.8.12",
@@ -3799,8 +3800,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "agave-transaction-view",
  "bitcode",
@@ -3866,8 +3867,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -3878,6 +3879,7 @@ dependencies = [
  "magicblock-accountsdb",
  "magicblock-engine-nucleus",
  "magicblock-keeper",
+ "smallvec",
  "solana-account 4.3.1",
  "solana-compute-budget-instruction",
  "solana-hash 4.4.0",
@@ -4970,7 +4972,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5399,7 +5401,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5985,7 +5987,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "4.3.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "bincode",
  "bitflags 2.13.1",
@@ -7571,7 +7573,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -8260,7 +8262,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "ahash 0.8.12",
  "magic-root-interface",
@@ -8647,7 +8649,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "bincode",
  "serde",
@@ -9273,7 +9275,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -10129,8 +10131,8 @@ dependencies = [
 
 [[package]]
 name = "v42-calculator-interface"
-version = "0.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.1#2b52f2ae7184b432e5a22027931b0d2ebf5b11fd"
+version = "0.1.2"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.1.2#32aa1b5547e61dd6be73c36111ba18a073963ad2"
 dependencies = [
  "solana-instruction 3.4.0",
  "solana-pubkey 4.2.0",
@@ -10315,7 +10317,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
