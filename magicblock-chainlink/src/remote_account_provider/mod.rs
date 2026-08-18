@@ -416,7 +416,7 @@ const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
 
 // getMultipleAccounts accepts at most this many keys per request.
-const MAX_MULTIPLE_ACCOUNTS_PER_REQUEST: usize = 100;
+pub(crate) const MAX_MULTIPLE_ACCOUNTS_PER_REQUEST: usize = 100;
 
 // Splits keys into the minimum number of chunks that fit the RPC's
 // getMultipleAccounts limit, sized as evenly as possible.
