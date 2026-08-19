@@ -1164,8 +1164,9 @@ where
     }
 
     /// Holds a persistent programdata subscription for a LoaderV3 program so
-    /// upgrades stay observable; both pubkeys are preferred onto gRPC
-    /// transport. Installed before the clone so an upgrade notification
+    /// upgrades stay observable; it keeps full coverage on every transport
+    /// leg, while the program account is preferred onto gRPC.
+    /// Installed before the clone so an upgrade notification
     /// landing mid-clone already routes; held once per program (idempotent
     /// across reloads). Failing to hold the subscription is an error but
     /// non-fatal to the clone: the watch is retried on the next load.
@@ -1240,11 +1241,14 @@ where
                 .await;
             return Ok(ProgramDataWatch::EvictedConcurrently);
         }
+        // Only the program account is narrowed to gRPC: pre-Agave-4.2
+        // chains notify hot program accounts every slot without changes,
+        // which would flood websocket legs. The programdata sub — the
+        // actual upgrade signal, quiet outside deploys — keeps default
+        // full coverage on every leg so one dead transport cannot
+        // silence upgrade detection.
         self.remote_account_provider
             .prefer_grpc_subscription(&program_id)
-            .await;
-        self.remote_account_provider
-            .prefer_grpc_subscription(&program_data_pubkey)
             .await;
         Ok(ProgramDataWatch::Installed)
     }
