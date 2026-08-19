@@ -6,9 +6,12 @@
 //             http PUBLIC / ws PUBLIC+1   http ER / ws ER+1       http BASE / ws BASE+1
 //             (public entry)              (internal)              (internal, base L1)
 //
+// With --cranker, a hydra-cranker is supervised alongside them, pointed at the
+// ephemeral-validator, so scheduled tasks actually fire locally.
+//
 // It spawns the existing sibling wrapper scripts (mbTestValidator.js,
-// ephemeralValidator.js, queryFilteringService.js). It only adds ordering, health
-// gating, an endpoint summary, and supervision.
+// ephemeralValidator.js, queryFilteringService.js, hydraCranker.js). It only adds
+// ordering, health gating, an endpoint summary, and supervision.
 //
 import http from "http";
 import path from "path";
@@ -30,6 +33,9 @@ function port(envVar: string, fallback: number): number {
 const PUBLIC_PORT = port("MB_STACK_PUBLIC_PORT", 6699);
 const ER_PORT = port("MB_STACK_ER_PORT", 7799);
 const BASE_PORT = port("MB_STACK_BASE_PORT", 8899);
+// The cranker exposes no RPC — this is its Prometheus/health port, which is also
+// what readiness is gated on.
+const CRANKER_PORT = port("MB_STACK_CRANKER_PORT", 9797);
 
 // Which base chain the ephemeral-validator clones from / commits to. Defaults to
 // the local mb-test-validator; override (comma-separated remotes, e.g.
@@ -63,6 +69,9 @@ interface Service {
   requiredAccount?: string;
   // Optional child-output marker that must appear before dependents start.
   readyOutput?: RegExp;
+  // What to print once the service is up. Defaults to the RPC/WS pair implied by
+  // `healthPort`; services that serve something else say so themselves.
+  endpoints?: string;
   // Short label + ANSI color used to prefix this service's log lines so the
   // three interleaved outputs stay readable.
   tag: string;
@@ -86,13 +95,30 @@ function svcColor(name: string): string {
   return SERVICES.find((svc) => svc.name === name)?.color ?? RESET;
 }
 
-// Extra CLI args passed to `mb-stack` are forwarded to the mb-test-validator
-// (base L1), which appends them to solana-test-validator — the service operators
-// most often need to customize (extra --bpf-program / --account / --clone / --reset).
-// They are appended after mb-stack's own base args, so on last-wins flags the
-// user's value takes priority. (Use MB_STACK_BASE_PORT instead of --rpc-port,
-// which solana-test-validator rejects if given twice.)
-const PASSTHROUGH_ARGS = process.argv.slice(2);
+const CLI_ARGS = process.argv.slice(2);
+
+// `--cranker` is mb-stack's own flag: it adds the hydra-cranker to the stack.
+const WITH_CRANKER = CLI_ARGS.includes("--cranker");
+
+const CRANKER_KEYPAIR = process.env.MB_STACK_CRANKER_KEYPAIR;
+
+if (WITH_CRANKER && !CRANKER_KEYPAIR) {
+  console.error(
+    "--cranker requires MB_STACK_CRANKER_KEYPAIR: a keypair file path, a 64-byte\n" +
+      "JSON array, or a base58 keypair. It receives the per-trigger tips, \n" + 
+      "so the account must be delegated (cranker handles the delegation).",
+  );
+  process.exit(1);
+}
+
+// The remaining CLI args passed to `mb-stack` are forwarded to the
+// mb-test-validator (base L1), which appends them to solana-test-validator — the
+// service operators most often need to customize (extra --bpf-program /
+// --account / --clone / --reset). They are appended after mb-stack's own base
+// args, so on last-wins flags the user's value takes priority. (Use
+// MB_STACK_BASE_PORT instead of --rpc-port, which solana-test-validator rejects
+// if given twice.)
+const PASSTHROUGH_ARGS = CLI_ARGS.filter((arg) => arg !== "--cranker");
 
 // Ordered: base L1 first, then ER (which clones from base), then the public
 // query-filtering-service front (which forwards to the ER).
@@ -135,6 +161,30 @@ const SERVICES: Service[] = [
     requireRpcHealth: false,
     tag: "qfs",
     color: "\x1b[35m", // magenta
+  },
+  {
+    name: "hydra-cranker",
+    script: "hydraCranker.js",
+    // --ephemeral targets hydra's ephemeral-rollup program (the one the ER's
+    // task scheduler creates cranks against) rather than the base-layer one.
+    // --ws-url is explicit because the cranker would otherwise derive it from
+    // --rpc-url, and the ER serves WS on RPC port + 1.
+    args: [
+      "--ephemeral",
+      "--rpc-url",
+      `http://${HOST}:${ER_PORT}`,
+      "--ws-url",
+      `ws://${HOST}:${ER_PORT + 1}`,
+      "--prometheus-port",
+      String(CRANKER_PORT),
+    ],
+    healthPort: CRANKER_PORT,
+    requireRpcHealth: false,
+    endpoints: `metrics http://${HOST}:${CRANKER_PORT}/metrics`,
+    tag: "crank",
+    color: "\x1b[33m", // yellow
+    // Passed via env rather than argv so the secret stays out of `ps` output.
+    extraEnv: { HYDRA_CRANKER_KEYPAIR: CRANKER_KEYPAIR },
   },
 ];
 
@@ -285,29 +335,27 @@ async function pingHealth(
   );
 }
 
-async function waitForHealth(
-  name: string,
-  healthPort: number,
-  requireRpcHealth: boolean,
-  requiredAccount?: string,
-  waitForReadyOutput = false,
-  timeoutMs = 120000,
-): Promise<void> {
+async function waitForHealth(svc: Service, timeoutMs = 120000): Promise<void> {
+  const { name, healthPort } = svc;
+  const requireRpcHealth = svc.requireRpcHealth ?? true;
+  const waitForReadyOutput = svc.readyOutput !== undefined;
+  const endpoints =
+    svc.endpoints ??
+    `${color("rpc", DIM)} http://${HOST}:${healthPort}, ${color(
+      "ws",
+      DIM,
+    )} ws://${HOST}:${healthPort + 1}`;
+
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     if (shuttingDown) return;
     const outputReady = !waitForReadyOutput || readyOutputSeen.has(name);
     if (
       outputReady &&
-      (await pingHealth(healthPort, requireRpcHealth, requiredAccount))
+      (await pingHealth(healthPort, requireRpcHealth, svc.requiredAccount))
     ) {
       console.log(
-        `${color("✔", GREEN)} ${color(name, svcColor(name))} ready: ${color(
-          "rpc",
-          DIM,
-        )} http://${HOST}:${healthPort}, ${color("ws", DIM)} ws://${HOST}:${
-          healthPort + 1
-        }`,
+        `${color("✔", GREEN)} ${color(name, svcColor(name))} ready: ${endpoints}`,
       );
       return;
     }
@@ -378,6 +426,11 @@ function printSummary(): void {
   if (remotesOverride) {
     console.log(`${color("Base chain:", CYAN)}             ${remotesOverride}`);
   }
+  if (WITH_CRANKER) {
+    console.log(
+      `${color("Cranker:", CYAN)}                firing ephemeral hydra cranks on the ER`,
+    );
+  }
   console.log(color("Stop: press Ctrl-C to shut down all nodes.", DIM));
   console.log("");
 }
@@ -387,20 +440,17 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => shutdown(0));
 
   // When the ER points at an external base, the local base validator is unused —
-  // skip it so we don't boot an idle validator.
-  const services = process.env.MB_STACK_ER_REMOTES
-    ? SERVICES.filter((s) => s.script !== "mbTestValidator.js")
-    : SERVICES;
+  // skip it so we don't boot an idle validator. The cranker is opt-in.
+  const services = SERVICES.filter((s) => {
+    if (s.script === "mbTestValidator.js")
+      return !process.env.MB_STACK_ER_REMOTES;
+    if (s.script === "hydraCranker.js") return WITH_CRANKER;
+    return true;
+  });
 
   for (const svc of services) {
     startService(svc);
-    await waitForHealth(
-      svc.name,
-      svc.healthPort,
-      svc.requireRpcHealth ?? true,
-      svc.requiredAccount,
-      svc.readyOutput !== undefined,
-    );
+    await waitForHealth(svc);
     if (shuttingDown) return;
   }
 
