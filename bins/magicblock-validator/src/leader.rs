@@ -23,7 +23,7 @@ use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
     undelegation_request_service::UndelegationRequestService,
 };
-use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_validator_admin::claim_fees::{ClaimFeesTask, claim_fees};
 use nucleus::{metrics::EventTimer, shutdown::ShutdownManager};
 use replicator::ReplicationDispatcher;
@@ -173,12 +173,10 @@ impl Leader {
             info!("RPC runtime shutdown");
         });
 
-        let task_scheduler_db_path = SchedulerDatabase::path(&engine_ledger);
-        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
+        debug!("Initializing task scheduler");
         let task_scheduler = Some(TaskSchedulerService::new(
-            &task_scheduler_db_path,
-            &config.task_scheduler,
             engine.clone(),
+            config.aperture.listen.http(),
             config.engine.blockstore.blocktime,
             token.clone(),
         )?);
@@ -521,6 +519,7 @@ impl Leader {
                     error!("Exiting process");
                     std::process::exit(1);
                 }
+
                 if let Some(ref config) = admin
                     && !config.claim_fees_frequency.is_zero()
                 {

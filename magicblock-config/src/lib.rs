@@ -27,7 +27,7 @@ pub mod types;
 use crate::{
     config::{
         AdminConfig, ChainLinkConfig, CommittorConfig, LedgerConfig,
-        LoadableProgram, TaskSchedulerConfig,
+        LoadableProgram,
     },
     types::Remote,
 };
@@ -65,7 +65,6 @@ pub struct LeaderParams {
     pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
     pub admin: Option<AdminConfig>,
-    pub task_scheduler: TaskSchedulerConfig,
     pub programs: Vec<LoadableProgram>,
 }
 
