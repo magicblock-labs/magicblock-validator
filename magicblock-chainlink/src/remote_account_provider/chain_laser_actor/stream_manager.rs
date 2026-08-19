@@ -2244,11 +2244,9 @@ mod tests {
         // child (the only ready one is the closed child, which the
         // StreamMap reaps) and then parks, so the timeout is expected.
         factory.close_stream(0);
-        let poll = tokio::time::timeout(
-            Duration::from_millis(100),
-            mgr.next_update(),
-        )
-        .await;
+        let poll =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await;
         assert!(poll.is_err(), "no update expected while reaping");
 
         assert_eq!(
