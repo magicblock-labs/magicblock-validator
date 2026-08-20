@@ -116,12 +116,20 @@ where
         // cache; drop the stale entry (and the persistent programdata
         // watch held for it) and reload.
         this.program_verify_cache.lock().pop(&pubkey);
-        if this
-            .programdata_index
-            .lock()
-            .pop(&program_data_pubkey)
-            .is_some()
-        {
+        // Rechecked under the index lock: a concurrent clone that saw the
+        // entry (AlreadyInstalled) may have re-materialized the program
+        // after the miss above — its watch must survive. Both sides
+        // serialize on this lock and the clone re-asserts its watch after
+        // inserting into the bank, so every interleaving keeps a watch.
+        let released_watch = {
+            let mut index = this.programdata_index.lock();
+            if this.accounts_bank.get_account(&pubkey).is_none() {
+                index.pop(&program_data_pubkey).is_some()
+            } else {
+                false
+            }
+        };
+        if released_watch {
             this.remote_account_provider
                 .forget_subscription_reason(
                     &program_data_pubkey,

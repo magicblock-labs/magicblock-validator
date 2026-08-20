@@ -12411,3 +12411,84 @@ async fn test_skipped_program_clone_still_installs_programdata_watch() {
         "skipped clone must still install the programdata watch"
     );
 }
+
+/// A watch subscription can die upstream while local bookkeeping keeps it
+/// (e.g. lost across a provider reconnect), so no programdata notification
+/// ever arrives again. The periodic sweep must detect the upgrade over the
+/// fetch transport alone — and must stay a no-op while nothing changed.
+#[tokio::test]
+async fn test_programdata_sweep_detects_upgrade_without_notification() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+    const UPGRADE_SLOT: u64 = 150;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // A sweep against unchanged chain state must not reload anything.
+    fetch_cloner.sweep_programdata_watches().await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // Upgrade on chain, but deliver NO subscription update: the watch's
+    // upstream subscription is dead.
+    let upgraded_elf = [9u8; 64];
+    let (_, upgraded_program_data) = loaderv3_program_accounts(
+        &program_data_pubkey,
+        UPGRADE_SLOT,
+        &upgraded_elf,
+    );
+    rpc_client.set_current_slot(UPGRADE_SLOT);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
+    rpc_client.add_account(program_data_pubkey, upgraded_program_data);
+
+    // Clear the program verify throttle window.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+
+    fetch_cloner.sweep_programdata_watches().await;
+
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "sweep must reload the upgraded program"
+    );
+    let reloaded = cloner
+        .get_cloned_program(&program_pubkey)
+        .expect("program must be cloned");
+    assert_eq!(
+        reloaded.program_data, upgraded_elf,
+        "sweep reload must pick up the upgraded program data"
+    );
+    // The programdata account itself must not be cloned into the bank.
+    assert_not_cloned!(cloner, &[program_data_pubkey]);
+
+    // Once the reload settled, further sweeps are no-ops again.
+    fetch_cloner.sweep_programdata_watches().await;
+    assert_eq!(cloner.program_clone_count(), 2);
+}
