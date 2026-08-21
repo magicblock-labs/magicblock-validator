@@ -12,6 +12,7 @@ use magicblock_magic_program_api::{
 use solana_account::{
     create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
 };
+use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_clock::Clock;
 use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
 use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
@@ -1291,6 +1292,91 @@ mod tests {
             ix.accounts,
             Err(InstructionError::InvalidAccountData),
         );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_too_large_account() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_too_large_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        // One byte past the cap: the delegated account could not be grown to
+        // this size on base chain within a single instruction.
+        account_data.get_mut(&committee).unwrap().set_data(vec![
+            7u8;
+            MAX_PERMITTED_DATA_INCREASE
+                + 1
+        ]);
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
+        );
+    }
+
+    /// Pins the boundary: `MAX_PERMITTED_DATA_INCREASE` is the largest
+    /// *permitted* size, not the first rejected one. Solana's realloc check is
+    /// `post_len - pre_len > MAX_PERMITTED_DATA_INCREASE` (strictly greater),
+    /// so an account of exactly that size can still be grown/committed in one
+    /// instruction. This test fails if the check is ever tightened to `>=`.
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_max_size_account_succeeds() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_with_max_size_account")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer, program, committee,
+            );
+        account_data
+            .get_mut(&committee)
+            .unwrap()
+            .set_data(vec![7u8; MAX_PERMITTED_DATA_INCREASE]);
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let processed_scheduled = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts.clone(),
+            ix.accounts,
+            Ok(()),
+        );
+        assert_non_accepted_actions(&processed_scheduled, &payer.pubkey(), 1);
     }
 
     #[test]
