@@ -11,7 +11,8 @@ pub mod scheduler;
 
 pub use aperture::ApertureConfig;
 pub use chain::{
-    AdminConfig, AllowedProgram, ChainLinkConfig, CommittorConfig, RiskConfig,
+    AdminConfig, AllowedProgram, ChainLinkConfig, CommittorConfig,
+    RecordSyncConfig, RiskConfig, SubscriptionTransport,
 };
 pub use engine::{EngineConfig, FollowerReplication, LeaderReplication};
 pub use grpc::GrpcConfig;

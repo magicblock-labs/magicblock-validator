@@ -18,10 +18,13 @@ use super::{
     subscription::{SubscriptionRelease, release_subs},
 };
 use crate::{
-    chainlink::errors::{ChainlinkError, ChainlinkResult},
+    chainlink::{
+        errors::{ChainlinkError, ChainlinkResult},
+        record_mirror::MirrorLookup,
+    },
     cloner::DelegationActions,
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, SubscriptionReason,
     },
 };
 
@@ -169,7 +172,6 @@ where
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }
 
-#[instrument(skip(this))]
 pub(crate) async fn fetch_and_parse_delegation_record<T, U>(
     this: &FetchCloner<T, U>,
     account_pubkey: Pubkey,
@@ -177,6 +179,47 @@ pub(crate) async fn fetch_and_parse_delegation_record<T, U>(
     fetch_context: metrics::AccountFetchContext,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<(DelegationRecord, Option<DelegationActions>)>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    resolve_delegation_record(
+        this,
+        account_pubkey,
+        min_context_slot,
+        fetch_context,
+        companion_fetch_log_context,
+    )
+    .await
+    .into_found()
+}
+
+pub(crate) enum DelegationRecordResolution {
+    Found(DelegationRecord, Option<DelegationActions>),
+    Missing,
+    Invalid,
+    Uncertain,
+}
+
+impl DelegationRecordResolution {
+    fn into_found(
+        self,
+    ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
+        match self {
+            Self::Found(record, actions) => Some((record, actions)),
+            Self::Missing | Self::Invalid | Self::Uncertain => None,
+        }
+    }
+}
+
+#[instrument(skip(this))]
+pub(crate) async fn resolve_delegation_record<T, U>(
+    this: &FetchCloner<T, U>,
+    account_pubkey: Pubkey,
+    min_context_slot: u64,
+    fetch_context: metrics::AccountFetchContext,
+    companion_fetch_log_context: &CompanionFetchLogContext,
+) -> DelegationRecordResolution
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -200,65 +243,78 @@ where
             false
         });
 
-    let res = match this
-        .remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[delegation_record_pubkey],
-            Some(MatchSlotsConfig {
-                min_context_slot: Some(min_context_slot),
-                ..MatchSlotsConfig::new(
-                    ChainlinkCompanionFetchKind::DelegationRecord,
-                )
-            }),
-            fetch_context
-                .with_reason(metrics::AccountFetchReason::DelegationRecord),
-        )
-        .await
+    let mirrored = this.record_mirror.as_ref().and_then(|mirror| match mirror
+        .get(&delegation_record_pubkey, min_context_slot)
     {
-        Ok(mut delegation_records) => {
-            if let Some(delegation_record_remote) = delegation_records.pop() {
-                match delegation_record_remote.fresh_account() {
-                    Some(delegation_record_account) => this
+        MirrorLookup::Hit { data, .. } => {
+            use metrics::RecordMirrorLookupOutcome as Outcome;
+            let parsed = this
+                .parse_delegation_record(&data, delegation_record_pubkey)
+                .ok();
+            metrics::inc_record_mirror_lookup(if parsed.is_some() {
+                Outcome::Hit
+            } else {
+                Outcome::ParseFallback
+            });
+            parsed
+        }
+        MirrorLookup::Tombstone { .. }
+        | MirrorLookup::Uncertain { .. }
+        | MirrorLookup::Miss => None,
+    });
+
+    let res = if let Some((record, actions)) = mirrored {
+        DelegationRecordResolution::Found(record, actions)
+    } else {
+        match this
+            .remote_account_provider
+            .fetch_multi_rpc_only(
+                &[delegation_record_pubkey],
+                min_context_slot,
+                fetch_context
+                    .with_reason(metrics::AccountFetchReason::DelegationRecord),
+            )
+            .await
+        {
+            Ok(mut delegation_records) => match delegation_records.pop() {
+                Some(remote) if !remote.is_found() => {
+                    DelegationRecordResolution::Missing
+                }
+                Some(remote) => match remote.fresh_account() {
+                    Some(account) => this
                         .parse_delegation_record(
-                            delegation_record_account.data(),
+                            account.data(),
                             delegation_record_pubkey,
                         )
-                        .ok(),
-                    None => None,
-                }
-            } else {
-                None
+                        .map(|(record, actions)| {
+                            DelegationRecordResolution::Found(record, actions)
+                        })
+                        .unwrap_or(DelegationRecordResolution::Invalid),
+                    None => DelegationRecordResolution::Uncertain,
+                },
+                None => DelegationRecordResolution::Uncertain,
+            },
+            Err(err) => {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    delegation_record_pubkey,
+                    ChainlinkCompanionFetchKind::DelegationRecord,
+                    &err,
+                );
+                DelegationRecordResolution::Uncertain
             }
-        }
-        Err(err) => {
-            log_companion_fetch_failure(
-                companion_fetch_log_context,
-                delegation_record_pubkey,
-                ChainlinkCompanionFetchKind::DelegationRecord,
-                &err,
-            );
-            None
         }
     };
 
-    let mut releases = Vec::new();
-    // Handle edge case where it was cloned in the meantime.
-    // The small possibility of a fetch + clone of this delegation record being in process
-    // still exists, but it's negligible.
-    if !this.contains_account(&delegation_record_pubkey) {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DirectAccount,
-        });
-    }
     if acquired_delegation_record_reason {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DelegationRecord,
-        });
-    }
-    if !releases.is_empty() {
-        release_subs(&this.remote_account_provider, releases).await;
+        release_subs(
+            &this.remote_account_provider,
+            [SubscriptionRelease::Pubkey {
+                pubkey: delegation_record_pubkey,
+                reason: SubscriptionReason::DelegationRecord,
+            }],
+        )
+        .await;
     }
 
     res

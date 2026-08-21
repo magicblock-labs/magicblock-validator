@@ -29,8 +29,8 @@ use crate::{
         DelegationActions, errors::ClonerResult,
     },
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccount, SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, MAX_MULTIPLE_ACCOUNTS_PER_REQUEST,
+        MatchSlotsConfig, RemoteAccount, ResolvedAccount, SubscriptionReason,
         program_account::{
             LOADER_V3, ProgramAccountResolver,
             get_loaderv3_get_program_data_address,
@@ -38,6 +38,14 @@ use crate::{
         pubsub_common::is_internal_dlp_account_data,
     },
 };
+
+fn loader_v3_fetch_batches(
+    pubkeys: &[Pubkey],
+) -> impl Iterator<Item = &[Pubkey]> {
+    debug_assert_eq!(pubkeys.len() % 2, 0);
+    debug_assert_eq!(MAX_MULTIPLE_ACCOUNTS_PER_REQUEST % 2, 0);
+    pubkeys.chunks(MAX_MULTIPLE_ACCOUNTS_PER_REQUEST)
+}
 
 pub(crate) fn collect_delegation_action_dependencies(
     accounts_to_clone: &[AccountCloneRequest],
@@ -209,7 +217,7 @@ where
 
     // For potentially delegated accounts we update the owner and delegation state first
     let mut fetch_with_delegation_record_join_set = JoinSet::new();
-    for (pubkey, _, account_slot) in &owned_by_deleg {
+    for (pubkey, account, account_slot) in &owned_by_deleg {
         let effective_slot = if let Some(min_slot) = min_context_slot {
             min_slot.max(*account_slot)
         } else {
@@ -218,6 +226,8 @@ where
         fetch_with_delegation_record_join_set.spawn(
             this.task_to_fetch_with_delegation_record(
                 *pubkey,
+                account.clone(),
+                *account_slot,
                 effective_slot,
                 fetch_context.clone(),
             ),
@@ -249,7 +259,6 @@ where
             let releases = owned_by_deleg
                 .iter()
                 .map(|(pubkey, _, _)| *pubkey)
-                .chain(record_subs.iter().copied())
                 .map(|pubkey| SubscriptionRelease::Pubkey {
                     pubkey,
                     reason: SubscriptionReason::DirectAccount,
@@ -301,7 +310,6 @@ where
                             let releases = owned_by_deleg
                                 .iter()
                                 .map(|(pubkey, _, _)| *pubkey)
-                                .chain(record_subs.iter().copied())
                                 .map(|pubkey| SubscriptionRelease::Pubkey {
                                     pubkey,
                                     reason: SubscriptionReason::DirectAccount,
@@ -389,18 +397,6 @@ where
             }
         }
 
-        release_subs(
-            &this.remote_account_provider,
-            owned_by_deleg
-                .iter()
-                .map(|(pubkey, _, _)| SubscriptionRelease::Pubkey {
-                    pubkey: *pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
-
         // Subscribe to owner programs concurrently in background (best-effort)
         if !owner_programs_to_subscribe.is_empty() {
             let remote_account_provider = this.remote_account_provider.clone();
@@ -485,18 +481,36 @@ where
     let fetch_result = if !pubkeys_to_fetch.is_empty() {
         this.fetch_count
             .fetch_add(pubkeys_to_fetch.len() as u64, Ordering::Relaxed);
-        this.remote_account_provider
-            .try_get_multi_until_slots_match(
-                &pubkeys_to_fetch,
-                Some(MatchSlotsConfig {
-                    min_context_slot: batch_min_context_slot,
-                    ..MatchSlotsConfig::new(
-                        ChainlinkCompanionFetchKind::ProgramData,
-                    )
-                }),
-                fetch_context.with_reason(AccountFetchReason::ProgramData),
-            )
-            .await
+        let mut remote_accounts = Vec::with_capacity(pubkeys_to_fetch.len());
+        let mut fetch_error = None;
+        for pubkey_batch in loader_v3_fetch_batches(&pubkeys_to_fetch) {
+            match this
+                .remote_account_provider
+                .try_get_multi_until_slots_match(
+                    pubkey_batch,
+                    Some(MatchSlotsConfig {
+                        min_context_slot: batch_min_context_slot,
+                        ..MatchSlotsConfig::new(
+                            ChainlinkCompanionFetchKind::ProgramData,
+                        )
+                    }),
+                    fetch_context
+                        .clone()
+                        .with_reason(AccountFetchReason::ProgramData),
+                )
+                .await
+            {
+                Ok(accounts) => remote_accounts.extend(accounts),
+                Err(error) => {
+                    fetch_error = Some(error);
+                    break;
+                }
+            }
+        }
+        match fetch_error {
+            Some(error) => Err(error),
+            None => Ok(remote_accounts),
+        }
     } else {
         Ok(vec![])
     };
@@ -646,16 +660,17 @@ pub(crate) fn compute_subscription_releases(
         .map(|request| request.pubkey)
         .collect::<HashSet<_>>();
 
+    let record_subs = record_subs.into_iter().collect::<HashSet<_>>();
     let mut direct_releases = all_requested_pubkeys
         .iter()
         .copied()
         .filter(|pubkey| {
             !cloned_accounts.contains(pubkey)
                 && !loaded_program_ids.contains(pubkey)
+                && !record_subs.contains(pubkey)
         })
         .collect::<HashSet<_>>();
     direct_releases.extend(delegated_cloned_accounts);
-    direct_releases.extend(record_subs.iter().copied());
     direct_releases.extend(program_data_subs.iter().copied());
 
     let mut releases = direct_releases
@@ -806,4 +821,72 @@ where
     );
 
     Ok(materialized)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loader_v3_fetch_batches_keep_pairs_within_rpc_limit() {
+        let pubkeys =
+            (0..102).map(|_| Pubkey::new_unique()).collect::<Vec<_>>();
+        let batches = loader_v3_fetch_batches(&pubkeys).collect::<Vec<_>>();
+
+        assert_eq!(
+            batches.iter().map(|batch| batch.len()).collect::<Vec<_>>(),
+            vec![100, 2]
+        );
+        assert!(batches.iter().all(|batch| {
+            batch.len() <= MAX_MULTIPLE_ACCOUNTS_PER_REQUEST
+                && batch.len() % 2 == 0
+        }));
+        assert_eq!(batches.concat(), pubkeys);
+    }
+
+    #[test]
+    fn record_cleanup_releases_only_the_acquired_reason() {
+        let record = Pubkey::new_unique();
+        let releases = compute_subscription_releases(
+            &[record],
+            &[],
+            &[],
+            vec![record],
+            HashSet::new(),
+        );
+
+        assert!(matches!(
+            releases.as_slice(),
+            [SubscriptionRelease::Pubkey { pubkey, reason }]
+                if *pubkey == record
+                    && *reason == SubscriptionReason::DelegationRecord
+        ));
+    }
+
+    #[test]
+    fn missing_record_cleanup_keeps_primary_watch() {
+        let primary = Pubkey::new_unique();
+        let record = delegation_record_pda_from_delegated_account(&primary);
+        let request = AccountCloneRequest {
+            pubkey: primary,
+            account: AccountBuilder::default(),
+            commit_frequency_ms: None,
+            post_delegation_mode: ClonePostDelegationMode::None,
+            delegated_to_other: None,
+        };
+        let releases = compute_subscription_releases(
+            &[primary, record],
+            &[request],
+            &[],
+            vec![record],
+            HashSet::new(),
+        );
+
+        assert!(matches!(
+            releases.as_slice(),
+            [SubscriptionRelease::Pubkey { pubkey, reason }]
+                if *pubkey == record
+                    && *reason == SubscriptionReason::DelegationRecord
+        ));
+    }
 }

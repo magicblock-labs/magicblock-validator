@@ -291,6 +291,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             }
             result?;
         }
+        metrics::inc_grpc_account_filter_updates();
 
         // Update active subscriptions with new pubkeys only after stream update
         {

@@ -116,6 +116,36 @@ async fn setup_provider_multi(
     }
 }
 
+#[tokio::test]
+async fn fetch_multi_rpc_only_chunked_bounds_each_request() {
+    let accounts = (0..101)
+        .map(|_| {
+            (
+                Pubkey::new_unique(),
+                AccountSharedData::new(1, 0, &Pubkey::new_unique()).into(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let pubkeys = accounts
+        .iter()
+        .map(|(pubkey, _)| *pubkey)
+        .collect::<Vec<_>>();
+    let ctx = setup_provider_multi(accounts).await;
+
+    let fetched = ctx
+        .provider
+        .fetch_multi_rpc_only_chunked(
+            &pubkeys,
+            100,
+            AccountFetchContext::rpc_get_multiple_accounts(),
+        )
+        .await
+        .expect("chunked exact-account fetch should succeed");
+
+    assert_eq!(fetched.len(), pubkeys.len());
+    assert_eq!(ctx.rpc_client.multi_account_fetches(), 2);
+}
+
 fn pending_accounts_value(
     origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,

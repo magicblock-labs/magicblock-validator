@@ -67,6 +67,18 @@ pub enum ChainlinkError {
     #[error("account load failed for {0}")]
     AccountLoadFailed(Pubkey),
 
+    #[error("replay recovery could not resolve {0} delegation records")]
+    IncompleteReplayRecovery(usize),
+
+    #[error("replay recovery found conflicting delegated accounts for {0}")]
+    AmbiguousReplayRecovery(Pubkey),
+
+    #[error("undelegation request receiver closed during replay recovery")]
+    UndelegationRequestReceiverClosed,
+
+    #[error("undelegation request recovery could not scan {0} partitions")]
+    IncompleteUndelegationRequestRecovery(usize),
+
     #[error("Failed to perform risk check: {0}")]
     RiskCheckFailed(#[from] RiskError),
 }
