@@ -11,6 +11,7 @@ use magicblock_magic_program_api::{
 };
 use solana_account::{
     create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
+    WritableAccount,
 };
 use solana_clock::Clock;
 use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
@@ -280,10 +281,13 @@ mod tests {
     };
     use magicblock_core::token_programs::{
         derive_ata, derive_ata_with_token_program, derive_eata,
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        EATA_PROGRAM_ID, RENT_PENDING_ATA_CLOSE_AUTHORITY,
+        TOKEN_2022_PROGRAM_ID,
     };
     use serial_test::serial;
+    use solana_program::{program_option::COption, program_pack::Pack};
     use solana_seed_derivable::SeedDerivable;
+    use spl_token::state::Account as SplAccount;
     use test_kit::init_logger;
 
     use super::*;
@@ -306,6 +310,17 @@ mod tests {
         let ata_account = create_token_2022_ata_account(owner, mint);
         let mut acc = AccountSharedData::from(ata_account);
         acc.set_delegated(true);
+        acc
+    }
+
+    fn make_rent_pending_spl_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        let mut acc = make_delegated_spl_ata_account(owner, mint);
+        let mut token = SplAccount::unpack(acc.data()).unwrap();
+        token.close_authority = COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY);
+        SplAccount::pack(token, acc.data_as_mut_slice()).unwrap();
         acc
     }
 
@@ -662,6 +677,48 @@ mod tests {
         assert_eq!(
             scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rejects_rent_pending_ata() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_rejects_rent_pend").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Rent-pending ATAs are ER-only and must never be committed.
+        account_data.insert(
+            ata_pubkey,
+            make_rent_pending_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
         );
     }
 

@@ -9,7 +9,8 @@ pub use magicblock_core::intent::{
 use magicblock_core::{
     intent::types::CommittedAccount,
     token_programs::{
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        try_get_rent_pending_ata_info, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
     },
     Slot,
 };
@@ -533,6 +534,22 @@ fn validate_commit_type_accounts(
                 pubkey
             );
             return Err(InstructionError::IllegalOwner)
+        }
+
+        // Rent-pending ATAs are ER-only and have no base delegation to commit
+        // to; funds leave them via the shuttle withdrawal flow instead.
+        if try_get_rent_pending_ata_info(
+            pubkey,
+            &account.to_account_shared_data()?,
+        )
+        .is_some()
+        {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is a rent-pending ATA and cannot be committed or undelegated; use the shuttle withdrawal flow",
+                pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
         }
 
         // Validate committed account was scheduled by valid authority
