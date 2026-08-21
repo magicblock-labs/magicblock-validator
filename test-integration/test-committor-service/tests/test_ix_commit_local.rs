@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use borsh::to_vec;
+use dlp_api::solana_program::native_token::LAMPORTS_PER_SOL;
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
@@ -19,7 +20,8 @@ use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction,
+    hash::Hash, rent::Rent, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use test_kit::init_logger;
 use tokio::task::JoinSet;
@@ -486,6 +488,8 @@ async fn commit_large_account(
 
     account.data = common::generate_random_bytes(bytes);
     account.owner = program_flexi_counter::id();
+    account.lamports =
+        LAMPORTS_PER_SOL + Rent::default().minimum_balance(account.data.len());
 
     let account = CommittedAccount {
         pubkey,
@@ -539,6 +543,8 @@ async fn commit_large_accounts(
         for account in bundle {
             account.account.data = common::generate_random_bytes(bytes[i]);
             account.account.owner = program_flexi_counter::id();
+            account.account.lamports = LAMPORTS_PER_SOL
+                + Rent::default().minimum_balance(account.data_len());
             i += 1;
         }
     }
@@ -1202,82 +1208,6 @@ async fn execute_intent_bundle(
 // Test Executor
 // -----------------
 
-/// For each committed account across `intent_bundles`, fetches its current
-/// on-chain balance and its `DelegationRecord.lamports` ledger value, keyed
-/// by pubkey. Missing/undeserializable records are omitted (the caller falls
-/// back to treating the account as having no prior growth).
-async fn collect_pre_execution_lamports(
-    rpc_client: &RpcClient,
-    intent_bundles: &[ScheduledIntentBundle],
-) -> HashMap<Pubkey, (u64, u64)> {
-    let mut pre_state = HashMap::new();
-    for base_intent in intent_bundles {
-        let pubkeys: Vec<Pubkey> = [
-            base_intent.get_commit_intent_accounts(),
-            base_intent.get_commit_finalize_intent_accounts(),
-            base_intent.get_undelegate_intent_accounts(),
-            base_intent.get_commit_finalize_and_undelegate_intent_accounts(),
-        ]
-        .into_iter()
-        .flatten()
-        .flat_map(|accounts| accounts.iter())
-        .map(|account| account.pubkey)
-        .collect();
-
-        for pubkey in pubkeys {
-            if pre_state.contains_key(&pubkey) {
-                continue;
-            }
-            let Ok(balance_before) = rpc_client.get_balance(&pubkey).await
-            else {
-                continue;
-            };
-            let delegation_record_pda =
-                dlp_api::pda::delegation_record_pda_from_delegated_account(
-                    &pubkey,
-                );
-            let delegation_record_lamports = rpc_client
-                .get_account(&delegation_record_pda)
-                .await
-                .ok()
-                .and_then(|acc| {
-                    dlp_api::state::DelegationRecord::try_from_bytes_with_discriminator(
-                        &acc.data,
-                    )
-                    .ok()
-                    .map(|record| record.lamports)
-                })
-                .unwrap_or(balance_before);
-            pre_state
-                .insert(pubkey, (balance_before, delegation_record_lamports));
-        }
-    }
-    pre_state
-}
-
-/// Computes what `pubkey`'s real final balance should be after committing
-/// `committed_lamports` lamports at `new_data_len` bytes, mirroring dlp's own
-/// settlement math (see `finalize.rs`/`commit_finalize_internal.rs`): the
-/// committed lamports value is a *delta* against `DelegationRecord.lamports`,
-/// applied on top of whatever the account already holds -- which may be more
-/// than its pre-commit balance if PreallocateBuffer grew (and funded) it.
-fn expected_settled_lamports(
-    pre_state: &HashMap<Pubkey, (u64, u64)>,
-    pubkey: Pubkey,
-    committed_lamports: u64,
-    new_data_len: usize,
-) -> u64 {
-    let (balance_before, delegation_record_lamports_before) = pre_state
-        .get(&pubkey)
-        .copied()
-        .unwrap_or((committed_lamports, committed_lamports));
-    let rent_exempt_minimum =
-        solana_sdk::rent::Rent::default().minimum_balance(new_data_len);
-    let base = balance_before.max(rent_exempt_minimum);
-    (base as i128 + committed_lamports as i128
-        - delegation_record_lamports_before as i128) as u64
-}
-
 async fn ix_commit_local(
     processor: Arc<CommittorProcessor>,
     intent_bundles: Vec<ScheduledIntentBundle>,
@@ -1288,10 +1218,6 @@ async fn ix_commit_local(
         "http://localhost:7799".to_string(),
         CommitmentConfig::confirmed(),
     );
-
-    // Fetch pre intent state
-    let pre_state =
-        collect_pre_execution_lamports(&rpc_client, &intent_bundles).await;
 
     let execution_outputs = processor
         .execute_intent_bundles(intent_bundles.clone())
@@ -1393,12 +1319,6 @@ async fn ix_commit_local(
                 dlp_api::id()
             };
 
-            let lamports = expected_settled_lamports(
-                &pre_state,
-                account.pubkey,
-                account.account.lamports,
-                account.account.data.len(),
-            );
             get_account!(
                 rpc_client,
                 account.pubkey,
@@ -1408,7 +1328,7 @@ async fn ix_commit_local(
                         acc,
                         remaining_tries,
                         &account.account.data,
-                        lamports,
+                        account.account.lamports,
                         expected_owner,
                         account.pubkey,
                         has_undelegate,
