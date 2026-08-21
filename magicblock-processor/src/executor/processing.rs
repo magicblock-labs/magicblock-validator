@@ -11,6 +11,7 @@ use magicblock_core::{
         },
     },
     tls::ExecutionTlsStash,
+    token_programs::try_get_rent_pending_ata_info,
 };
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
@@ -442,10 +443,7 @@ impl super::TransactionExecutor {
             return;
         };
 
-        // Privileged fee payers bypass all checks
-        if fee_payer_acc.privileged() {
-            return;
-        }
+        let privileged = fee_payer_acc.privileged();
 
         let logs = executed
             .execution_details
@@ -454,17 +452,51 @@ impl super::TransactionExecutor {
 
         // Confined Account Integrity Check
         // Confined accounts must not have their lamport balance changed.
-        for (pubkey, acc) in &txn.accounts {
-            if !acc.confined() {
-                continue;
+        // Privileged fee payers bypass it.
+        if !privileged {
+            for (pubkey, acc) in &txn.accounts {
+                if !acc.confined() {
+                    continue;
+                }
+                if acc.lamports_changed() {
+                    executed.execution_details.status =
+                        Err(TransactionError::UnbalancedTransaction);
+                    logs.push(format!(
+                        "Confined account {pubkey} has been illegally modified"
+                    ));
+                    break;
+                }
             }
-            if acc.lamports_changed() {
-                executed.execution_details.status =
-                    Err(TransactionError::UnbalancedTransaction);
-                logs.push(format!(
-                    "Confined account {pubkey} has been illegally modified"
-                ));
-                break;
+        }
+
+        if executed.execution_details.status.is_err() {
+            return;
+        }
+
+        // Anti-spam invariant: a rent-pending ATA must end its creation
+        // transaction funded, otherwise the whole transaction is rolled back.
+        // Applies to privileged fee payers too: post-delegation actions run
+        // with the validator as fee payer and must not bypass it.
+        while let Some(pubkey) =
+            ExecutionTlsStash::pop_newly_created_rent_pending_ata()
+        {
+            let info = txn
+                .accounts
+                .iter()
+                .find(|(key, _)| key == &pubkey)
+                .and_then(|(_, acc)| {
+                    try_get_rent_pending_ata_info(&pubkey, acc)
+                });
+            match info {
+                Some(info) if info.amount > 0 => {}
+                _ => {
+                    executed.execution_details.status =
+                        Err(TransactionError::UnbalancedTransaction);
+                    logs.push(format!(
+                        "Rent-pending ATA {pubkey} must end creation transaction with positive token amount"
+                    ));
+                    break;
+                }
             }
         }
     }

@@ -448,6 +448,50 @@ fn test_clone_account_rejects_delegated_account() {
 }
 
 #[test]
+fn test_clone_account_replaces_drained_rent_pending_ata() {
+    use magicblock_core::token_programs::{
+        derive_ata, RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+    };
+
+    init_logger!();
+    let wallet_owner = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let pubkey = derive_ata(&wallet_owner, &mint);
+
+    // SPL token layout: mint, owner, zero amount, initialized state, and the
+    // rent sysvar close authority that marks the account rent-pending.
+    let mut data = vec![0u8; 165];
+    data[0..32].copy_from_slice(mint.as_ref());
+    data[32..64].copy_from_slice(wallet_owner.as_ref());
+    data[108] = 1;
+    data[129..133].copy_from_slice(&1u32.to_le_bytes());
+    data[133..165].copy_from_slice(RENT_PENDING_ATA_CLOSE_AUTHORITY.as_ref());
+
+    let mut account = AccountSharedData::new(0, 0, &TOKEN_PROGRAM_ID);
+    account.set_data_from_slice(&data);
+    account.set_delegated(true);
+
+    let mut accounts = HashMap::new();
+    accounts.insert(pubkey, account);
+    ensure_started_validator(&mut accounts, None);
+
+    let ix = InstructionUtils::clone_account_instruction(
+        pubkey,
+        vec![],
+        clone_fields(200, 0),
+        Vec::new(),
+    );
+
+    // A drained rent-pending placeholder must not block its own replacement.
+    process_instruction(
+        &ix.data,
+        tx_accounts(accounts, &ix.accounts),
+        ix.accounts,
+        Ok(()),
+    );
+}
+
+#[test]
 fn test_clone_account_rejects_ephemeral_account() {
     init_logger!();
     let pubkey = Pubkey::new_unique();

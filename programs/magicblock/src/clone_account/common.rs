@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use magicblock_core::token_programs::try_get_rent_pending_ata_info;
 use magicblock_magic_program_api::{
     instruction::{
         AccountCloneFields, PostDelegationActionExecutorInstruction,
@@ -117,6 +118,14 @@ pub fn validate_mutable(
             pubkey
         );
         return Err(MagicBlockProgramError::AccountIsEphemeral.into());
+    }
+    // A drained rent-pending ATA holds no value and no base delegation: a
+    // clone may replace it with the real eATA projection. Funded ones still
+    // block, so a balance is never clobbered.
+    if try_get_rent_pending_ata_info(pubkey, &account.to_account_shared_data())
+        .is_some_and(|info| info.amount == 0)
+    {
+        return Ok(());
     }
     validate_not_delegated(account, pubkey, invoke_context)
 }

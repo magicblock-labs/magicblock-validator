@@ -59,4 +59,5 @@ solana-compute-budget-interface = { workspace = true }
 solana-keypair = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
+spl-token = { workspace = true }
 test-kit = { workspace = true }
