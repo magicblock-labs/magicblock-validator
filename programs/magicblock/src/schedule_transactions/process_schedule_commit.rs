@@ -6,6 +6,7 @@ use magicblock_core::intent::{
 };
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{ReadableAccount, WritableAccount};
+use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -164,6 +165,19 @@ pub(crate) fn process_schedule_commit(
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
+        // Accounts larger than 10_240 bytes can't be committed
+        // TDOO: enable large commits and remove this
+        if acc.to_account_shared_data()?.data().len()
+            > MAX_PERMITTED_DATA_INCREASE
+        {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is too large to be committed",
                 acc_pubkey
             );
             return Err(InstructionError::InvalidAccountData);
