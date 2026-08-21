@@ -6,7 +6,7 @@ use magicblock_core::intent::{
     types::CommittedAccount, CommitAndUndelegate, CommitType, UndelegateType,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-use solana_account::Account;
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use tracing::error;
@@ -49,6 +49,12 @@ pub struct CommitStageTaskInfo {
     base_accounts: HashMap<Pubkey, Account>,
 }
 
+/// Necessary info for finalize stage task creation
+pub struct FinalizeStageTaskInfo {
+    /// Delegation metadata for a given address
+    delegation_metadata: HashMap<Pubkey, DelegationMetadata>,
+}
+
 /// Task builder
 pub struct TaskBuilderImpl;
 
@@ -68,6 +74,7 @@ impl TaskBuilderImpl {
             .await
     }
 
+    /// Returns base state for account that use diff
     async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
         accounts: &[CommittedAccount],
@@ -145,6 +152,30 @@ impl TaskBuilderImpl {
         Ok(CommitStageTaskInfo {
             commit_nonces,
             base_accounts,
+        })
+    }
+
+    async fn fetch_finalize_stage_info<C: TaskInfoFetcher>(
+        intent_bundle: &ScheduledIntentBundle,
+        task_info_fetcher: &Arc<C>,
+    ) -> TaskBuilderResult<FinalizeStageTaskInfo> {
+        // Fetch necessary data for BaseTasks creation
+        let all_committed_accounts = intent_bundle.get_all_committed_accounts();
+        let all_committed_pubkeys =
+            Self::get_finalize_stage_metadata_pubkeys(intent_bundle);
+        // Get commit nonces and base accounts
+        let min_context_slot = all_committed_accounts
+            .iter()
+            .map(|account| account.remote_slot)
+            .max()
+            .unwrap_or(0);
+        let delegation_metadata = task_info_fetcher
+            .fetch_delegation_metadata(&all_committed_pubkeys, min_context_slot)
+            .await
+            .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+
+        Ok(FinalizeStageTaskInfo {
+            delegation_metadata,
         })
     }
 }
@@ -228,6 +259,7 @@ impl TasksBuilder for TaskBuilderImpl {
         fn finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
             FinalizeTask {
                 delegated_account: account.pubkey,
+                state_size: account.account.data().len(),
             }
             .into()
         }
@@ -243,6 +275,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 owner_program: account.account.owner,
                 rent_reimbursement: *rent_reimbursement,
                 include_undelegation_request,
+                state_size: account.account.data().len(),
             }
             .into()
         }
@@ -297,23 +330,12 @@ impl TasksBuilder for TaskBuilderImpl {
             Ok(tasks)
         }
 
-        let mut tasks = Vec::new();
-        let finalize_metadata_pubkeys =
-            Self::get_finalize_stage_metadata_pubkeys(intent_bundle);
-        let min_context_slot = intent_bundle
-            .get_all_committed_accounts()
-            .iter()
-            .map(|account| account.remote_slot)
-            .max()
-            .unwrap_or(0);
-        let delegation_metadata = info_fetcher
-            .fetch_delegation_metadata(
-                &finalize_metadata_pubkeys,
-                min_context_slot,
-            )
-            .await
-            .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+        let FinalizeStageTaskInfo {
+            delegation_metadata,
+        } = Self::fetch_finalize_stage_info(intent_bundle, info_fetcher)
+            .await?;
 
+        let mut tasks = Vec::new();
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
             tasks.extend(create_finalize_tasks(value));
         }

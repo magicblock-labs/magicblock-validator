@@ -1,4 +1,6 @@
-use dlp_api::diff::compute_diff;
+use std::marker::PhantomData;
+
+use dlp_api::{args::PreallocateBufferKind, diff::compute_diff};
 use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{create_close_ix, CreateCloseIxArgs},
@@ -12,17 +14,19 @@ use magicblock_committor_program::{
 };
 use magicblock_program::Pubkey;
 use solana_instruction::Instruction;
+use solana_program::account_info::MAX_PERMITTED_DATA_INCREASE;
 
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
     tasks::{
         commit_finalize_task::CommitFinalizeTask,
         commit_task::{CommitDelivery, CommitTask},
+        FinalizeTask, UndelegateTask,
     },
 };
 
 #[derive(Debug)]
-pub struct PreparationTask<'a> {
+pub struct BufferPreparationTask<'a> {
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks: Chunks,
@@ -30,7 +34,7 @@ pub struct PreparationTask<'a> {
     prepared: &'a mut bool,
 }
 
-impl<'a> PreparationTask<'a> {
+impl<'a> BufferPreparationTask<'a> {
     pub fn from_commit(task: &'a mut CommitTask) -> Option<Self> {
         match &mut task.delivery_details {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
@@ -294,6 +298,116 @@ impl CleanupTask {
     }
 }
 
+pub struct Preallocate<T> {
+    delegated_account: Pubkey,
+    current_size: u32,
+    target_size: u32,
+    _phantom: PhantomData<T>,
+}
+
+pub trait Preallocatable {
+    const KIND: PreallocateBufferKind;
+}
+
+impl Preallocatable for CommitTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::CommitState;
+}
+
+impl Preallocatable for CommitFinalizeTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::DelegatedAccount;
+}
+
+impl Preallocatable for FinalizeTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::DelegatedAccount;
+}
+
+impl Preallocatable for UndelegateTask {
+    const KIND: PreallocateBufferKind = PreallocateBufferKind::UndelegateBuffer;
+}
+
+impl<T: Preallocatable> Preallocate<T> {
+    pub fn new(
+        delegated_account: Pubkey,
+        current_size: u32,
+        target_size: u32,
+    ) -> Option<Self> {
+        (target_size > current_size + MAX_PERMITTED_DATA_INCREASE as u32)
+            .then_some(Self {
+                delegated_account,
+                current_size,
+                target_size,
+                _phantom: PhantomData,
+            })
+    }
+
+    pub fn instructions(&self, validator: &Pubkey) -> Vec<Instruction> {
+        dlp_api::instruction_builder::preallocate_buffer_chunks(
+            *validator,
+            self.delegated_account,
+            T::KIND,
+            self.current_size,
+            self.target_size,
+        )
+    }
+}
+
+impl Preallocate<CommitTask> {
+    pub fn from_commit(task: &CommitTask) -> Option<Self> {
+        let delegated_account = task.committed_account.pubkey;
+        match &task.delivery_details {
+            // We assume that tx can't carry over 10kb in arguments
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
+                None
+            }
+            CommitDelivery::StateInBuffer { .. }
+            // commit_state is always written with the full reconstructed
+            // account state, so the target size is the same regardless of
+            // whether delivery is diff or state based. see dlp merge_diff_copy
+            | CommitDelivery::DiffInBuffer { .. } => {
+                let target_size = task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, 0, target_size)
+            }
+        }
+    }
+}
+
+impl Preallocate<CommitFinalizeTask> {
+    pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
+        let delegated_account = task.committed_account.pubkey;
+        match &task.delivery {
+            // We assume that tx can't carry over 10kb in arguments
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
+                None
+            }
+            CommitDelivery::StateInBuffer { .. } => {
+                let target_size =
+                    task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, 0, target_size)
+            }
+            CommitDelivery::DiffInBuffer { base_account, .. } => {
+                // This increases delegated account, so we care about delta and not resulting size
+                let current_size = base_account.data.len() as u32;
+                let target_size =
+                    task.committed_account.account.data.len() as u32;
+                Self::new(delegated_account, current_size, target_size)
+            }
+        }
+    }
+}
+
+impl Preallocate<FinalizeTask> {
+    pub fn from_finalize_task(task: &FinalizeTask) -> Option<Self> {
+        Self::new(task.delegated_account, 0, task.state_size as u32)
+    }
+}
+
+// TODO: use once dlp side support large undelegations
+impl Preallocate<UndelegateTask> {
+    pub fn from_undelegate_task(task: &UndelegateTask) -> Option<Self> {
+        Self::new(task.delegated_account, 0, task.state_size as u32)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use solana_hash::Hash;
@@ -321,7 +435,7 @@ mod tests {
         let authority = Keypair::new();
         let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
         let mut prepared = false;
-        let preparation_task = PreparationTask {
+        let preparation_task = BufferPreparationTask {
             commit_id: 1,
             pubkey: Pubkey::new_unique(),
             chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),

@@ -638,6 +638,7 @@ mod tests {
     fn create_test_finalize_task() -> FinalizeTask {
         FinalizeTask {
             delegated_account: Pubkey::new_unique(),
+            state_size: 0,
         }
     }
 
@@ -648,6 +649,7 @@ mod tests {
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: false,
+            state_size: 0,
         }
     }
 

@@ -3,20 +3,30 @@ use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
     persist::IntentPersisterImpl,
     tasks::{
-        commit_stage_task::{CleanupTask, PreparationTask},
         commit_task::CommitDelivery,
+        preparation_task::{BufferPreparationTask, CleanupTask},
         task_strategist::{TaskStrategist, TransactionStrategy},
         BaseTaskImpl,
     },
 };
-use solana_sdk::signer::Signer;
+use solana_sdk::{signature::Keypair, signer::Signer};
 
-use crate::common::{
-    create_buffer_commit_task, create_commit_task, generate_random_bytes,
-    TestFixture,
+use crate::{
+    common::{
+        create_buffer_commit_task, create_commit_task, generate_random_bytes,
+        TestFixture,
+    },
+    utils::{
+        ensure_validator_authority,
+        transactions::{
+            fund_validator_auth_and_ensure_validator_fees_vault,
+            init_and_delegate_account_on_chain,
+        },
+    },
 };
 
 mod common;
+mod utils;
 
 #[tokio::test]
 async fn test_prepare_10kb_buffer() {
@@ -81,7 +91,15 @@ async fn test_prepare_10kb_buffer() {
 
 #[tokio::test]
 async fn test_prepare_multiple_buffers() {
-    let fixture = TestFixture::new().await;
+    // The 500KB task exceeds MAX_PERMITTED_DATA_INCREASE, so preparation
+    // also preallocates its commit_state PDA -- that requires a real,
+    // currently delegated account.
+    const DELEGATED_ACCOUNT_SIZE: u64 = 100;
+
+    let validator_auth = ensure_validator_authority();
+    let fixture = TestFixture::new_with_keypair(validator_auth).await;
+    fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
+        .await;
     let preparator = fixture.create_delivery_preparator();
 
     let datas = [
@@ -89,10 +107,21 @@ async fn test_prepare_multiple_buffers() {
         generate_random_bytes(10),
         generate_random_bytes(500 * 1024),
     ];
-    let buffer_tasks: Vec<BaseTaskImpl> = datas
+    let mut buffer_tasks: Vec<BaseTaskImpl> = datas
         .iter()
         .map(|data| create_buffer_commit_task(data).into())
         .collect();
+
+    let (large_pubkey, _) = init_and_delegate_account_on_chain(
+        &Keypair::new(),
+        DELEGATED_ACCOUNT_SIZE,
+        None,
+    )
+    .await;
+    if let BaseTaskImpl::Commit(task) = &mut buffer_tasks[2] {
+        task.committed_account.pubkey = large_pubkey;
+    }
+
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
@@ -353,7 +382,8 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
     let data = generate_random_bytes(112);
     let mut commit_task = create_buffer_commit_task(&data);
     commit_task.reset_commit_id(1);
-    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task)
+    let Some(preparation_task) =
+        BufferPreparationTask::from_commit(&mut commit_task)
     else {
         panic!("expected preparation stage");
     };
@@ -480,8 +510,13 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
 #[tokio::test]
 async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     use borsh::BorshDeserialize;
+    const DELEGATED_ACCOUNT_SIZE: u64 = 100;
 
-    let fixture = TestFixture::new().await;
+    let validator_auth = ensure_validator_authority();
+    let fixture = TestFixture::new_with_keypair(validator_auth).await;
+    fund_validator_auth_and_ensure_validator_fees_vault(&fixture.authority)
+        .await;
+
     let preparator = fixture.create_delivery_preparator();
 
     // Data of committed accs
@@ -489,10 +524,26 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     let buf_a_data = generate_random_bytes(12 * 1024);
     let buf_b_data = generate_random_bytes(64 * 1024 + 3);
 
+    // For preallocation buf_a, buf_b needs to be delegated
+    let (buf_a_pubkey, _) = init_and_delegate_account_on_chain(
+        &Keypair::new(),
+        DELEGATED_ACCOUNT_SIZE,
+        None,
+    )
+    .await;
+    let (buf_b_pubkey, _) = init_and_delegate_account_on_chain(
+        &Keypair::new(),
+        DELEGATED_ACCOUNT_SIZE,
+        None,
+    )
+    .await;
+
     // Keep these around to modify data later (same commit IDs, different data)
     let mut commit_args = create_commit_task(&args_data);
     let mut commit_a = create_buffer_commit_task(&buf_a_data);
+    commit_a.committed_account.pubkey = buf_a_pubkey;
     let mut commit_b = create_buffer_commit_task(&buf_b_data);
+    commit_b.committed_account.pubkey = buf_b_pubkey;
 
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![

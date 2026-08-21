@@ -5,9 +5,9 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 pub mod commit_finalize_task;
-pub mod commit_stage_task;
 pub mod commit_task;
 pub mod intent_size_validator;
+pub mod preparation_task;
 pub mod task_builder;
 pub mod task_strategist;
 pub mod utils;
@@ -174,6 +174,8 @@ pub struct UndelegateTask {
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
     pub include_undelegation_request: bool,
+    /// Size of state to bFe processed
+    pub state_size: usize,
 }
 
 impl UndelegateTask {
@@ -205,6 +207,8 @@ impl From<UndelegateTask> for BaseTaskImpl {
 #[derive(Clone, Debug)]
 pub struct FinalizeTask {
     pub delegated_account: Pubkey,
+    /// Size of state to be processed
+    pub state_size: usize,
 }
 
 impl FinalizeTask {
@@ -404,8 +408,8 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
-            commit_stage_task::PreparationTask,
             commit_task::{CommitDelivery, CommitTask},
+            preparation_task::BufferPreparationTask,
             *,
         },
         test_utils,
@@ -452,6 +456,7 @@ mod serialization_safety_test {
         // Test Finalize variant
         let finalize_task: BaseTaskImpl = FinalizeTask {
             delegated_account: Pubkey::new_unique(),
+            state_size: 101,
         }
         .into();
         assert_serializable(&finalize_task.instruction(&validator));
@@ -462,6 +467,7 @@ mod serialization_safety_test {
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: false,
+            state_size: 101,
         }
         .into();
         assert_serializable(&undelegate_task.instruction(&validator));
@@ -522,6 +528,7 @@ mod serialization_safety_test {
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: true,
+            state_size: 101,
         }
         .instruction(&Pubkey::new_unique());
 
@@ -568,7 +575,7 @@ mod serialization_safety_test {
             make_buffer_commit_task(789, true, vec![0; 1024], 3000);
 
         let Some(preparation_task) =
-            PreparationTask::from_commit(&mut commit_task)
+            BufferPreparationTask::from_commit(&mut commit_task)
         else {
             panic!("invalid preparation state on creation!");
         };
@@ -597,7 +604,7 @@ fn test_close_buffer_limit() {
     use tracing::info;
 
     use crate::{
-        tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
+        tasks::{preparation_task::CleanupTask, utils::TransactionUtils},
         test_utils,
         transactions::{
             serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
