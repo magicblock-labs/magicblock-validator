@@ -22,10 +22,10 @@ use engine::Engine;
 use keeper::MissingAccount;
 use lru::LruCache;
 use magicblock_aml::RiskService;
-use magicblock_config::config::AllowedProgram;
+use magicblock_config::config::{AllowedProgram, AmlCheckStrategy};
 use magicblock_core::token_programs::{
-    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
-    normalize_native_token_account_for_local_clone,
+    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    TOKEN_PROGRAM_ID, is_ata, normalize_native_token_account_for_local_clone,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -350,6 +350,47 @@ fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
         error = %error,
         "Failed to fetch companion account"
     );
+}
+
+/// Programs whose presence in a post-delegation action triggers a risk check
+/// under [`AmlCheckStrategy::RelevantPrograms`]: SPL Token (legacy and 2022),
+/// the ephemeral SPL / eATA program (ESPL), the Magic program, and the system
+/// programs. The latter move native SOL, which is as much value as a token
+/// balance, so leaving them out would let a plain lamport transfer signed by a
+/// sanctioned address through unchecked.
+const RISK_RELEVANT_PROGRAMS: [Pubkey; 6] = [
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    EATA_PROGRAM_ID,
+    magicblock_magic_program_api::ID,
+    solana_sdk_ids::system_program::ID,
+    magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+];
+
+/// Decides whether the configured [`AmlCheckStrategy`] requires risk checking
+/// the signers of these post-delegation actions.
+fn delegation_actions_require_risk_check(
+    strategy: AmlCheckStrategy,
+    delegation_actions: &DelegationActions,
+) -> bool {
+    match strategy {
+        AmlCheckStrategy::AllSigners => true,
+        AmlCheckStrategy::RelevantPrograms => delegation_actions
+            .iter()
+            .any(instruction_involves_risk_relevant_program),
+    }
+}
+
+/// Returns true when a risk-relevant program is invoked by the instruction or
+/// referenced by any of its accounts (e.g. as the target of a CPI).
+fn instruction_involves_risk_relevant_program(
+    instruction: &solana_instruction::Instruction,
+) -> bool {
+    RISK_RELEVANT_PROGRAMS.contains(&instruction.program_id)
+        || instruction
+            .accounts
+            .iter()
+            .any(|meta| RISK_RELEVANT_PROGRAMS.contains(&meta.pubkey))
 }
 
 impl<T, U> FetchCloner<T, U>
@@ -1733,6 +1774,22 @@ where
         let Some(risk_service) = self.risk_service.as_ref() else {
             return Ok(());
         };
+
+        let strategy = risk_service.check_strategy();
+        if !delegation_actions_require_risk_check(strategy, delegation_actions)
+        {
+            // A suppressed check is a compliance-relevant event, so leave a
+            // record that the delegation was activated without a risk query.
+            debug!(
+                strategy = ?strategy,
+                action_programs = ?delegation_actions
+                    .iter()
+                    .map(|ix| ix.program_id)
+                    .collect::<Vec<_>>(),
+                "Skipping risk check for post-delegation actions"
+            );
+            return Ok(());
+        }
 
         let mut signers = delegation_actions
             .iter()
