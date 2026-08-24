@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use magicblock_config::consts::HEALTHCHECK_ACCOUNT_PUBKEY;
 use magicblock_magic_program_api as magic_program;
 use magicblock_program::MagicContext;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
@@ -11,7 +12,9 @@ use solana_rent::Rent;
 use spl_token::{native_mint, state::Mint};
 
 /// Builds validator-controlled accounts that must exist before execution starts.
-pub(crate) fn initial_accounts() -> HashMap<Pubkey, AccountSharedData> {
+pub(crate) fn initial_accounts(
+    programs: &HashMap<Pubkey, Vec<u8>>,
+) -> HashMap<Pubkey, AccountSharedData> {
     let mut accounts = HashMap::new();
 
     let magic_context = AccountBuilder::default()
@@ -44,6 +47,18 @@ pub(crate) fn initial_accounts() -> HashMap<Pubkey, AccountSharedData> {
         .owner(spl_token::id())
         .build();
     accounts.insert(native_mint::id(), native_mint);
+
+    let healthcheck = AccountBuilder::default()
+        .data(vec![0; size_of::<i64>()])
+        .owner(v42_calculator_interface::ID)
+        .mode(AccountMode::Ephemeral)
+        .build();
+    accounts.insert(HEALTHCHECK_ACCOUNT_PUBKEY, healthcheck);
+
+    if !programs.contains_key(&v42_calculator_interface::ID) {
+        let sentinel = AccountBuilder::default().mode(AccountMode::System);
+        accounts.insert(v42_calculator_interface::ID, sentinel.build());
+    }
 
     accounts
 }

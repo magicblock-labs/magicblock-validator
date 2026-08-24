@@ -23,10 +23,11 @@ impl WsDispatcher {
         let id = next_subid();
         let mut rx = self.engine.accounts().subscribe(pubkey).await;
         let tx = self.chan.tx.clone();
+        let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
             while let Some(account) = rx.recv().await {
                 let account: AccountSharedData = account;
-                let slot = account.slot();
+                let slot = context_slot(&engine);
                 let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
                 else {
                     continue;
