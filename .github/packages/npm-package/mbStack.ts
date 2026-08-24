@@ -13,6 +13,7 @@
 import http from "http";
 import path from "path";
 import { spawn, ChildProcess } from "child_process";
+import { parseStackArgs, vrfOracleArgs } from "./mbStackConfig";
 
 const HOST = "127.0.0.1";
 
@@ -56,7 +57,7 @@ interface Service {
   script: string;
   args: string[];
   // RPC port to poll for readiness before starting the next service.
-  healthPort: number;
+  healthPort?: number;
   // Validator RPCs must report getHealth=ok before dependents can safely start.
   requireRpcHealth?: boolean;
   // Optional account that must be visible through RPC before dependents start.
@@ -77,6 +78,7 @@ const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const MAGENTA = "\x1b[35m";
+const YELLOW = "\x1b[33m";
 
 function color(text: string, ansi: string): string {
   return useColor ? `${ansi}${text}${RESET}` : text;
@@ -92,7 +94,17 @@ function svcColor(name: string): string {
 // They are appended after mb-stack's own base args, so on last-wins flags the
 // user's value takes priority. (Use MB_STACK_BASE_PORT instead of --rpc-port,
 // which solana-test-validator rejects if given twice.)
-const PASSTHROUGH_ARGS = process.argv.slice(2);
+const { enableVrf, passthroughArgs: PASSTHROUGH_ARGS } = parseStackArgs(
+  process.argv.slice(2),
+);
+
+const VRF_SERVICE: Service = {
+  name: "vrf-oracle",
+  script: "vrfOracle.js",
+  args: vrfOracleArgs(HOST, ER_PORT),
+  tag: "vrf",
+  color: YELLOW,
+};
 
 // Ordered: base L1 first, then ER (which clones from base), then the public
 // query-filtering-service front (which forwards to the ER).
@@ -118,6 +130,7 @@ const SERVICES: Service[] = [
     tag: "er",
     color: "\x1b[32m", // green
   },
+  ...(enableVrf ? [VRF_SERVICE] : []),
   {
     name: "query-filtering-service",
     script: "queryFilteringService.js",
@@ -394,6 +407,10 @@ async function main(): Promise<void> {
 
   for (const svc of services) {
     startService(svc);
+    if (svc.healthPort === undefined) {
+      console.log(`${color("✔", GREEN)} ${color(svc.name, svc.color)} started`);
+      continue;
+    }
     await waitForHealth(
       svc.name,
       svc.healthPort,
