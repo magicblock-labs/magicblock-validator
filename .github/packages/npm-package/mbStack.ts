@@ -13,7 +13,7 @@
 import http from "http";
 import path from "path";
 import { spawn, ChildProcess } from "child_process";
-import { parseStackArgs, vrfOracleArgs } from "./mbStackConfig";
+import { parseStackArgs, vrfServiceConfigs } from "./mbStackConfig";
 
 const HOST = "127.0.0.1";
 
@@ -94,17 +94,11 @@ function svcColor(name: string): string {
 // They are appended after mb-stack's own base args, so on last-wins flags the
 // user's value takes priority. (Use MB_STACK_BASE_PORT instead of --rpc-port,
 // which solana-test-validator rejects if given twice.)
-const { enableVrf, passthroughArgs: PASSTHROUGH_ARGS } = parseStackArgs(
-  process.argv.slice(2),
-);
-
-const VRF_SERVICE: Service = {
-  name: "vrf-oracle",
-  script: "vrfOracle.js",
-  args: vrfOracleArgs(HOST, ER_PORT),
-  tag: "vrf",
-  color: YELLOW,
-};
+const {
+  enableVrf,
+  enableErVrf,
+  passthroughArgs: PASSTHROUGH_ARGS,
+} = parseStackArgs(process.argv.slice(2));
 
 // Ordered: base L1 first, then ER (which clones from base), then the public
 // query-filtering-service front (which forwards to the ER).
@@ -130,7 +124,6 @@ const SERVICES: Service[] = [
     tag: "er",
     color: "\x1b[32m", // green
   },
-  ...(enableVrf ? [VRF_SERVICE] : []),
   {
     name: "query-filtering-service",
     script: "queryFilteringService.js",
@@ -348,6 +341,7 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 function shutdown(code: number): void {
   if (shuttingDown) return;
   shuttingDown = true;
+  process.exitCode = code;
   for (const { child } of children) {
     killGroup(child, "SIGTERM");
   }
@@ -399,11 +393,29 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
 
+  const vrfServices: Service[] = vrfServiceConfigs(
+    enableVrf,
+    enableErVrf,
+    HOST,
+    BASE_PORT,
+    ER_PORT,
+    process.env.MB_STACK_ER_REMOTES,
+  ).map((service) => ({
+    ...service,
+    script: "vrfOracle.js",
+    color: YELLOW,
+  }));
+
   // When the ER points at an external base, the local base validator is unused —
   // skip it so we don't boot an idle validator.
-  const services = process.env.MB_STACK_ER_REMOTES
+  const coreServices = process.env.MB_STACK_ER_REMOTES
     ? SERVICES.filter((s) => s.script !== "mbTestValidator.js")
     : SERVICES;
+  const services = [
+    ...coreServices.slice(0, -1),
+    ...vrfServices,
+    coreServices[coreServices.length - 1],
+  ];
 
   for (const svc of services) {
     startService(svc);
