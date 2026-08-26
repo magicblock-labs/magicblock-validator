@@ -1103,7 +1103,7 @@ impl ChainPubsubActor {
             return;
         }
 
-        debug!(
+        warn!(
             client_id = client_id,
             reason = reason,
             "Aborting connection"

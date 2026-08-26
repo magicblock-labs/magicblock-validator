@@ -179,7 +179,9 @@ impl MagicBlockSendTransactionConfig {
         }
     }
 
-    pub fn ensure_committed() -> Self {
+    /// Waits for processed and committed results
+    /// NOTE: processed may fail, while committed - succeeds
+    pub fn ensure_processed_and_committed() -> Self {
         Self::SendAndConfirm {
             wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
                 2_000,
@@ -188,6 +190,22 @@ impl MagicBlockSendTransactionConfig {
             check_for_processed_interval: Some(Duration::from_millis(400)),
             // NOTE: that this time is after we already verified that the transaction was
             //       processed
+            wait_for_commitment_level: Some(Duration::from_millis(8_000)),
+            check_for_commitment_interval: Some(Duration::from_millis(400)),
+        }
+    }
+
+    /// Waits for committed stage results
+    pub fn ensure_committed() -> Self {
+        Self::SendAndConfirm {
+            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
+                2_000,
+            )),
+            wait_for_processed_level: None,
+            check_for_processed_interval: None,
+            // NOTE: we skip the processed check here and wait directly for
+            //       the commitment level, trusting the confirmed result
+            //       even if an earlier processed check would have failed
             wait_for_commitment_level: Some(Duration::from_millis(8_000)),
             check_for_commitment_interval: Some(Duration::from_millis(400)),
         }
@@ -687,25 +705,29 @@ impl MagicblockRpcClient {
         };
 
         // 1. Wait for processed status
-        let check_for_processed_interval = check_for_processed_interval
-            .unwrap_or_else(|| Duration::from_millis(200));
-        let wait_for_processed_level =
-            wait_for_processed_level.unwrap_or_default();
-        let processed_status = self
-            .wait_for_processed_status(
-                &sig,
-                tx.get_recent_blockhash(),
-                wait_for_processed_level,
-                check_for_processed_interval,
-                wait_for_blockhash_to_become_valid,
-            )
-            .await?;
+        let processed_status = if let Some(wait_for_processed_level) =
+            wait_for_processed_level
+        {
+            let processed_status = self
+                .wait_for_processed_status(
+                    &sig,
+                    tx.get_recent_blockhash(),
+                    wait_for_processed_level,
+                    check_for_processed_interval,
+                    wait_for_blockhash_to_become_valid,
+                )
+                .await?;
 
-        if let Err(err) = processed_status {
-            return Err(MagicBlockRpcClientError::SentTransactionError(
-                err, sig,
-            ));
-        }
+            if let Err(err) = processed_status {
+                return Err(MagicBlockRpcClientError::SentTransactionError(
+                    err, sig,
+                ));
+            }
+
+            Some(processed_status)
+        } else {
+            None
+        };
 
         // 2. Wait for confirmed status if configured
         let confirmed_status = if let Some(wait_for_commitment_level) =
@@ -725,7 +747,7 @@ impl MagicblockRpcClient {
 
         Ok(MagicBlockSendTransactionOutcome {
             signature: sig,
-            processed_err: processed_status.err(),
+            processed_err: processed_status.and_then(|status| status.err()),
             confirmed_err: confirmed_status.and_then(|status| status.err()),
         })
     }
@@ -743,14 +765,16 @@ impl MagicblockRpcClient {
         &self,
         signature: &Signature,
         recent_blockhash: &Hash,
-        timeout: Duration,
-        check_interval: Duration,
+        timeout: &Duration,
+        check_interval: &Option<Duration>,
         _blockhash_valid_timeout: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
+        let check_interval =
+            check_interval.unwrap_or_else(|| Duration::from_millis(200));
         if let Some(status) = Box::pin(self.confirmer.wait_for_status(
             signature,
             CommitmentConfig::processed(),
-            timeout,
+            *timeout,
             check_interval,
         ))
         .await

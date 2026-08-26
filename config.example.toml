@@ -58,6 +58,10 @@ lifecycle = "ephemeral"
 # Note: gRPC remote requires a Helius API key/token.
 # Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
 # See Helius gRPC docs for available network endpoints.
+#
+# A WebSocket remote may also be written as a table to cap subscriptions
+# per connection for that endpoint (overrides chainlink.ws-subs-per-connection):
+# remotes = [{ url = "wss://api.devnet.solana.com", ws-subs-per-connection = 100 }]
 remotes = [
     "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
     "https://api.devnet.solana.com",

@@ -19,6 +19,7 @@ use magicblock_magic_program_api::args::{
 };
 use serde::{Deserialize, Serialize};
 use solana_account::{AccountMode, ReadableAccount};
+use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_hash::Hash;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::{
@@ -536,6 +537,16 @@ fn validate_commit_type_accounts(
                 pubkey
             );
             return Err(InstructionError::IllegalOwner)
+        }
+
+        // Accounts larger than 10_240 bytes cannot currently be committed.
+        if account.borrow()?.data().len() > MAX_PERMITTED_DATA_INCREASE {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is too large to be committed",
+                pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
         }
 
         // Validate committed account was scheduled by valid authority
