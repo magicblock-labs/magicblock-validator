@@ -952,7 +952,8 @@ impl LookupTableRc {
         match rpc_client.commitment_level() {
             Processed => MagicBlockSendTransactionConfig::ensure_processed(),
             Confirmed | Finalized => {
-                MagicBlockSendTransactionConfig::ensure_committed()
+                MagicBlockSendTransactionConfig::ensure_processed_and_committed(
+                )
             }
         }
     }

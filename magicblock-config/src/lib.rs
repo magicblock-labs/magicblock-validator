@@ -174,7 +174,7 @@ impl LeaderParams {
         if self
             .remotes
             .iter()
-            .any(|r| matches!(r, Remote::Websocket(_)))
+            .any(|r| matches!(r, Remote::Websocket(..)))
         {
             return;
         }
@@ -211,7 +211,7 @@ impl LeaderParams {
     pub fn websocket_urls(&self) -> impl Iterator<Item = &str> + '_ {
         self.remotes
             .iter()
-            .filter(|r| matches!(r, Remote::Websocket(_)))
+            .filter(|r| matches!(r, Remote::Websocket(..)))
             .map(|r| r.url_str())
     }
 
@@ -230,7 +230,7 @@ impl fmt::Display for LeaderParams {
         for remote in &self.remotes {
             match remote {
                 Remote::Http(_) => http += 1,
-                Remote::Websocket(_) => websocket += 1,
+                Remote::Websocket(..) => websocket += 1,
                 Remote::Grpc(_) => grpc += 1,
             }
         }

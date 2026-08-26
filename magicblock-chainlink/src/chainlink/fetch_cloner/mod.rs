@@ -22,10 +22,10 @@ use engine::Engine;
 use keeper::MissingAccount;
 use lru::LruCache;
 use magicblock_aml::RiskService;
-use magicblock_config::config::AllowedProgram;
+use magicblock_config::config::{AllowedProgram, AmlCheckStrategy};
 use magicblock_core::token_programs::{
-    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
-    normalize_native_token_account_for_local_clone,
+    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+    TOKEN_PROGRAM_ID, is_ata, normalize_native_token_account_for_local_clone,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -137,6 +137,10 @@ where
     /// program account itself can remain byte-identical across upgrades.
     programdata_index: Arc<PlMutex<LruCache<Pubkey, Pubkey>>>,
 
+    /// Rotates the starting entry of each programdata sweep pass so an
+    /// abandoned pass cannot starve the same tail entries every time.
+    programdata_sweep_cursor: Arc<AtomicU64>,
+
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
     dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
@@ -182,6 +186,25 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
 /// account cache because subscription ownership remains in Chainlink.
 const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(512).expect("programdata watch capacity is non-zero");
+
+/// Interval between transport-independent sweeps over the programdata
+/// watches. A watch whose upstream subscription silently dies stops
+/// delivering upgrade notifications entirely; the sweep bounds upgrade
+/// detection for such programs to roughly this interval, at a cost of one
+/// 12-byte header fetch per watched program.
+const PROGRAMDATA_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Programdata prefix holding the state tag (4 bytes) and deploy slot
+/// (8 bytes) of `UpgradeableLoaderState::ProgramData`.
+const PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN: usize = 12;
+
+/// Enum tag of `UpgradeableLoaderState::ProgramData`.
+const PROGRAMDATA_STATE_TAG: u32 = 3;
+
+/// Consecutive header-fetch failures after which a sweep pass is
+/// abandoned until the next interval, bounding a pass against an
+/// unhealthy RPC endpoint.
+const PROGRAMDATA_SWEEP_MAX_CONSECUTIVE_FAILURES: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProgramDataWatch {
@@ -303,6 +326,7 @@ where
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
             programdata_index: self.programdata_index.clone(),
+            programdata_sweep_cursor: self.programdata_sweep_cursor.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
             risk_service: self.risk_service.clone(),
@@ -350,6 +374,47 @@ fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
         error = %error,
         "Failed to fetch companion account"
     );
+}
+
+/// Programs whose presence in a post-delegation action triggers a risk check
+/// under [`AmlCheckStrategy::RelevantPrograms`]: SPL Token (legacy and 2022),
+/// the ephemeral SPL / eATA program (ESPL), the Magic program, and the system
+/// programs. The latter move native SOL, which is as much value as a token
+/// balance, so leaving them out would let a plain lamport transfer signed by a
+/// sanctioned address through unchecked.
+const RISK_RELEVANT_PROGRAMS: [Pubkey; 6] = [
+    TOKEN_PROGRAM_ID,
+    TOKEN_2022_PROGRAM_ID,
+    EATA_PROGRAM_ID,
+    magicblock_magic_program_api::ID,
+    solana_sdk_ids::system_program::ID,
+    magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+];
+
+/// Decides whether the configured [`AmlCheckStrategy`] requires risk checking
+/// the signers of these post-delegation actions.
+fn delegation_actions_require_risk_check(
+    strategy: AmlCheckStrategy,
+    delegation_actions: &DelegationActions,
+) -> bool {
+    match strategy {
+        AmlCheckStrategy::AllSigners => true,
+        AmlCheckStrategy::RelevantPrograms => delegation_actions
+            .iter()
+            .any(instruction_involves_risk_relevant_program),
+    }
+}
+
+/// Returns true when a risk-relevant program is invoked by the instruction or
+/// referenced by any of its accounts (e.g. as the target of a CPI).
+fn instruction_involves_risk_relevant_program(
+    instruction: &solana_instruction::Instruction,
+) -> bool {
+    RISK_RELEVANT_PROGRAMS.contains(&instruction.program_id)
+        || instruction
+            .accounts
+            .iter()
+            .any(|meta| RISK_RELEVANT_PROGRAMS.contains(&meta.pubkey))
 }
 
 impl<T, U> FetchCloner<T, U>
@@ -413,6 +478,7 @@ where
             programdata_index: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAMDATA_WATCH_CAPACITY,
             ))),
+            programdata_sweep_cursor: Arc::new(AtomicU64::new(0)),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
@@ -423,6 +489,7 @@ where
 
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
+        me.start_programdata_sweep();
 
         me
     }
@@ -816,9 +883,6 @@ where
         self.remote_account_provider
             .prefer_grpc_subscription(&program_id)
             .await;
-        self.remote_account_provider
-            .prefer_grpc_subscription(&program_data_pubkey)
-            .await;
         Ok(ProgramDataWatch::Installed)
     }
 
@@ -837,6 +901,125 @@ where
                     SubscriptionReason::ProgramData,
                 )
                 .await;
+        }
+    }
+
+    /// Runs the upgrade-detection backstop on a fixed interval. Holds only
+    /// a weak handle so the loop neither keeps the FetchCloner alive nor
+    /// outlives it.
+    fn start_programdata_sweep(self: &Arc<Self>) {
+        let this = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(PROGRAMDATA_SWEEP_INTERVAL).await;
+                let Some(this) = this.upgrade() else {
+                    break;
+                };
+                this.sweep_programdata_watches().await;
+            }
+        });
+    }
+
+    /// One pass of the upgrade-detection backstop: compares each watched
+    /// program's on-chain deploy slot against the bank copy's remote slot
+    /// and routes stale programs into the reload path. Runs on the fetch
+    /// transport, so upgrades surface even when a watch subscription died
+    /// upstream while local bookkeeping kept it. Metadata-only changes
+    /// (e.g. authority rotations) keep the deploy slot and are left to the
+    /// subscription path.
+    async fn sweep_programdata_watches(&self) {
+        let watched: Vec<(Pubkey, Pubkey)> = self
+            .programdata_index
+            .lock()
+            .iter()
+            .map(|(program_data, program_id)| (*program_data, *program_id))
+            .collect();
+        if watched.is_empty() {
+            return;
+        }
+
+        let start = self
+            .programdata_sweep_cursor
+            .fetch_add(1, Ordering::Relaxed) as usize
+            % watched.len();
+        let len = watched.len();
+        let mut consecutive_failures = 0usize;
+        for (program_data_pubkey, program_id) in
+            watched.into_iter().cycle().skip(start).take(len)
+        {
+            let Some(bank_slot) =
+                self.read_account(&program_id, |account| account.slot())
+            else {
+                continue;
+            };
+            let prefix = match self
+                .remote_account_provider
+                .get_account_data_slice(
+                    &program_data_pubkey,
+                    0,
+                    PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN,
+                    bank_slot,
+                )
+                .await
+            {
+                Ok(Some(prefix))
+                    if prefix.len() >= PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN
+                        && prefix[..4]
+                            == PROGRAMDATA_STATE_TAG.to_le_bytes() =>
+                {
+                    consecutive_failures = 0;
+                    prefix
+                }
+                Ok(_) => {
+                    consecutive_failures = 0;
+                    continue;
+                }
+                Err(err) => {
+                    debug!(
+                        program_id = %program_id,
+                        program_data = %program_data_pubkey,
+                        error = %err,
+                        "Programdata sweep header fetch failed"
+                    );
+                    consecutive_failures += 1;
+                    if consecutive_failures
+                        >= PROGRAMDATA_SWEEP_MAX_CONSECUTIVE_FAILURES
+                    {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let Ok(deploy_slot_bytes) = <[u8; 8]>::try_from(&prefix[4..12])
+            else {
+                continue;
+            };
+            let deploy_slot = u64::from_le_bytes(deploy_slot_bytes);
+            if deploy_slot <= bank_slot {
+                continue;
+            }
+            info!(
+                program_id = %program_id,
+                deploy_slot,
+                bank_slot,
+                "Programdata sweep detected missed program upgrade"
+            );
+            let companion_fetch_log_context = CompanionFetchLogContext {
+                origin: AccountFetchContext::subscription_update(
+                    AccountFetchReason::SubscriptionUpdateClone,
+                ),
+                primary_pubkey: program_id,
+                context_slot: deploy_slot,
+            };
+            let program_account =
+                AccountBuilder::from(AccountSharedData::new(1, 0, &LOADER_V3))
+                    .slot(deploy_slot);
+            self.handle_executable_sub_update(
+                program_id,
+                program_account,
+                &companion_fetch_log_context,
+            )
+            .await;
         }
     }
 
@@ -882,6 +1065,9 @@ where
         let result =
             cloner::clone_program(&self.engine, program, materialization).await;
         if result.is_ok() {
+            if is_loaderv3 {
+                let _ = self.watch_programdata(program_id).await;
+            }
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context.clone(),
                 remote_result,
@@ -1734,6 +1920,22 @@ where
             return Ok(());
         };
 
+        let strategy = risk_service.check_strategy();
+        if !delegation_actions_require_risk_check(strategy, delegation_actions)
+        {
+            // A suppressed check is a compliance-relevant event, so leave a
+            // record that the delegation was activated without a risk query.
+            debug!(
+                strategy = ?strategy,
+                action_programs = ?delegation_actions
+                    .iter()
+                    .map(|ix| ix.program_id)
+                    .collect::<Vec<_>>(),
+                "Skipping risk check for post-delegation actions"
+            );
+            return Ok(());
+        }
+
         let mut signers = delegation_actions
             .iter()
             .flat_map(|instruction| {
@@ -1806,10 +2008,16 @@ where
         let record_context = fetch_context
             .clone()
             .with_reason(AccountFetchReason::DelegationRecord);
+        // The record precheck shares the account fetch's effective slot
+        // floor; a lower floor could settle on an older in-flight record
+        // result and conservatively re-park the candidate.
+        let record_min_context_slot = candidate
+            .slot
+            .max(self.remote_account_provider.chain_slot());
         let Some((deleg_record, _)) = self
             .fetch_and_parse_delegation_record(
                 candidate.pubkey,
-                candidate.slot,
+                record_min_context_slot,
                 record_context.clone(),
                 CompanionFetchLogContext {
                     origin: record_context,

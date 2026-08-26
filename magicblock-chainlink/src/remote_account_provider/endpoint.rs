@@ -14,6 +14,9 @@ pub enum Endpoint {
     WebSocket {
         url: String,
         label: String,
+        /// Per-endpoint max subscriptions per connection; falls back to
+        /// the global `ws-subs-per-connection` when unset.
+        subs_per_connection: Option<usize>,
     },
     Grpc {
         url: String,
@@ -79,11 +82,12 @@ impl TryFrom<&Remote> for Endpoint {
                     label,
                 })
             }
-            Remote::Websocket(url) => {
+            Remote::Websocket(url, subs_per_connection) => {
                 let label = extract_label(url);
                 Ok(Endpoint::WebSocket {
                     url: url.to_string(),
                     label,
+                    subs_per_connection: *subs_per_connection,
                 })
             }
             Remote::Grpc(url) => {

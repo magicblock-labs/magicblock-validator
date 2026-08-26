@@ -933,7 +933,7 @@ async fn test_commit_unfinalized_account_recovery() {
             .rpc_client
             .send_transaction(
                 &tx,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
+                &MagicBlockSendTransactionConfig::ensure_processed_and_committed(),
             )
             .await;
         result.expect("unfinalized commit succeeds");
@@ -1021,7 +1021,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
             .rpc_client
             .send_transaction(
                 &tx,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
+                &MagicBlockSendTransactionConfig::ensure_processed_and_committed(),
             )
             .await;
         result.expect("unfinalized commit succeeds");
