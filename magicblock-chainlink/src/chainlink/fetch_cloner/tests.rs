@@ -6559,6 +6559,152 @@ async fn test_released_collision_candidate_retries_when_clone_settles_stale() {
     );
 }
 
+// A released candidate's record precheck must use the effective account-
+// fetch slot: when chain_slot() > candidate.slot, joining an older
+// in-flight record fetch must not settle the release on its stale result.
+#[tokio::test]
+async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_slot(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let other_validator = random_pubkey();
+    let account_pubkey = random_pubkey();
+    let account_owner = random_pubkey();
+    const PARK_SLOT: u64 = 100;
+    const CHAIN_SLOT: u64 = 120;
+
+    let delegated_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: dlp_api::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let FetcherTestCtx {
+        remote_account_provider,
+        accounts_bank,
+        rpc_client,
+        fetch_cloner,
+        ..
+    } = setup(
+        [(account_pubkey, delegated_account.clone())],
+        PARK_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    // The RPC still serves the previous generation's record (delegated to
+    // another validator).
+    let delegation_record_pubkey = add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        other_validator,
+        account_owner,
+        PARK_SLOT - 10,
+    );
+
+    // The chain advances past the candidate slot via a clock update.
+    remote_account_provider
+        .pubsub_client()
+        .send_account_update(
+            solana_sdk_ids::sysvar::clock::ID,
+            CHAIN_SLOT,
+            &Account::default(),
+        )
+        .await;
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider.chain_slot() < CHAIN_SLOT {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the chain slot to advance");
+
+    // An older record fetch is in flight: started when the chain was still
+    // at the park slot, it resolves at that slot with the stale record.
+    rpc_client.block_fetches();
+    let in_flight = tokio::spawn({
+        let provider = remote_account_provider.clone();
+        async move {
+            provider
+                .try_get_multi(
+                    &[delegation_record_pubkey],
+                    None,
+                    AccountFetchContext::rpc_get_account(),
+                    Some(PARK_SLOT),
+                )
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 1
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the in-flight record fetch to start");
+
+    // The release's record lookup joins the in-flight fetch as a waiter.
+    let release = tokio::spawn({
+        let fetch_cloner = fetch_cloner.clone();
+        async move {
+            fetch_cloner
+                .clone_released_collision_candidate(ParkedCollisionCandidate {
+                    pubkey: account_pubkey,
+                    slot: PARK_SLOT,
+                })
+                .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while remote_account_provider
+            .pending_fetch_waiter_count(&delegation_record_pubkey)
+            < 2
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the record lookup to join the fetch");
+
+    rpc_client.allow_fetches();
+    let stale = in_flight
+        .await
+        .unwrap()
+        .expect("in-flight record fetch must resolve");
+    assert_eq!(
+        stale[0].slot(),
+        PARK_SLOT,
+        "the joined in-flight result must be older than the chain slot"
+    );
+
+    // The RPC view catches up with the fresh generation delegated to us;
+    // the record is swapped before the slot advances so the release's
+    // retries can never observe the stale record at the new slot.
+    add_delegation_record_with_slot_for(
+        &rpc_client,
+        account_pubkey,
+        validator_pubkey,
+        account_owner,
+        CHAIN_SLOT - 10,
+    );
+    rpc_client.set_slot(CHAIN_SLOT);
+    rpc_client.set_clock_sysvar_for_slot(CHAIN_SLOT);
+    release.await.unwrap();
+
+    let in_bank = accounts_bank
+        .get_account(&account_pubkey)
+        .expect("release must clone the candidate from the effective slot");
+    assert!(in_bank.delegated());
+    assert_eq!(in_bank.owner(), &account_owner);
+    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT);
+}
+
 // A released collision candidate delegated to another validator must be
 // ignored like record-first discovery, not force-cloned from the firehose.
 #[tokio::test]
@@ -12264,4 +12410,85 @@ async fn test_skipped_program_clone_still_installs_programdata_watch() {
         remote_account_provider.is_watching(&program_data_pubkey),
         "skipped clone must still install the programdata watch"
     );
+}
+
+/// A watch subscription can die upstream while local bookkeeping keeps it
+/// (e.g. lost across a provider reconnect), so no programdata notification
+/// ever arrives again. The periodic sweep must detect the upgrade over the
+/// fetch transport alone — and must stay a no-op while nothing changed.
+#[tokio::test]
+async fn test_programdata_sweep_detects_upgrade_without_notification() {
+    use crate::remote_account_provider::program_account::get_loaderv3_get_program_data_address;
+
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let program_pubkey = random_pubkey();
+    let program_data_pubkey =
+        get_loaderv3_get_program_data_address(&program_pubkey);
+    const DEPLOY_SLOT: u64 = 90;
+    const CURRENT_SLOT: u64 = 100;
+    const UPGRADE_SLOT: u64 = 150;
+
+    let (program_account, program_data_account) =
+        loaderv3_program_accounts(&program_data_pubkey, DEPLOY_SLOT, &[7; 64]);
+
+    let FetcherTestCtx {
+        fetch_cloner,
+        rpc_client,
+        cloner,
+        ..
+    } = setup(
+        [
+            (program_pubkey, program_account.clone()),
+            (program_data_pubkey, program_data_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    let mut update = AccountSharedData::from(program_account.clone());
+    update.set_remote_slot(CURRENT_SLOT);
+    handle_executable_sub_update(&fetch_cloner, program_pubkey, update).await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // A sweep against unchanged chain state must not reload anything.
+    fetch_cloner.sweep_programdata_watches().await;
+    assert_eq!(cloner.program_clone_count(), 1);
+
+    // Upgrade on chain, but deliver NO subscription update: the watch's
+    // upstream subscription is dead.
+    let upgraded_elf = [9u8; 64];
+    let (_, upgraded_program_data) = loaderv3_program_accounts(
+        &program_data_pubkey,
+        UPGRADE_SLOT,
+        &upgraded_elf,
+    );
+    rpc_client.set_current_slot(UPGRADE_SLOT);
+    rpc_client.account_override_slot(&program_pubkey, UPGRADE_SLOT);
+    rpc_client.add_account(program_data_pubkey, upgraded_program_data);
+
+    // Clear the program verify throttle window.
+    tokio::time::sleep(Duration::from_millis(350)).await;
+
+    fetch_cloner.sweep_programdata_watches().await;
+
+    assert_eq!(
+        cloner.program_clone_count(),
+        2,
+        "sweep must reload the upgraded program"
+    );
+    let reloaded = cloner
+        .get_cloned_program(&program_pubkey)
+        .expect("program must be cloned");
+    assert_eq!(
+        reloaded.program_data, upgraded_elf,
+        "sweep reload must pick up the upgraded program data"
+    );
+    // The programdata account itself must not be cloned into the bank.
+    assert_not_cloned!(cloner, &[program_data_pubkey]);
+
+    // Once the reload settled, further sweeps are no-ops again.
+    fetch_cloner.sweep_programdata_watches().await;
+    assert_eq!(cloner.program_clone_count(), 2);
 }

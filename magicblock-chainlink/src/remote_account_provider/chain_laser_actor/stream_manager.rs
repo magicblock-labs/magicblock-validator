@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     num::NonZeroUsize,
+    time::{Duration, Instant},
 };
 
 use helius_laserstream::grpc::{
@@ -51,6 +52,15 @@ impl StreamKey {
         }
     }
 }
+
+/// Liveness grace granted to a freshly created stream before it can be
+/// reported silent: SDK connection setup (5s connect timeout) and
+/// upstream activation/backfill legitimately delay the first update
+/// well past the steady-state liveness window.
+#[cfg(not(test))]
+const STREAM_STARTUP_GRACE: Duration = Duration::from_secs(30);
+#[cfg(test)]
+const STREAM_STARTUP_GRACE: Duration = Duration::from_millis(200);
 
 /// Configuration for the generational stream manager.
 #[derive(Debug, Clone, Copy)]
@@ -128,6 +138,13 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Updated only when stream topology changes.
     stream_map: StreamMap<StreamKey, LaserStream>,
 
+    /// Last update observed per live stream. Every stream carries a slot
+    /// filter, so a healthy stream refreshes its entry every chain slot;
+    /// prolonged staleness marks a silently dead stream even while
+    /// sibling streams keep delivering. Entries for dropped streams are
+    /// pruned in [Self::max_stream_silence].
+    last_activity: HashMap<StreamKey, Instant>,
+
     /// Chain slot tracker for computing `from_slot` during optimization
     /// and program subscriptions. The chain slot is always present and
     /// provides a lookback window before the current chain slot so no
@@ -169,6 +186,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             optimized_old_handles: Vec::new(),
             program_sub: None,
             stream_map: StreamMap::new(),
+            last_activity: HashMap::new(),
             chain_slot,
             client_id,
             optimized_since_last_check: false,
@@ -309,8 +327,16 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             if let Some(stream) = self.stream_map.remove(&StreamKey::CurrentNew)
             {
                 let idx = self.unoptimized_old_handles.len();
-                self.stream_map
-                    .insert(StreamKey::UnoptimizedOld(idx), stream);
+                // The same live stream relocates: its silence history
+                // must move with it rather than reset, so a stream
+                // already going quiet cannot hide behind the promotion.
+                let last_seen =
+                    self.last_activity.remove(&StreamKey::CurrentNew);
+                self.insert_stream(StreamKey::UnoptimizedOld(idx), stream);
+                if let Some(last_seen) = last_seen {
+                    self.last_activity
+                        .insert(StreamKey::UnoptimizedOld(idx), last_seen);
+                }
             }
             if let Some(handle) = self.current_new_handle.take() {
                 self.unoptimized_old_handles.push(handle);
@@ -382,12 +408,68 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     ) -> Option<(StreamUpdateSource, LaserResult)> {
         use tokio_stream::StreamExt;
         let (key, result) = self.stream_map.next().await?;
+        // Only successful updates count as liveness: a stream stuck in an
+        // SDK retry loop keeps emitting reconnectable statuses, and those
+        // must not keep resetting the silence watchdog.
+        if result.is_ok() {
+            self.last_activity.insert(key.clone(), Instant::now());
+        }
         Some((key.source(), result))
     }
 
     /// Returns `true` if any stream (account or program) exists.
     pub fn has_any_subscriptions(&self) -> bool {
         !self.stream_map.is_empty()
+    }
+
+    /// Longest silence across live streams, or `None` without streams.
+    /// Tracked per stream so one dead stream is visible even while
+    /// sibling streams keep resetting an actor-wide notion of activity.
+    /// A stream whose handle exists but whose stream is gone from the
+    /// map ended silently (the StreamMap drops finished children during
+    /// polling without notification while siblings remain) and is
+    /// reported as infinite silence.
+    pub fn max_stream_silence(&mut self) -> Option<Duration> {
+        let now = Instant::now();
+        let live: HashSet<StreamKey> =
+            self.stream_map.keys().cloned().collect();
+        if self
+            .expected_stream_keys()
+            .iter()
+            .any(|key| !live.contains(key))
+        {
+            return Some(Duration::MAX);
+        }
+        self.last_activity.retain(|key, _| live.contains(key));
+        live.into_iter()
+            .map(|key| {
+                now.saturating_duration_since(
+                    *self
+                        .last_activity
+                        .entry(key)
+                        .or_insert(now + STREAM_STARTUP_GRACE),
+                )
+            })
+            .max()
+    }
+
+    /// Stream keys that must be present in the map according to the
+    /// held handles; a missing one marks a silently ended stream.
+    fn expected_stream_keys(&self) -> Vec<StreamKey> {
+        let mut keys = Vec::with_capacity(self.account_stream_count() + 1);
+        if self.current_new_handle.is_some() {
+            keys.push(StreamKey::CurrentNew);
+        }
+        for i in 0..self.unoptimized_old_handles.len() {
+            keys.push(StreamKey::UnoptimizedOld(i));
+        }
+        for i in 0..self.optimized_old_handles.len() {
+            keys.push(StreamKey::OptimizedOld(i));
+        }
+        if self.program_sub.is_some() {
+            keys.push(StreamKey::Program);
+        }
+        keys
     }
 
     /// Returns `true` if there are unoptimized old streams.
@@ -508,7 +590,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             + prev_optimized.len();
 
         for (key, stream) in new_optimized_streams {
-            self.stream_map.insert(key, stream);
+            self.insert_stream(key, stream);
         }
 
         self.optimized_old_handles = new_optimized_handles;
@@ -583,6 +665,16 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     // Internal helpers
     // ---------------------------------------------------------
 
+    /// Registers a freshly created `stream` under `key`, granting it
+    /// [STREAM_STARTUP_GRACE] before it can be reported silent: upstream
+    /// activation and backfill legitimately delay the first update well
+    /// past the steady-state liveness window.
+    fn insert_stream(&mut self, key: StreamKey, stream: LaserStream) {
+        self.last_activity
+            .insert(key.clone(), Instant::now() + STREAM_STARTUP_GRACE);
+        self.stream_map.insert(key, stream);
+    }
+
     /// Slot subscription filter attached to every stream. It provides chain
     /// slot synchronisation and serves as a liveness heartbeat: a healthy
     /// stream delivers a slot update every chain slot.
@@ -634,7 +726,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             Self::build_account_request(pubkeys, commitment, from_slot);
         let LaserStreamWithHandle { stream, handle } =
             self.stream_factory.subscribe(request).await?;
-        self.stream_map.insert(StreamKey::CurrentNew, stream);
+        self.insert_stream(StreamKey::CurrentNew, stream);
         self.current_new_handle = Some(handle);
         Ok(())
     }
@@ -685,7 +777,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                     from_slot,
                 )
                 .await?;
-            self.stream_map.insert(StreamKey::Program, stream);
+            self.insert_stream(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
             self.update_stream_metrics_with_extra(0);
         }
@@ -2044,5 +2136,158 @@ mod tests {
 
         // When a stream is closed, next_update returns None
         assert!(result.is_none());
+    }
+
+    // ---------------------------------------------------------
+    // 13. Per-stream liveness
+    // ---------------------------------------------------------
+
+    use helius_laserstream::grpc::SubscribeUpdate;
+
+    /// Push one Ok update into `idx` and drain it so the manager
+    /// records real activity for that stream.
+    async fn deliver_update(
+        mgr: &mut StreamManager<MockStreamHandle, MockStreamFactory>,
+        factory: &MockStreamFactory,
+        idx: usize,
+    ) {
+        factory.push_update_to_stream(idx, Ok(SubscribeUpdate::default()));
+        let update = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            mgr.next_update(),
+        )
+        .await
+        .expect("next_update timed out");
+        assert!(update.is_some());
+    }
+
+    /// One silently dead stream must stay visible even while sibling
+    /// streams keep delivering: actor-wide activity tracking masked
+    /// exactly this, leaving the dead stream's accounts unwatched.
+    #[tokio::test]
+    async fn test_max_stream_silence_exposes_silent_sibling_stream() {
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+        // Two account streams: each batch overflows max_subs_in_new (5),
+        // promoting the current-new stream out.
+        subscribe_in_batches(&mut mgr, 12, 6).await;
+        assert!(factory.active_stream_count() >= 2);
+
+        // Real activity on both streams.
+        deliver_update(&mut mgr, &factory, 0).await;
+        deliver_update(&mut mgr, &factory, 1).await;
+        let silence = mgr.max_stream_silence().expect("streams exist");
+        assert!(silence < Duration::from_millis(50));
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        // Only stream 1 keeps delivering; stream 0 stays silent.
+        deliver_update(&mut mgr, &factory, 1).await;
+        let silence = mgr.max_stream_silence().expect("streams exist");
+        assert!(
+            silence >= Duration::from_millis(150),
+            "silent sibling stream must dominate max silence, got {silence:?}"
+        );
+    }
+
+    /// Without any streams the silence probe reports `None`, so an idle
+    /// actor never trips the liveness watchdog.
+    #[tokio::test]
+    async fn test_max_stream_silence_none_without_streams() {
+        let (mut mgr, _factory) = create_manager();
+        assert!(mgr.max_stream_silence().is_none());
+
+        subscribe_n(&mut mgr, 2).await;
+        assert!(mgr.max_stream_silence().is_some());
+
+        // Clearing subscriptions drops the streams and their tracking.
+        mgr.clear_account_subscriptions();
+        assert!(mgr.max_stream_silence().is_none());
+    }
+
+    /// A fresh stream gets a startup grace before it can be reported
+    /// silent; after the grace elapses, silence accrues normally.
+    #[tokio::test]
+    async fn test_max_stream_silence_grants_startup_grace() {
+        use std::time::Duration;
+
+        let (mut mgr, _factory) = create_manager();
+        subscribe_n(&mut mgr, 2).await;
+
+        // Well inside the 200ms test grace: reported fully active.
+        tokio::time::sleep(Duration::from_millis(80)).await;
+        let silence = mgr.max_stream_silence().expect("stream exists");
+        assert_eq!(silence, Duration::ZERO, "within grace, got {silence:?}");
+
+        // Past the grace, silence accrues from the grace boundary.
+        tokio::time::sleep(Duration::from_millis(420)).await;
+        let silence = mgr.max_stream_silence().expect("stream exists");
+        assert!(
+            silence >= Duration::from_millis(200),
+            "past grace silence must accrue, got {silence:?}"
+        );
+    }
+
+    /// A stream that ends while a sibling keeps delivering is dropped
+    /// by the StreamMap without any notification; the probe must expose
+    /// it via the expected-topology check.
+    #[tokio::test]
+    async fn test_max_stream_silence_detects_silently_ended_stream() {
+        use std::time::Duration;
+
+        let (mut mgr, factory) = create_manager();
+        subscribe_in_batches(&mut mgr, 12, 6).await;
+        assert!(factory.active_stream_count() >= 2);
+
+        // Stream 0 ends. Polling with no update queued visits every
+        // child (the only ready one is the closed child, which the
+        // StreamMap reaps) and then parks, so the timeout is expected.
+        factory.close_stream(0);
+        let poll =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await;
+        assert!(poll.is_err(), "no update expected while reaping");
+
+        assert_eq!(
+            mgr.max_stream_silence(),
+            Some(Duration::MAX),
+            "an ended stream with live siblings must be reported"
+        );
+    }
+
+    /// Error items must not count as liveness: a stream stuck in an SDK
+    /// retry loop keeps emitting statuses without delivering data.
+    #[tokio::test]
+    async fn test_max_stream_silence_ignores_error_items() {
+        use std::time::Duration;
+
+        use helius_laserstream::LaserstreamError;
+        use tonic::Code;
+
+        let (mut mgr, factory) = create_manager();
+        subscribe_n(&mut mgr, 2).await;
+        deliver_update(&mut mgr, &factory, 0).await;
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+
+        factory.push_error_to_stream(
+            0,
+            LaserstreamError::Status(tonic::Status::new(
+                Code::Internal,
+                "test error",
+            )),
+        );
+        let update =
+            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
+        assert!(matches!(update, Some((_, Err(_)))));
+
+        let silence = mgr.max_stream_silence().expect("stream exists");
+        assert!(
+            silence >= Duration::from_millis(150),
+            "errors must not reset the silence watchdog, got {silence:?}"
+        );
     }
 }

@@ -25,7 +25,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    time::{interval, Instant, MissedTickBehavior},
+    time::{interval, MissedTickBehavior},
 };
 use tonic::Code;
 use tracing::*;
@@ -253,11 +253,13 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
     pub async fn run(mut self) {
-        // Every stream carries a slot-update filter, so a healthy connection
-        // delivers updates every chain slot (~400ms). Prolonged silence while
-        // subscriptions exist means the connection died without erroring
-        // (e.g. an h2 half-open wedge) and the error-driven recovery will
-        // never fire - force a reconnect instead.
+        // Every stream carries a slot-update filter, so a healthy stream
+        // delivers updates every chain slot (~400ms). Silence is judged
+        // per stream: a single stream can die without erroring (e.g. an
+        // h2 half-open wedge or a failed SDK-internal resume) while its
+        // siblings keep flowing, which would mask actor-wide activity
+        // tracking and silence that stream's accounts forever - force a
+        // reconnect instead.
         const STREAM_LIVENESS_TIMEOUT: Duration = Duration::from_secs(5);
         const LIVENESS_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -272,7 +274,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         let mut liveness_interval = interval(LIVENESS_CHECK_INTERVAL);
         liveness_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         liveness_interval.tick().await;
-        let mut last_stream_activity = Instant::now();
 
         loop {
             tokio::select! {
@@ -290,7 +291,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     }
                 },
                 update = self.stream_manager.next_update(), if self.stream_manager.has_any_subscriptions() => {
-                    last_stream_activity = Instant::now();
                     match update {
                         Some((src, result)) => {
                             self.handle_stream_result(
@@ -311,17 +311,17 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                     }
                 },
                 _ = liveness_interval.tick() => {
-                    if !self.stream_manager.has_any_subscriptions() {
-                        last_stream_activity = Instant::now();
-                    } else if last_stream_activity.elapsed()
-                        >= STREAM_LIVENESS_TIMEOUT
+                    // None without streams, so idle actors never reconnect.
+                    let silence = self.stream_manager.max_stream_silence();
+                    if let Some(silence) =
+                        silence.filter(|s| *s >= STREAM_LIVENESS_TIMEOUT)
                     {
                         warn!(
                             client_id = %self.client_id,
-                            silent_for = ?last_stream_activity.elapsed(),
+                            silent_for = ?silence,
                             slots = ?self.slots,
-                            "No stream updates within liveness window, \
-                             forcing reconnect"
+                            "A stream delivered no updates within the \
+                             liveness window, forcing reconnect"
                         );
                         Self::signal_connection_issue(
                             &mut self.stream_manager,
@@ -329,7 +329,6 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                             &self.client_id,
                         )
                         .await;
-                        last_stream_activity = Instant::now();
                     }
                 },
                 _ = optimization_interval.tick() => {
