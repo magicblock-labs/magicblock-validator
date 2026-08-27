@@ -158,6 +158,10 @@ where
     /// Bounded; entries evicted at capacity release their subscription.
     programdata_index: Arc<PlMutex<LruCache<Pubkey, Pubkey>>>,
 
+    /// Rotates the starting entry of each programdata sweep pass so an
+    /// abandoned pass cannot starve the same tail entries every time.
+    programdata_sweep_cursor: Arc<AtomicU64>,
+
     /// Recognizes freshly delegated accounts whose app data collides with an
     /// internal DLP discriminator via delegation-record sightings.
     dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
@@ -227,6 +231,25 @@ fn programdata_watch_capacity(
     )
     .expect("programdata watch capacity has a non-zero floor")
 }
+
+/// Interval between transport-independent sweeps over the programdata
+/// watches. A watch whose upstream subscription silently dies stops
+/// delivering upgrade notifications entirely; the sweep bounds upgrade
+/// detection for such programs to roughly this interval, at a cost of one
+/// 12-byte header fetch per watched program.
+const PROGRAMDATA_SWEEP_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Programdata prefix holding the state tag (4 bytes) and deploy slot
+/// (8 bytes) of `UpgradeableLoaderState::ProgramData`.
+const PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN: usize = 12;
+
+/// Enum tag of `UpgradeableLoaderState::ProgramData`.
+const PROGRAMDATA_STATE_TAG: u32 = 3;
+
+/// Consecutive header-fetch failures after which a sweep pass is
+/// abandoned until the next interval, bounding a pass against an
+/// unhealthy RPC endpoint.
+const PROGRAMDATA_SWEEP_MAX_CONSECUTIVE_FAILURES: usize = 3;
 
 /// Outcome of [FetchCloner::watch_programdata].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +427,7 @@ where
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
             programdata_index: self.programdata_index.clone(),
+            programdata_sweep_cursor: self.programdata_sweep_cursor.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
@@ -531,6 +555,7 @@ where
                     remote_account_provider.subscribed_accounts_capacity(),
                 ),
             ))),
+            programdata_sweep_cursor: Arc::new(AtomicU64::new(0)),
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
@@ -560,6 +585,7 @@ where
         );
         me.clone()
             .start_subscription_listener(subscription_updates_rx);
+        me.start_programdata_sweep();
 
         me
     }
@@ -1138,8 +1164,9 @@ where
     }
 
     /// Holds a persistent programdata subscription for a LoaderV3 program so
-    /// upgrades stay observable; both pubkeys are preferred onto gRPC
-    /// transport. Installed before the clone so an upgrade notification
+    /// upgrades stay observable; it keeps full coverage on every transport
+    /// leg, while the program account is preferred onto gRPC.
+    /// Installed before the clone so an upgrade notification
     /// landing mid-clone already routes; held once per program (idempotent
     /// across reloads). Failing to hold the subscription is an error but
     /// non-fatal to the clone: the watch is retried on the next load.
@@ -1214,11 +1241,14 @@ where
                 .await;
             return Ok(ProgramDataWatch::EvictedConcurrently);
         }
+        // Only the program account is narrowed to gRPC: pre-Agave-4.2
+        // chains notify hot program accounts every slot without changes,
+        // which would flood websocket legs. The programdata sub — the
+        // actual upgrade signal, quiet outside deploys — keeps default
+        // full coverage on every leg so one dead transport cannot
+        // silence upgrade detection.
         self.remote_account_provider
             .prefer_grpc_subscription(&program_id)
-            .await;
-        self.remote_account_provider
-            .prefer_grpc_subscription(&program_data_pubkey)
             .await;
         Ok(ProgramDataWatch::Installed)
     }
@@ -1240,6 +1270,137 @@ where
                     SubscriptionReason::ProgramData,
                 )
                 .await;
+        }
+    }
+
+    /// Runs the upgrade-detection backstop on a fixed interval. Holds only
+    /// a weak handle so the loop neither keeps the FetchCloner alive nor
+    /// outlives it.
+    fn start_programdata_sweep(self: &Arc<Self>) {
+        let this = Arc::downgrade(self);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(PROGRAMDATA_SWEEP_INTERVAL).await;
+                let Some(this) = this.upgrade() else {
+                    break;
+                };
+                this.sweep_programdata_watches().await;
+            }
+        });
+    }
+
+    /// One pass of the upgrade-detection backstop: compares each watched
+    /// program's on-chain deploy slot against the bank copy's remote slot
+    /// and routes stale programs into the reload path. Runs on the fetch
+    /// transport, so upgrades surface even when a watch subscription died
+    /// upstream while local bookkeeping kept it. Metadata-only changes
+    /// (e.g. authority rotations) keep the deploy slot and are left to the
+    /// subscription path.
+    async fn sweep_programdata_watches(&self) {
+        let watched: Vec<(Pubkey, Pubkey)> = self
+            .programdata_index
+            .lock()
+            .iter()
+            .map(|(program_data, program_id)| (*program_data, *program_id))
+            .collect();
+        if watched.is_empty() {
+            return;
+        }
+        // Rotate the starting entry so a pass abandoned by the failure
+        // breaker below cannot starve the same tail entries every time.
+        let start = self
+            .programdata_sweep_cursor
+            .fetch_add(1, Ordering::Relaxed) as usize
+            % watched.len();
+        let len = watched.len();
+        let mut consecutive_failures = 0usize;
+        for (program_data_pubkey, program_id) in
+            watched.into_iter().cycle().skip(start).take(len)
+        {
+            let Some(bank_slot) = self
+                .accounts_bank
+                .get_account(&program_id)
+                .map(|account| account.remote_slot())
+            else {
+                // Bank copy gone: nothing to verify. Watch cleanup stays
+                // with the notification path — releasing here would race
+                // an in-flight clone that already saw the index entry.
+                continue;
+            };
+            let prefix = match self
+                .remote_account_provider
+                .get_account_data_slice(
+                    &program_data_pubkey,
+                    0,
+                    PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN,
+                    bank_slot,
+                )
+                .await
+            {
+                Ok(Some(prefix))
+                    if prefix.len() >= PROGRAMDATA_DEPLOY_SLOT_PREFIX_LEN
+                        && prefix[..4]
+                            == PROGRAMDATA_STATE_TAG.to_le_bytes() =>
+                {
+                    consecutive_failures = 0;
+                    prefix
+                }
+                // Missing or non-programdata state: nothing to verify
+                // against; live-subscription paths handle closures.
+                Ok(_) => {
+                    consecutive_failures = 0;
+                    continue;
+                }
+                // Transient fetch failure: the next sweep retries. An
+                // unhealthy RPC fails every fetch after its full retry
+                // budget, so abandon the pass instead of crawling on.
+                Err(err) => {
+                    debug!(
+                        program_id = %program_id,
+                        program_data = %program_data_pubkey,
+                        error = %err,
+                        "Programdata sweep header fetch failed"
+                    );
+                    consecutive_failures += 1;
+                    if consecutive_failures
+                        >= PROGRAMDATA_SWEEP_MAX_CONSECUTIVE_FAILURES
+                    {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let Ok(deploy_slot_bytes) = <[u8; 8]>::try_from(&prefix[4..12])
+            else {
+                continue;
+            };
+            let deploy_slot = u64::from_le_bytes(deploy_slot_bytes);
+            // The bank copy was fetched at `bank_slot`, so it already
+            // reflects every deploy up to that slot.
+            if deploy_slot <= bank_slot {
+                continue;
+            }
+            info!(
+                program_id = %program_id,
+                deploy_slot,
+                bank_slot,
+                "Programdata sweep detected missed program upgrade"
+            );
+            let companion_fetch_log_context = CompanionFetchLogContext {
+                origin: AccountFetchContext::subscription_update(
+                    AccountFetchReason::SubscriptionUpdateClone,
+                ),
+                primary_pubkey: program_id,
+                context_slot: deploy_slot,
+            };
+            let mut program_account = AccountSharedData::new(1, 0, &LOADER_V3);
+            program_account.set_remote_slot(deploy_slot);
+            self.handle_executable_sub_update(
+                program_id,
+                program_account,
+                &companion_fetch_log_context,
+            )
+            .await;
         }
     }
 
@@ -1512,6 +1673,15 @@ where
                             );
                         let result = self.cloner.clone_program(program).await;
                         if result.is_ok() {
+                            // Re-assert the watch after the bank insert: a
+                            // concurrent bank-miss cleanup may have released
+                            // it in the meantime (cleanups pop only while
+                            // the bank copy is absent, so none can follow
+                            // this point). Idempotent when it survived.
+                            if is_loaderv3 {
+                                let _ =
+                                    self.watch_programdata(program_id).await;
+                            }
                             metrics::inc_chainlink_clone_accounts_total_with_context(
                                 fetch_context.clone(),
                                 remote_result,
