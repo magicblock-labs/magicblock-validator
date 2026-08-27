@@ -389,11 +389,14 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             warn!(total_subs, "Re-subscription made no progress");
             return Err(err);
         }
-        if remaining.is_empty() {
-            // Clean pass: restore the configured pacing
+        if remaining.len() < total_subs {
+            // Any progress restores the configured pacing: an escalated
+            // delay stretches the restore window past the connection's
+            // lifetime and wedges reconnects into a permanent loop.
             self.current_resub_delay_ms
                 .store(self.initial_resub_delay_ms, Ordering::SeqCst);
-        } else {
+        }
+        if !remaining.is_empty() {
             // Leftovers are repaired by the subscription reconciler
             warn!(
                 total_subs,
