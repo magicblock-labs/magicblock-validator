@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Entry},
     future::Future,
     mem,
     num::NonZeroUsize,
@@ -46,7 +46,7 @@ use solana_rpc_client_api::{
 };
 use solana_signer::Signer;
 use tokio::{
-    sync::{Semaphore, broadcast, mpsc},
+    sync::{Semaphore, broadcast, mpsc, watch},
     task,
     task::JoinSet,
 };
@@ -86,7 +86,8 @@ use crate::{
     },
     cloner::{
         self, AccountCloneRequest, AccountMaterialization,
-        ClonePostDelegationMode, DelegationActions, errors::ClonerResult,
+        ClonePostDelegationMode, DelegationActions,
+        errors::{ClonerError, ClonerResult},
     },
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
@@ -147,10 +148,48 @@ where
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
 
+    /// Clone submissions in flight, keyed by account and remote slot.
+    ///
+    /// Concurrent triggers for the same account state (a subscription update
+    /// racing a discovery sweep) would compose identical transactions; the
+    /// engine rejects the twin as already processed and the whole clone fails.
+    /// Instead, the first caller submits and the rest adopt its outcome.
+    in_flight_clones: Arc<Mutex<InFlightClones>>,
+
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
 
     undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
+}
+
+/// Outcome of a coalesced clone submission, shareable across adopters.
+/// `ClonerError` is not `Clone`, so followers receive its message.
+type CloneOutcome = Result<Option<AccountMode>, String>;
+type InFlightClones =
+    HashMap<(Pubkey, u64), watch::Receiver<Option<CloneOutcome>>>;
+
+/// Removes the in-flight entry when the leading clone submission finishes or
+/// is dropped, so followers of a dead leader can retake the slot. Owning the
+/// sender guarantees the entry is gone before followers observe the channel
+/// as closed.
+struct CloneFlightGuard {
+    in_flight_clones: Arc<Mutex<InFlightClones>>,
+    key: (Pubkey, u64),
+    sender: watch::Sender<Option<CloneOutcome>>,
+}
+
+impl CloneFlightGuard {
+    fn publish(&self, outcome: CloneOutcome) {
+        let _ = self.sender.send(Some(outcome));
+    }
+}
+
+impl Drop for CloneFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut in_flight_clones) = self.in_flight_clones.lock() {
+            in_flight_clones.remove(&self.key);
+        }
+    }
 }
 
 struct PendingUndelegationGuard {
@@ -329,6 +368,7 @@ where
             programdata_sweep_cursor: self.programdata_sweep_cursor.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
+            in_flight_clones: self.in_flight_clones.clone(),
             risk_service: self.risk_service.clone(),
             undelegation_request_sender: self
                 .undelegation_request_sender
@@ -483,6 +523,7 @@ where
                 DlpCollisionTracker::new(),
             )),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
+            in_flight_clones: Arc::new(Mutex::new(HashMap::new())),
             risk_service,
             undelegation_request_sender,
         });
@@ -760,6 +801,69 @@ where
         }
     }
 
+    /// Runs `submit` once per account state: concurrent callers for the same
+    /// (pubkey, remote slot) adopt the in-flight submission's outcome instead
+    /// of sending an identical transaction the engine rejects as already
+    /// processed.
+    async fn submit_coalesced<F>(
+        &self,
+        key: (Pubkey, u64),
+        submit: F,
+    ) -> ClonerResult<Option<AccountMode>>
+    where
+        F: Future<Output = ClonerResult<Option<AccountMode>>>,
+    {
+        let guard = loop {
+            let follower = {
+                let mut in_flight_clones = self
+                    .in_flight_clones
+                    .lock()
+                    .expect("in_flight_clones lock poisoned");
+                match in_flight_clones.entry(key) {
+                    Entry::Occupied(entry) => entry.get().clone(),
+                    Entry::Vacant(entry) => {
+                        let (sender, receiver) = watch::channel(None);
+                        entry.insert(receiver);
+                        break CloneFlightGuard {
+                            in_flight_clones: Arc::clone(
+                                &self.in_flight_clones,
+                            ),
+                            key,
+                            sender,
+                        };
+                    }
+                }
+            };
+            let mut follower = follower;
+            match follower.wait_for(|outcome| outcome.is_some()).await {
+                Ok(outcome) => {
+                    trace!(
+                        pubkey = %key.0,
+                        slot = key.1,
+                        "Adopted concurrent clone outcome"
+                    );
+                    let outcome =
+                        outcome.clone().expect("wait_for checked is_some");
+                    return outcome.map_err(|err| {
+                        ClonerError::FailedToCloneRegularAccount(
+                            key.0,
+                            Box::new(ClonerError::Engine(err)),
+                        )
+                    });
+                }
+                // The leading submission was dropped before publishing its
+                // outcome; its guard removed the entry, so retake the slot.
+                Err(_) => continue,
+            }
+        };
+        let result = submit.await;
+        guard.publish(match &result {
+            Ok(mode) => Ok(*mode),
+            Err(err) => Err(err.to_string()),
+        });
+        result
+    }
+
     async fn clone_account(
         &self,
         request: AccountCloneRequest,
@@ -767,6 +871,7 @@ where
         materialization: AccountMaterialization,
     ) -> ClonerResult<MaterializedAccount> {
         let pubkey = request.pubkey;
+        let remote_slot = request.account.read().slot();
         let remote_result = Self::clone_remote_result_for_request(&request);
         let clone_intent = Self::clone_intent_for_request(&request);
         let is_empty_placeholder =
@@ -783,8 +888,24 @@ where
             ChainlinkEmptyPlaceholderStage::CloneSubmitted,
             Outcome::Success,
         );
-        let result =
-            cloner::clone_account(&self.engine, request, materialization).await;
+        let result = self
+            .submit_coalesced((pubkey, remote_slot), async {
+                cloner::clone_account(&self.engine, request, materialization)
+                    .await
+                    .map(Some)
+            })
+            .await
+            .and_then(|mode| {
+                mode.ok_or_else(|| {
+                    ClonerError::FailedToCloneRegularAccount(
+                        pubkey,
+                        Box::new(ClonerError::Engine(
+                            "coalesced clone yielded no account mode"
+                                .to_string(),
+                        )),
+                    )
+                })
+            });
         if result.is_ok() {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context.clone(),
@@ -1062,8 +1183,12 @@ where
                 self.watch_programdata(program_id).await,
                 Ok(ProgramDataWatch::Installed)
             );
-        let result =
-            cloner::clone_program(&self.engine, program, materialization).await;
+        let result = self
+            .submit_coalesced(
+                (program_id, remote_slot),
+                cloner::clone_program(&self.engine, program, materialization),
+            )
+            .await;
         if result.is_ok() {
             if is_loaderv3 {
                 let _ = self.watch_programdata(program_id).await;
