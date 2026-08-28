@@ -1583,7 +1583,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
-    /// Subscribes first to catch any updates that arrive during fetch.
+    /// Subscribe is best-effort so a pubsub outage cannot drop the snapshot
+    /// that post-delegation actions need.
     #[instrument(skip(self, pubkeys, mark_empty_if_not_found, fetch_context))]
     pub async fn try_get_multi(
         &self,
@@ -1895,7 +1896,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
         // Send all subscription requests in parallel (non-fail-fast).
         // We use join_all instead of try_join_all to ensure ALL acquire
-        // attempts complete, even if some fail.
+        // attempts complete, even if some fail. A failed subscribe must
+        // not abort the RPC snapshot: pubsub is for staying current, and
+        // post-delegation actions (record_bid) only run after that fetch.
         let subscription_results = join_all(pubkeys.iter().map(|pubkey| {
             let fetch_context = fetch_context.clone();
             async move {
@@ -1909,58 +1912,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }))
         .await;
 
-        let mut errors = Vec::new();
-        let mut acquired = Vec::new();
         for (result, pubkey) in subscription_results.iter().zip(pubkeys.iter())
         {
-            match result {
-                Err(err) => {
-                    error!(
-                        pubkey = %pubkey, err = ?err,
-                        "Failed to subscribe to account"
-                    );
-                    errors.push(format!("{}: {}", pubkey, err));
-                }
-                Ok(()) => acquired.push(*pubkey),
+            if let Err(err) = result {
+                warn!(
+                    pubkey = %pubkey, err = ?err,
+                    "Failed to subscribe to account; continuing with RPC fetch"
+                );
             }
-        }
-
-        if !errors.is_empty() {
-            for pubkey in &acquired {
-                if let Err(unsub_err) = self
-                    .release_single_subscription(
-                        pubkey,
-                        SubscriptionReason::DirectAccount,
-                    )
-                    .await
-                {
-                    if matches!(
-                        unsub_err,
-                        RemoteAccountProviderError::AccountSubscriptionDoesNotExist(_)
-                    ) {
-                        debug!(
-                            pubkey = %pubkey, err = ?unsub_err,
-                            "Failed to unsubscribe after partial \
-                             subscription failure"
-                        );
-                    } else {
-                        warn!(
-                            pubkey = %pubkey, err = ?unsub_err,
-                            "Failed to unsubscribe after partial \
-                             subscription failure"
-                        );
-                    }
-                }
-            }
-            return Err(
-                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                    format!(
-                        "{} subscription(s) failed: [{}]",
-                        errors.len(),
-                        errors.join(", ")
-                    ),
-                ),
-            );
         }
 
         Ok(())

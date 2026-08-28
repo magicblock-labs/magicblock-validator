@@ -334,8 +334,7 @@ async fn setup_matching_slots(
 }
 
 #[tokio::test]
-async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry()
- {
+async fn test_try_get_multi_fetches_when_subscribe_fails() {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
@@ -381,25 +380,15 @@ async fn test_try_get_multi_setup_subscriptions_failure_cleans_up_pending_entry(
         .await
         .expect("owner task should complete")
         .expect("owner task should not panic");
-    let err = result.expect_err("setup_subscriptions should fail");
-    assert!(err.to_string().contains("subscription(s) failed"));
+    let remote_accounts = result
+        .expect("RPC fetch must proceed when pubsub subscribe fails");
+    assert_eq!(remote_accounts.len(), 1);
+    assert_eq!(remote_accounts[0].fresh_lamports(), Some(1_000_000));
     assert!(!provider.is_pending(&pubkey));
-
-    pubsub_client.try_reconnect().await.unwrap();
-    let retry = provider
-        .try_get_multi(
-            &[pubkey],
-            None,
-            AccountFetchContext::rpc_get_account(),
-            None,
-        )
-        .await
-        .expect("retry after cleanup should succeed");
-    assert_eq!(retry.len(), 1);
 }
 
 #[tokio::test]
-async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
+async fn test_try_get_multi_waiter_receives_account_when_subscribe_fails() {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
     let pubkey = solana_pubkey::Pubkey::new_unique();
@@ -484,10 +473,14 @@ async fn test_try_get_multi_waiter_receives_setup_subscriptions_failure() {
             .expect("waiter task should complete")
             .expect("waiter task should not panic");
 
-    let first_err = first_result.expect_err("owner should fail");
-    let second_err = second_result.expect_err("waiter should fail");
-    assert!(first_err.to_string().contains("subscription(s) failed"));
-    assert!(second_err.to_string().contains("subscription(s) failed"));
+    let first_accounts = first_result
+        .expect("owner must receive the RPC snapshot when subscribe fails");
+    let second_accounts = second_result
+        .expect("waiter must receive the RPC snapshot when subscribe fails");
+    assert_eq!(first_accounts.len(), 1);
+    assert_eq!(second_accounts.len(), 1);
+    assert_eq!(first_accounts[0].fresh_lamports(), Some(1_000_000));
+    assert_eq!(second_accounts[0].fresh_lamports(), Some(1_000_000));
     assert!(!provider.is_pending(&pubkey));
 }
 

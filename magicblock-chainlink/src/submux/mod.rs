@@ -731,13 +731,17 @@ where
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
-            debug!(
+            warn!(
                 client_id = %client.id(),
                 resub_delay_ms = ?client.current_resub_delay_ms(),
                 error = ?err,
-                "Failed to resubscribe accounts after reconnect"
+                "Failed to resubscribe accounts after reconnect; keeping client visible so new subscriptions can use the live transport"
             );
-            rollback_visibility();
+            // Do not rollback visibility. Rolling back empties
+            // connected_clients_snapshot() and makes every subscribe() fail
+            // with "No clients provided" until the next backoff retry.
+            // The reconnector still retries the resub; the reconciler
+            // repairs stragglers.
             return Err(err);
         }
 
@@ -2178,6 +2182,54 @@ mod tests {
         let up = got.expect("should receive update after retry reconnect");
         assert_eq!(up.pubkey, pk);
         assert!(up.slot >= 100);
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_reconnect_keeps_client_visible_when_account_resub_fails() {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+
+        let pk = Pubkey::new_unique();
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client.clone()], vec![pk], Some(100));
+
+        mux.subscribe(pk, None).await.unwrap();
+        assert_eq!(mux.connected_clients_snapshot().len(), 1);
+
+        client.fail_next_resubscriptions(1);
+        client.simulate_disconnect();
+        aborts[0].send(()).await.expect("abort send");
+
+        let deadline = Instant::now() + Duration::from_millis(500);
+        while Instant::now() < deadline {
+            if client.reconnect_calls() >= 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            client.reconnect_calls() >= 1,
+            "reconnect should have attempted account resubscribe"
+        );
+        // Let the forced resub failure finish and apply rollback (today)
+        // or keep the client visible (desired).
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(
+            mux.connected_clients_snapshot().len(),
+            1,
+            "a live transport must stay usable for new subscriptions after account resub fails"
+        );
+
+        let pk2 = Pubkey::new_unique();
+        mux.subscribe(pk2, None)
+            .await
+            .expect("subscribe must not see an empty connected-client set");
+        assert!(client.subscriptions_union().contains(&pk2));
 
         mux.shutdown().await.unwrap();
     }
