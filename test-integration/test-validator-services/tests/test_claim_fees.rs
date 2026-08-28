@@ -144,7 +144,7 @@ fn test_claim_fees_rpc_connection() {
 fn test_validator_claim_fees() {
     println!("Starting Validator Fee Claiming Integration Test\n");
 
-    // 3. Fund the validator for transaction fees
+    // Fund the validator for transaction fees
     let client = RpcClient::new_with_commitment(
         DEVNET_URL,
         CommitmentConfig::confirmed(),
@@ -157,7 +157,7 @@ fn test_validator_claim_fees() {
     )
     .expect("Failed to airdrop initial funds to validator");
 
-    // 4. Run test sequence
+    // Run test sequence
     println!("=== Test 1: Instruction Creation ===");
     test_claim_fees_instruction();
 

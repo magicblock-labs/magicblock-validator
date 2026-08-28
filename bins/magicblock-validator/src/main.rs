@@ -28,8 +28,9 @@ fn main() -> ExitCode {
 }
 
 fn try_main() -> Result<ShutdownReason> {
-    // Reserve most CPUs for blocking I/O, RPC, and engine execution.
-    let workers = (num_cpus::get() / 4).max(1);
+    // RPC and other async services share this runtime. Use half the CPUs minus
+    // one, leaving capacity for engine execution and blocking work.
+    let workers = (num_cpus::get() / 2).saturating_sub(1).max(1);
     let runtime = Builder::new_multi_thread()
         .worker_threads(workers)
         .enable_all()

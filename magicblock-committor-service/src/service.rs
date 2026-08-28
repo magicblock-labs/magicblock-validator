@@ -3,7 +3,10 @@ pub mod intent_client;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -20,9 +23,9 @@ use magicblock_program::{
 };
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use tokio::{
-    sync::broadcast,
+    sync::{Notify, broadcast},
     task,
-    task::{JoinError, JoinSet},
+    task::JoinError,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
@@ -49,8 +52,11 @@ pub struct IntentExecutionService<R> {
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
-    /// Meta for ongoing executing intents
+    /// Accepted intents whose execution result has not been handled yet.
     intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+    /// Result notifications currently being submitted back to the Engine.
+    processing_results: Arc<AtomicUsize>,
+    intents_changed: Arc<Notify>,
 }
 
 impl<R> IntentExecutionService<R>
@@ -70,6 +76,8 @@ where
             processor,
             slot_interval,
             intents_meta_map: Arc::new(Mutex::default()),
+            processing_results: Arc::new(AtomicUsize::new(0)),
+            intents_changed: Arc::new(Notify::new()),
         }
     }
 
@@ -89,47 +97,94 @@ where
         cancellation_token: CancellationToken,
     ) -> Result<(), IntentExecutionServiceError> {
         let result_subscriber = self.processor.subscribe_for_results();
-        let mut workers = JoinSet::new();
-        let result_token = cancellation_token.clone();
+        let result_token = CancellationToken::new();
+        let result_shutdown = result_token.clone();
         let intents_meta_map = self.intents_meta_map.clone();
+        let processing_results = self.processing_results.clone();
+        let intents_changed = self.intents_changed.clone();
         let intent_rpc_client = self.intent_rpc_client.clone();
-        workers.spawn(async move {
+        let mut result_worker = tokio::spawn(async move {
             Self::result_processor(
                 result_subscriber,
-                result_token,
+                result_shutdown,
                 intents_meta_map,
+                processing_results,
+                intents_changed,
                 intent_rpc_client,
             )
             .await;
-            "result processor"
         });
-        let accept_token = cancellation_token.clone();
-        workers.spawn(async move {
-            self.accept_worker(accept_token).await;
-            "intent acceptor"
+        let accept_token = CancellationToken::new();
+        let accept_shutdown = accept_token.clone();
+        let pending_intents = self.intents_meta_map.clone();
+        let processing_results = self.processing_results.clone();
+        let pending_changed = self.intents_changed.clone();
+        let mut accept_worker = tokio::spawn(async move {
+            self.accept_worker(accept_shutdown).await;
         });
 
         tokio::select! {
             biased;
-            _ = cancellation_token.cancelled() => {}
-            result = workers.join_next() => {
-                let failure = match result.expect("intent workers are registered") {
-                    Ok(worker) => IntentExecutionServiceError::WorkerStopped(worker),
-                    Err(error) => IntentExecutionServiceError::WorkerJoin(error),
-                };
-                cancellation_token.cancel();
-                workers.shutdown().await;
-                return Err(failure);
-            }
-        }
+            _ = cancellation_token.cancelled() => {
+                // Do not drop completion notifications for already accepted
+                // intents: stop ingress, drain results, then stop observation.
+                accept_token.cancel();
+                accept_worker.await.map_err(IntentExecutionServiceError::WorkerJoin)?;
 
-        while let Some(result) = workers.join_next().await {
-            if let Err(error) = result {
-                workers.shutdown().await;
-                return Err(error.into());
+                tokio::select! {
+                    biased;
+                    _ = Self::wait_for_intents(
+                        pending_intents,
+                        processing_results,
+                        pending_changed,
+                    ) => {}
+                    result = &mut result_worker => {
+                        return Err(Self::worker_failure("result processor", result));
+                    }
+                }
+
+                result_token.cancel();
+                result_worker.await.map_err(IntentExecutionServiceError::WorkerJoin)?;
+                Ok(())
+            }
+            result = &mut accept_worker => {
+                result_token.cancel();
+                let _ = result_worker.await;
+                Err(Self::worker_failure("intent acceptor", result))
+            }
+            result = &mut result_worker => {
+                accept_token.cancel();
+                let _ = accept_worker.await;
+                Err(Self::worker_failure("result processor", result))
             }
         }
-        Ok(())
+    }
+
+    async fn wait_for_intents(
+        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: Arc<AtomicUsize>,
+        intents_changed: Arc<Notify>,
+    ) {
+        loop {
+            let intents_empty = intents_meta_map
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .is_empty();
+            if intents_empty && processing_results.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            intents_changed.notified().await;
+        }
+    }
+
+    fn worker_failure(
+        worker: &'static str,
+        result: Result<(), JoinError>,
+    ) -> IntentExecutionServiceError {
+        match result {
+            Ok(()) => IntentExecutionServiceError::WorkerStopped(worker),
+            Err(error) => IntentExecutionServiceError::WorkerJoin(error),
+        }
     }
 
     async fn accept_worker(self, cancellation_token: CancellationToken) {
@@ -261,6 +316,7 @@ where
             intent_ids.iter().for_each(|id| {
                 intent_metas.remove(id);
             });
+            self.intents_changed.notify_one();
         }
         result
     }
@@ -304,6 +360,8 @@ where
         result_subscription,
         cancellation_token,
         intents_meta_map,
+        processing_results,
+        intents_changed,
         intent_client
     ))]
     async fn result_processor(
@@ -312,6 +370,8 @@ where
         >,
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: Arc<AtomicUsize>,
+        intents_changed: Arc<Notify>,
         intent_client: Arc<R>,
     ) {
         loop {
@@ -342,6 +402,8 @@ where
                 &intent_client,
                 execution_result,
                 &intents_meta_map,
+                &processing_results,
+                &intents_changed,
             )
             .await
             {
@@ -354,25 +416,33 @@ where
         intent_client: &Arc<R>,
         execution_result: BroadcastedIntentExecutionResult,
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: &AtomicUsize,
+        intents_changed: &Notify,
     ) -> Result<(), R::Error> {
         let intent_id = execution_result.id;
-        let Some(intent_meta) = intents_meta_map
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .remove(&intent_id)
-        else {
-            // Possible if we have duplicate Intents
-            // First one will remove id from map and second could fail.
-            // This should not happen and needs investigation!
-            error!(intent_id, "Failed to find intent metadata");
-            return Ok(());
+        let intent_meta = {
+            let Some(intent_meta) = intents_meta_map
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&intent_id)
+            else {
+                // Possible if we have duplicate Intents
+                // First one will remove id from map and second could fail.
+                // This should not happen and needs investigation!
+                error!(intent_id, "Failed to find intent metadata");
+                return Ok(());
+            };
+            processing_results.fetch_add(1, Ordering::SeqCst);
+            intent_meta
         };
 
-        intent_client
+        let result = intent_client
             .notify_commit_sent(intent_meta, execution_result)
-            .await?;
+            .await;
+        processing_results.fetch_sub(1, Ordering::SeqCst);
+        intents_changed.notify_one();
 
-        Ok(())
+        result
     }
 
     async fn retain_recoverable_intents(
