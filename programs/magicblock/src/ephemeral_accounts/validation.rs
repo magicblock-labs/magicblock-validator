@@ -8,10 +8,7 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::transaction::TransactionContext;
 
 use super::{EPHEMERAL_IDX, SPONSOR_IDX, VAULT_IDX};
-use crate::utils::{
-    accounts::{self, InstructionAccount},
-    instruction_context_frames::InstructionContextFrames,
-};
+use crate::utils::accounts::{self, InstructionAccount};
 
 /// Returns the program ID of the CPI caller.
 ///
@@ -20,11 +17,13 @@ use crate::utils::{
 fn get_caller_program_id(
     tc: &TransactionContext<'_>,
 ) -> Result<Pubkey, InstructionError> {
-    let frames = InstructionContextFrames::try_from(tc)?;
-    frames
-        .find_program_id_of_parent_of_current_instruction()
+    let height = tc.get_instruction_stack_height();
+    let parent_level = height
+        .checked_sub(2)
+        .ok_or(InstructionError::IncorrectProgramId)?;
+    tc.get_instruction_context_at_nesting_level(parent_level)?
+        .get_program_key()
         .copied()
-        .ok_or(InstructionError::IncorrectProgramId)
 }
 
 /// Validates that the sponsor account is a signer.

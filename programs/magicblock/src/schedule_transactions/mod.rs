@@ -55,6 +55,9 @@ fn get_parent_program_id(
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
     let parent_program_id =
         frames.find_program_id_of_parent_of_current_instruction();
+    // MagicRoot wraps post-delegation actions; it is not a user owner program.
+    let parent_program_id =
+        parent_program_id.filter(|id| **id != magic_root_interface::ID);
 
     ic_msg!(
         invoke_context,

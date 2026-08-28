@@ -5,6 +5,12 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::token_programs::try_remap_ata_to_eata;
 
+/// Engine-internal wrapper that runs post-delegation actions. It is never the
+/// owner program of a committed user account; treating it as one makes DLP
+/// finalize reject the validator (`InvalidAuthority`).
+const MAGIC_ROOT_PROGRAM_ID: Pubkey =
+    Pubkey::from_str_const("MagicRootDRJ5atQjSJUxFjXzjeZXMADHUDznbk22gy");
+
 pub type CommittedAccountRef = (Pubkey, AccountSharedData);
 
 #[derive(
@@ -54,12 +60,51 @@ impl CommittedAccount {
             executable: account_shared.executable(),
             rent_epoch: account_shared.rent_epoch(),
         };
-        account.owner = parent_program_id.unwrap_or(account.owner);
+        // Rescue undelegation is CPI'd from MagicRoot. Keep the ER owner
+        // (the user program) so L1 finalize restores the same owner.
+        if let Some(parent) = parent_program_id {
+            if parent != MAGIC_ROOT_PROGRAM_ID {
+                account.owner = parent;
+            }
+        }
 
         CommittedAccount {
             pubkey,
             account,
             remote_slot,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_account::AccountSharedData;
+    use solana_pubkey::Pubkey as SolanaPubkey;
+
+    use super::*;
+
+    #[test]
+    fn rescue_undelegate_keeps_user_program_owner() {
+        let owner = SolanaPubkey::new_unique();
+        let account = AccountSharedData::new(1_000, 8, &owner);
+        let committed = CommittedAccount::from_account_shared(
+            SolanaPubkey::new_unique(),
+            &account,
+            Some(MAGIC_ROOT_PROGRAM_ID),
+        );
+        assert_eq!(committed.account.owner, owner);
+    }
+
+    #[test]
+    fn parent_program_still_overrides_owner_when_not_magic_root() {
+        let owner = SolanaPubkey::new_unique();
+        let parent = SolanaPubkey::new_unique();
+        let account = AccountSharedData::new(1_000, 8, &owner);
+        let committed = CommittedAccount::from_account_shared(
+            SolanaPubkey::new_unique(),
+            &account,
+            Some(parent),
+        );
+        assert_eq!(committed.account.owner, parent);
     }
 }

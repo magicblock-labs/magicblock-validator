@@ -12,6 +12,7 @@ lazy_static = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
+magic-root-interface = { workspace = true }
 nucleus = { workspace = true, features = ["tls"] }
 num-derive = { workspace = true }
 num-traits = { workspace = true }
