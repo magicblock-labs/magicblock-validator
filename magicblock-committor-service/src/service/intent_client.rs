@@ -1,5 +1,3 @@
-use std::mem;
-
 use async_trait::async_trait;
 use engine::{Engine, IntoTransactionView};
 use magicblock_program::{
@@ -12,7 +10,6 @@ use solana_account::ReadableAccount;
 use solana_hash::Hash;
 use solana_message::Message;
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tracing::{debug, error, info};
 
@@ -26,15 +23,7 @@ pub struct ScheduledBaseIntentMeta {
     blockhash: Hash,
     payer: Pubkey,
     included_pubkeys: Vec<Pubkey>,
-    sent_transaction: IntentSentTransaction,
     requested_undelegation: bool,
-}
-
-#[derive(Default)]
-enum IntentSentTransaction {
-    Known(Transaction),
-    #[default]
-    Recovered,
 }
 
 impl ScheduledBaseIntentMeta {
@@ -44,11 +33,6 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            sent_transaction: if intent.sent_transaction.signatures.is_empty() {
-                IntentSentTransaction::Recovered
-            } else {
-                IntentSentTransaction::Known(intent.sent_transaction.clone())
-            },
             requested_undelegation: intent.has_undelegate_intent(),
         }
     }
@@ -162,28 +146,24 @@ impl ERIntentClient for InternalIntentRpcClient {
 
     async fn notify_commit_sent(
         &self,
-        mut meta: ScheduledBaseIntentMeta,
+        meta: ScheduledBaseIntentMeta,
         result: BroadcastedIntentExecutionResult,
     ) -> Result<(), Self::Error> {
         let intent_id = result.id;
-        let transaction = mem::take(&mut meta.sent_transaction);
         let sent_commit = build_sent_commit(meta, &result);
         register_scheduled_commit_sent(sent_commit);
-        let result = match transaction {
-            IntentSentTransaction::Known(transaction) => {
-                self.execute(transaction).await
-            }
-            IntentSentTransaction::Recovered => {
-                let authority = self.engine.authority();
-                let ix = InstructionUtils::scheduled_commit_sent_instruction(
-                    &id(),
-                    &authority,
-                    intent_id,
-                );
-                let message = Message::new(&[ix], Some(&authority));
-                self.execute(message).await
-            }
-        };
+        // The pre-built ER tx carries the blockhash from schedule time. After a
+        // long L1 commit that hash is expired (BlockhashNotFound) and a serial
+        // result processor then lags the 100-wide broadcast. Rebuild against
+        // the engine's current blockhash every time.
+        let authority = self.engine.authority();
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            &id(),
+            &authority,
+            intent_id,
+        );
+        let message = Message::new(&[ix], Some(&authority));
+        let result = self.execute(message).await;
         result
             .inspect(|_| debug!("Sent commit signaled"))
             .inspect_err(
