@@ -17,6 +17,7 @@ magicblock-delegation-program-api = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
+nucleus = { workspace = true }
 solana-hash = { workspace = true }
 solana-instruction = { workspace = true, features = ["wincode"] }
 solana-keypair = { workspace = true }

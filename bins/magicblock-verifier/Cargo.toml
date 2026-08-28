@@ -18,5 +18,4 @@ magicblock-runtime = { workspace = true }
 nucleus = { workspace = true }
 replicator = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
 tracing = { workspace = true }

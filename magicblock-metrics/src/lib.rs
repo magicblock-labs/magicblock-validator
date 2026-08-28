@@ -3,4 +3,4 @@
 pub mod metrics;
 mod service;
 
-pub use service::{MetricsService, try_start_metrics_service};
+pub use service::MetricsService;

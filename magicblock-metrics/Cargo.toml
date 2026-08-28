@@ -16,8 +16,8 @@ http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 lazy_static = { workspace = true }
+nucleus = { workspace = true }
 prometheus = { workspace = true }
 solana-signature = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
-tokio-util = { workspace = true }
 tracing = { workspace = true }

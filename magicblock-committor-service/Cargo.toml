@@ -24,6 +24,7 @@ magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
+nucleus = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }

@@ -9,6 +9,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 engine = { workspace = true }
 magicblock-aperture = { workspace = true }
 magicblock-chainlink = { workspace = true }
@@ -34,12 +35,12 @@ solana-native-token = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-signer = { workspace = true }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
-tokio-util = { workspace = true }
 tracing = { workspace = true }
 
 console-subscriber = { workspace = true, optional = true }
