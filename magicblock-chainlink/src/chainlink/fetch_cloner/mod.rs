@@ -1891,17 +1891,36 @@ where
                     .eq(&self.validator_pubkey)
                     .then_some(dr.commit_frequency_ms)
             });
+            // Re-delegation (top-up, etc.) arrives as a subscription update
+            // after the previous undelegation left a Transient copy in the
+            // bank. Those updates must run the new post-delegation actions;
+            // treating them as a plain Update drops the action.
+            let locally_delegated = self
+                .read_account(&pubkey, |account| account.is(AccountMode::Delegated))
+                .unwrap_or(false);
+            let post_delegation_mode = if !locally_delegated
+                && !delegation_actions.is_empty()
+            {
+                ClonePostDelegationMode::from(delegation_actions)
+            } else {
+                ClonePostDelegationMode::None
+            };
+            let materialization = if post_delegation_mode.has_actions() {
+                AccountMaterialization::Create
+            } else {
+                AccountMaterialization::Update
+            };
             if let Err(err) = self
                 .clone_account_with_post_delegation_action_invariants(
                     AccountCloneRequest {
                         pubkey,
                         account,
                         commit_frequency_ms,
-                        post_delegation_mode: ClonePostDelegationMode::None,
+                        post_delegation_mode,
                         delegated_to_other,
                     },
                     subscription_clone_context.clone(),
-                    AccountMaterialization::Update,
+                    materialization,
                 )
                 .await
             {
@@ -1956,6 +1975,8 @@ where
                 dependencies
                     .into_iter()
                     .filter(|dependency| {
+                        let writable =
+                            writable_dependencies.contains(dependency);
                         let reader = |account: &AccountSharedData| {
                             // A copy that already sits at `remote_slot` is as
                             // fresh as the update we are resolving. Refreshing
@@ -1964,16 +1985,23 @@ where
                             // non-advancing transition, which fails the whole
                             // action path and undelegates the account.
                             account.slot() < remote_slot
-                                && writable_dependencies.contains(dependency)
+                                && writable
                                 && (!account.is(AccountMode::Delegated)
                                     || account.is(AccountMode::Transient))
                         };
-                        let Some(needs_refresh) =
-                            loader.read(dependency, reader).ok().flatten()
-                        else {
-                            return true;
-                        };
-                        needs_refresh
+                        match loader
+                            .read(dependency, reader)
+                            .ok()
+                            .flatten()
+                        {
+                            // Missing writable deps are ER-only (tree,
+                            // permission). Fetching them from L1 fails
+                            // AccountLoadFailed and rescue-undelegates.
+                            // Leave them absent so Create+PostFinalize
+                            // can materialize them.
+                            None => !writable,
+                            Some(needs_refresh) => needs_refresh,
+                        }
                     })
                     .collect::<HashSet<_>>()
                     .into_iter()
