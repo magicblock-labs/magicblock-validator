@@ -52,6 +52,7 @@ wincode = { workspace = true }
 
 [dev-dependencies]
 rand = { workspace = true }
+solana-commitment-config = { workspace = true }
 solana-signature = { workspace = true, features = ["rand"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }

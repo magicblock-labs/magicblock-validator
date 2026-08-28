@@ -199,9 +199,10 @@ pub fn decide_rpc_error_flow(
         | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
             ..,
         ) => {
-            // if there's still time left we can retry sending tx
-            // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
-            ControlFlow::Continue(Duration::ZERO)
+            // The transaction was already submitted. Re-signing with a fresh
+            // blockhash can land a second CAU (AlreadyProcessed / NotUndelegatable)
+            // and occupies an executor for minutes under a large ticket queue.
+            ControlFlow::Break(())
         }
         MagicBlockRpcClientError::GetLatestBlockhash(err) => {
             trace!(error = ?err, "Failed to get latest blockhash during sending tx");
@@ -248,6 +249,7 @@ fn decide_reqwest_flow(status: Option<u16>) -> ControlFlow<(), Duration> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::MagicBlockRpcClientError;
 
     #[test]
     fn test_reqwest_transport_and_transient_statuses_retried() {
@@ -290,5 +292,31 @@ mod tests {
             })),
         };
         assert!(decide_rpc_native_flow(&err).is_break());
+    }
+
+    #[test]
+    fn test_confirm_timeout_does_not_resend() {
+        let err =
+            MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
+                solana_signature::Signature::default(),
+                solana_commitment_config::CommitmentLevel::Confirmed,
+            );
+        assert!(
+            decide_rpc_error_flow(&err).is_break(),
+            "a sent transaction that timed out on confirm must be re-polled, not re-signed"
+        );
+    }
+
+    #[test]
+    fn test_processed_status_timeout_does_not_resend() {
+        let err =
+            MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
+                solana_signature::Signature::default(),
+                "timed out waiting for processed signature status".to_string(),
+            );
+        assert!(
+            decide_rpc_error_flow(&err).is_break(),
+            "a sent transaction that timed out on processed must be re-polled, not re-signed"
+        );
     }
 }

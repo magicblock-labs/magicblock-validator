@@ -205,8 +205,10 @@ impl MagicBlockSendTransactionConfig {
             check_for_processed_interval: None,
             // NOTE: we skip the processed check here and wait directly for
             //       the commitment level, trusting the confirmed result
-            //       even if an earlier processed check would have failed
-            wait_for_commitment_level: Some(Duration::from_millis(8_000)),
+            //       even if an earlier processed check would have failed.
+            //       Use the processed window so a single send can confirm
+            //       under a large parallel CAU queue instead of re-signing.
+            wait_for_commitment_level: Some(DEFAULT_MAX_TIME_TO_PROCESSED),
             check_for_commitment_interval: Some(Duration::from_millis(400)),
         }
     }

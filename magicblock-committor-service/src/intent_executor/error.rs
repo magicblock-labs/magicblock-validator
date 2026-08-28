@@ -144,7 +144,7 @@ impl IntentExecutorError {
             Self::FailedToFinalizeError {
                 err,
                 commit_signature: None,
-                ..
+                finalize_signature: None,
             } => err.is_transient(),
             Self::FailedToFinalizeError { .. }
             | Self::FailedFinalizePreparationError(_) => false,
@@ -653,6 +653,27 @@ mod tests {
             finalize_signature: None,
         };
         assert!(!err.is_transient());
+    }
+
+    #[test]
+    fn sent_finalize_signature_is_not_retried_as_a_fresh_send() {
+        let confirm_timeout = TransactionStrategyExecutionError::InternalError(
+            InternalError::MagicBlockRpcClientError(Box::new(
+                MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
+                    solana_signature::Signature::default(),
+                    solana_commitment_config::CommitmentLevel::Confirmed,
+                ),
+            )),
+        );
+        let err = super::IntentExecutorError::FailedToFinalizeError {
+            err: confirm_timeout,
+            commit_signature: None,
+            finalize_signature: Some(solana_signature::Signature::default()),
+        };
+        assert!(
+            !err.is_transient(),
+            "single-stage CAU already submitted a signature; re-executing would send again"
+        );
     }
 
     #[test]
