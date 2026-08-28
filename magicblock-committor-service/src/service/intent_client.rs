@@ -109,10 +109,21 @@ impl InternalIntentRpcClient {
     /// Sends transaction to move the scheduled commits from the `MagicContext`
     /// to the global ScheduledCommit store
     async fn send_accept_tx(&self) -> Result<(), InternalIntentClientError> {
+        // The ER blockhash only rotates when transactions execute, so on an
+        // otherwise idle validator consecutive accept transactions would be
+        // byte-identical and rejected as AlreadyProcessed, wedging intent
+        // delivery. A nonce noop makes every accept unique.
+        static ACCEPT_NONCE: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(0);
+        let nonce =
+            ACCEPT_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
         let authority = self.engine.authority();
-        let ix =
-            InstructionUtils::accept_scheduled_commits_instruction(&authority);
-        let message = Message::new(&[ix], Some(&authority));
+        let ixs = [
+            InstructionUtils::accept_scheduled_commits_instruction(&authority),
+            InstructionUtils::noop_instruction(nonce),
+        ];
+        let message = Message::new(&ixs, Some(&authority));
         self.execute(message).await.inspect_err(|err| {
             error!(error = ?err, "Failed to accept scheduled commits");
         })
