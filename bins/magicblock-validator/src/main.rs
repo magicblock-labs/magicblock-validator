@@ -3,8 +3,11 @@ mod leader;
 mod ledger;
 mod magic_sys_adapter;
 
+use std::process::ExitCode;
+
+use anyhow::{Context, Result};
 use leader::Leader;
-use magicblock_config::LeaderParams;
+use magicblock_config::{ConfigError, LeaderParams};
 use nucleus::shutdown::ShutdownReason;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
@@ -17,7 +20,14 @@ fn init_logger() {
     });
 }
 
-fn main() {
+fn main() -> ExitCode {
+    init_logger();
+    let reason =
+        try_main().unwrap_or_else(|error| ShutdownReason::Error(error.into()));
+    exit(reason)
+}
+
+fn try_main() -> Result<ShutdownReason> {
     // Reserve most CPUs for blocking I/O, RPC, and engine execution.
     let workers = (num_cpus::get() / 4).max(1);
     let runtime = Builder::new_multi_thread()
@@ -25,21 +35,17 @@ fn main() {
         .enable_all()
         .thread_name("async-runtime")
         .build()
-        .expect("failed to build async runtime");
-    runtime.block_on(run());
+        .context("failed to build leader async runtime")?;
+    let result = runtime.block_on(run());
     info!("main runtime shutdown");
+    result
 }
 
 #[instrument(skip_all)]
-async fn run() {
-    let config = match LeaderParams::try_new(std::env::args_os()) {
-        Ok(config) => config,
-        Err(error) => {
-            eprintln!("Failed to read leader config: {error}");
-            std::process::exit(1);
-        }
+async fn run() -> Result<ShutdownReason> {
+    let Some(config) = load_config()? else {
+        return Ok(ShutdownReason::Signalled);
     };
-    init_logger();
 
     info!("Starting leader\n{config}");
     let rpc_url = config.aperture.listen.http();
@@ -47,30 +53,34 @@ async fn run() {
     let identity = config.engine.authority.local.pubkey().to_string();
     let remote_rpc_url = config.rpc_url().to_owned();
 
-    let mut leader = match Leader::try_from_config(config).await {
-        Ok(leader) => leader,
-        Err(error) => {
-            error!(%error, "Failed to create leader runtime");
-            std::process::exit(1);
-        }
-    };
+    let mut leader = Leader::try_from_config(config)
+        .await
+        .context("failed to create leader runtime")?;
 
-    if let Err(error) = leader.start().await {
-        error!(%error, "Failed to start leader services");
-        leader.stop().await;
-        std::process::exit(1);
-    }
+    leader.start();
 
     print_startup(&rpc_url, &ws_url, &remote_rpc_url, &identity);
-    let cause = leader.shutdown.wait().await;
-    let failed = !matches!(cause, ShutdownReason::Signalled);
-    if failed {
-        error!(?cause, "Engine service terminated before leader shutdown");
-    }
+    Ok(leader.wait().await)
+}
 
-    leader.stop().await;
-    if failed {
-        std::process::exit(1);
+fn exit(reason: ShutdownReason) -> ExitCode {
+    let code = reason.exit_code();
+    if code == 0 {
+        info!(exit_code = code, "process terminated cleanly");
+    } else {
+        error!(?reason, exit_code = code, "process terminated");
+    }
+    ExitCode::from(code)
+}
+
+fn load_config() -> Result<Option<LeaderParams>> {
+    match LeaderParams::try_new(std::env::args_os()) {
+        Ok(config) => Ok(Some(config)),
+        Err(ConfigError::Cli(error)) if error.exit_code() == 0 => {
+            error.print().context("failed to print leader help")?;
+            Ok(None)
+        }
+        Err(error) => Err(error).context("failed to load leader config"),
     }
 }
 

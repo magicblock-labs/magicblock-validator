@@ -4,7 +4,6 @@ use dlp_api::instruction_builder::validator_claim_fees;
 use integration_test_tools::{
     loaded_accounts::LoadedAccounts, IntegrationTestContext,
 };
-use magicblock_validator_admin::claim_fees::ClaimFeesTask;
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -85,26 +84,6 @@ fn test_add_fees_to_vault() {
     println!("✓ Added {} lamports test fees to vault", TEST_FEE_AMOUNT);
 }
 
-/// Test the ClaimFeesTask struct
-fn test_claim_fees_task() {
-    println!("Testing ClaimFeesTask struct...");
-
-    let task = ClaimFeesTask::new();
-
-    // Test that the task starts in the correct state
-    assert!(task.handle.is_none(), "Task should start with no handle");
-
-    println!("✓ ClaimFeesTask created successfully");
-
-    let default_task = ClaimFeesTask::default();
-    assert!(
-        default_task.handle.is_none(),
-        "Default task should have no handle"
-    );
-
-    println!("✓ ClaimFeesTask default implementation works");
-}
-
 /// Test the actual fee claiming transaction
 fn test_claim_fees_transaction() {
     println!("Testing actual claim fees transaction...");
@@ -182,16 +161,13 @@ fn test_validator_claim_fees() {
     println!("=== Test 1: Instruction Creation ===");
     test_claim_fees_instruction();
 
-    println!("\n=== Test 2: ClaimFeesTask Struct ===");
-    test_claim_fees_task();
-
-    println!("\n=== Test 3: Add Test Fees ===");
+    println!("\n=== Test 2: Add Test Fees ===");
     test_add_fees_to_vault();
 
-    println!("\n=== Test 4: Claim Fees Transaction ===");
+    println!("\n=== Test 3: Claim Fees Transaction ===");
     test_claim_fees_transaction();
 
-    println!("\n=== Test 5: RPC Connection ===");
+    println!("\n=== Test 4: RPC Connection ===");
     test_claim_fees_rpc_connection();
 
     println!("\nAll tests completed successfully!");

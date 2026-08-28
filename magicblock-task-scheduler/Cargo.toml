@@ -14,6 +14,7 @@ futures-util = { workspace = true }
 keeper = { workspace = true }
 magicblock-config = { workspace = true }
 magicblock-program = { workspace = true }
+nucleus = { workspace = true }
 rusqlite = { workspace = true }
 solana-instruction = { workspace = true, features = ["wincode"] }
 solana-message = { workspace = true }

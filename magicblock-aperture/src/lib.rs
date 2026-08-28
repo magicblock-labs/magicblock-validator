@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{io, net::SocketAddr};
 
 pub use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
@@ -38,10 +38,8 @@ impl JsonRpcServer {
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let http = TcpListener::bind(config.listen.0)
-            .await
-            .map_err(RpcError::internal)?;
-        let http_addr = http.local_addr().map_err(RpcError::internal)?;
+        let http = TcpListener::bind(config.listen.0).await?;
+        let http_addr = http.local_addr()?;
 
         let mut ws_addr = http_addr;
         let listen_port = config.listen.0.port();
@@ -50,17 +48,18 @@ impl JsonRpcServer {
             ws_addr.set_port(0);
         } else {
             let ws_port = listen_port.checked_add(1).ok_or_else(|| {
-                RpcError::internal(format!(
-                    "RPC listen port {listen_port} leaves no room for the \
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "RPC listen port {listen_port} leaves no room for the \
                      derived WebSocket port (listen + 1)."
-                ))
+                    ),
+                )
             })?;
             ws_addr.set_port(ws_port);
         }
-        let ws = TcpListener::bind(ws_addr)
-            .await
-            .map_err(RpcError::internal)?;
-        let ws_addr = ws.local_addr().map_err(RpcError::internal)?;
+        let ws = TcpListener::bind(ws_addr).await?;
+        let ws_addr = ws.local_addr()?;
 
         // Initialize HTTP and Websocket servers before starting any background
         // delivery tasks, so a bind failure cannot leak engine subscriptions.

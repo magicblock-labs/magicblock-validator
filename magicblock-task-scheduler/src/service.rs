@@ -14,17 +14,15 @@ use magicblock_program::{
     args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest},
     instruction_utils::InstructionUtils,
 };
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_message::Message;
 use tokio::{
     select,
     sync::mpsc,
-    task::{JoinHandle, JoinSet},
+    task::JoinSet,
     time::{Duration, MissedTickBehavior, interval},
 };
-use tokio_util::{
-    sync::CancellationToken,
-    time::{DelayQueue, delay_queue::Key},
-};
+use tokio_util::time::{DelayQueue, delay_queue::Key};
 use tracing::*;
 
 use crate::{
@@ -56,8 +54,6 @@ pub struct TaskSchedulerService {
     task_versions: HashMap<i64, i64>,
     /// Number of consecutive failed execution attempts for each task
     task_execution_retries: HashMap<i64, u32>,
-    /// Token used to cancel the task scheduler
-    token: CancellationToken,
     /// Minimum interval between task executions
     min_interval: Duration,
     /// How long failed task and scheduling records are retained.
@@ -75,9 +71,9 @@ enum ProcessingOutcome {
     Recoverable(Box<TaskSchedulerError>),
 }
 
-// SAFETY: TaskSchedulerService is moved into a single Tokio task in `start()` and never cloned.
+// SAFETY: TaskSchedulerService is moved into a single Tokio task in `run()` and never cloned.
 // It runs exclusively on that task's thread. All fields (SchedulerDatabase, Engine,
-// mpsc::Receiver, DelayQueue, HashMap, AtomicU64, CancellationToken) are Send+Sync,
+// mpsc::Receiver, DelayQueue, HashMap, and AtomicU64) are Send+Sync,
 // and the service maintains exclusive ownership throughout its lifetime.
 unsafe impl Send for TaskSchedulerService {}
 unsafe impl Sync for TaskSchedulerService {}
@@ -88,7 +84,6 @@ impl TaskSchedulerService {
         config: &TaskSchedulerConfig,
         engine: Engine,
         slot_interval: Duration,
-        token: CancellationToken,
     ) -> TaskSchedulerResult<Self> {
         if config.min_interval.as_millis() > u32::MAX as u128 {
             return Err(TaskSchedulerError::InvalidConfiguration(format!(
@@ -122,7 +117,6 @@ impl TaskSchedulerService {
             task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: Arc::new(AtomicU64::default()),
-            token,
             min_interval: config.min_interval,
             failed_task_retention: config.failed_task_retention,
             failed_task_cleanup_interval: config.failed_task_cleanup_interval,
@@ -130,12 +124,20 @@ impl TaskSchedulerService {
         })
     }
 
-    /// Starts the `TaskSchedulerService` and returns a handle to the task.
-    pub async fn start(
-        mut self,
-    ) -> TaskSchedulerResult<JoinHandle<TaskSchedulerResult<()>>> {
-        self.load_persisted_tasks().await?;
-        Ok(tokio::spawn(self.run()))
+    /// Runs the task scheduler and reports its terminal status after all crank
+    /// workers have stopped.
+    pub async fn run(mut self, mut shutdown: ShutdownHandle) {
+        let result = async {
+            self.load_persisted_tasks().await?;
+            self.run_loop(&shutdown).await
+        }
+        .await;
+        let reason = match result {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 
     async fn load_persisted_tasks(&mut self) -> TaskSchedulerResult<()> {
@@ -185,16 +187,20 @@ impl TaskSchedulerService {
     }
 
     /// Main loop of the task scheduler.
-    async fn run(mut self) -> TaskSchedulerResult<()> {
+    async fn run_loop(
+        mut self,
+        shutdown: &ShutdownHandle,
+    ) -> TaskSchedulerResult<()> {
         let mut failed_task_cleanup = interval(
             self.failed_task_cleanup_interval
                 .max(Duration::from_millis(1)),
         );
         failed_task_cleanup.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-        let (crank_tx, mut crank_rx) = mpsc::unbounded_channel();
+        let mut crank_tasks = JoinSet::new();
 
-        loop {
+        let result = async {
+            loop {
             select! {
                 Some(expired) = self.task_queue.next() => {
                     // A task expired, batch all expired tasks
@@ -212,15 +218,15 @@ impl TaskSchedulerService {
 
                     let engine = self.engine.clone();
                     let tx_counter = self.tx_counter.clone();
-                    let crank_tx = crank_tx.clone();
 
-                    tokio::spawn(async move {
+                    crank_tasks.spawn(async move {
                         let result =
                             Self::send_crank_batch(&engine, tx_counter, &batch).await;
-                        let _ = crank_tx.send((batch, result));
+                        (batch, result)
                     });
                 }
-                Some((batch, result)) = crank_rx.recv() => {
+                Some(result) = crank_tasks.join_next(), if !crank_tasks.is_empty() => {
+                    let (batch, result) = result?;
                     // The batch has been sent, updates queue and db
                     self.on_crank_batch_completed(batch, result).await?;
                 }
@@ -269,19 +275,35 @@ impl TaskSchedulerService {
                         );
                     }
                 }
-                _ = self.token.cancelled() => {
+                _ = shutdown.signalled() => {
                     break;
                 }
             }
+            }
+
+            Ok(())
         }
+        .await;
 
         info!("TaskSchedulerService shutdown!");
-        drop(crank_tx);
-        while let Some((batch, result)) = crank_rx.recv().await {
-            self.on_crank_batch_completed(batch, result).await?;
+        if let Err(error) = result {
+            crank_tasks.shutdown().await;
+            return Err(error);
         }
 
-        Ok(())
+        let result = async {
+            while let Some(worker) = crank_tasks.join_next().await {
+                let (batch, worker_result) = worker?;
+                self.on_crank_batch_completed(batch, worker_result).await?;
+            }
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            crank_tasks.shutdown().await;
+        }
+
+        result
     }
 
     /// Processes [TaskRequest] provided by the transaction executor.
@@ -800,6 +822,7 @@ mod tests {
         args::ScheduleTaskRequest,
         validator::generate_validator_authority_if_needed,
     };
+    use nucleus::shutdown::{Service, ShutdownManager};
     use solana_pubkey::Pubkey;
     use tokio::time::timeout;
 
@@ -822,7 +845,6 @@ mod tests {
             task_versions: HashMap::new(),
             task_execution_retries: HashMap::new(),
             tx_counter: Arc::new(AtomicU64::default()),
-            token: CancellationToken::new(),
             min_interval: Duration::from_millis(1000),
             failed_task_retention: Duration::from_secs(60),
             failed_task_cleanup_interval: Duration::from_secs(60),
@@ -865,7 +887,9 @@ mod tests {
 
         let (_engine, tx, service) = setup(db.clone()).await;
 
-        let handle = service.start().await.unwrap();
+        let mut shutdown = ShutdownManager::default();
+        let handle =
+            tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
 
         // Invalid task interval
         tx.try_send(encode_task(&TaskRequest::Schedule(ScheduleTaskRequest {
@@ -902,7 +926,8 @@ mod tests {
         .await
         .unwrap_err();
 
-        handle.abort();
+        let _ = shutdown.terminate().await;
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -936,7 +961,9 @@ mod tests {
         .unwrap();
         let (_engine, _tx, service) = setup(db.clone()).await;
 
-        let handle = service.start().await.unwrap();
+        let mut shutdown = ShutdownManager::default();
+        let handle =
+            tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
 
         // After starting, only one task should be in the database
         timeout(Duration::from_secs(1), async move {
@@ -951,7 +978,8 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        handle.abort();
+        let _ = shutdown.terminate().await;
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -985,7 +1013,9 @@ mod tests {
         let (_engine, _tx, mut service) = setup(db.clone()).await;
         service.min_interval = Duration::from_millis(10);
 
-        let handle = service.start().await.unwrap();
+        let mut shutdown = ShutdownManager::default();
+        let handle =
+            tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
 
         timeout(Duration::from_secs(1), async move {
             loop {
@@ -999,7 +1029,8 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        handle.abort();
+        let _ = shutdown.terminate().await;
+        handle.await.unwrap();
     }
 
     #[tokio::test]
@@ -1070,7 +1101,9 @@ mod tests {
         service.failed_task_retention = Duration::from_millis(1);
         service.failed_task_cleanup_interval = Duration::from_millis(5);
 
-        let handle = service.start().await.unwrap();
+        let mut shutdown = ShutdownManager::default();
+        let handle =
+            tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
 
         timeout(Duration::from_secs(1), async move {
             loop {
@@ -1085,6 +1118,7 @@ mod tests {
         .await
         .unwrap()
         .unwrap();
-        handle.abort();
+        let _ = shutdown.terminate().await;
+        handle.await.unwrap();
     }
 }

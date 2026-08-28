@@ -3,13 +3,13 @@ use std::time::Duration;
 use dlp_api::instruction_builder::validator_claim_fees;
 use engine::Engine;
 use magicblock_rpc_client::MagicBlockRpcClientError;
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
-use tokio::{task::JoinHandle, time::Instant};
-use tokio_util::sync::CancellationToken;
+use tokio::time::Instant;
 use tracing::{error, info, instrument};
 
 const MIN_CLAIMABLE_LAMPORTS: u64 = 100_000_000;
@@ -25,61 +25,10 @@ pub enum ClaimFeesError {
     Rpc(#[from] MagicBlockRpcClientError),
 }
 
-pub struct ClaimFeesTask {
-    pub handle: Option<JoinHandle<()>>,
-    token: CancellationToken,
-}
-
-impl ClaimFeesTask {
-    pub fn new() -> Self {
-        Self {
-            handle: None,
-            token: CancellationToken::new(),
-        }
-    }
-
-    pub fn start(
-        &mut self,
-        engine: Engine,
-        tick_period: Duration,
-        url: String,
-    ) {
-        if self.handle.is_some() {
-            error!("Claim fees task already started");
-            return;
-        }
-
-        let token = self.token.clone();
-        let handle =
-            tokio::spawn(run_claim_fees_loop(engine, token, tick_period, url));
-        self.handle = Some(handle);
-    }
-
-    pub async fn stop(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            info!("Stopping claim fees task");
-            self.token.cancel();
-            // Give the task a grace period to shut down gracefully
-            if tokio::time::timeout(Duration::from_secs(2), handle)
-                .await
-                .is_err()
-            {
-                error!("Claim fees task did not stop within grace period");
-            }
-        }
-    }
-}
-
-impl Default for ClaimFeesTask {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[instrument(skip(engine, token), fields(tick_period_ms = tick_period.as_millis() as u64, url = %url))]
-async fn run_claim_fees_loop(
+#[instrument(skip(engine, shutdown), fields(tick_period_ms = tick_period.as_millis() as u64, url = %url))]
+pub async fn run_claim_fees_loop(
     engine: Engine,
-    token: CancellationToken,
+    mut shutdown: ShutdownHandle,
     tick_period: Duration,
     url: String,
 ) {
@@ -93,10 +42,11 @@ async fn run_claim_fees_loop(
                     error!(error = ?err, "Failed to claim fees");
                 }
             },
-            _ = token.cancelled() => break,
+            _ = shutdown.signalled() => break,
         }
     }
     info!("Claim fees task stopped");
+    shutdown.terminate(ShutdownReason::Signalled);
 }
 
 #[instrument(skip(engine), fields(validator = %engine.authority()))]
