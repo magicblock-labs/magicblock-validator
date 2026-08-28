@@ -25,7 +25,6 @@ use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use tokio::{
     sync::{Notify, broadcast},
     task,
-    task::JoinError,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
@@ -103,25 +102,22 @@ where
         let processing_results = self.processing_results.clone();
         let intents_changed = self.intents_changed.clone();
         let intent_rpc_client = self.intent_rpc_client.clone();
-        let mut result_worker = tokio::spawn(async move {
-            Self::result_processor(
-                result_subscriber,
-                result_shutdown,
-                intents_meta_map,
-                processing_results,
-                intents_changed,
-                intent_rpc_client,
-            )
-            .await;
-        });
+        let result_worker = Self::result_processor(
+            result_subscriber,
+            result_shutdown,
+            intents_meta_map,
+            processing_results,
+            intents_changed,
+            intent_rpc_client,
+        );
+        tokio::pin!(result_worker);
         let accept_token = CancellationToken::new();
         let accept_shutdown = accept_token.clone();
         let pending_intents = self.intents_meta_map.clone();
         let processing_results = self.processing_results.clone();
         let pending_changed = self.intents_changed.clone();
-        let mut accept_worker = tokio::spawn(async move {
-            self.accept_worker(accept_shutdown).await;
-        });
+        let accept_worker = self.accept_worker(accept_shutdown);
+        tokio::pin!(accept_worker);
 
         tokio::select! {
             biased;
@@ -129,7 +125,7 @@ where
                 // Do not drop completion notifications for already accepted
                 // intents: stop ingress, drain results, then stop observation.
                 accept_token.cancel();
-                accept_worker.await.map_err(IntentExecutionServiceError::WorkerJoin)?;
+                accept_worker.await;
 
                 tokio::select! {
                     biased;
@@ -138,24 +134,30 @@ where
                         processing_results,
                         pending_changed,
                     ) => {}
-                    result = &mut result_worker => {
-                        return Err(Self::worker_failure("result processor", result));
+                    _ = &mut result_worker => {
+                        return Err(IntentExecutionServiceError::WorkerStopped(
+                            "result processor",
+                        ));
                     }
                 }
 
                 result_token.cancel();
-                result_worker.await.map_err(IntentExecutionServiceError::WorkerJoin)?;
+                result_worker.await;
                 Ok(())
             }
-            result = &mut accept_worker => {
+            _ = &mut accept_worker => {
                 result_token.cancel();
-                let _ = result_worker.await;
-                Err(Self::worker_failure("intent acceptor", result))
+                result_worker.await;
+                Err(IntentExecutionServiceError::WorkerStopped(
+                    "intent acceptor",
+                ))
             }
-            result = &mut result_worker => {
+            _ = &mut result_worker => {
                 accept_token.cancel();
-                let _ = accept_worker.await;
-                Err(Self::worker_failure("result processor", result))
+                accept_worker.await;
+                Err(IntentExecutionServiceError::WorkerStopped(
+                    "result processor",
+                ))
             }
         }
     }
@@ -174,16 +176,6 @@ where
                 return;
             }
             intents_changed.notified().await;
-        }
-    }
-
-    fn worker_failure(
-        worker: &'static str,
-        result: Result<(), JoinError>,
-    ) -> IntentExecutionServiceError {
-        match result {
-            Ok(()) => IntentExecutionServiceError::WorkerStopped(worker),
-            Err(error) => IntentExecutionServiceError::WorkerJoin(error),
         }
     }
 
@@ -549,8 +541,6 @@ where
 pub enum IntentExecutionServiceError {
     #[error("Intent execution worker '{0}' stopped unexpectedly")]
     WorkerStopped(&'static str),
-    #[error("Intent execution worker failed: {0}")]
-    WorkerJoin(#[from] JoinError),
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalIntentClientError),
 }
