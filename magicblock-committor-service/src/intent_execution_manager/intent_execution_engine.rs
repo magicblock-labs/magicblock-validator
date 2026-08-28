@@ -145,7 +145,7 @@ where
 
     /// Spawns `main_loop` and return `Receiver` listening to results
     pub fn spawn(self) -> ResultSubscriber {
-        let (result_sender, _) = broadcast::channel(100);
+        let (result_sender, _) = broadcast::channel(4096);
         tokio::spawn(self.main_loop(result_sender.clone()));
 
         ResultSubscriber(result_sender)
@@ -273,7 +273,18 @@ where
         db: &Arc<D>,
     ) -> Result<ScheduledIntentBundle, IntentExecutionManagerError> {
         match receiver.try_recv() {
-            Ok(val) => Ok(val),
+            Ok(val) => {
+                // Independent later CAUs may jump a DummyDB backlog. A later
+                // CAU for an account already queued must wait its turn.
+                if db.conflicts_with(&val) {
+                    db.store_intent_bundle(val).await?;
+                    Ok(db.pop_intent_bundle().await?.expect(
+                        "DummyDB cannot be empty after storing a conflicting intent",
+                    ))
+                } else {
+                    Ok(val)
+                }
+            }
             Err(TryRecvError::Empty) => {
                 // Worker either cleaned-up congested channel and now need to clean-up DB
                 // or we're just waiting on empty channel
@@ -629,6 +640,77 @@ mod tests {
             result.inner.unwrap_err().to_string(),
             "FailedToCommitError: InternalError: SignerError: custom error: oops"
         );
+    }
+
+    #[tokio::test]
+    async fn test_get_new_intent_does_not_reorder_same_account_behind_db() {
+        let (sender, worker) = setup_engine(false);
+        let shared = pubkey!("1111111111111111111111111111111111111111111");
+        let earlier = create_test_intent(1, &[shared], true);
+        let later = create_test_intent(2, &[shared], true);
+        worker.db.store_intent_bundle(earlier.clone()).await.unwrap();
+        sender.send(later).await.unwrap();
+
+        let mut receiver = worker.receiver;
+        let next = MockIntentExecutionEngine::get_new_intent(
+            &mut receiver,
+            &worker.db,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            next.id, 1,
+            "later CAU for the same account must not jump an earlier one still in DummyDB"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_new_intent_runs_nonconflicting_channel_intent_ahead_of_db()
+    {
+        let (sender, worker) = setup_engine(false);
+        let queued = create_test_intent(1, &[Pubkey::new_unique()], true);
+        let incoming = create_test_intent(2, &[Pubkey::new_unique()], true);
+        worker.db.store_intent_bundle(queued).await.unwrap();
+        sender.send(incoming.clone()).await.unwrap();
+
+        let mut receiver = worker.receiver;
+        let next = MockIntentExecutionEngine::get_new_intent(
+            &mut receiver,
+            &worker.db,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            next.id, 2,
+            "independent later CAUs must not wait behind a DummyDB ticket backlog"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_enqueue_keeps_channel_usable_when_db_has_backlog() {
+        let (sender, receiver) = mpsc::channel(4);
+        let db = DummyDB::new();
+        let queued = create_test_intent(1, &[Pubkey::new_unique()], true);
+        db.store_intent_bundle(queued).await.unwrap();
+
+        let incoming = create_test_intent(2, &[Pubkey::new_unique()], true);
+        crate::intent_execution_manager::enqueue_intent_bundles(
+            &sender,
+            &db,
+            vec![incoming.clone()],
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            !db.is_empty(),
+            "backlog stays in DummyDB until the worker drains it"
+        );
+        let mut receiver = receiver;
+        let from_channel = receiver.try_recv().expect(
+            "non-conflicting later CAU must enter the live channel, not the DummyDB tail",
+        );
+        assert_eq!(from_channel.id, 2);
     }
 
     #[tokio::test]
