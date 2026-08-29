@@ -11,7 +11,7 @@ use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_signature::Signature;
 use tokio::{
-    sync::{broadcast, OwnedSemaphorePermit, Semaphore},
+    sync::{OwnedSemaphorePermit, Semaphore, broadcast},
     task::JoinHandle,
     time::sleep,
 };
@@ -27,10 +27,10 @@ use crate::{
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
     },
     intent_executor::{
+        ExecutionOutput, IntentExecutionResult,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_executor_factory::IntentExecutorBuilder,
         strategy_executor::error::TransactionStrategyExecutionError,
-        ExecutionOutput, IntentExecutionResult,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -448,7 +448,7 @@ mod tests {
     use magicblock_rpc_client::MagicBlockRpcClientError;
     use solana_keypair::Keypair;
     use solana_message::VersionedMessage;
-    use solana_pubkey::{pubkey, Pubkey};
+    use solana_pubkey::{Pubkey, pubkey};
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
@@ -458,23 +458,23 @@ mod tests {
     use crate::{
         intent_engine::{
             db::{BacklogDB, DummyDB},
-            intent_channel::{channel, IntentScheduleHandle},
+            intent_channel::{IntentScheduleHandle, channel},
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
+            IntentExecutionResult, IntentExecutor,
             cleanup_handle::CleanupHandle,
             error::{IntentExecutorError as ExecutorError, InternalError},
             intent_executor_factory::IntentExecutorBuilder,
-            IntentExecutionResult, IntentExecutor,
         },
         tasks::task_strategist::TransactionStrategy,
         test_utils,
         transaction_preparator::{
+            TransactionPreparator,
             delivery_preparator::{
                 BufferExecutionError, DeliveryPreparatorResult,
             },
             error::PreparatorResult,
-            TransactionPreparator,
         },
     };
 

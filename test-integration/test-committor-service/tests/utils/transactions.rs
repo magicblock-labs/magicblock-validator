@@ -202,7 +202,8 @@ pub async fn init_and_delegate_account_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let ixs = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    let ixs =
+        init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
     run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
 }
 
@@ -215,8 +216,11 @@ pub async fn init_and_delegate_flexi_counter_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let ixs =
-        init_flexi_counter_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    let ixs = init_flexi_counter_and_delegate_ixs(
+        counter_auth.pubkey(),
+        bytes,
+        label,
+    );
     run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
 }
 

@@ -600,7 +600,7 @@ fn test_close_buffer_limit() {
     use crate::{
         tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
         test_utils,
-        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+        utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
     };
 
     test_utils::init_test_logger();

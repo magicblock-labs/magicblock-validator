@@ -2982,16 +2982,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             .unwrap_or_else(|poison| poison.into_inner());
         fetching.contains_key(pubkey)
     }
-
-    /// Number of callers waiting on the in-flight fetch for `pubkey`
-    /// (the owner included).
-    pub(crate) fn pending_fetch_waiter_count(&self, pubkey: &Pubkey) -> usize {
-        let fetching = self
-            .fetching_accounts
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        fetching.get(pubkey).map_or(0, |state| state.waiters.len())
-    }
 }
 
 #[cfg(any(test, feature = "dev-context"))]

@@ -16,7 +16,7 @@ use tokio::sync::broadcast;
 use crate::{
     intent_engine::{
         db::BacklogDB,
-        intent_channel::{channel, IntentScheduleError, IntentScheduleHandle},
+        intent_channel::{IntentScheduleError, IntentScheduleHandle, channel},
         intent_execution_engine::{IntentExecutionEngine, ResultSubscriber},
     },
     intent_executor::{
@@ -33,6 +33,7 @@ pub struct IntentEngineHandle<D> {
 }
 
 impl<D: BacklogDB> IntentEngineHandle<D> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new<A, O>(
         authority: Keypair,
         rpc_client: MagicblockRpcClient,

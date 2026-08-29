@@ -5,7 +5,7 @@ use magicblock_committor_program::{
     instruction::IX_WRITE_SIZE_WITHOUT_CHUNKS,
 };
 use solana_packet::PACKET_DATA_SIZE;
-use wincode::{config::DefaultConfig, SchemaWrite};
+use wincode::{SchemaWrite, config::DefaultConfig};
 
 const BUDGET_SET_COMPUTE_UNIT_PRICE_BYTES: u16 = (1 + 8) * 8;
 const BUDGET_SET_COMPUTE_UNIT_LIMIT_BYTES: u16 = (1 + 4) * 8;

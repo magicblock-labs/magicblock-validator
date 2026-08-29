@@ -11,6 +11,8 @@ use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::utils::{
@@ -20,8 +22,6 @@ use crate::{
             build_commit_finalize_tasks, execute_single_stage_flow,
             report_and_close_intent,
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{

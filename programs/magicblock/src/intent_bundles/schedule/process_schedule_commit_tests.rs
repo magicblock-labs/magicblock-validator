@@ -416,12 +416,13 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let intent_ids = MagicContext::deserialize(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+            let intent_ids =
+                MagicContext::deserialize(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
             );
@@ -604,12 +605,13 @@ mod tests {
                     &payer, program, committee,
                 );
 
-            let intent_ids = MagicContext::deserialize(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+            let intent_ids =
+                MagicContext::deserialize(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
             );
@@ -951,12 +953,13 @@ mod tests {
                 (true, true, true),
             );
 
-            let intent_ids = MagicContext::deserialize(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+            let intent_ids =
+                MagicContext::deserialize(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
             );
@@ -1073,12 +1076,13 @@ mod tests {
                 (true, true, true),
             );
 
-            let intent_ids = MagicContext::deserialize(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+            let intent_ids =
+                MagicContext::deserialize(magic_context_acc.data())
+                    .unwrap()
+                    .scheduled_base_intents
+                    .into_iter()
+                    .map(|i| i.id)
+                    .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
             );

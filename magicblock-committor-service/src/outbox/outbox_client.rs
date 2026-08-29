@@ -2,12 +2,12 @@ use std::{mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use accountsdb::AccountsDBError;
 use async_trait::async_trait;
-use backoff::{future::retry, ExponentialBackoff};
+use backoff::{ExponentialBackoff, future::retry};
 use engine::{Engine, EngineError, IntoTransactionView};
 use magicblock_program::{
-    instruction_utils::InstructionUtils,
+    MAGIC_CONTEXT_PUBKEY, MagicContext, instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent, MagicContext, MAGIC_CONTEXT_PUBKEY,
+    register_scheduled_commit_sent,
 };
 use solana_account::ReadableAccount;
 use solana_rpc_client::{
@@ -21,12 +21,12 @@ use tracing::{debug, error};
 
 use crate::{
     intent_executor::{
-        error::IntentExecutorResult, ExecutionOutput, IntentExecutionReport,
+        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
     },
     outbox::{
+        IntentSentTransaction, OutboxClient, ScheduledBaseIntentMeta,
         outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
-        utils::build_sent_commit, IntentSentTransaction, OutboxClient,
-        ScheduledBaseIntentMeta,
+        utils::build_sent_commit,
     },
 };
 
@@ -144,7 +144,8 @@ impl OutboxClient for InternalOutboxClient {
             )
             .map_err(|err| (vec![], err.into()))?;
 
-        self.send_accept_tx(magic_context.scheduled_base_intents).await
+        self.send_accept_tx(magic_context.scheduled_base_intents)
+            .await
     }
 
     async fn set_intent_execution_stage(

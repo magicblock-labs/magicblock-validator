@@ -9,9 +9,9 @@ use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use pin_project::pin_project;
 use tokio::sync::{
     mpsc,
-    mpsc::{error::TrySendError, Receiver, Sender},
+    mpsc::{Receiver, Sender, error::TrySendError},
 };
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::intent_engine::{db, db::BacklogDB};
 

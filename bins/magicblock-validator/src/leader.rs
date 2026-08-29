@@ -11,8 +11,7 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
-    committor_processor::CommittorProcessor,
-    config::ChainConfig,
+    committor_processor::CommittorProcessor, config::ChainConfig,
     intent_engine::db::DummyIntentBacklog,
     outbox::outbox_client::InternalOutboxClient,
     service::IntentExecutionService,
@@ -209,7 +208,8 @@ impl Leader {
         config: &LeaderParams,
         engine: &Engine,
     ) -> InternalOutboxClient {
-        let rpc_client = Arc::new(RpcClient::new(config.aperture.listen.http()));
+        let rpc_client =
+            Arc::new(RpcClient::new(config.aperture.listen.http()));
         InternalOutboxClient::new(engine.clone(), rpc_client)
     }
 

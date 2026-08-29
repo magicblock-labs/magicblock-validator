@@ -1,6 +1,6 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    collections::{HashMap, hash_map::Entry},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 
 use futures_util::future::join_all;
@@ -18,7 +18,7 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_engine::{
-        db::BacklogDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
+        BroadcastedIntentExecutionResult, IntentEngineHandle, db::BacklogDB,
     },
     intent_executor::{
         error::IntentExecutorError, intent_executor_factory::ExecutorConfig,

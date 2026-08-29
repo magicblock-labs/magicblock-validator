@@ -23,7 +23,7 @@ use solana_pubkey::Pubkey;
 use solana_transaction_context::transaction::TransactionContext;
 
 pub use crate::intent_bundles::outbox::process_scheduled_commit_sent::{
-    process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
+    SentCommit, process_scheduled_commit_sent, register_scheduled_commit_sent,
 };
 pub(crate) use crate::intent_bundles::{
     outbox::{

@@ -5,7 +5,7 @@ use std::{
 
 use magicblock_chainlink::ProdChainlink;
 use magicblock_metrics::metrics::{self};
-use magicblock_program::{outbox_intent_bundles::OutboxIntentBundle, Pubkey};
+use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
 use solana_transaction::Transaction;
 use tokio::{
     task,
@@ -20,11 +20,11 @@ use crate::{
     intent_engine::db::BacklogDB,
     intent_executor::error::IntentExecutorError,
     outbox::{
+        OutboxClient,
         outbox_client::InternalOutboxClientError,
         outbox_intent_bundles_reader::{
             OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
         },
-        OutboxClient,
     },
 };
 

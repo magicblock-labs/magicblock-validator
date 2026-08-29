@@ -8,7 +8,7 @@ use accountsdb::AccountsDBError;
 use async_trait::async_trait;
 use engine::Engine;
 use magicblock_core::intent::outbox::{
-    outbox_intent_pda, OUTBOX_INTENT_DISCRIMINATOR,
+    OUTBOX_INTENT_DISCRIMINATOR, outbox_intent_pda,
 };
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -77,7 +77,8 @@ impl InternalOutboxIntentBundlesReader {
         }
 
         let accounts = self.engine.accounts();
-        let outbox_candidates_iter = accounts.program(&magicblock_program::ID)?;
+        let outbox_candidates_iter =
+            accounts.program(&magicblock_program::ID)?;
 
         // Create iterator that yields valid, unconsumed intents
         let outbox_iter = outbox_candidates_iter
@@ -175,8 +176,7 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
         intent_id: u64,
     ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
         let pda = outbox_intent_pda(intent_id);
-        let Some(account) = self.engine.accounts().loader().load(&pda)?
-        else {
+        let Some(account) = self.engine.accounts().loader().load(&pda)? else {
             return Ok(None);
         };
         Ok(Some(OutboxIntentBundle::try_from_bytes(account.data())?))

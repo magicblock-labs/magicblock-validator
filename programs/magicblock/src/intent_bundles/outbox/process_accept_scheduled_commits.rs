@@ -7,22 +7,21 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
-
 use solana_transaction_context::transaction::TransactionContext;
 
 use crate::{
+    MagicContext,
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     schedule_transactions,
     utils::{
         account_actions::set_account_mode,
         accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-            InstructionAccount,
+            InstructionAccount, get_instruction_account_with_idx,
+            get_instruction_pubkey_with_idx,
         },
     },
     validator::authority,
-    MagicContext,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;

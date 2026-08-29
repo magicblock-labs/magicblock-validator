@@ -56,7 +56,8 @@ fn validate(
         ic_msg!(
             invoke_context,
             "CloseOutboxIntent ERR: provided validator account {} does not match validator identity {}",
-            validator_pubkey, validator_authority_id
+            validator_pubkey,
+            validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
     }
@@ -105,16 +106,17 @@ fn validate(
     // Validate if intent reached stage where it can be closed
     let intent_acc =
         get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let bundle =
-        OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data())
-            .map_err(|_| {
-                ic_msg!(
-                invoke_context,
-                "CloseOutboxIntent ERR: failed to deserialize outbox intent {}",
-                intent_id
-            );
-                InstructionError::InvalidAccountData
-            })?;
+    let bundle = OutboxIntentBundle::try_from_bytes(
+        intent_acc.borrow()?.data(),
+    )
+    .map_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "CloseOutboxIntent ERR: failed to deserialize outbox intent {}",
+            intent_id
+        );
+        InstructionError::InvalidAccountData
+    })?;
     if !bundle.is_final_stage() {
         ic_msg!(
             invoke_context,
@@ -147,12 +149,12 @@ fn close_outbox_ephemeral_account(
 mod tests {
     use magicblock_core::intent::MagicIntentBundle;
     use magicblock_magic_program_api::{
-        outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
         EPHEMERAL_VAULT_PUBKEY,
+        outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
     };
     use solana_account::{AccountMode, AccountSharedData};
     use solana_hash::Hash;
-    use solana_instruction::{error::InstructionError, Instruction};
+    use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signature::Signature;

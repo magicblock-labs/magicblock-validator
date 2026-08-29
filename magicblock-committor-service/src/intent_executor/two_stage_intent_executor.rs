@@ -12,21 +12,21 @@ use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
             utils::{
-                execute_with_timeout, requires_uniqueness_nonce,
-                resolve_pending_signature, FinalizeStage,
+                FinalizeStage, execute_with_timeout, requires_uniqueness_nonce,
+                resolve_pending_signature,
             },
         },
         utils::{
             build_commit_finalize_tasks, execute_two_stage_flow,
             report_and_close_intent,
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{

@@ -1,7 +1,7 @@
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
-    args::ScheduleTaskArgs, instruction::MagicBlockInstruction, outbox,
-    pda::crank_signer_pda, CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY,
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
+    instruction::MagicBlockInstruction, outbox, pda::crank_signer_pda,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};

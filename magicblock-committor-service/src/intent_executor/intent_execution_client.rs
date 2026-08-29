@@ -2,13 +2,14 @@ use std::{ops::ControlFlow, time::Duration};
 
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::{
-        decide_rpc_error_flow, get_with_retries, map_magicblock_client_error,
-        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
-    },
     MagicBlockRpcClientError, MagicBlockRpcClientResult,
     MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,
+    utils::{
+        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
+        get_with_retries, map_magicblock_client_error,
+        send_transaction_with_retries,
+    },
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
@@ -22,11 +23,11 @@ use tracing::warn;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput,
         error::{IntentExecutorResult, InternalError},
         strategy_executor::error::{
             IntentTransactionErrorMapper, TransactionStrategyExecutionError,
         },
-        ExecutionOutput,
     },
     tasks::BaseTaskImpl,
 };

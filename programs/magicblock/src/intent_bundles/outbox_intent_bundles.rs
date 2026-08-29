@@ -127,7 +127,7 @@ impl OutboxIntentBundleStatus {
                     TwoStageProgress::Finalizing { .. } => {
                         return Err(
                             "cannot transition from Accepted to Finalizing",
-                        )
+                        );
                     }
                 }
             }

@@ -16,6 +16,7 @@ use tracing::{error, info};
 
 use crate::{
     intent_executor::{
+        IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
@@ -24,17 +25,16 @@ use crate::{
             single_stage::SingleStageStrategyExecutor,
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
         },
-        IntentExecutionReport,
     },
     outbox::OutboxClient,
     tasks::{
+        BaseTaskImpl,
         task_builder::TaskBuilderError,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionStrategy},
-        BaseTaskImpl,
     },
     transaction_preparator::{
-        error::TransactionPreparatorError, TransactionPreparator,
+        TransactionPreparator, error::TransactionPreparatorError,
     },
 };
 

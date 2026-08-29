@@ -6,8 +6,8 @@ use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
 
 use crate::{
-    tasks::{utils::TransactionUtils, BaseActionTask, BaseTask, BaseTaskImpl},
-    utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    tasks::{BaseActionTask, BaseTask, BaseTaskImpl, utils::TransactionUtils},
+    utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
 #[derive(Default, Clone)]
@@ -423,11 +423,11 @@ mod tests {
     use crate::{
         intent_engine::intent_scheduler::create_test_intent,
         tasks::{
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
             commit_task::CommitTask,
             task_builder::{TaskBuilderImpl, TasksBuilder},
+            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
             utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_task},
         },
         test_utils,

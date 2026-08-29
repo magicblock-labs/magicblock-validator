@@ -186,7 +186,8 @@ fn validate(
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: provided validator account {} does not match validator identity {}",
-            validator_pubkey, validator_authority_id
+            validator_pubkey,
+            validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
     }

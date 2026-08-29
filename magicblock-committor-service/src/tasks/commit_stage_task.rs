@@ -310,7 +310,7 @@ mod tests {
         ComputeBudgetConfig,
         tasks::utils::TransactionUtils,
         test_utils,
-        utils::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+        utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
     };
 
     #[test]

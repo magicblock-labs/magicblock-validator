@@ -12,14 +12,14 @@ use solana_signature::Signature;
 use tracing::error;
 
 use crate::tasks::{
+    BaseTaskImpl, FinalizeTask, UndelegateTask,
     task_info_fetcher::{
         TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
     },
     utils::{
-        create_action_tasks, create_commit_finalize_task, create_commit_task,
-        COMMIT_STATE_SIZE_THRESHOLD,
+        COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks,
+        create_commit_finalize_task, create_commit_task,
     },
-    BaseTaskImpl, FinalizeTask, UndelegateTask,
 };
 
 #[async_trait]

@@ -1,7 +1,7 @@
 use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::TransactionErrorMapper, MagicBlockRpcClientError,
+    MagicBlockRpcClientError, utils::TransactionErrorMapper,
 };
 use solana_instruction::error::InstructionError;
 use solana_signature::Signature;

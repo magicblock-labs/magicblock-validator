@@ -10,6 +10,7 @@ use tracing::{error, warn};
 
 use crate::{
     intent_executor::{
+        IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
@@ -19,12 +20,11 @@ use crate::{
                 handle_undelegation_error, prepare_and_execute_strategy,
             },
         },
-        IntentExecutionReport,
     },
     tasks::{
+        BaseTaskImpl, FinalizeTask,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::TransactionStrategy,
-        BaseTaskImpl, FinalizeTask,
     },
     transaction_preparator::TransactionPreparator,
 };

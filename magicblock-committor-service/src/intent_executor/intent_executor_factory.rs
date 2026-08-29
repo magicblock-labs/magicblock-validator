@@ -9,9 +9,9 @@ use solana_keypair::Keypair;
 use crate::{
     ComputeBudgetConfig,
     intent_executor::{
-        build_stage_intent_executor, error::IntentExecutorError,
-        intent_execution_client::IntentExecutionClient, IntentExecutor,
-        IntentExecutorCtx,
+        IntentExecutor, IntentExecutorCtx, build_stage_intent_executor,
+        error::IntentExecutorError,
+        intent_execution_client::IntentExecutionClient,
     },
     outbox::OutboxClient,
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
