@@ -10,6 +10,7 @@ use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
+use solana_keypair::Keypair;
 use tokio::sync::broadcast;
 
 use crate::{
@@ -33,6 +34,7 @@ pub struct IntentEngineHandle<D> {
 
 impl<D: BacklogDB> IntentEngineHandle<D> {
     pub fn new<A, O>(
+        authority: Keypair,
         rpc_client: MagicblockRpcClient,
         db: D,
         task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
@@ -49,6 +51,7 @@ impl<D: BacklogDB> IntentEngineHandle<D> {
         let db = Arc::new(Mutex::new(db));
 
         let executor_factory = IntentExecutorBuilderImpl {
+            authority,
             rpc_client,
             table_mania,
             executor_config,

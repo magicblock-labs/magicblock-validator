@@ -92,6 +92,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
         let commits_scheduler = IntentEngineHandle::new(
+            authority.insecure_clone(),
             magic_block_rpc_client.clone(),
             db,
             task_info_fetcher.clone(),
@@ -184,7 +185,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             return Err(err);
         }
 
-        let results = join_all(receivers.into_iter())
+        let results = join_all(receivers)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, RecvError>>()?;

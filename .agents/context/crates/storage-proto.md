@@ -43,7 +43,6 @@ For the general documentation-update rule, see `.agents/memory/agent-memory-and-
 | `storage-proto/src/lib.rs` | Public crate root. Exposes `convert`, stored compatibility structs, and conversions between stored/bincode-compatible forms and Solana status types. |
 | `storage-proto/src/convert.rs` | Includes generated protobuf modules from `OUT_DIR` and implements `From` / `TryFrom` conversions between generated messages and Solana transaction-status types. Contains conversion tests. |
 | `Cargo.toml` | Workspace dependency and `[patch.crates-io]` entry point this crate uses to replace upstream `solana-storage-proto`. Also pins `prost` with a comment to keep it in sync with codegen. |
-| `test-integration/Cargo.toml` | Integration workspace patch for the same local `solana-storage-proto` replacement. |
 | `magicblock-ledger/src/database/columns.rs` | Defines `cf::TransactionStatus` as a `ProtobufColumn` whose value type is `solana_storage_proto::convert::generated::TransactionStatusMeta`. |
 | `magicblock-ledger/src/database/ledger_column.rs` | Encodes/decodes `ProtobufColumn` values with `prost::Message`; includes fallback helpers for older bincode values. |
 | `magicblock-ledger/src/store/api.rs` | Writes `TransactionStatusMeta` through this crate's generated type and converts protobuf values back to Solana status metadata for ledger/RPC reads. |
@@ -151,7 +150,7 @@ Most protobuf-to-Solana conversions are fallible where malformed external-sized 
 
 ### Workspace patching
 
-The root workspace patches `solana-storage-proto` to `./storage-proto` because Solana dependencies may otherwise pull an upstream crate version with incompatible protobuf tooling. Keep the root and `test-integration` patches aligned when dependency or build-tool versions change.
+The root workspace patches `solana-storage-proto` to `./storage-proto` because Solana dependencies may otherwise pull an upstream crate version with incompatible protobuf tooling.
 
 ## Important invariants
 
@@ -195,7 +194,6 @@ Start with:
 - `storage-proto/build.rs`
 - `storage-proto/Cargo.toml`
 - root `Cargo.toml` workspace `prost`, `protobuf-src`, and `[patch.crates-io]` entries
-- `test-integration/Cargo.toml` patches
 
 Validate on a clean build if possible so stale `OUT_DIR` artifacts do not hide codegen problems.
 
@@ -223,4 +221,4 @@ This can affect persistence compatibility and RPC history. Run both storage-prot
 - `storage-proto/proto/*.proto` — editable protobuf schemas.
 - `storage-proto/build.rs` — protobuf code-generation setup.
 - `magicblock-ledger/src/database/columns.rs`, `magicblock-ledger/src/database/ledger_column.rs`, and `magicblock-ledger/src/store/api.rs` — direct ledger consumers.
-- `Cargo.toml` and `test-integration/Cargo.toml` — workspace patch points for the local `solana-storage-proto` crate.
+- `Cargo.toml` — workspace patch point for the local `solana-storage-proto` crate.

@@ -4,7 +4,7 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
+use magicblock_core::intent::outbox::outbox_intent_pda;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -15,8 +15,7 @@ use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id,
+    utils::accounts::get_instruction_pubkey_with_idx, validator::authority,
 };
 
 /// Error code returned when an intent execution failed.
@@ -116,16 +115,10 @@ pub fn process_scheduled_commit_sent(
     invoke_context: &mut InvokeContext,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    let mode = coordination_mode::CoordinationMode::current();
-    if !mode.should_schedule_intents() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommitSent: skipped (mode={:?})",
-            mode
-        );
-        return Ok(());
-    }
-
+    // No replica gating here: on a replica this will fail (the commit was
+    // never registered in its local SENT_COMMITS map), but that's fine since
+    // this instruction only clears bookkeeping state, not AccountsDB - it has
+    // no effect on the replicated account state a replica needs to converge on.
     validate(&signers, invoke_context, intent_id)?;
 
     // Only after we passed all checks do we remove the commit from the global hashmap
@@ -171,8 +164,7 @@ fn validate(
 ) -> Result<(), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
     const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
-    const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
+    const CLOSING_PDA_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -189,7 +181,7 @@ fn validate(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = effective_validator_authority_id();
+    let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
@@ -309,8 +301,8 @@ fn log_sent_commit(
 #[cfg(test)]
 mod tests {
     use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
-    use solana_account::AccountSharedData;
-    use solana_instruction::{error::InstructionError, Instruction};
+    use solana_account::{AccountMode, AccountSharedData};
+    use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;
@@ -465,13 +457,13 @@ mod tests {
 
         let pda = outbox_intent_pda(commit.message_id);
         let mut pda_account = AccountSharedData::new(0, 0, &crate::id());
-        pda_account.set_ephemeral(true);
+        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut account_data = {
             let mut map = HashMap::new();
             // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
             let mut vault = AccountSharedData::new(10_000, 0, &crate::id());
-            vault.set_ephemeral(true);
+            vault.set_mode(AccountMode::Ephemeral).unwrap();
             map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
             // Add outbox PDA as existing ephemeral account (created by accept)
             map.insert(pda, pda_account);

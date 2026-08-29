@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use derive_more::{Deref, Display};
-use serde::{de, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 use url::Url;
 
@@ -129,7 +129,7 @@ impl Remote {
     }
 
     /// Converts an HTTP remote to a WebSocket remote by deriving the appropriate WebSocket URL.
-    pub(crate) fn to_websocket(&self) -> Option<Self> {
+    pub fn to_websocket(&self) -> Option<Self> {
         let mut url = match self {
             Self::Websocket(_) => return Some(self.clone()),
             Self::Grpc(_) => return None,

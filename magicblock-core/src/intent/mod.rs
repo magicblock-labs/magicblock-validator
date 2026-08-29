@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
+use wincode::{SchemaRead, SchemaWrite};
+
 pub mod outbox;
 pub mod types;
 
@@ -19,7 +21,9 @@ pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
 pub const MISSING_COMMIT_NONCE_ERR: u32 = 0xA000_0001;
 
 // BaseIntent user wants to send to base layer
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub enum MagicBaseIntent {
     /// Actions without commitment or undelegation
     BaseActions(Vec<BaseAction>),
@@ -30,7 +34,17 @@ pub enum MagicBaseIntent {
 }
 
 // Bundle of BaseIntents
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Default,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    SchemaRead,
+    SchemaWrite,
+)]
 pub struct MagicIntentBundle {
     pub commit: Option<CommitType>,
     pub commit_and_undelegate: Option<CommitAndUndelegate>,
@@ -276,16 +290,16 @@ impl MagicIntentBundle {
     }
 
     pub fn get_action_mut(&mut self, id: u64) -> Option<&mut BaseAction> {
-        if let Some(commit) = self.commit.as_mut() {
-            if let Some(action) = commit.get_action_mut(id) {
-                return Some(action);
-            }
+        if let Some(commit) = self.commit.as_mut()
+            && let Some(action) = commit.get_action_mut(id)
+        {
+            return Some(action);
         }
 
-        if let Some(cau) = self.commit_and_undelegate.as_mut() {
-            if let Some(action) = cau.get_action_mut(id) {
-                return Some(action);
-            }
+        if let Some(cau) = self.commit_and_undelegate.as_mut()
+            && let Some(action) = cau.get_action_mut(id)
+        {
+            return Some(action);
         }
 
         if let Some(action) =
@@ -294,16 +308,16 @@ impl MagicIntentBundle {
             return Some(action);
         }
 
-        if let Some(commit_finalize) = self.commit_finalize.as_mut() {
-            if let Some(action) = commit_finalize.get_action_mut(id) {
-                return Some(action);
-            }
+        if let Some(commit_finalize) = self.commit_finalize.as_mut()
+            && let Some(action) = commit_finalize.get_action_mut(id)
+        {
+            return Some(action);
         }
 
-        if let Some(cfau) = self.commit_finalize_and_undelegate.as_mut() {
-            if let Some(action) = cfau.get_action_mut(id) {
-                return Some(action);
-            }
+        if let Some(cfau) = self.commit_finalize_and_undelegate.as_mut()
+            && let Some(action) = cfau.get_action_mut(id)
+        {
+            return Some(action);
         }
 
         None
@@ -382,7 +396,9 @@ impl MagicBaseIntent {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct CommitAndUndelegate {
     pub commit_action: CommitType,
     pub undelegate_action: UndelegateType,
@@ -437,7 +453,9 @@ impl CommitAndUndelegate {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct ProgramArgs {
     pub escrow_index: u8,
     pub data: Vec<u8>,
@@ -458,7 +476,9 @@ impl From<&ActionArgs> for ProgramArgs {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct BaseAction {
     /// Stable identity of this action within its intent bundle, used to
     /// address it independently of its position (e.g. for patch removal).
@@ -473,7 +493,9 @@ pub struct BaseAction {
 }
 
 /// A callback that is execution with result of BaseAction
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct BaseActionCallback {
     pub destination_program: Pubkey,
     pub discriminator: Vec<u8>,
@@ -482,7 +504,9 @@ pub struct BaseActionCallback {
     pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub enum CommitType {
     /// Regular commit without actions
     Standalone(Vec<CommittedAccount>), // accounts to commit
@@ -501,7 +525,7 @@ impl CommitType {
     ) -> Result<u64, InstructionError> {
         let mut fee = 0;
         match self {
-            CommitType::Standalone(ref committed_accounts) => {
+            CommitType::Standalone(committed_accounts) => {
                 fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
             }
             CommitType::WithBaseActions {
@@ -574,7 +598,9 @@ impl CommitType {
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub enum UndelegateType {
     Standalone,
     WithBaseActions(Vec<BaseAction>),
@@ -637,10 +663,11 @@ mod tests {
     use solana_pubkey::Pubkey;
 
     use crate::intent::{
-        calculate_actions_fee, calculate_commit_fee, types::CommittedAccount,
-        BaseAction, BaseActionCallback, CommitAndUndelegate, CommitType,
-        MagicIntentBundle, ProgramArgs, UndelegateType, ACTUAL_COMMIT_LIMIT,
-        COMMIT_FEE_LAMPORTS, MISSING_COMMIT_NONCE_ERR,
+        ACTUAL_COMMIT_LIMIT, BaseAction, BaseActionCallback,
+        COMMIT_FEE_LAMPORTS, CommitAndUndelegate, CommitType,
+        MISSING_COMMIT_NONCE_ERR, MagicIntentBundle, ProgramArgs,
+        UndelegateType, calculate_actions_fee, calculate_commit_fee,
+        types::CommittedAccount,
     };
 
     fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {

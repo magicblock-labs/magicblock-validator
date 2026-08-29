@@ -411,7 +411,7 @@ where
             &INTENT_BUNDLE_LABEL,
             result,
         );
-        if let Err(ref err) = result {
+        if let Err(err) = &result {
             metrics::inc_committor_failed_intents_count(
                 &INTENT_BUNDLE_LABEL,
                 err,
@@ -438,8 +438,8 @@ mod tests {
     use std::{
         collections::HashSet,
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         time::Duration,
     };

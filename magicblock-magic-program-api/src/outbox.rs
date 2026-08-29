@@ -1,24 +1,28 @@
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_signature::Signature;
+use wincode::{SchemaRead, SchemaWrite};
 
 /// A transaction that was sent but not yet confirmed, along with the
 /// blockhash it was built with. The blockhash is needed on recovery to
 /// tell apart "may still land" (blockhash still valid) from "guaranteed
 /// dead" (blockhash expired) when the signature isn't found on-chain.
 #[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct PendingTransaction {
     pub signature: Signature,
     pub blockhash: Hash,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum ExecutionStage {
     SingleStage(PendingTransaction),
     TwoStage(TwoStageProgress),
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum TwoStageProgress {
     Committing(PendingTransaction),
     Finalizing {
@@ -34,7 +38,7 @@ impl ExecutionStage {
     ) -> Result<(), &'static str> {
         match (self, stage) {
             // Current sig wasn't confirmed, we replace it with new attempt
-            (Self::SingleStage(ref mut this_sig), Self::SingleStage(sig)) => {
+            (Self::SingleStage(this_sig), Self::SingleStage(sig)) => {
                 *this_sig = sig;
             }
             // TODO(edwin): validate this case,
@@ -54,7 +58,7 @@ impl ExecutionStage {
                 return Err("cannot transition from SingleStage to Finalizing");
             }
             // Transitions within TwoStage states
-            (Self::TwoStage(ref mut this), Self::TwoStage(value)) => {
+            (Self::TwoStage(this), Self::TwoStage(value)) => {
                 this.apply_stage_transition(value)?;
             }
             // TwoStage can't be downgraded into SingleStage

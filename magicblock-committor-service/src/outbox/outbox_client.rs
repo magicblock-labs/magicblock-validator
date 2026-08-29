@@ -1,21 +1,15 @@
 use std::{mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
+use accountsdb::AccountsDBError;
 use async_trait::async_trait;
 use backoff::{future::retry, ExponentialBackoff};
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
-use magicblock_core::{
-    link::{
-        accounts::LockedAccount,
-        transactions::{with_encoded, TransactionSchedulerHandle},
-    },
-    traits::LatestBlockProvider,
-};
+use engine::{Engine, EngineError, IntoTransactionView};
 use magicblock_program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent, MagicContext, Pubkey, MAGIC_CONTEXT_PUBKEY,
+    register_scheduled_commit_sent, MagicContext, MAGIC_CONTEXT_PUBKEY,
 };
-use solana_account::{Account, ReadableAccount};
+use solana_account::ReadableAccount;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -36,32 +30,21 @@ use crate::{
     },
 };
 
-/// Implementation of `OutboxClient` that uses ER internals
-/// Potentially could be replaced with RPC base Client
-pub struct InternalOutboxClient<L: LatestBlockProvider> {
-    /// Provides access to MagicContext
-    accounts_db: Arc<AccountsDb>,
-    /// RPC client for sending accept transactions to the ER
+/// Implementation of `OutboxClient` that uses ER internals.
+///
+/// Accept/set-stage/close still go through the RPC client (aperture) with
+/// backoff retries; `notify_commit_sent` submits directly through the engine.
+pub struct InternalOutboxClient {
+    /// Engine handle: reads MagicContext, provides blockhash, and submits the
+    /// `ScheduledCommitSent` notification directly.
+    engine: Engine,
+    /// RPC client for sending accept/set-stage/close transactions to the ER
     rpc_client: Arc<RpcClient>,
-    /// Internal endpoint for scheduling ER TXs
-    transaction_scheduler: TransactionSchedulerHandle,
-    /// Provides access to ER latest block for TX creation
-    latest_block_provider: L,
 }
 
-impl<L: LatestBlockProvider> InternalOutboxClient<L> {
-    pub fn new(
-        accounts_db: Arc<AccountsDb>,
-        rpc_client: Arc<RpcClient>,
-        transaction_scheduler: TransactionSchedulerHandle,
-        latest_block_provider: L,
-    ) -> Self {
-        Self {
-            accounts_db,
-            rpc_client,
-            transaction_scheduler,
-            latest_block_provider,
-        }
+impl InternalOutboxClient {
+    pub fn new(engine: Engine, rpc_client: Arc<RpcClient>) -> Self {
+        Self { engine, rpc_client }
     }
 
     async fn send_with_backoff(
@@ -90,6 +73,16 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
         Ok(())
     }
 
+    /// Submits `transaction` directly through the engine, signed with the
+    /// engine's authority.
+    async fn execute_via_engine<T: IntoTransactionView>(
+        &self,
+        transaction: T,
+    ) -> Result<(), InternalOutboxClientError> {
+        self.engine.transaction(transaction)?.execute().await??;
+        Ok(())
+    }
+
     /// Sends `AcceptScheduledCommits` transactions to the ER, moving scheduled
     /// commits from `MagicContext` into outbox PDA accounts, up to CHUNK_SIZE intents per transaction.
     /// On first error returns the successfully accepted intents so far alongside the error.
@@ -107,7 +100,7 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
         while !remaining.is_empty() {
             let chunk_size = CHUNK_SIZE.min(remaining.len());
             let tx = InstructionUtils::accept_scheduled_commits(
-                self.latest_block_provider.blockhash(),
+                self.engine.blockhash(),
                 remaining[..chunk_size].iter().map(|i| i.id),
             );
             let backoff_config = ExponentialBackoff {
@@ -123,21 +116,10 @@ impl<L: LatestBlockProvider> InternalOutboxClient<L> {
 
         Ok(accepted)
     }
-
-    /// Returns account corresponding to `pubkey` if it exists
-    /// Safely handles race-conditions and any concurrent changes to an account
-    fn safe_get_account(&self, pubkey: &Pubkey) -> Option<Account> {
-        let shared_account = self.accounts_db.get_account(pubkey)?;
-        let locked_account = LockedAccount::new(*pubkey, shared_account);
-        let output = locked_account
-            .read_locked(|_, account| Account::from(account.clone()));
-
-        Some(output)
-    }
 }
 
 #[async_trait]
-impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
+impl OutboxClient for InternalOutboxClient {
     type Error = InternalOutboxClientError;
     type OutboxReader = InternalOutboxIntentBundlesReader;
 
@@ -149,15 +131,20 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
     > {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
-        let magic_context_acc =
-            self.safe_get_account(&MAGIC_CONTEXT_PUBKEY).expect(
+        let magic_context = self
+            .engine
+            .accounts()
+            .loader()
+            .read(&MAGIC_CONTEXT_PUBKEY, |account| {
+                MagicContext::deserialize(account.data())
+            })
+            .map_err(|err| (vec![], err.into()))?
+            .expect(
                 "Validator found to be running without MagicContext account!",
-            );
-
-        let magic_context = MagicContext::deserialize(magic_context_acc.data())
+            )
             .map_err(|err| (vec![], err.into()))?;
-        self.send_accept_tx(magic_context.scheduled_base_intents)
-            .await
+
+        self.send_accept_tx(magic_context.scheduled_base_intents).await
     }
 
     async fn set_intent_execution_stage(
@@ -166,7 +153,7 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         stage: ExecutionStage,
     ) -> Result<(), Self::Error> {
         let tx = InstructionUtils::set_intent_execution_stage(
-            self.latest_block_provider.blockhash(),
+            self.engine.blockhash(),
             intent_id,
             stage,
         );
@@ -186,7 +173,7 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
     async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
         let tx = InstructionUtils::close_outbox_intent(
             intent_id,
-            self.latest_block_provider.blockhash(),
+            self.engine.blockhash(),
         );
 
         self.send_with_backoff(
@@ -210,19 +197,14 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
         let tx = match mem::take(&mut meta.intent_sent_transaction) {
             IntentSentTransaction::Known(tx) => tx,
             IntentSentTransaction::Recovered => {
-                let blockhash = self.latest_block_provider.blockhash();
+                let blockhash = self.engine.blockhash();
                 InstructionUtils::scheduled_commit_sent(meta.id, blockhash)
             }
         };
         let sent_commit = build_sent_commit(meta, result, execution_report);
         // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
         register_scheduled_commit_sent(sent_commit);
-        let txn = with_encoded(tx).inspect_err(|err| {
-            // Unreachable case, all intent transactions are smaller than 64KB by construction
-            error!(error = ?err, "Failed to bincode intent transaction");
-        })?;
-        self.transaction_scheduler
-            .execute(txn)
+        self.execute_via_engine(tx)
             .await
             .inspect(|_| debug!("Sent commit signaled"))
             .inspect_err(
@@ -234,10 +216,7 @@ impl<L: LatestBlockProvider> OutboxClient for InternalOutboxClient<L> {
 
     fn outbox_reader(&self) -> Self::OutboxReader {
         const CAPACITY: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
-        InternalOutboxIntentBundlesReader::new(
-            self.accounts_db.clone(),
-            CAPACITY,
-        )
+        InternalOutboxIntentBundlesReader::new(self.engine.clone(), CAPACITY)
     }
 }
 
@@ -247,8 +226,12 @@ pub enum InternalOutboxClientError {
     TransactionError(#[from] TransactionError),
     #[error("RpcClientError: {0}")]
     RpcClientError(#[from] client_error::Error),
-    #[error("BincodeError: {0}")]
-    BincodeError(#[from] bincode::Error),
+    #[error("EngineError: {0}")]
+    EngineError(#[from] EngineError),
+    #[error("WincodeError: {0}")]
+    WincodeError(#[from] wincode::ReadError),
+    #[error("AccountsDbError: {0}")]
+    AccountsDbError(#[from] AccountsDBError),
 }
 
 pub type InternalOutboxClientResult<T> = Result<T, InternalOutboxClientError>;

@@ -1,17 +1,17 @@
 use dlp_api::{
+    AccountSizeClass,
     args::CommitFinalizeArgs,
     diff::compute_diff,
     instruction_builder::{
         commit_finalize_from_buffer_size_budget, commit_finalize_size_budget,
     },
-    AccountSizeClass,
 };
 use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::tasks::{commit_task::CommitDelivery, BaseTask, BaseTaskImpl};
+use crate::tasks::{BaseTask, BaseTaskImpl, commit_task::CommitDelivery};
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
 /// instruction.

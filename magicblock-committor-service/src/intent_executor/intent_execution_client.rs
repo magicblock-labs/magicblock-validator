@@ -186,6 +186,11 @@ impl IntentExecutionClient {
                 warn!("Legacy message not expected");
                 value.recent_blockhash = latest_blockhash;
             }
+            VersionedMessage::V1(value) => {
+                warn!("V1 message not expected");
+                // V1 renames the blockhash to the lifetime specifier.
+                value.lifetime_specifier = latest_blockhash;
+            }
         };
 
         let transaction =

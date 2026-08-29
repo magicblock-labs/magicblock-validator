@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::TwoStageProgress, validator::validator_authority,
+    outbox::TwoStageProgress,
 };
 use solana_keypair::Keypair;
 use solana_signature::Signature;
@@ -63,7 +63,7 @@ where
         actions_timeout: Duration,
         stage: TwoStageProgress,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             authority,
             stage,

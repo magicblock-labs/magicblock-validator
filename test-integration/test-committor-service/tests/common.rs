@@ -157,6 +157,7 @@ impl TestFixture {
     > {
         AcceptedIntentExecutor::new(
             IntentExecutorCtx {
+                authority: self.authority.insecure_clone(),
                 intent_client: IntentExecutionClient::new(
                     self.rpc_client.clone(),
                 ),

@@ -46,8 +46,8 @@ impl DebounceState {
     /// scheduling fields. Returns true if state changed.
     pub fn maybe_enable(&mut self, now: Instant) -> bool {
         if let DebounceState::Disabled {
-            ref mut arrivals,
-            pubkey: ref pk,
+            arrivals,
+            pubkey: pk,
         } = self
         {
             let a = std::mem::take(arrivals);
@@ -68,8 +68,8 @@ impl DebounceState {
     /// arrival history. Returns true if state changed.
     pub fn maybe_disable(&mut self) -> bool {
         if let DebounceState::Enabled {
-            ref mut arrivals,
-            pubkey: ref pk,
+            arrivals,
+            pubkey: pk,
             ..
         } = self
         {

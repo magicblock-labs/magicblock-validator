@@ -1,5 +1,4 @@
 mod process_add_action_callback;
-mod process_schedule_cloned_undelegation;
 mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
@@ -10,18 +9,18 @@ use std::sync::Arc;
 
 use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
-    pda::CALLBACK_SIGNER, MAGIC_CONTEXT_PUBKEY,
+    MAGIC_CONTEXT_PUBKEY, pda::CALLBACK_SIGNER,
 };
 pub(crate) use process_add_action_callback::process_add_action_callback;
-pub(crate) use process_schedule_cloned_undelegation::process_schedule_cloned_account_undelegation;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
+use solana_account::AccountMode;
 use solana_clock::Clock;
-use solana_instruction::{error::InstructionError, AccountMeta};
+use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 pub use crate::intent_bundles::outbox::process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
@@ -36,14 +35,14 @@ pub(crate) use crate::intent_bundles::{
 };
 use crate::{
     magic_sys::{
-        fetch_current_commit_nonces, COMMIT_LIMIT, COMMIT_LIMIT_ERR,
-        MISSING_COMMIT_NONCE_ERR,
+        COMMIT_LIMIT, COMMIT_LIMIT_ERR, MISSING_COMMIT_NONCE_ERR,
+        fetch_current_commit_nonces,
     },
     utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        get_writable_with_idx, InstructionAccount,
+        InstructionAccount, get_instruction_account_with_idx,
+        get_instruction_pubkey_with_idx, get_writable_with_idx,
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
 
 pub(crate) const PAYER_IDX: u16 = 0;
@@ -158,7 +157,7 @@ pub(crate) fn check_commit_limits(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
-    let validator_authority = crate::validator::validator_authority_id();
+    let validator_authority = authority();
     Pubkey::find_program_address(
         &[b"magic-fee-vault", validator_authority.as_ref()],
         &crate::utils::DELEGATION_PROGRAM_ID,
@@ -180,10 +179,11 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
 ) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
-    let payer_requires_fee_vault = {
-        let payer = payer_account.to_account_shared_data()?;
-        payer.delegated() && !payer.confined()
-    };
+    // Confined payers used to be excluded here via a separate flag; a confined
+    // account is now `Ephemeral`, and modes are exclusive, so being `Delegated`
+    // already implies it.
+    let payer_requires_fee_vault =
+        payer_account.borrow()?.is(AccountMode::Delegated);
     if !payer_requires_fee_vault {
         return Ok(None);
     }
@@ -203,8 +203,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
         get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
     let is_vault_writable =
         get_writable_with_idx(transaction_context, fee_vault_idx)?;
-    if !vault_account.to_account_shared_data()?.delegated()
-        || !is_vault_writable
+    if !vault_account.borrow()?.is(AccountMode::Delegated) || !is_vault_writable
     {
         ic_msg!(
             invoke_context,
@@ -248,7 +247,7 @@ pub(crate) fn validate_callback_accounts(
             return Err(InstructionError::IncorrectAuthority);
         }
 
-        if pubkey == &effective_validator_authority_id() {
+        if pubkey == &authority() {
             ic_msg!(
                 invoke_context,
                 "{}: the validator authority cannot be used in callbacks",

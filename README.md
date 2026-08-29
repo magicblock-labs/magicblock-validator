@@ -47,10 +47,9 @@ The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runti
    cd magicblock-validator
 ```
 
-2. **Build the project:**
+2. **Build the operator binaries:**
 ```bash
-cargo build --release
-
+cargo build --release -p mbv-leader -p mbv-verifier -p mbv -p mbv-tui
 ```
 
 
@@ -78,23 +77,66 @@ remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com"]
 
 ## 🏃 Usage
 
-### Running the Validator
+### Running a leader
 
-To start the validator with the default configuration (or your custom config file):
+The leader binary runs `Engine<Leader>` and the validator service graph:
 
 ```bash
-cargo run --release -- config.example.toml
+cargo run --release -p mbv-leader -- --config config.example.toml
+```
+
+### Running a verifier
+
+The verifier binary runs only `Engine<Follower>` and its replication client:
+
+```bash
+cargo run --release -p mbv-verifier -- config.verifier.example.toml
+```
+
+Both Engine-hosting binaries expose MBV and Engine Prometheus collectors from
+their configured `/metrics` endpoint. Configure distinct metrics addresses when
+running a leader and verifier on the same host.
+
+### Managing the Magic Domain Program
+
+Domain registration is an explicit operator action and is not part of leader
+startup or shutdown:
+
+```bash
+cargo run --release -p mbv -- domain register \
+  --config config.example.toml \
+  --country-code US \
+  --fqdn https://validator.example.com
+
+cargo run --release -p mbv -- domain sync \
+  --config config.example.toml \
+  --country-code US \
+  --fqdn https://validator.example.com
+
+cargo run --release -p mbv -- domain unregister \
+  --config config.example.toml
+```
+
+### Running the TUI
+
+The TUI is an external RPC/websocket client:
+
+```bash
+cargo run --release -p mbv-tui -- \
+  --rpc-url http://127.0.0.1:7799 \
+  --ws-url ws://127.0.0.1:7800
 ```
 
 ### Using Environment Variables
 
-You can override any configuration value using environment variables with the `MBV_` prefix.
+Leader settings use the `MBV_` prefix. Verifier settings use
+`MBV_VERIFIER_`.
 
 ```bash
 # Example: Run as an ephemeral validator syncing from Mainnet
 MBV_LIFECYCLE=ephemeral \
 MBV_LISTEN=0.0.0.0:8899 \
-cargo run --release config.example.toml
+cargo run --release -p mbv-leader -- --config config.example.toml
 
 ```
 
@@ -120,18 +162,9 @@ This cluster allows you to test Ephemeral Rollup interactions without local setu
 
 The project includes a comprehensive test suite managed via `Makefile`.
 
-* **Run all tests (Unit & Integration):**
+* **Run the workspace tests:**
 ```bash
 make test
-
-```
-
-
-* **Run integration tests specifically:**
-See [test-integration/README.md](./test-integration/README.md) for detailed instructions on running specific scenarios.
-```bash
-make -C test-integration test
-
 ```
 
 
@@ -172,4 +205,3 @@ This project is licensed under the **Business Source License 1.1**. See [LICENSE
 <div align="center">
 <sub>Built with ❤️ by MagicBlock Labs</sub>
 </div>
-

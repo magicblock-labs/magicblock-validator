@@ -14,9 +14,9 @@ use solana_system_interface::instruction as system_instruction;
 use tracing::{debug, error};
 
 use crate::utils::instructions::{
-    init_account_and_delegate_ixs, init_order_book_account_and_delegate_ixs,
-    init_validator_fees_vault_ix, InitAccountAndDelegateIxs,
-    InitOrderBookAndDelegateIxs,
+    init_account_and_delegate_ixs, init_flexi_counter_and_delegate_ixs,
+    init_order_book_account_and_delegate_ixs, init_validator_fees_vault_ix,
+    InitAccountAndDelegateIxs, InitOrderBookAndDelegateIxs,
 };
 
 #[macro_export]
@@ -202,6 +202,29 @@ pub async fn init_and_delegate_account_on_chain(
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
+    let ixs = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
+}
+
+/// Flexi-counter-specific variant of [`init_and_delegate_account_on_chain`],
+/// used only where a test needs flexi-counter's own on-chain behavior (e.g.
+/// its `FAIL_UNDELEGATION_LABEL` forced-undelegation-failure hook).
+#[allow(dead_code)]
+pub async fn init_and_delegate_flexi_counter_on_chain(
+    counter_auth: &Keypair,
+    bytes: u64,
+    label: Option<String>,
+) -> (Pubkey, Account) {
+    let ixs =
+        init_flexi_counter_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
+}
+
+async fn run_init_and_delegate_ixs(
+    counter_auth: &Keypair,
+    bytes: u64,
+    ixs: InitAccountAndDelegateIxs,
+) -> (Pubkey, Account) {
     const BASE_COUNTER_AUTH_BALANCE: u64 = LAMPORTS_PER_SOL;
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
@@ -211,7 +234,7 @@ pub async fn init_and_delegate_account_on_chain(
         delegate: delegate_ix,
         pda,
         rent_excempt,
-    } = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    } = ixs;
     let min_balance = BASE_COUNTER_AUTH_BALANCE + rent_excempt;
 
     airdrop_and_confirm(

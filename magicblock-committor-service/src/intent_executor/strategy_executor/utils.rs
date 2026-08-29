@@ -70,7 +70,7 @@ where
     P: Patcher,
 {
     loop {
-        if let Some(ref pending) = state.pending_transaction {
+        if let &mut Some(ref pending) = state.pending_transaction {
             match check_pending_signature(intent_client, pending).await? {
                 PendingSignatureStatus::Succeeded => {
                     break Ok(Ok(pending.signature));

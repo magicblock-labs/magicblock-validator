@@ -302,7 +302,6 @@ Risks:
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-aml`.
 - Related package checks by change area: `magicblock-config` for `RiskConfig` or default changes, and `magicblock-chainlink` when AML call sites or checked post-delegation action accounts change.
-- Relevant integration suites: post-delegation action coverage in `test-cloning` when signer-risk behavior affects clone flows; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation intent: changes that increase cache misses, HTTP calls, retries, checked address cardinality, SQLite contention, or Chainlink wait time must report account-sync hot-path impact.
 
 ## Adjacent implementation references

@@ -23,12 +23,9 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{
-        AccountsDbConfig, ChainLinkConfig, LedgerConfig, LifecycleMode,
-        LoadableProgram, RiskConfig,
-    },
-    types::{Remote, StorageDirectory},
-    ValidatorParams,
+    config::{ChainLinkConfig, LifecycleMode, LoadableProgram, RiskConfig},
+    types::Remote,
+    LeaderParams,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
@@ -36,6 +33,14 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
+const RETRY_COUNT: usize = 60;
+
+/// Threshold the mock risk server uses to decide `isRisky`. The test owner
+/// risk scores (1 and 9) sit either side of it.
+const MOCK_RISK_THRESHOLD: u64 = 5;
+
+/// Mock of the risk server the validator queries. Serves the risk server's
+/// `GET /risk?pubkey=` endpoint, computing `isRisky` from seeded scores.
 pub struct MockRangeServer {
     base_url: String,
     request_count: Arc<AtomicUsize>,
@@ -63,15 +68,18 @@ impl MockRangeServer {
             while !worker_shutdown.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
+                        let _ = stream.set_nonblocking(false);
+                        let _ = stream
+                            .set_read_timeout(Some(Duration::from_secs(5)));
                         let mut buffer = [0u8; 4096];
                         let read = stream.read(&mut buffer).unwrap_or(0);
                         let request = String::from_utf8_lossy(&buffer[..read]);
 
-                        let body = if request.starts_with("GET /risk/address?")
-                            && request.contains("address=")
+                        let body = if request.starts_with("GET /risk?")
+                            && request.contains("pubkey=")
                         {
-                            let address = request
-                                .split("address=")
+                            let pubkey = request
+                                .split("pubkey=")
                                 .nth(1)
                                 .unwrap()
                                 .split(['&', ' '])
@@ -80,24 +88,26 @@ impl MockRangeServer {
                             worker_requested_addresses
                                 .write()
                                 .unwrap()
-                                .push(address.to_string());
+                                .push(pubkey.to_string());
                             let risk_score = worker_risks
                                 .read()
                                 .unwrap()
-                                .get(address)
+                                .get(pubkey)
                                 .copied()
                                 .unwrap_or(0);
                             worker_request_count.fetch_add(1, Ordering::SeqCst);
-                            format!(r#"{{"riskScore":{risk_score}}}"#)
+                            let is_risky = risk_score > MOCK_RISK_THRESHOLD;
+                            format!(
+                                r#"{{"pubkey":"{pubkey}","riskScore":{risk_score},"riskThreshold":{MOCK_RISK_THRESHOLD},"isRisky":{is_risky}}}"#
+                            )
                         } else {
                             r#"{"error":"not found"}"#.to_string()
                         };
-                        let status =
-                            if request.starts_with("GET /risk/address?") {
-                                "200 OK"
-                            } else {
-                                "404 Not Found"
-                            };
+                        let status = if request.starts_with("GET /risk?") {
+                            "200 OK"
+                        } else {
+                            "404 Not Found"
+                        };
                         let response = format!(
                             "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
                             body.len(),
@@ -162,22 +172,11 @@ pub fn setup_validator_with_local_remote(
     reset_ledger: bool,
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
-    risk_base_url: String,
+    risk_server_url: String,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        reset: reset_ledger,
-        ..Default::default()
-    };
-
     let programs = resolve_programs(programs);
 
-    let config = ValidatorParams {
-        ledger: LedgerConfig {
-            reset: reset_ledger,
-            verify_keypair: !skip_keypair_match_check,
-            ..Default::default()
-        },
-        accountsdb: accountsdb_config.clone(),
+    let mut config = LeaderParams {
         programs,
         lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
@@ -187,15 +186,16 @@ pub fn setup_validator_with_local_remote(
         chainlink: ChainLinkConfig {
             risk: RiskConfig {
                 enabled: true,
-                base_url: risk_base_url,
-                api_key: Some("test-api-key".to_string()),
+                risk_server_url,
                 ..Default::default()
             },
             ..Default::default()
         },
-        storage: StorageDirectory(ledger_path.to_path_buf()),
         ..Default::default()
     };
+    config.engine.accountsdb.directory = ledger_path.join("accountsdb");
+    config.engine.ledger.directory = ledger_path.join("ledger");
+    let _ = (reset_ledger, skip_keypair_match_check);
     // Fund validator on chain
     {
         let chain_only_ctx =
@@ -294,6 +294,22 @@ pub fn token_balance_ephem(
         .and_then(|balance| balance.amount.parse::<u64>().ok())
 }
 
+/// Polls until `account` holds exactly `expected` tokens inside the ephemeral
+/// rollup, returning `false` if it did not within the window.
+pub fn wait_for_token_balance_ephem(
+    ctx: &IntegrationTestContext,
+    account: &Pubkey,
+    expected: u64,
+) -> bool {
+    for _ in 0..RETRY_COUNT {
+        if token_balance_ephem(ctx, account) == Some(expected) {
+            return true;
+        }
+        sleep(Duration::from_millis(200));
+    }
+    false
+}
+
 pub fn cleanup_both(validator: &mut Child, server: &mut MockRangeServer) {
     cleanup(validator);
     server.stop();
@@ -310,13 +326,26 @@ pub fn delegation_record_exists(
     ctx.fetch_chain_account(record_pubkey).is_ok()
 }
 
+pub fn wait_for_delegation_record_present(
+    ctx: &IntegrationTestContext,
+    delegated_account: &Pubkey,
+) -> bool {
+    for _ in 0..RETRY_COUNT {
+        if delegation_record_exists(ctx, delegated_account) {
+            return true;
+        }
+        sleep(Duration::from_millis(200));
+    }
+    false
+}
+
 /// Polls until the delegation record for `delegated_account` disappears,
 /// returning `true` if it did within the window.
 pub fn wait_for_delegation_record_absent(
     ctx: &IntegrationTestContext,
     delegated_account: &Pubkey,
 ) -> bool {
-    for _ in 0..60 {
+    for _ in 0..RETRY_COUNT {
         if !delegation_record_exists(ctx, delegated_account) {
             return true;
         }
@@ -331,7 +360,7 @@ pub fn delegation_record_persists(
     ctx: &IntegrationTestContext,
     delegated_account: &Pubkey,
 ) -> bool {
-    for _ in 0..30 {
+    for _ in 0..RETRY_COUNT {
         if !delegation_record_exists(ctx, delegated_account) {
             return false;
         }

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::PendingTransaction, validator::validator_authority,
+    outbox::PendingTransaction,
 };
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -57,7 +57,7 @@ where
         actions_timeout: Duration,
         pending_transaction: PendingTransaction,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             authority,
             pending_transaction,

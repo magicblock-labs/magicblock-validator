@@ -2,10 +2,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    validator::validator_authority,
-};
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use tracing::trace;
@@ -58,7 +55,7 @@ where
         ctx: IntentExecutorCtx<T, F, A, O>,
         actions_timeout: Duration,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             ctx,
             authority,

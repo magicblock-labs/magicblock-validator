@@ -11,13 +11,19 @@ pub enum TaskSchedulerError {
     DatabaseConnection(#[from] rusqlite::Error),
 
     #[error(transparent)]
-    Bincode(#[from] bincode::Error),
+    Wincode(#[from] wincode::WriteError),
 
     #[error(transparent)]
     Rpc(#[from] Box<solana_rpc_client_api::client_error::Error>),
 
+    #[error("Transaction execution failed: {0}")]
+    TransactionExecution(String),
+
     #[error(transparent)]
     Io(#[from] std::io::Error),
+
+    #[error(transparent)]
+    Keeper(#[from] keeper::error::KeeperError),
 
     #[error("Task {0} already exists and is owned by {1}, not {2}")]
     UnauthorizedReplacing(i64, String, String),

@@ -3,8 +3,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
+use magicblock_chainlink::ProdChainlink;
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{outbox_intent_bundles::OutboxIntentBundle, Pubkey};
 use solana_transaction::Transaction;
@@ -29,23 +28,13 @@ use crate::{
     },
 };
 
-pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
-pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
+pub type ChainlinkImpl = ProdChainlink;
 
 pub enum IntentExecutionService<O, D> {
     Created(ServiceInner<O, D>),
     Started(JoinHandle<()>),
     Stopped,
-    /// Not in `CoordinationMode::Primary` - accept/schedule loop must not run.
-    Disabled,
     Error,
-}
-
-impl<O, D> IntentExecutionService<O, D> {
-    /// Makes `start`/`stop` no-ops. Use when not primary.
-    pub fn disabled() -> Self {
-        Self::Disabled
-    }
 }
 
 impl<O, D: BacklogDB> IntentExecutionService<O, D>
@@ -80,10 +69,6 @@ where
     }
 
     pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
-        if matches!(self, Self::Disabled) {
-            return Ok(());
-        }
-
         let Self::Created(service) = self.take() else {
             return Err(IntentExecutionServiceError::InvalidState(
                 "service must be in Created state to start".into(),
@@ -96,10 +81,6 @@ where
     }
 
     pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
-        if matches!(self, Self::Disabled) {
-            return Ok(());
-        }
-
         let Self::Started(handle) = self.take() else {
             return Err(IntentExecutionServiceError::InvalidState(
                 "service must be in Started state to stop".into(),

@@ -1,18 +1,34 @@
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::{
+    AccountMode, AccountSharedData, ReadableAccount, WritableAccount,
+};
 use solana_instruction::error::InstructionError;
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 
 use super::DELEGATION_PROGRAM_ID;
 use crate::utils::accounts::InstructionAccount;
 
+pub(crate) fn set_account_mode(
+    invoke_context: &InvokeContext,
+    acc: &mut AccountSharedData,
+    mode: AccountMode,
+) -> Result<(), InstructionError> {
+    acc.set_mode(mode).map_err(|err| {
+        ic_msg!(invoke_context, "Account mode transition rejected: {}", err);
+        InstructionError::InvalidArgument
+    })
+}
+
 /// Sets proper account values during undelegation
 pub(crate) fn mark_account_as_undelegated(
+    invoke_context: &InvokeContext,
     acc: &InstructionAccount<'_, '_>,
 ) -> Result<(), InstructionError> {
     let mut acc = acc.borrow_mut()?;
     acc.set_owner(DELEGATION_PROGRAM_ID);
-    acc.set_undelegating(true);
-    acc.set_delegated(false);
-    Ok(())
+    // `Transient` is a delegated account on its way back to readonly, which is
+    // what the separate undelegating/delegated flags used to express together.
+    set_account_mode(invoke_context, &mut acc, AccountMode::Transient)
 }
 
 /// Transfers `fee` lamports from `payer` to `fee_vault`.
@@ -22,10 +38,10 @@ pub(crate) fn charge_delegated_payer(
     fee_vault: &InstructionAccount<'_, '_>,
     fee: u64,
 ) -> Result<(), InstructionError> {
-    if !payer.borrow()?.delegated() {
+    if !payer.borrow()?.is(AccountMode::Delegated) {
         return Err(InstructionError::IllegalOwner);
     }
-    if !fee_vault.borrow()?.delegated() {
+    if !fee_vault.borrow()?.is(AccountMode::Delegated) {
         return Err(InstructionError::IllegalOwner);
     }
     if fee == 0 {

@@ -213,8 +213,7 @@ mod tests {
     use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
-    const TX_TOO_LARGE_MAGICBLOCK: &str =
-        "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
+    const TX_TOO_LARGE_MAGICBLOCK: &str = "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
 
     fn make_send_transaction_error(message: &str) -> InternalError {
         let rpc_error = RpcClientError {

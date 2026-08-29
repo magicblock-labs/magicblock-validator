@@ -13,7 +13,7 @@ use crate::{
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
@@ -25,7 +25,7 @@ pub fn process_set_intent_execution_stage(
     intent_id: u64,
     stage: ExecutionStage,
 ) -> Result<(), InstructionError> {
-    let validator_auth = effective_validator_authority_id();
+    let validator_auth = authority();
     validate(&signers, invoke_context, &validator_auth, intent_id)?;
 
     set_new_execution_stage(invoke_context, intent_id, stage)

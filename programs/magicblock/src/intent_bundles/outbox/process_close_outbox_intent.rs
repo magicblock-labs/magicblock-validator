@@ -1,22 +1,24 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::outbox::outbox_intent_pda;
-use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, EPHEMERAL_VAULT_PUBKEY,
-};
-use solana_account::ReadableAccount;
-use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_account::{ReadableAccount, WritableAccount};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 
 use crate::{
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
+
+const VALIDATOR_IDX: u16 = 0;
+const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
+const CLOSING_PDA_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
 
 /// Closes the outbox intent PDA
 /// Validates intent execution stage to see if it can be closed
@@ -25,14 +27,8 @@ pub fn process_close_outbox_intent(
     invoke_context: &mut InvokeContext,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    let (validator_authority_id, expected_pda) =
-        validate(&signers, invoke_context, intent_id)?;
-
-    close_outbox_account_cpi(
-        invoke_context,
-        validator_authority_id,
-        expected_pda,
-    )
+    validate(&signers, invoke_context, intent_id)?;
+    close_outbox_ephemeral_account(invoke_context)
 }
 
 fn validate(
@@ -40,11 +36,6 @@ fn validate(
     invoke_context: &InvokeContext,
     intent_id: u64,
 ) -> Result<(Pubkey, Pubkey), InstructionError> {
-    const VALIDATOR_IDX: u16 = 0;
-    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
-    const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
-
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
@@ -60,7 +51,7 @@ fn validate(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = effective_validator_authority_id();
+    let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
@@ -137,37 +128,29 @@ fn validate(
     Ok((validator_authority_id, expected_pda))
 }
 
-fn close_outbox_account_cpi(
-    invoke_context: &mut InvokeContext,
-    sponsor: Pubkey,
-    pda: Pubkey,
+fn close_outbox_ephemeral_account(
+    invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    invoke_context.native_invoke(
-        Instruction {
-            program_id: crate::id(),
-            accounts: vec![
-                AccountMeta::new(sponsor, true),
-                AccountMeta::new(pda, false),
-                AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-            ],
-            data: MagicBlockInstruction::CloseEphemeralAccount
-                .try_to_vec()
-                .map_err(|_| InstructionError::InvalidInstructionData)?,
-        },
-        &[],
-    )
+    let transaction_context = &*invoke_context.transaction_context;
+    let pda =
+        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+
+    let mut acc = pda.borrow_mut()?;
+    acc.set_lamports(0);
+    acc.set_owner(system_program::id());
+    acc.resize(0, 0);
+
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::{
-        coordination_mode::{switch_to_primary_mode, switch_to_replica_mode},
-        intent::MagicIntentBundle,
+    use magicblock_core::intent::MagicIntentBundle;
+    use magicblock_magic_program_api::{
+        outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
+        EPHEMERAL_VAULT_PUBKEY,
     };
-    use magicblock_magic_program_api::outbox::{
-        ExecutionStage, PendingTransaction, TwoStageProgress,
-    };
-    use solana_account::AccountSharedData;
+    use solana_account::{AccountMode, AccountSharedData};
     use solana_hash::Hash;
     use solana_instruction::{error::InstructionError, Instruction};
     use solana_keypair::Keypair;
@@ -225,13 +208,13 @@ mod tests {
         let mut pda_account =
             AccountSharedData::new(0, data.len(), &crate::id());
         pda_account.set_data_from_slice(&data);
-        pda_account.set_ephemeral(true);
+        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut map = std::collections::HashMap::new();
         // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor -
         // refund is rent-exempt-minimum for the PDA's actual data length
         let mut vault = AccountSharedData::new(1_000_000, 0, &crate::id());
-        vault.set_ephemeral(true);
+        vault.set_mode(AccountMode::Ephemeral).unwrap();
         map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
         // Add outbox PDA as existing ephemeral account (created by accept)
         map.insert(pda, pda_account);
@@ -332,31 +315,6 @@ mod tests {
             ix.accounts,
             Ok(()),
         );
-    }
-
-    /// Unlike `ScheduledCommitSent`, closing must not be gated on
-    /// `CoordinationMode` - replicas replaying a primary's close have to
-    /// reach the same state, or the outbox PDA leaks and can be re-executed.
-    #[test]
-    fn test_closes_outbox_pda_in_replica_mode() {
-        switch_to_replica_mode();
-
-        let intent_id: u64 = rand::random();
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(final_stage()));
-        ensure_started_validator(&mut account_data, None);
-
-        let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        switch_to_primary_mode();
     }
 
     #[test]

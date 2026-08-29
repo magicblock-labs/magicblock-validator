@@ -3,7 +3,7 @@ use std::{collections::HashMap, sync::Arc};
 use async_trait::async_trait;
 use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_core::intent::{
-    types::CommittedAccount, CommitAndUndelegate, CommitType, UndelegateType,
+    CommitAndUndelegate, CommitType, UndelegateType, types::CommittedAccount,
 };
 use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
@@ -374,10 +374,7 @@ impl<'a> CommitFinalizeBuilder<'a> {
                     .into()
             })
             .collect();
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
-        } = commit_type
-        {
+        if let CommitType::WithBaseActions { base_actions, .. } = &commit_type {
             tasks.extend(create_action_tasks(base_actions));
         }
         tasks
@@ -402,10 +399,7 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
                     .into()
             })
             .collect();
-        if let CommitType::WithBaseActions {
-            ref base_actions, ..
-        } = commit_type
-        {
+        if let CommitType::WithBaseActions { base_actions, .. } = &commit_type {
             tasks.extend(create_action_tasks(base_actions));
         }
         tasks

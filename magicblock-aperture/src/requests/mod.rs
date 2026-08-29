@@ -1,6 +1,7 @@
-use json::{Array, Deserialize, Value};
+use json::{Array, Deserialize, JsonValueTrait, Value};
+use serde::de::DeserializeOwned;
 
-use crate::{error::RpcError, RpcResult};
+use crate::{RpcResult, error::RpcError};
 
 pub(crate) type JsonHttpRequest = JsonRequest<JsonRpcHttpMethod>;
 pub(crate) type JsonWsRequest = JsonRequest<JsonRpcWsMethod>;
@@ -22,12 +23,38 @@ pub enum RpcRequest {
 }
 
 impl<M> JsonRequest<M> {
-    /// A helper method to get a mutable reference to the
-    /// `params` array, returning an error if it is `None`.
-    fn params(&mut self) -> RpcResult<&mut Array> {
+    pub(crate) fn required<T: DeserializeOwned>(
+        &self,
+        index: usize,
+    ) -> RpcResult<T> {
+        let value = self
+            .params
+            .as_ref()
+            .and_then(|params| params.get(index))
+            .ok_or_else(|| {
+            RpcError::invalid_params(format!("missing parameter {index}"))
+        })?;
+        json::from_value(value).map_err(RpcError::invalid_params)
+    }
+
+    pub(crate) fn optional<T: DeserializeOwned>(
+        &self,
+        index: usize,
+    ) -> RpcResult<Option<T>> {
         self.params
-            .as_mut()
-            .ok_or_else(|| RpcError::invalid_request("missing params"))
+            .as_ref()
+            .and_then(|params| params.get(index))
+            .map(|value| {
+                if value.is_null() {
+                    Ok(None)
+                } else {
+                    json::from_value(value)
+                        .map(Some)
+                        .map_err(RpcError::invalid_params)
+                }
+            })
+            .transpose()
+            .map(Option::flatten)
     }
 }
 
@@ -176,39 +203,6 @@ impl JsonRpcWsMethod {
             Self::MethodNotFound => "methodNotFound",
         }
     }
-}
-
-/// A helper macro for easily parsing positional parameters from a JSON-RPC request.
-///
-/// This macro simplifies the process of extracting and deserializing parameters
-/// from the `params` array of a `JsonRequest`.
-///
-/// ## Return Value
-///
-/// It returns an `Option<T>` for a single parameter, or a tuple of `Option<T>`s for
-/// multiple parameters. Each `Option` will be `Some(value)` on a successful parse,
-/// and `None` if a parameter is missing or fails to deserialize into the specified type.
-#[macro_export]
-macro_rules! parse_params {
-    ($input: expr, $ty1: ty) => {{
-        $input.reverse();
-        $input.pop().and_then(|v| json::from_value::<$ty1>(&v).ok())
-    }};
-    (@reversed, $input: expr, $ty1: ty) => {
-        $input.pop().and_then(|v| json::from_value::<$ty1>(&v).ok())
-    };
-    ($input: expr, $ty1: ty, $ty2: ty) => {{
-        $input.reverse();
-        (parse_params!(@reversed, $input, $ty1), parse_params!(@reversed, $input, $ty2))
-    }};
-    ($input: expr, $ty1: ty, $ty2: ty, $ty3: ty) => {{
-        $input.reverse();
-        (
-            parse_params!(@reversed, $input, $ty1),
-            parse_params!(@reversed, $input, $ty2),
-            parse_params!(@reversed, $input, $ty3),
-        )
-    }};
 }
 
 pub(crate) mod http;
