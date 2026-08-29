@@ -82,3 +82,115 @@ fn clone_request_classification() {
         ChainlinkCloneIntent::ActionDependency
     );
 }
+
+mod aml_check_strategy {
+    use solana_instruction::AccountMeta;
+
+    use super::*;
+
+    fn action_for_program(program_id: Pubkey) -> Instruction {
+        Instruction::new_with_bytes(program_id, &[], vec![])
+    }
+
+    fn action_referencing(program_id: Pubkey, account: Pubkey) -> Instruction {
+        Instruction::new_with_bytes(
+            program_id,
+            &[],
+            vec![AccountMeta::new_readonly(account, false)],
+        )
+    }
+
+    #[test]
+    fn all_signers_strategy_always_requires_check() {
+        // An action that touches no risk-relevant program still gets checked.
+        let actions: DelegationActions =
+            vec![action_for_program(Pubkey::new_unique())].into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::AllSigners,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn relevant_programs_strategy_skips_unrelated_actions() {
+        let actions: DelegationActions = vec![
+            action_for_program(Pubkey::new_unique()),
+            action_for_program(Pubkey::new_unique()),
+        ]
+        .into();
+        assert!(!delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_each_relevant_program() {
+        // Spelled out rather than iterating RISK_RELEVANT_PROGRAMS, so that
+        // dropping a program from that list fails this test.
+        for program in [
+            TOKEN_PROGRAM_ID,
+            TOKEN_2022_PROGRAM_ID,
+            EATA_PROGRAM_ID,
+            magicblock_magic_program_api::ID,
+            system_program::ID,
+            magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+        ] {
+            let actions: DelegationActions =
+                vec![action_for_program(program)].into();
+            assert!(
+                delegation_actions_require_risk_check(
+                    AmlCheckStrategy::RelevantPrograms,
+                    &actions,
+                ),
+                "program {program} invoked as program_id should require check",
+            );
+
+            // Referenced as a CPI target account, not the invoked program.
+            let actions: DelegationActions =
+                vec![action_referencing(Pubkey::new_unique(), program)].into();
+            assert!(
+                delegation_actions_require_risk_check(
+                    AmlCheckStrategy::RelevantPrograms,
+                    &actions,
+                ),
+                "program {program} referenced as account should require check",
+            );
+        }
+    }
+
+    #[test]
+    fn default_strategy_checks_all_signers() {
+        // The narrower strategy must be opted into: defaulting to it would
+        // silently drop coverage for deployments that only set `enabled`.
+        assert_eq!(AmlCheckStrategy::default(), AmlCheckStrategy::AllSigners);
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_native_sol_transfers() {
+        let actions: DelegationActions =
+            vec![solana_system_interface::instruction::transfer(
+                &Pubkey::new_unique(),
+                &Pubkey::new_unique(),
+                1_000,
+            )]
+            .into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
+    }
+
+    #[test]
+    fn relevant_programs_strategy_matches_when_any_action_is_relevant() {
+        let actions: DelegationActions = vec![
+            action_for_program(Pubkey::new_unique()),
+            action_for_program(EATA_PROGRAM_ID),
+        ]
+        .into();
+        assert!(delegation_actions_require_risk_check(
+            AmlCheckStrategy::RelevantPrograms,
+            &actions,
+        ));
+    }
+}

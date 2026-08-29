@@ -14,6 +14,7 @@ figment = { workspace = true, features = ["env", "toml"] }
 humantime = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_with = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 
 nucleus = { workspace = true, features = ["config"] }

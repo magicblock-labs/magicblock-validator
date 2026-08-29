@@ -7,8 +7,13 @@ use magicblock_chainlink::{
 };
 use magicblock_metrics::metrics::AccountFetchContext;
 use magicblock_program::instruction_utils::InstructionUtils;
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_transaction_error::TransactionError;
-use tokio::{sync::broadcast, time::MissedTickBehavior};
+use tokio::{
+    sync::broadcast,
+    task::{JoinError, JoinSet},
+    time::MissedTickBehavior,
+};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -43,7 +48,6 @@ impl fmt::Display for ObservedUndelegationRequestError {
 
 pub struct UndelegationRequestService {
     chainlink: Arc<ChainlinkImpl>,
-    cancellation_token: CancellationToken,
     engine: Engine,
     undelegation_request_poll_interval: Duration,
 }
@@ -56,7 +60,6 @@ impl UndelegationRequestService {
     ) -> Self {
         Self {
             chainlink,
-            cancellation_token: CancellationToken::new(),
             engine,
             undelegation_request_poll_interval,
         }
@@ -374,31 +377,81 @@ impl UndelegationRequestService {
         Ok(())
     }
 
-    pub fn start(self: &Arc<Self>) {
-        let requests = self.chainlink.subscribe_undelegation_requests();
-        tokio::spawn(Self::undelegation_request_processor(
-            requests,
-            self.cancellation_token.clone(),
-            self.chainlink.clone(),
-            self.engine.clone(),
-        ));
-        self.spawn_undelegation_request_poll_processor();
+    /// Runs and supervises the subscription and optional polling workers.
+    pub async fn run(self, mut shutdown: ShutdownHandle) {
+        let result = self.run_workers(shutdown.child()).await;
+        let reason = match result {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 
-    fn spawn_undelegation_request_poll_processor(self: &Arc<Self>) {
+    async fn run_workers(
+        self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), UndelegationRequestServiceError> {
+        let mut workers = JoinSet::new();
+        let requests = self.chainlink.subscribe_undelegation_requests();
+        let token = cancellation_token.clone();
+        let chainlink = self.chainlink.clone();
+        let engine = self.engine.clone();
+        workers.spawn(async move {
+            Self::undelegation_request_processor(
+                requests, token, chainlink, engine,
+            )
+            .await;
+            "subscription processor"
+        });
+
         if self.undelegation_request_poll_interval.is_zero() {
             debug!("Skipping DLP undelegation request poll processor");
-            return;
+        } else {
+            let token = cancellation_token.clone();
+            let chainlink = self.chainlink;
+            let engine = self.engine;
+            let poll_interval = self.undelegation_request_poll_interval;
+            workers.spawn(async move {
+                Self::undelegation_request_poll_processor(
+                    poll_interval,
+                    token,
+                    chainlink,
+                    engine,
+                )
+                .await;
+                "poll processor"
+            });
         }
-        tokio::spawn(Self::undelegation_request_poll_processor(
-            self.undelegation_request_poll_interval,
-            self.cancellation_token.clone(),
-            self.chainlink.clone(),
-            self.engine.clone(),
-        ));
-    }
 
-    pub fn stop(&self) {
-        self.cancellation_token.cancel();
+        tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => {}
+            result = workers.join_next() => {
+                let failure = match result.expect("undelegation workers are registered") {
+                    Ok(worker) => UndelegationRequestServiceError::WorkerStopped(worker),
+                    Err(error) => UndelegationRequestServiceError::WorkerJoin(error),
+                };
+                cancellation_token.cancel();
+                workers.shutdown().await;
+                return Err(failure);
+            }
+        }
+
+        while let Some(result) = workers.join_next().await {
+            if let Err(error) = result {
+                workers.shutdown().await;
+                return Err(error.into());
+            }
+        }
+        Ok(())
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum UndelegationRequestServiceError {
+    #[error("Undelegation request worker '{0}' stopped unexpectedly")]
+    WorkerStopped(&'static str),
+    #[error("Undelegation request worker failed: {0}")]
+    WorkerJoin(#[from] JoinError),
 }

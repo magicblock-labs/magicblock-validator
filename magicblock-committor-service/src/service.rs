@@ -1,16 +1,14 @@
 use std::{
-    collections::HashSet, future::Future, mem, num::NonZeroUsize, sync::Arc,
+    collections::HashSet, future::Future, num::NonZeroUsize, sync::Arc,
     time::Duration,
 };
 
 use magicblock_chainlink::ProdChainlink;
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_transaction::Transaction;
-use tokio::{
-    task,
-    task::{JoinError, JoinHandle},
-};
+use tokio::task;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
@@ -30,70 +28,7 @@ use crate::{
 
 pub type ChainlinkImpl = ProdChainlink;
 
-pub enum IntentExecutionService<O, D> {
-    Created(ServiceInner<O, D>),
-    Started(JoinHandle<()>),
-    Stopped,
-    Error,
-}
-
-impl<O, D: BacklogDB> IntentExecutionService<O, D>
-where
-    O: OutboxClient,
-    // OutboxClient errors should be convertible to Service errors
-    O::Error: Into<IntentExecutionServiceError>,
-    // OutboxClient errors should be convertible to IntentExecutor error
-    O::Error: Into<IntentExecutorError>,
-    // OutboxReader errors should be convertible to Service errors
-    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
-        Into<IntentExecutionServiceError>,
-{
-    pub fn new(
-        chainlink: Arc<ChainlinkImpl>,
-        intent_client: Arc<O>,
-        processor: Arc<CommittorProcessor<D>>,
-        slot_interval: Duration,
-        cancellation_token: CancellationToken,
-    ) -> Self {
-        Self::Created(ServiceInner::new(
-            chainlink,
-            intent_client,
-            processor,
-            slot_interval,
-            cancellation_token,
-        ))
-    }
-
-    fn take(&mut self) -> Self {
-        mem::replace(self, Self::Error)
-    }
-
-    pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
-        let Self::Created(service) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Created state to start".into(),
-            ));
-        };
-
-        let handle = service.start();
-        *self = Self::Started(handle);
-        Ok(())
-    }
-
-    pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
-        let Self::Started(handle) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Started state to stop".into(),
-            ));
-        };
-
-        handle.await?;
-        *self = Self::Stopped;
-        Ok(())
-    }
-}
-
-pub struct ServiceInner<O, D> {
+pub struct IntentExecutionService<O, D> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
@@ -103,10 +38,9 @@ pub struct ServiceInner<O, D> {
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
-    cancellation_token: CancellationToken,
 }
 
-impl<O, D: BacklogDB> ServiceInner<O, D>
+impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
     O: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
@@ -122,22 +56,29 @@ where
         outbox_client: Arc<O>,
         processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
-        cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             chainlink,
             outbox_client,
             processor,
             slot_interval,
-            cancellation_token,
         }
     }
 
-    fn start(self) -> JoinHandle<()> {
-        tokio::task::spawn(self.accept_worker())
+    pub async fn run(self, mut shutdown: ShutdownHandle) {
+        let result = self.accept_worker(shutdown.child()).await;
+        let reason = match result {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 
-    async fn accept_worker(self) {
+    async fn accept_worker(
+        self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), IntentExecutionServiceError> {
         // Reschedule existing outbox intents first
         // We need to ensure that accounts in outbox a scheduled before
         // we accept new incoming Intents
@@ -150,7 +91,8 @@ where
         loop {
             tokio::select! {
                 biased;
-                _ = self.cancellation_token.cancelled() => {
+                _ = cancellation_token.cancelled() => {
+                    // Durable execution of intents makes its safe to exit right away
                     break;
                 }
                 _ = interval.tick() => {
@@ -163,13 +105,14 @@ where
                         accepted_intents
                     });
 
-                    let intent_bundles= intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
+                    let intent_bundles = intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
                         error!("Failed to schedule intent execution: {}", err);
                     }
                 }
             }
         }
+        Ok(())
     }
 
     async fn reschedule_intents(
@@ -297,10 +240,8 @@ where
 
 #[derive(thiserror::Error, Debug)]
 pub enum IntentExecutionServiceError {
-    #[error("Invalid state: {0}")]
-    InvalidState(String),
-    #[error("JoinError: {0}")]
-    JoinError(#[from] JoinError),
+    #[error("Intent execution worker '{0}' stopped unexpectedly")]
+    WorkerStopped(&'static str),
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]

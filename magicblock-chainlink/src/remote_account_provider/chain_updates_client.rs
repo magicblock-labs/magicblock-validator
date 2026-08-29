@@ -43,7 +43,11 @@ impl ChainUpdatesClient {
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
 
         match endpoint {
-            WebSocket { url, label } => {
+            WebSocket {
+                url,
+                label,
+                subs_per_connection,
+            } => {
                 debug!(url = %url, "Initializing WebSocket client");
                 let client_id = format!(
                     "ws:{label}-{}",
@@ -56,7 +60,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
-                        ws_subs_per_connection,
+                        (*subs_per_connection).or(ws_subs_per_connection),
                     )
                     .await?,
                 ))

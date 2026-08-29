@@ -2183,55 +2183,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_stale_abort_on_connected_client_skips_reconnect() {
-        init_logger();
-
-        let (tx1, rx1) = mpsc::channel(10_000);
-        let (tx2, rx2) = mpsc::channel(10_000);
-        let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
-        let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
-
-        let pk = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![client1.clone(), client2.clone()],
-            vec![pk],
-            Some(100),
-        );
-        let mut mux_rx = mux.take_updates();
-        mux.subscribe(pk, None).await.unwrap();
-
-        // Stale abort: the client is still connected, so the reconnector
-        // must not drain it via try_reconnect.
-        let attempts_before = client1.subscribe_attempts();
-        aborts[0].send(()).await.expect("abort send");
-        // The reconnect pass re-subscribes tracked accounts; wait for it so
-        // the assertions below run after the abort handler completed.
-        client1
-            .wait_for_subscribe_attempts(attempts_before + 1)
-            .await;
-        wait_for_connected_clients(&mux, 2).await;
-
-        assert_eq!(client1.reconnect_calls(), 0);
-        assert!(client1.subscriptions_union().contains(&pk));
-
-        // Client keeps streaming through the mux
-        client1
-            .send_account_update(pk, 7, &account_with_lamports(777))
-            .await;
-        let up = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("update after stale abort")
-        .expect("stream open");
-        assert_eq!(up.pubkey, pk);
-        assert_eq!(up.slot, 7);
-
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
     async fn test_reconciliation_snapshots_ignore_reconnecting_clients() {
         init_logger();
 

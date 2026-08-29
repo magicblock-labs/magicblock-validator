@@ -23,7 +23,10 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{ChainLinkConfig, LifecycleMode, LoadableProgram, RiskConfig},
+    config::{
+        AmlCheckStrategy, ChainLinkConfig, LifecycleMode, LoadableProgram,
+        RiskConfig,
+    },
     types::Remote,
     LeaderParams,
 };
@@ -187,6 +190,10 @@ pub fn setup_validator_with_local_remote(
             risk: RiskConfig {
                 enabled: true,
                 risk_server_url,
+                // Pinned rather than defaulted: the suite asserts that risky
+                // signers are blocked, which is only meaningful if we know
+                // which strategy decided to check them.
+                check_strategy: AmlCheckStrategy::AllSigners,
                 ..Default::default()
             },
             ..Default::default()
