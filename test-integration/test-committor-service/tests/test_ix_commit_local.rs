@@ -609,7 +609,10 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
+        expect_strategies(&[
+            (CommitStrategy::DiffBufferWithLookupTable, 4),
+            (CommitStrategy::DiffArgs, 1),
+        ]),
         CommitIntentKind::CommitAndUndelegate,
     )
     .await;
@@ -745,7 +748,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
         &[1024, 2048],
         &[],
         &[1024, 2048],
-        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
     )
     .await;
 }
