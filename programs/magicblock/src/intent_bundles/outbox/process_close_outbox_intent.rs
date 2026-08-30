@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::outbox::outbox_intent_pda;
-use solana_account::{ReadableAccount, WritableAccount};
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -10,8 +10,11 @@ use solana_sdk_ids::system_program;
 
 use crate::{
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    utils::{
+        account_actions::set_account_mode,
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
     },
     validator::authority,
 };
@@ -141,6 +144,7 @@ fn close_outbox_ephemeral_account(
     acc.set_lamports(0);
     acc.set_owner(system_program::id());
     acc.resize(0, 0);
+    set_account_mode(invoke_context, &mut acc, AccountMode::Closed)?;
 
     Ok(())
 }
