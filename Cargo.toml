@@ -52,7 +52,7 @@ magicblock-committor-program = { path = "magicblock-committor-program", features
 magicblock-committor-service = { path = "magicblock-committor-service" }
 magicblock-config = { path = "magicblock-config" }
 magicblock-core = { path = "magicblock-core" }
-magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "6898ef4b82ba1f2b6fbb5d91eca578729edbbeb8" }
+magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "dcd46dc" }
 magicblock-ledger-deprecated = { path = "magicblock-ledger" }
 magicblock-magic-program-api = { path = "magicblock-magic-program-api" }
 magicblock-metrics = { path = "magicblock-metrics" }
