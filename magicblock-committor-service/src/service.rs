@@ -4,6 +4,7 @@ use std::{
 };
 
 use magicblock_chainlink::ProdChainlink;
+use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
@@ -105,7 +106,10 @@ where
                         accepted_intents
                     });
 
-                    let intent_bundles = intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
+                    let intent_bundles = intent_bundles.into_iter().map(|bundle| {
+                        let bump = outbox_intent_pda_with_bump(bundle.id).1;
+                        OutboxIntentBundle::accepted(bundle, bump)
+                    }).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
                         error!("Failed to schedule intent execution: {}", err);
                     }

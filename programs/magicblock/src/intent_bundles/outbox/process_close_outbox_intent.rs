@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::outbox_intent_pda;
+use magicblock_core::intent::outbox::verify_outbox_intent_pda;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -90,23 +90,8 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // Validate outbox intent PDA
-    let provided_pda =
-        get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(intent_id);
-    if *provided_pda != expected_pda {
-        ic_msg!(
-            invoke_context,
-            "CloseOutboxIntent ERR: account at idx {} is {}, expected PDA {} for intent {}",
-            CLOSING_PDA_IDX,
-            provided_pda,
-            expected_pda,
-            intent_id
-        );
-        return Err(InstructionError::InvalidArgument);
-    }
-
-    // Validate if intent reached stage where it can be closed
+    // Deserialize first so the PDA can be validated cheaply against its
+    // own stored bump, instead of re-deriving via find_program_address.
     let intent_acc =
         get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
     let bundle = OutboxIntentBundle::try_from_bytes(
@@ -120,6 +105,22 @@ fn validate(
         );
         InstructionError::InvalidAccountData
     })?;
+
+    // Validate outbox intent PDA
+    let provided_pda =
+        get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
+        ic_msg!(
+            invoke_context,
+            "CloseOutboxIntent ERR: account at idx {} is {}, invalid PDA for intent {}",
+            CLOSING_PDA_IDX,
+            provided_pda,
+            intent_id
+        );
+        return Err(InstructionError::InvalidArgument);
+    }
+
+    // Validate if intent reached stage where it can be closed
     if !bundle.is_final_stage() {
         ic_msg!(
             invoke_context,
@@ -130,7 +131,7 @@ fn validate(
         return Err(InstructionError::InvalidAccountData);
     }
 
-    Ok((validator_authority_id, expected_pda))
+    Ok((validator_authority_id, *provided_pda))
 }
 
 fn close_outbox_ephemeral_account(
@@ -151,7 +152,9 @@ fn close_outbox_ephemeral_account(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::MagicIntentBundle;
+    use magicblock_core::intent::{
+        MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
+    };
     use magicblock_magic_program_api::{
         EPHEMERAL_VAULT_PUBKEY,
         outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
@@ -188,6 +191,7 @@ mod tests {
 
     fn outbox_bundle_bytes(
         intent_id: u64,
+        bump: u8,
         stage: Option<ExecutionStage>,
     ) -> Vec<u8> {
         let inner = ScheduledIntentBundle {
@@ -198,7 +202,7 @@ mod tests {
             payer: Pubkey::new_unique(),
             intent_bundle: MagicIntentBundle::default(),
         };
-        let mut bundle = OutboxIntentBundle::accepted(inner);
+        let mut bundle = OutboxIntentBundle::accepted(inner, bump);
         if let Some(stage) = stage {
             bundle.apply_stage_transition(stage).unwrap();
         }
@@ -209,8 +213,8 @@ mod tests {
         intent_id: u64,
         stage: Option<ExecutionStage>,
     ) -> std::collections::HashMap<Pubkey, AccountSharedData> {
-        let pda = outbox_intent_pda(intent_id);
-        let data = outbox_bundle_bytes(intent_id, stage);
+        let (pda, bump) = outbox_intent_pda_with_bump(intent_id);
+        let data = outbox_bundle_bytes(intent_id, bump, stage);
         let mut pda_account =
             AccountSharedData::new(0, data.len(), &crate::id());
         pda_account.set_data_from_slice(&data);

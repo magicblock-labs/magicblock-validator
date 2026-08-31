@@ -14,8 +14,9 @@ use magicblock_committor_service::{
     ComputeBudgetConfig,
 };
 use magicblock_core::intent::{
-    types::CommittedAccount, CommitAndUndelegate, CommitType, MagicBaseIntent,
-    MagicIntentBundle, UndelegateType,
+    outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
+    UndelegateType,
 };
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
@@ -1050,7 +1051,10 @@ async fn ix_commit_local(
 ) {
     let outbox_bundles = intent_bundles
         .iter()
-        .map(|b| OutboxIntentBundle::accepted(b.clone()))
+        .map(|b| {
+            let bump = outbox_intent_pda_with_bump(b.id).1;
+            OutboxIntentBundle::accepted(b.clone(), bump)
+        })
         .collect::<Vec<_>>();
     let execution_outputs = processor
         .execute_intent_bundles(outbox_bundles)

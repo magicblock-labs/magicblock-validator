@@ -855,7 +855,7 @@ pub(crate) fn create_test_intent(
 ) -> OutboxIntentBundle {
     use magicblock_core::intent::{
         CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
-        types::CommittedAccount,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
     };
     use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
@@ -892,7 +892,8 @@ pub(crate) fn create_test_intent(
         }
     }
 
-    OutboxIntentBundle::accepted(intent)
+    let bump = outbox_intent_pda_with_bump(id).1;
+    OutboxIntentBundle::accepted(intent, bump)
 }
 
 #[cfg(test)]
@@ -903,7 +904,7 @@ pub(crate) fn create_test_intent_bundle(
 ) -> OutboxIntentBundle {
     use magicblock_core::intent::{
         CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
-        types::CommittedAccount,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
     };
     use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
     use solana_account::Account;
@@ -944,5 +945,6 @@ pub(crate) fn create_test_intent_bundle(
             });
     }
 
-    OutboxIntentBundle::accepted(intent)
+    let bump = outbox_intent_pda_with_bump(id).1;
+    OutboxIntentBundle::accepted(intent, bump)
 }

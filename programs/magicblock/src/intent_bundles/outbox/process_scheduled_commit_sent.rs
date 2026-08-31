@@ -4,7 +4,8 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::intent::outbox::outbox_intent_pda;
+use magicblock_core::intent::outbox::verify_outbox_intent_pda;
+use solana_account::ReadableAccount;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -15,7 +16,11 @@ use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx, validator::authority,
+    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    },
+    validator::authority,
 };
 
 /// Error code returned when an intent execution failed.
@@ -217,17 +222,31 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
+    // Deserialize first so the PDA can be validated cheaply against its
+    // own stored bump, instead of re-deriving via find_program_address.
+    let intent_acc =
+        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(
+        intent_acc.borrow()?.data(),
+    )
+    .map_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent ERR: failed to deserialize outbox intent {}",
+            intent_id
+        );
+        InstructionError::InvalidAccountData
+    })?;
+
     // Validate outbox intent PDA
     let provided_pda =
         get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(intent_id);
-    if *provided_pda != expected_pda {
+    if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected PDA {} for intent {}",
+            "ScheduleCommitSent ERR: account at idx {} is {}, invalid PDA for intent {}",
             CLOSING_PDA_IDX,
             provided_pda,
-            expected_pda,
             intent_id
         );
         return Err(InstructionError::InvalidArgument);
@@ -301,16 +320,21 @@ fn log_sent_commit(
 
 #[cfg(test)]
 mod tests {
+    use magicblock_core::intent::{
+        MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
+    };
     use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
     use solana_account::{AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
     use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
+        magic_scheduled_base_intent::ScheduledIntentBundle,
         test_utils::{ensure_started_validator, process_instruction},
     };
 
@@ -456,8 +480,22 @@ mod tests {
     fn test_registered_all_checks_out() {
         let commit = setup_registered_commit();
 
-        let pda = outbox_intent_pda(commit.message_id);
-        let mut pda_account = AccountSharedData::new(0, 0, &crate::id());
+        let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
+        let bundle = OutboxIntentBundle::accepted(
+            ScheduledIntentBundle {
+                id: commit.message_id,
+                slot: 0,
+                blockhash: Hash::default(),
+                sent_transaction: Transaction::default(),
+                payer: Pubkey::new_unique(),
+                intent_bundle: MagicIntentBundle::default(),
+            },
+            bump,
+        );
+        let data = bundle.try_to_bytes().unwrap();
+        let mut pda_account =
+            AccountSharedData::new(0, data.len(), &crate::id());
+        pda_account.set_data_from_slice(&data);
         pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut account_data = {

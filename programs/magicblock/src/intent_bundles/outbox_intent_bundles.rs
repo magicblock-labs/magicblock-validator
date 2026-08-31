@@ -17,18 +17,24 @@ use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
     status: OutboxIntentBundleStatus,
+    bump: u8,
 }
 
 impl OutboxIntentBundle {
-    pub fn accepted(intent_bundle: ScheduledIntentBundle) -> Self {
+    pub fn accepted(intent_bundle: ScheduledIntentBundle, bump: u8) -> Self {
         Self {
             inner: intent_bundle,
             status: OutboxIntentBundleStatus::Accepted,
+            bump,
         }
     }
 
     pub fn status(&self) -> &OutboxIntentBundleStatus {
         &self.status
+    }
+
+    pub fn bump(&self) -> u8 {
+        self.bump
     }
 
     /// Whether execution has reached its last stage.
@@ -66,10 +72,13 @@ impl OutboxIntentBundle {
 
         // wincode serializes structs as field concatenation, so max body size
         // is inner size + worst-case status size (TwoStage::Finalizing with 2 sigs)
+        // + the bump byte
         let max_body_size = (wincode::serialized_size(&self.inner)?
             + wincode::serialized_size(
                 &OutboxIntentBundleStatus::max_size_variant(),
-            )?) as usize;
+            )?
+            + wincode::serialized_size(&self.bump)?)
+            as usize;
 
         let mut out = vec![0u8; DISCRIMINATOR_LEN + max_body_size];
         out[..DISCRIMINATOR_LEN].copy_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);

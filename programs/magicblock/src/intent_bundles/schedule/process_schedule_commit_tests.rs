@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use magicblock_core::intent::{
+    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    outbox::outbox_intent_pda_with_bump,
+};
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
     args::{
@@ -219,7 +222,8 @@ fn assert_accepted_actions(
     assert_eq!(accepted_intents.len(), expected_accepted_count);
 
     for intent in &accepted_intents {
-        let expected = OutboxIntentBundle::accepted(intent.clone());
+        let bump = outbox_intent_pda_with_bump(intent.id).1;
+        let expected = OutboxIntentBundle::accepted(intent.clone(), bump);
         let actual = processed_accepted
             .iter()
             .filter(|acc| {

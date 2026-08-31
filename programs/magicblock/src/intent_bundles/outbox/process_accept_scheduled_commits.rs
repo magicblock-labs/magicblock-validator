@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::outbox_intent_pda;
+use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -51,13 +51,13 @@ pub fn process_accept_scheduled_commits(
 
     for (i, intent) in intents.into_iter().enumerate() {
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
-        verify_intent_pda(invoke_context, intent.id, pda_idx)?;
+        let bump = verify_intent_pda(invoke_context, intent.id, pda_idx)?;
 
         // Create outbox ephemeral account
         create_outbox_ephemeral_account(
             invoke_context,
             pda_idx,
-            OutboxIntentBundle::accepted(intent),
+            OutboxIntentBundle::accepted(intent, bump),
         )?;
     }
 
@@ -123,11 +123,11 @@ fn verify_intent_pda(
     invoke_context: &InvokeContext,
     intent_id: u64,
     pda_idx: u16,
-) -> Result<Pubkey, InstructionError> {
+) -> Result<u8, InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let provided =
         get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
-    let expected = outbox_intent_pda(intent_id);
+    let (expected, bump) = outbox_intent_pda_with_bump(intent_id);
     if *provided != expected {
         ic_msg!(
             invoke_context,
@@ -139,7 +139,7 @@ fn verify_intent_pda(
         );
         return Err(InstructionError::InvalidArgument);
     }
-    Ok(expected)
+    Ok(bump)
 }
 
 fn pop_scheduled_intents(

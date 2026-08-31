@@ -201,7 +201,9 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use engine::testkit::TestEngine;
-    use magicblock_core::intent::outbox::outbox_intent_pda;
+    use magicblock_core::intent::outbox::{
+        outbox_intent_pda, outbox_intent_pda_with_bump,
+    };
     use magicblock_program::{
         magic_scheduled_base_intent::{
             MagicIntentBundle, ScheduledIntentBundle,
@@ -224,7 +226,8 @@ mod tests {
             payer: Pubkey::default(),
             intent_bundle: MagicIntentBundle::default(),
         };
-        OutboxIntentBundle::accepted(inner)
+        let bump = outbox_intent_pda_with_bump(id).1;
+        OutboxIntentBundle::accepted(inner, bump)
     }
 
     async fn insert_bundle(te: &TestEngine, bundle: &OutboxIntentBundle) {
