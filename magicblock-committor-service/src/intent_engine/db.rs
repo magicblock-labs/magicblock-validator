@@ -1,12 +1,15 @@
 use std::{cell::RefCell, collections::VecDeque};
 
-/// DB for storing intents that overflow committor channel
 use engine::Engine;
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
 
+/// Queues intents that overflow the in-memory execution channel, preserving
+/// FIFO order until the committor can process them. Implementations only
+/// need to track ordering (e.g. by id) - the intent bundle itself already
+/// lives durably in the outbox account on-chain.
 pub trait BacklogDB: Send + 'static {
     fn store_intent_bundle(
         &self,

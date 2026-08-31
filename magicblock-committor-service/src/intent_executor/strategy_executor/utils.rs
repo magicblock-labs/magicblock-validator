@@ -71,19 +71,10 @@ where
 {
     loop {
         if let &mut Some(ref pending) = state.pending_transaction {
-            match check_pending_signature(intent_client, pending).await? {
-                PendingSignatureStatus::Succeeded => {
-                    break Ok(Ok(pending.signature));
-                }
-                // May still land - don't resend, just re-check later
-                PendingSignatureStatus::Pending => {
-                    sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
-                    continue;
-                }
-                PendingSignatureStatus::Rejected => {
-                    *state.pending_transaction = None;
-                }
+            if resolve_pending_signature(intent_client, pending).await? {
+                break Ok(Ok(pending.signature));
             }
+            *state.pending_transaction = None;
         }
 
         *state.current_attempt += 1;
@@ -184,6 +175,11 @@ pub(in crate::intent_executor) enum PendingSignatureStatus {
     /// The transaction landed and failed, or its blockhash has expired
     /// without landing - guaranteed dead, safe to send a new transaction.
     Rejected,
+    /// The RPC returned no entry at all for the single signature we asked
+    /// about - a contract violation, not a normal "not found yet" response.
+    /// Distinct from `Pending` so repeated occurrences can be bounded
+    /// instead of retried forever.
+    Anomalous,
 }
 
 /// Checks a pending signature loaded from the outbox against the full
@@ -223,15 +219,24 @@ pub(in crate::intent_executor) async fn check_pending_signature(
             info!(pending_signature = ?pending.signature, error = ?err, "Transaction corresponding to pending signature failed");
             Ok(PendingSignatureStatus::Rejected)
         }
-        // Not found on-chain: could be genuinely never sent, or simply not
-        // landed yet.
-        None | Some(None) => {
+        // Not found on-chain (but present in the response): could be
+        // genuinely never sent, or simply not landed yet.
+        Some(None) => {
             if blockhash_still_valid {
                 Ok(PendingSignatureStatus::Pending)
             } else {
                 info!(pending_signature = ?pending.signature, "Pending transaction's blockhash expired without landing");
                 Ok(PendingSignatureStatus::Rejected)
             }
+        }
+        // We requested exactly one signature, so a response with no entry
+        // at all violates the RPC contract - the node is misbehaving. Report
+        // `Anomalous` rather than `Rejected`, since wrongly concluding the tx
+        // is dead risks a double-send/double-execution; callers bound how
+        // many consecutive anomalies they tolerate before giving up.
+        None => {
+            error!(pending_signature = ?pending.signature, "RPC returned no entry for requested signature status");
+            Ok(PendingSignatureStatus::Anomalous)
         }
     }
 }
@@ -248,14 +253,32 @@ pub(in crate::intent_executor) async fn resolve_pending_signature(
     client: &IntentExecutionClient,
     pending: &PendingTransaction,
 ) -> IntentExecutorResult<bool> {
+    /// Consecutive `Anomalous` responses tolerated before giving up -
+    /// genuine `Pending` is unbounded (it already ends once the blockhash
+    /// expires), this only guards against a misbehaving RPC that never
+    /// returns a usable answer.
+    const MAX_CONSECUTIVE_ANOMALIES: u8 = 5;
+
+    let mut consecutive_anomalies = 0u8;
     loop {
         match check_pending_signature(client, pending).await? {
             PendingSignatureStatus::Succeeded => return Ok(true),
             PendingSignatureStatus::Rejected => return Ok(false),
             PendingSignatureStatus::Pending => {
-                sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
+                consecutive_anomalies = 0;
+            }
+            PendingSignatureStatus::Anomalous => {
+                consecutive_anomalies += 1;
             }
         }
+
+        if consecutive_anomalies >= MAX_CONSECUTIVE_ANOMALIES {
+            break Err(IntentExecutorError::PendingSignatureResolutionError(
+                pending.signature,
+            ));
+        } else {
+            sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
+        };
     }
 }
 

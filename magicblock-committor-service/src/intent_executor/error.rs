@@ -66,6 +66,8 @@ pub enum IntentExecutorError {
     OutboxClientError(#[from] InternalOutboxClientError),
     #[error("Failed to get pending signature status: {0}")]
     GetPendingSignatureStatusError(#[source] MagicBlockRpcClientError),
+    #[error("Failed to resolve pending signature: {0}")]
+    PendingSignatureResolutionError(Signature),
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("FailedToCommitError: {err}")]
@@ -119,7 +121,10 @@ impl IntentExecutorError {
             Self::EmptyIntentError
             | Self::FailedToFitError
             | Self::SignerError(_)
-            | Self::OutboxClientError(_) => false,
+            | Self::OutboxClientError(_)
+            // The underlying tx may have already landed; blindly
+            // re-executing from scratch risks double-execution.
+            | Self::PendingSignatureResolutionError(_) => false,
             Self::GetPendingSignatureStatusError(err) => err.is_transient(),
             Self::TaskBuilderError(err) => err.is_transient(),
             Self::FailedToCommitError { err, .. } => err.is_transient(),
@@ -152,6 +157,9 @@ impl IntentExecutorError {
                 commit_signature,
                 finalize_signature,
             } => commit_signature.map(|el| (el, *finalize_signature)),
+            IntentExecutorError::PendingSignatureResolutionError(signature) => {
+                Some((*signature, None))
+            }
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
             | IntentExecutorError::SignerError(_)
