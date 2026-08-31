@@ -800,6 +800,19 @@ where
             .scan(|_pubkey, pending| pending.cancel.notify_one());
     }
 
+    /// Stops chain subscriptions and cancels in-flight fetch+clone work.
+    ///
+    /// Cloning runs through the transaction scheduler, so every update that
+    /// still arrives once the scheduler is gone fails with
+    /// `ClusterMaintenance` and is retried. Shutdown calls this before the
+    /// scheduler is cancelled so the pipeline is already dry by then.
+    pub async fn shutdown(&self) {
+        if let Err(err) = self.remote_account_provider.shutdown().await {
+            warn!(error = ?err, "Failed to shut down chain subscriptions");
+        }
+        self.cancel_all_pending();
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR
