@@ -113,6 +113,7 @@ pub struct MagicValidator {
     exit: Arc<AtomicBool>,
     token: CancellationToken,
     accountsdb: Arc<AccountsDb>,
+    chainlink: Arc<ChainlinkImpl>,
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
     intent_execution_service: IntentExecutionServiceImpl,
@@ -460,6 +461,7 @@ impl MagicValidator {
 
         Ok(Self {
             accountsdb,
+            chainlink,
             config,
             exit,
             _metrics: (metrics_service, system_metrics_ticker),
@@ -1259,6 +1261,15 @@ impl MagicValidator {
         // replication drain treats a closed channel as "producer finished"
         // and otherwise waits out its full timeout.
         self.replication_tx = None;
+
+        // Stop chain subscriptions before the token is cancelled: the cloner
+        // turns subscription updates into scheduled transactions, and once
+        // the scheduler is gone each one fails with `ClusterMaintenance` and
+        // is retried until the process is killed, which keeps the RPC
+        // runtime alive past its shutdown timeout.
+        let step_start = Instant::now();
+        self.chainlink.shutdown().await;
+        log_timing("shutdown", "chainlink_stop", step_start);
 
         // Stop request ingress before stopping intent execution so shutdown
         // does not admit new local undelegation scheduling work.
