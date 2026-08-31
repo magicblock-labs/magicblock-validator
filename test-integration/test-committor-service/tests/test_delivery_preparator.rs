@@ -338,8 +338,8 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
             .wait_for_processed_status(
                 signature,
                 blockhash,
-                Duration::from_secs(4),
-                Duration::from_millis(10),
+                &Duration::from_secs(4),
+                &Some(Duration::from_millis(10)),
                 &None,
             )
             .await

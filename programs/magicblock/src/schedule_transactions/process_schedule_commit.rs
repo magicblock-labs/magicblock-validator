@@ -4,8 +4,8 @@ use magicblock_core::intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType,
     calculate_commit_fee, types::CommittedAccount,
 };
-// no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
+use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -17,7 +17,9 @@ use crate::{
         ScheduledIntentBundle, validate_commit_schedule_permissions,
     },
     magic_sys::{fetch_current_commit_nonces, validate_intent_size},
-    schedule_transactions::{self, check_commit_limits, try_get_fee_vault},
+    schedule_transactions::{
+        self, check_commit_limits, get_parent_program_id, try_get_fee_vault,
+    },
     utils::{
         account_actions::{
             charge_delegated_payer, mark_account_as_undelegated,
@@ -98,44 +100,7 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingAccount);
     }
 
-    //
-    // Get the program_id of the parent instruction that invoked this one via CPI
-    //
-
-    // We cannot easily simulate the transaction being invoked via CPI
-    // from the owning program during unit tests
-    // Instead the integration tests ensure that this works as expected
-    #[cfg(not(test))]
-    let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
-
-    // During unit tests we assume the first committee has the correct program ID
-    #[cfg(test)]
-    let first_committee_owner = {
-        *get_instruction_account_with_idx(
-            transaction_context,
-            committees_start as u16,
-        )?
-        .borrow()?
-        .owner()
-    };
-
-    #[cfg(not(test))]
-    let parent_program_id = {
-        let parent_program_id =
-            frames.find_program_id_of_parent_of_current_instruction();
-
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit: parent program id: {}",
-            parent_program_id
-                .map_or_else(|| "None".to_string(), |id| id.to_string())
-        );
-
-        parent_program_id
-    };
-
-    #[cfg(test)]
-    let parent_program_id = Some(&first_committee_owner);
+    let parent_program_id = get_parent_program_id(invoke_context)?;
 
     // Assert all accounts are delegated, owned by invoking program OR are signers
     // Also works if the validator authority is a signer
@@ -157,6 +122,16 @@ pub(crate) fn process_schedule_commit(
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
+        // Accounts larger than 10_240 bytes cannot currently be committed.
+        if acc.borrow()?.data().len() > MAX_PERMITTED_DATA_INCREASE {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is too large to be committed",
                 acc_pubkey
             );
             return Err(InstructionError::InvalidAccountData);
@@ -192,16 +167,13 @@ pub(crate) fn process_schedule_commit(
                 &invoke_context,
                 &acc_owner,
                 acc_pubkey,
-                parent_program_id,
+                parent_program_id.as_ref(),
                 &signers,
             )?;
 
             let account = acc.borrow()?;
-            let committed = CommittedAccount::from_account_shared(
-                *acc_pubkey,
-                &account,
-                parent_program_id.cloned(),
-            );
+            let committed =
+                CommittedAccount::from_account_shared(*acc_pubkey, &account);
 
             if &committed.pubkey != acc_pubkey {
                 ic_msg!(

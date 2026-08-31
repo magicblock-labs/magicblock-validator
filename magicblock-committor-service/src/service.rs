@@ -3,8 +3,10 @@ pub mod intent_client;
 use std::{
     collections::{HashMap, HashSet},
     future::Future,
-    mem,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -19,10 +21,10 @@ use magicblock_metrics::metrics::{
 use magicblock_program::{
     Pubkey, magic_scheduled_base_intent::ScheduledIntentBundle,
 };
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use tokio::{
-    sync::broadcast,
+    sync::{Notify, broadcast},
     task,
-    task::{JoinError, JoinHandle},
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, instrument};
@@ -34,15 +36,26 @@ use crate::{
     persist::RecoveredIntent,
 };
 
-const POISONED_MUTEX_MSG: &str = "ServiceInner intents_meta_map mutex poisoned";
+const POISONED_MUTEX_MSG: &str =
+    "IntentExecutionService intents_meta_map mutex poisoned";
 
 pub type ChainlinkImpl = ProdChainlink;
 
-pub enum IntentExecutionService<R> {
-    Created(ServiceInner<R>),
-    Started(JoinHandle<()>),
-    Stopped,
-    Error,
+pub struct IntentExecutionService<R> {
+    /// Chainlink for notifying of undelegations
+    chainlink: Arc<ChainlinkImpl>,
+    /// ER client specific for Intent needs. Could be switched to RpcClient
+    intent_rpc_client: Arc<R>,
+    /// Processor of accepted intents
+    processor: Arc<CommittorProcessor>,
+    /// Time interval to scrape MagicContext(ER slot interval)
+    // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
+    slot_interval: Duration,
+    /// Accepted intents whose execution result has not been handled yet.
+    intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+    /// Result notifications currently being submitted back to the Engine.
+    processing_results: Arc<AtomicUsize>,
+    intents_changed: Arc<Notify>,
 }
 
 impl<R> IntentExecutionService<R>
@@ -55,98 +68,118 @@ where
         intent_rpc_client: R,
         processor: Arc<CommittorProcessor>,
         slot_interval: Duration,
-        cancellation_token: CancellationToken,
-    ) -> Self {
-        Self::Created(ServiceInner::new(
-            chainlink,
-            intent_rpc_client,
-            processor,
-            slot_interval,
-            cancellation_token,
-        ))
-    }
-
-    fn take(&mut self) -> Self {
-        mem::replace(self, Self::Error)
-    }
-
-    pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
-        let Self::Created(service) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Created state to start".into(),
-            ));
-        };
-
-        let handle = service.start();
-        *self = Self::Started(handle);
-        Ok(())
-    }
-
-    pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
-        let Self::Started(handle) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Started state to stop".into(),
-            ));
-        };
-
-        handle.await?;
-        *self = Self::Stopped;
-        Ok(())
-    }
-}
-
-pub struct ServiceInner<R> {
-    /// Chainlink for notifying of undelegations
-    chainlink: Arc<ChainlinkImpl>,
-    /// ER client specific for Intent needs. Could be switched to RpcClient
-    intent_rpc_client: Arc<R>,
-    /// Processor of accepted intents
-    processor: Arc<CommittorProcessor>,
-    /// Time interval to scrape MagicContext(ER slot interval)
-    // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
-    slot_interval: Duration,
-    cancellation_token: CancellationToken,
-    /// Meta for ongoing executing intents
-    intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
-}
-
-impl<R> ServiceInner<R>
-where
-    R: ERIntentClient,
-    R::Error: Into<IntentExecutionServiceError>,
-{
-    pub fn new(
-        chainlink: Arc<ChainlinkImpl>,
-        intent_rpc_client: R,
-        processor: Arc<CommittorProcessor>,
-        slot_interval: Duration,
-        cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             chainlink,
             intent_rpc_client: Arc::new(intent_rpc_client),
             processor,
             slot_interval,
-            cancellation_token,
             intents_meta_map: Arc::new(Mutex::default()),
+            processing_results: Arc::new(AtomicUsize::new(0)),
+            intents_changed: Arc::new(Notify::new()),
         }
     }
 
-    /// Starts 2 workers: one accepting intents, another awaiting and handling results
-    fn start(self) -> JoinHandle<()> {
-        let result_subscriber = self.processor.subscribe_for_results();
-        let cancellation_token = self.cancellation_token.clone();
-        tokio::spawn(Self::result_processor(
-            result_subscriber,
-            cancellation_token,
-            self.intents_meta_map.clone(),
-            self.intent_rpc_client.clone(),
-        ));
-
-        tokio::task::spawn(self.accept_worker())
+    /// Runs both intent workers and reports after they have stopped.
+    pub async fn run(self, mut shutdown: ShutdownHandle) {
+        let result = self.run_workers(shutdown.child()).await;
+        let reason = match result {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 
-    async fn accept_worker(self) {
+    async fn run_workers(
+        self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), IntentExecutionServiceError> {
+        let result_subscriber = self.processor.subscribe_for_results();
+        let result_token = CancellationToken::new();
+        let result_shutdown = result_token.clone();
+        let intents_meta_map = self.intents_meta_map.clone();
+        let processing_results = self.processing_results.clone();
+        let intents_changed = self.intents_changed.clone();
+        let intent_rpc_client = self.intent_rpc_client.clone();
+        let result_worker = Self::result_processor(
+            result_subscriber,
+            result_shutdown,
+            intents_meta_map,
+            processing_results,
+            intents_changed,
+            intent_rpc_client,
+        );
+        tokio::pin!(result_worker);
+        let accept_token = CancellationToken::new();
+        let accept_shutdown = accept_token.clone();
+        let pending_intents = self.intents_meta_map.clone();
+        let processing_results = self.processing_results.clone();
+        let pending_changed = self.intents_changed.clone();
+        let accept_worker = self.accept_worker(accept_shutdown);
+        tokio::pin!(accept_worker);
+
+        tokio::select! {
+            biased;
+            _ = cancellation_token.cancelled() => {
+                // Do not drop completion notifications for already accepted
+                // intents: stop ingress, drain results, then stop observation.
+                accept_token.cancel();
+                accept_worker.await;
+
+                tokio::select! {
+                    biased;
+                    _ = Self::wait_for_intents(
+                        pending_intents,
+                        processing_results,
+                        pending_changed,
+                    ) => {}
+                    _ = &mut result_worker => {
+                        return Err(IntentExecutionServiceError::WorkerStopped(
+                            "result processor",
+                        ));
+                    }
+                }
+
+                result_token.cancel();
+                result_worker.await;
+                Ok(())
+            }
+            _ = &mut accept_worker => {
+                result_token.cancel();
+                result_worker.await;
+                Err(IntentExecutionServiceError::WorkerStopped(
+                    "intent acceptor",
+                ))
+            }
+            _ = &mut result_worker => {
+                accept_token.cancel();
+                accept_worker.await;
+                Err(IntentExecutionServiceError::WorkerStopped(
+                    "result processor",
+                ))
+            }
+        }
+    }
+
+    async fn wait_for_intents(
+        intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: Arc<AtomicUsize>,
+        intents_changed: Arc<Notify>,
+    ) {
+        loop {
+            let intents_empty = intents_meta_map
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .is_empty();
+            if intents_empty && processing_results.load(Ordering::SeqCst) == 0 {
+                return;
+            }
+            intents_changed.notified().await;
+        }
+    }
+
+    async fn accept_worker(self, cancellation_token: CancellationToken) {
         if let Err(err) = self.reschedule_pending_bundles().await {
             error!(error = ?err, "Failed to reschedule pending bundles")
         }
@@ -155,7 +188,7 @@ where
         loop {
             tokio::select! {
                 biased;
-                _ = self.cancellation_token.cancelled() => {
+                _ = cancellation_token.cancelled() => {
                     break;
                 }
                 _ = interval.tick() => {
@@ -275,6 +308,7 @@ where
             intent_ids.iter().for_each(|id| {
                 intent_metas.remove(id);
             });
+            self.intents_changed.notify_one();
         }
         result
     }
@@ -318,6 +352,8 @@ where
         result_subscription,
         cancellation_token,
         intents_meta_map,
+        processing_results,
+        intents_changed,
         intent_client
     ))]
     async fn result_processor(
@@ -326,6 +362,8 @@ where
         >,
         cancellation_token: CancellationToken,
         intents_meta_map: Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: Arc<AtomicUsize>,
+        intents_changed: Arc<Notify>,
         intent_client: Arc<R>,
     ) {
         loop {
@@ -352,10 +390,12 @@ where
                 }
             };
 
-            if let Err(err) = ServiceInner::<R>::process_execution_result(
+            if let Err(err) = Self::process_execution_result(
                 &intent_client,
                 execution_result,
                 &intents_meta_map,
+                &processing_results,
+                &intents_changed,
             )
             .await
             {
@@ -368,25 +408,33 @@ where
         intent_client: &Arc<R>,
         execution_result: BroadcastedIntentExecutionResult,
         intents_meta_map: &Arc<Mutex<HashMap<u64, ScheduledBaseIntentMeta>>>,
+        processing_results: &AtomicUsize,
+        intents_changed: &Notify,
     ) -> Result<(), R::Error> {
         let intent_id = execution_result.id;
-        let Some(intent_meta) = intents_meta_map
-            .lock()
-            .expect(POISONED_MUTEX_MSG)
-            .remove(&intent_id)
-        else {
-            // Possible if we have duplicate Intents
-            // First one will remove id from map and second could fail.
-            // This should not happen and needs investigation!
-            error!(intent_id, "Failed to find intent metadata");
-            return Ok(());
+        let intent_meta = {
+            let Some(intent_meta) = intents_meta_map
+                .lock()
+                .expect(POISONED_MUTEX_MSG)
+                .remove(&intent_id)
+            else {
+                // Possible if we have duplicate Intents
+                // First one will remove id from map and second could fail.
+                // This should not happen and needs investigation!
+                error!(intent_id, "Failed to find intent metadata");
+                return Ok(());
+            };
+            processing_results.fetch_add(1, Ordering::SeqCst);
+            intent_meta
         };
 
-        intent_client
+        let result = intent_client
             .notify_commit_sent(intent_meta, execution_result)
-            .await?;
+            .await;
+        processing_results.fetch_sub(1, Ordering::SeqCst);
+        intents_changed.notify_one();
 
-        Ok(())
+        result
     }
 
     async fn retain_recoverable_intents(
@@ -491,10 +539,8 @@ where
 
 #[derive(thiserror::Error, Debug)]
 pub enum IntentExecutionServiceError {
-    #[error("Invalid state: {0}")]
-    InvalidState(String),
-    #[error("JoinError: {0}")]
-    JoinError(#[from] JoinError),
+    #[error("Intent execution worker '{0}' stopped unexpectedly")]
+    WorkerStopped(&'static str),
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalIntentClientError),
 }

@@ -1,13 +1,13 @@
 use std::{
     sync::{Arc, atomic::AtomicU64},
-    thread,
     time::Duration,
 };
 
 use engine::Engine;
 use magicblock_aperture::{SharedState, initialize_aperture};
 use magicblock_chainlink::{
-    ProdChainlink, config::ChainlinkConfig, remote_account_provider::Endpoints,
+    ProdChainlink, config::ChainlinkConfig, errors::ChainlinkError,
+    remote_account_provider::Endpoints,
 };
 use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
@@ -24,16 +24,17 @@ use magicblock_services::{
     undelegation_request_service::UndelegationRequestService,
 };
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
-use magicblock_validator_admin::claim_fees::{ClaimFeesTask, claim_fees};
-use nucleus::{metrics::EventTimer, shutdown::ShutdownManager};
+use magicblock_validator_admin::claim_fees::{claim_fees, run_claim_fees_loop};
+use nucleus::{
+    metrics::EventTimer,
+    shutdown::{Service, ShutdownManager, ShutdownReason},
+};
 use replicator::ReplicationDispatcher;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use tokio::runtime::Builder;
-use tokio_util::sync::CancellationToken;
 use tracing::*;
 
 use crate::{
@@ -52,14 +53,11 @@ type IntentExecutionServiceImpl =
 // -----------------
 pub struct Leader {
     config: LeaderParams,
-    token: CancellationToken,
     engine: Engine,
-    pub(crate) shutdown: ShutdownManager,
-    intent_execution_service: IntentExecutionServiceImpl,
-    undelegation_request_service: Arc<UndelegationRequestService>,
-    rpc_handle: thread::JoinHandle<()>,
-    _metrics: MetricsService,
-    claim_fees_task: ClaimFeesTask,
+    shutdown: ShutdownManager,
+    intent_execution_service: Option<IntentExecutionServiceImpl>,
+    undelegation_request_service: Option<UndelegationRequestService>,
+    metrics: Option<MetricsService>,
     task_scheduler: Option<TaskSchedulerService>,
 }
 
@@ -70,7 +68,6 @@ impl Leader {
     #[instrument(skip_all, fields(last_slot = tracing::field::Empty))]
     pub async fn try_from_config(config: LeaderParams) -> ApiResult<Self> {
         let mut timer = EventTimer::new("init");
-        let token = CancellationToken::new();
 
         let engine_ledger = config.engine.ledger.directory.clone();
         init_validator_authority(config.engine.authority.local.clone());
@@ -101,7 +98,7 @@ impl Leader {
         )
         .await;
         if let Err(error) = replication {
-            shutdown.terminate().await;
+            let _ = shutdown.terminate().await;
             return Err(error.into());
         }
         timer.record("Replication dispatcher started");
@@ -127,7 +124,6 @@ impl Leader {
             &engine,
             &committor_processor,
             config.engine.blockstore.blocktime,
-            &token,
         );
         timer.record("Committor service initialized");
         init_magic_sys(Arc::new(MagicSysAdapter::new(
@@ -136,41 +132,38 @@ impl Leader {
         )));
         timer.record("Magic syscall adapter initialized");
 
-        let metrics_service = magicblock_metrics::try_start_metrics_service(
-            config.metrics.address.0,
-            token.clone(),
-        )
-        .map_err(ApiError::FailedToStartMetricsService)?;
-        timer.record("Metrics service started");
+        let metrics = MetricsService::bind(config.metrics.address.0)
+            .await
+            .map_err(ApiError::FailedToStartMetricsService)?;
+        timer.record("Metrics service bound");
 
-        let undelegation_request_service =
-            Arc::new(UndelegationRequestService::new(
-                chainlink.clone(),
-                engine.clone(),
-                config.chainlink.undelegation_request_poll_interval,
-            ));
+        let undelegation_request_service = UndelegationRequestService::new(
+            chainlink.clone(),
+            engine.clone(),
+            config.chainlink.undelegation_request_poll_interval,
+        );
         let shared_state = SharedState::new(
             engine.clone(),
             ledger.clone(),
             chainlink.clone(),
             config.engine.blockstore.blocktime.as_millis() as u64,
         );
-        let rpc =
-            initialize_aperture(&config.aperture, shared_state, token.clone())
-                .await?;
+        let mut rpc_shutdown = shutdown.handle(Service::Rpc);
+        let rpc = initialize_aperture(
+            &config.aperture,
+            shared_state,
+            rpc_shutdown.child(),
+        )
+        .await?;
         timer.record("RPC service initialized");
-        let rpc_handle = thread::spawn(move || {
-            let workers = (num_cpus::get() / 2).saturating_sub(1).max(1);
-            let runtime = Builder::new_multi_thread()
-                .worker_threads(workers)
-                .enable_all()
-                .thread_name("rpc-worker")
-                .build()
-                .expect("failed to bulid async runtime for rpc service");
-            runtime.block_on(rpc.run());
-
-            drop(runtime);
-            info!("RPC runtime shutdown");
+        tokio::spawn(async move {
+            rpc.run().await;
+            let reason = if rpc_shutdown.requested() {
+                ShutdownReason::Signalled
+            } else {
+                ShutdownReason::Unexpected
+            };
+            rpc_shutdown.terminate(reason);
         });
 
         let task_scheduler_db_path = SchedulerDatabase::path(&engine_ledger);
@@ -180,20 +173,16 @@ impl Leader {
             &config.task_scheduler,
             engine.clone(),
             config.engine.blockstore.blocktime,
-            token.clone(),
         )?);
         timer.record("Task scheduler initialized");
 
         Ok(Self {
             config,
-            _metrics: metrics_service,
             engine,
             shutdown,
-            intent_execution_service,
-            undelegation_request_service,
-            token,
-            claim_fees_task: ClaimFeesTask::new(),
-            rpc_handle,
+            intent_execution_service: Some(intent_execution_service),
+            undelegation_request_service: Some(undelegation_request_service),
+            metrics: Some(metrics),
             task_scheduler,
         })
     }
@@ -242,7 +231,6 @@ impl Leader {
         engine: &Engine,
         committor_processor: &Arc<CommittorProcessor>,
         slot_interval: Duration,
-        cancellation_token: &CancellationToken,
     ) -> IntentExecutionServiceImpl {
         let intent_client = InternalIntentRpcClient::new(engine.clone());
 
@@ -251,7 +239,6 @@ impl Leader {
             intent_client,
             committor_processor.clone(),
             slot_interval,
-            cancellation_token.clone(),
         )
     }
 
@@ -262,11 +249,7 @@ impl Leader {
         chain_slot: Arc<AtomicU64>,
     ) -> ApiResult<ChainlinkImpl> {
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
-            .map_err(|e| {
-                ApiError::from(
-                    magicblock_chainlink::errors::ChainlinkError::from(e),
-                )
-            })?;
+            .map_err(ChainlinkError::from)?;
 
         let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
             LifecycleMode::Ephemeral,
@@ -275,11 +258,7 @@ impl Leader {
             .remote_account_provider
             .with_resubscription_delay(config.chainlink.resubscription_delay)
             .map(|conf| conf.with_grpc(config.grpc.clone()))
-            .map_err(|err| {
-                ApiError::from(
-                    magicblock_chainlink::errors::ChainlinkError::from(err),
-                )
-            })?;
+            .map_err(ChainlinkError::from)?;
         let commitment_config = {
             let level = CommitmentLevel::Confirmed;
             CommitmentConfig { commitment: level }
@@ -316,7 +295,7 @@ impl Leader {
         .map_err(|err| {
             ApiError::FailedToObtainValidatorOnChainBalance(
                 identity,
-                err.to_string(),
+                Box::new(err),
             )
         })?;
         if lamports < MIN_BALANCE_SOL * LAMPORTS_PER_SOL {
@@ -353,7 +332,7 @@ impl Leader {
             .map_err(|err| {
                 ApiError::FailedToInitMagicFeeVault(
                     validator_pubkey,
-                    err.to_string(),
+                    Box::new(err),
                 )
             })?;
 
@@ -370,7 +349,7 @@ impl Leader {
                 rpc.get_latest_blockhash().await.map_err(|err| {
                     ApiError::FailedToInitMagicFeeVault(
                         validator_pubkey,
-                        err.to_string(),
+                        Box::new(err),
                     )
                 })?;
             let tx = solana_transaction::Transaction::new_signed_with_payer(
@@ -383,11 +362,11 @@ impl Leader {
                 |err| match err.get_transaction_error() {
                     Some(tx_err) => ApiError::OnchainSetupTransactionRejected(
                         validator_pubkey,
-                        tx_err.to_string(),
+                        tx_err,
                     ),
                     None => ApiError::FailedToInitMagicFeeVault(
                         validator_pubkey,
-                        err.to_string(),
+                        Box::new(err),
                     ),
                 },
             )?;
@@ -406,7 +385,7 @@ impl Leader {
                 rpc.get_latest_blockhash().await.map_err(|err| {
                     ApiError::FailedToDelegateMagicFeeVault(
                         validator_pubkey,
-                        err.to_string(),
+                        Box::new(err),
                     )
                 })?;
             let tx = solana_transaction::Transaction::new_signed_with_payer(
@@ -419,11 +398,11 @@ impl Leader {
                 |err| match err.get_transaction_error() {
                     Some(tx_err) => ApiError::OnchainSetupTransactionRejected(
                         validator_pubkey,
-                        tx_err.to_string(),
+                        tx_err,
                     ),
                     None => ApiError::FailedToDelegateMagicFeeVault(
                         validator_pubkey,
-                        err.to_string(),
+                        Box::new(err),
                     ),
                 },
             )?;
@@ -473,19 +452,18 @@ impl Leader {
         }
     }
 
-    fn spawn_primary_onchain_setup(&self) {
+    fn spawn_primary_onchain_setup(&mut self) {
         let engine = self.engine.clone();
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.engine.authority();
         let admin = self.config.admin.clone();
-        let token = self.token.clone();
 
+        let mut shutdown = self.shutdown.handle(Service::OnchainSetup);
         // Ephemeral mode does a non-blocking startup balance check.
-        // Intentionally fire-and-forget: the task itself exits the process on failure.
         tokio::spawn(async move {
             let setup = async move {
                 let mut timer = EventTimer::new("onchain-setup");
-                let result = Self::with_onchain_setup_retries(
+                Self::with_onchain_setup_retries(
                     "ensure_funded_on_chain",
                     || {
                         Leader::ensure_validator_funded_on_chain(
@@ -494,15 +472,10 @@ impl Leader {
                         )
                     },
                 )
-                .await;
+                .await?;
                 timer.record("Validator balance checked");
-                if let Err(err) = result {
-                    error!(error = ?err, "Validator balance check failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
 
-                let result = Self::with_onchain_setup_retries(
+                Self::with_onchain_setup_retries(
                     "ensure_magic_fee_vault_on_chain",
                     || {
                         Leader::ensure_magic_fee_vault_on_chain(
@@ -511,16 +484,9 @@ impl Leader {
                         )
                     },
                 )
-                .await;
+                .await?;
                 timer.record("Magic fee vault setup attempt completed");
 
-                // Without magic fee vault being properly set up
-                // transactions scheduling commits will fail
-                if let Err(err) = result {
-                    error!(error = ?err, "Magic fee vault setup failed");
-                    error!("Exiting process");
-                    std::process::exit(1);
-                }
                 if let Some(ref config) = admin
                     && !config.claim_fees_frequency.is_zero()
                 {
@@ -533,24 +499,39 @@ impl Leader {
                     }
                     timer.record("Startup fee claim attempt completed");
                 }
+                ApiResult::Ok(())
             };
-            tokio::select! {
-                _ = token.cancelled() => {
-                    debug!("On-chain setup cancelled by shutdown")
+            let result = tokio::select! {
+                _ = shutdown.signalled() => {
+                    debug!("On-chain setup cancelled by shutdown");
+                    ApiResult::Ok(())
                 }
-                _ = setup => {}
-            }
+                result = setup => result,
+            };
+            let reason = match result {
+                Err(error) => ShutdownReason::Error(Box::new(error)),
+                Ok(()) => {
+                    shutdown.signalled().await;
+                    ShutdownReason::Signalled
+                }
+            };
+            shutdown.terminate(reason);
         });
     }
 
     #[instrument(skip(self))]
-    pub async fn start(&mut self) -> ApiResult<()> {
+    pub fn start(&mut self) {
         let mut timer = EventTimer::new("startup");
         if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
             self.spawn_primary_onchain_setup();
         }
 
-        self.undelegation_request_service.start();
+        let undelegation_request_service = self
+            .undelegation_request_service
+            .take()
+            .expect("undelegation request service starts once");
+        let shutdown = self.shutdown.handle(Service::UndelegationRequests);
+        tokio::spawn(undelegation_request_service.run(shutdown));
         timer.record("Undelegation request service started");
 
         // Now we are ready to start all services and are ready to accept transactions
@@ -561,81 +542,38 @@ impl Leader {
             .filter(|co| !co.claim_fees_frequency.is_zero())
             .map(|co| co.claim_fees_frequency)
         {
-            self.claim_fees_task.start(
-                self.engine.clone(),
-                frequency,
-                self.config.rpc_url().to_owned(),
-            );
+            let engine = self.engine.clone();
+            let rpc_url = self.config.rpc_url().to_owned();
+            let shutdown = self.shutdown.handle(Service::FeeClaim);
+            tokio::spawn(run_claim_fees_loop(
+                engine, shutdown, frequency, rpc_url,
+            ));
             timer.record("Fee claim task started");
         }
 
-        self.intent_execution_service.start()?;
+        let intent_execution_service = self
+            .intent_execution_service
+            .take()
+            .expect("intent execution service starts once");
+        let shutdown = self.shutdown.handle(Service::IntentExecution);
+        tokio::spawn(intent_execution_service.run(shutdown));
         timer.record("Intent execution service started");
 
-        // TODO: we should shutdown gracefully.
-        // This is discussed in this comment:
-        // https://github.com/magicblock-labs/magicblock-validator/pull/493#discussion_r2324560798
-        // However there is no proper solution for this right now.
-        // An issue to create a shutdown system is open here:
-        // https://github.com/magicblock-labs/magicblock-validator/issues/524
         if let Some(task_scheduler) = self.task_scheduler.take() {
-            tokio::spawn(async move {
-                let join_handle = {
-                    let mut timer = EventTimer::new("task-scheduler");
-                    let handle = match task_scheduler.start().await {
-                        Ok(join_handle) => join_handle,
-                        Err(err) => {
-                            error!(error = ?err, "Failed to start task scheduler");
-                            error!("Exiting process");
-                            std::process::exit(1);
-                        }
-                    };
-                    timer.record("Task scheduler started");
-                    handle
-                };
-
-                match join_handle.await {
-                    Ok(Ok(())) => {}
-                    Ok(Err(err)) => {
-                        error!(error = ?err, "Task scheduler failed");
-                        error!("Exiting process");
-                        std::process::exit(1);
-                    }
-                    Err(err) => {
-                        error!(error = ?err, "Task scheduler join failed");
-                        error!("Exiting process");
-                        std::process::exit(1);
-                    }
-                }
-            });
+            let shutdown = self.shutdown.handle(Service::TaskScheduler);
+            tokio::spawn(task_scheduler.run(shutdown));
+            timer.record("Task scheduler started");
         }
 
-        Ok(())
+        let metrics = self.metrics.take().expect("metrics service starts once");
+        let shutdown = self.shutdown.handle(Service::Metrics);
+        tokio::spawn(metrics.run(shutdown));
+        timer.record("Metrics service started");
     }
 
     #[instrument(skip(self))]
-    pub async fn stop(mut self) {
-        let mut timer = EventTimer::new("shutdown");
-
-        // Stop request ingress before stopping intent execution so shutdown
-        // does not admit new local undelegation scheduling work.
-        self.token.cancel();
-
-        let _ = self.rpc_handle.join();
-        timer.record("RPC thread stopped");
-
-        self.undelegation_request_service.stop();
-        timer.record("Undelegation request service stopped");
-
-        if let Err(err) = self.intent_execution_service.stop().await {
-            error!(error =? err, "Failure during stopping Intent Execution Service")
-        }
-        timer.record("Intent execution service stopped");
-
-        self.claim_fees_task.stop().await;
-        timer.record("Fee claim task stopped");
-
-        self.shutdown.terminate().await;
-        timer.record("Validator shutdown completed");
+    pub async fn wait(&mut self) -> ShutdownReason {
+        let reason = self.shutdown.wait().await;
+        reason.combine(self.shutdown.terminate().await)
     }
 }

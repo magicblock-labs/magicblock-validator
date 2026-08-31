@@ -428,7 +428,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_intent_bundle_action_only_with_two_accounts() {
+    fn test_schedule_intent_bundle_action_only_rejects_missing_caller() {
         let payer = Keypair::from_seed(
             b"schedule_intent_bundle_action_only_two_accounts",
         )
@@ -495,33 +495,12 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        let processed_scheduled = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Ok(()),
+            Err(InstructionError::UnsupportedProgramId),
         );
-
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-        let magic_context =
-            MagicContext::deserialize(magic_context_acc.data()).unwrap();
-        let scheduled = &magic_context.scheduled_base_intents[0];
-        let actions = scheduled.standalone_actions();
-
-        assert!(scheduled.get_all_committed_pubkeys().is_empty());
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].escrow_authority, payer.pubkey());
-        assert_eq!(actions[0].destination_program, destination_program);
-        assert_eq!(actions[0].account_metas_per_program.len(), 1);
-        assert_eq!(
-            actions[0].account_metas_per_program[0].pubkey,
-            action_account
-        );
-        assert!(actions[0].source_program.is_some());
     }
 
     #[test]
@@ -695,7 +674,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_allows_token_2022_ata_from_eata_parent() {
+    fn test_schedule_commit_rejects_token_2022_ata_without_eata_caller() {
         let payer =
             Keypair::from_seed(b"schedule_commit_token_2022_ata_eata_parent")
                 .unwrap();
@@ -707,8 +686,6 @@ mod tests {
             &mint,
             &TOKEN_2022_PROGRAM_ID,
         );
-        let eata_pubkey = derive_eata(&wallet_owner, &mint);
-
         let (mut account_data, mut transaction_accounts) =
             prepare_transaction_with_single_committee(
                 &payer,
@@ -732,24 +709,11 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        let processed_scheduled = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Ok(()),
-        );
-        let magic_context_acc = assert_non_accepted_actions(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-        let magic_context =
-            MagicContext::deserialize(magic_context_acc.data()).unwrap();
-        let scheduled = &magic_context.scheduled_base_intents[0];
-
-        assert_eq!(
-            scheduled.get_all_committed_pubkeys(),
-            vec![eata_parent_owned_committee, eata_pubkey]
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 
@@ -1274,7 +1238,7 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::InvalidAccountOwner),
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 
