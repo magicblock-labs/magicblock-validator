@@ -110,14 +110,15 @@ impl IntentExecutionClient {
         Ok(())
     }
 
-    /// Queries the full transaction history for the given signatures.
+    /// Queries the full transaction history for the given signatures and
+    /// filters each result down to `commitment_config`.
     /// Each entry is `None` if the signature was never included in a block,
     /// or if it landed but hasn't yet reached the configured commitment
     /// level - callers must not treat such an entry as final, since a
     /// merely-processed transaction can still be dropped by a fork.
     /// Use this for restart recovery where txs may be older than the RPC
     /// node's recent signature cache.
-    pub(in crate::intent_executor) async fn get_signature_statuses_with_history(
+    pub(in crate::intent_executor) async fn get_signature_statuses_with_history_at_commitment(
         &self,
         signatures: &[Signature],
         commitment_config: CommitmentConfig,

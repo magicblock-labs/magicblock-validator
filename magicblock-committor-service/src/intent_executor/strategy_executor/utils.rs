@@ -210,7 +210,7 @@ pub(in crate::intent_executor) async fn check_pending_signature(
         .map_err(IntentExecutorError::GetPendingSignatureStatusError)?;
 
     let statuses = client
-        .get_signature_statuses_with_history(
+        .get_signature_statuses_with_history_at_commitment(
             std::slice::from_ref(&pending.signature),
             CommitmentConfig::finalized(),
         )

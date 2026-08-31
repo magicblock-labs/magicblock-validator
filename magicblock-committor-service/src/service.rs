@@ -129,14 +129,15 @@ where
                 .read(RESCHEDULE_CHUNK_SIZE.get())
                 .await
                 .map_err(Into::into)?;
+            if intent_bundles_chunk.is_empty() {
+                return Ok(());
+            }
+
             // Original blockhash is stale after restart; signal recovery so
             // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
             intent_bundles_chunk.iter_mut().for_each(|b| {
                 b.inner.sent_transaction = Transaction::default()
             });
-            if intent_bundles_chunk.is_empty() {
-                return Ok(());
-            }
 
             let read_len = intent_bundles_chunk.len();
             // Schedule  without initial persistence as bundle already exists in db

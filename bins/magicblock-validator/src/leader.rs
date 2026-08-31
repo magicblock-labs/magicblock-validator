@@ -12,7 +12,7 @@ use magicblock_chainlink::{
 use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
     committor_processor::CommittorProcessor, config::ChainConfig,
-    intent_engine::db::DummyIntentBacklog,
+    intent_engine::db::AccountsDbIntentBacklog,
     outbox::outbox_client::InternalOutboxClient,
     service::IntentExecutionService,
 };
@@ -46,10 +46,10 @@ use crate::{
 
 type ChainlinkImpl = ProdChainlink;
 
-type CommittorProcessorImpl = CommittorProcessor<DummyIntentBacklog>;
+type CommittorProcessorImpl = CommittorProcessor<AccountsDbIntentBacklog>;
 
 type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalOutboxClient, DummyIntentBacklog>;
+    IntentExecutionService<InternalOutboxClient, AccountsDbIntentBacklog>;
 
 // -----------------
 // Leader
@@ -232,7 +232,7 @@ impl Leader {
             authority,
             base_chain_config,
             shared_chain_slot.clone(),
-            DummyIntentBacklog::new(engine.clone()),
+            AccountsDbIntentBacklog::new(engine.clone()),
             outbox_client.clone(),
             actions_callback_executor,
         )

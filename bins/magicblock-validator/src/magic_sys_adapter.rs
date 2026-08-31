@@ -2,7 +2,7 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
-    intent_engine::db::DummyIntentBacklog,
+    intent_engine::db::AccountsDbIntentBacklog,
     tasks::{
         intent_size_validator::IntentSizeValidator,
         task_info_fetcher::TaskInfoFetcherResult,
@@ -21,7 +21,7 @@ use tracing::error;
 #[derive(Clone)]
 pub struct MagicSysAdapter {
     handle: tokio::runtime::Handle,
-    committor_processor: Arc<CommittorProcessor<DummyIntentBacklog>>,
+    committor_processor: Arc<CommittorProcessor<AccountsDbIntentBacklog>>,
 }
 
 impl MagicSysAdapter {
@@ -36,7 +36,7 @@ impl MagicSysAdapter {
 
     pub fn new(
         handle: tokio::runtime::Handle,
-        committor_processor: Arc<CommittorProcessor<DummyIntentBacklog>>,
+        committor_processor: Arc<CommittorProcessor<AccountsDbIntentBacklog>>,
     ) -> Self {
         Self {
             handle,

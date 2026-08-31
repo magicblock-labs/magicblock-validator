@@ -22,12 +22,12 @@ pub trait BacklogDB: Send + 'static {
     fn is_empty(&self) -> bool;
 }
 
-pub struct DummyIntentBacklog {
+pub struct AccountsDbIntentBacklog {
     engine: Engine,
     queue: RefCell<VecDeque<u64>>,
 }
 
-impl DummyIntentBacklog {
+impl AccountsDbIntentBacklog {
     pub fn new(engine: Engine) -> Self {
         Self {
             engine,
@@ -36,7 +36,7 @@ impl DummyIntentBacklog {
     }
 }
 
-impl BacklogDB for DummyIntentBacklog {
+impl BacklogDB for AccountsDbIntentBacklog {
     fn store_intent_bundle(
         &self,
         intent_bundle: OutboxIntentBundle,
