@@ -26,7 +26,11 @@ pub(crate) fn process_execute_callback(
         "ExecuteCallback ERR",
     )?;
 
-    invoke_context.native_invoke(instruction, &[CALLBACK_SIGNER])
+    invoke_context.native_invoke_as(
+        crate::id(),
+        instruction,
+        &[CALLBACK_SIGNER],
+    )
 }
 
 /// Checks if callback is correctly authorized

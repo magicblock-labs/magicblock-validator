@@ -26,7 +26,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
         AccountCloneRequest, AccountMaterialization, ClonePostDelegationMode,
-        DelegationActions, errors::ClonerResult,
+        errors::ClonerResult,
     },
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
@@ -347,18 +347,18 @@ where
 
                     let delegation_actions =
                         if account.read().is(AccountMode::Delegated) {
-                            delegation_actions.unwrap_or_default()
+                            delegation_actions
                         } else {
-                            DelegationActions::default()
+                            None
                         };
 
                     (commit_freq, delegated_to_other, delegation_actions)
                 } else if is_internal_dlp_account_data(account.read().data()) {
-                    (None, None, DelegationActions::default())
+                    (None, None, None)
                 } else {
                     missing_delegation_record
                         .push((pubkey, account.read().slot()));
-                    (None, None, DelegationActions::default())
+                    (None, None, None)
                 };
             let cleanup_delegated_subscription =
                 account.read().is(AccountMode::Delegated);

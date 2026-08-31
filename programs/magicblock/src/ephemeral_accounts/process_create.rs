@@ -25,7 +25,7 @@ pub(crate) fn process_create_ephemeral_account(
         return Err(InstructionError::InvalidArgument);
     }
 
-    let caller_program_id = validate_common(transaction_context)?;
+    let caller_program_id = validate_common(invoke_context)?;
     validate_ephemeral_signer(transaction_context)?;
     let ephemeral = validate_new_ephemeral(transaction_context)?;
 

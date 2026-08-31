@@ -624,9 +624,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                     .map(|(pubkey, account)| {
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
-                            pubkey,
-                            &account,
-                            context.parent_program_id,
+                            pubkey, &account,
                         ))
                     })
                     .collect::<Result<_, InstructionError>>()?;
@@ -651,9 +649,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                     .map(|(pubkey, account)| {
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(
-                            pubkey,
-                            &account,
-                            context.parent_program_id,
+                            pubkey, &account,
                         ))
                     })
                     .collect::<Result<_, InstructionError>>()?;

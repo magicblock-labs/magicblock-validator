@@ -47,17 +47,10 @@ use crate::{
 
 pub(crate) const PAYER_IDX: u16 = 0;
 pub(crate) const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
-#[cfg(test)]
-pub(crate) const ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
-
-#[cfg(not(test))]
 fn get_parent_program_id(
-    invoke_context: &mut InvokeContext,
+    invoke_context: &InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
-    let transaction_context = &*invoke_context.transaction_context;
-    let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
-    let parent_program_id =
-        frames.find_program_id_of_parent_of_current_instruction();
+    let parent_program_id = invoke_context.effective_caller()?;
 
     ic_msg!(
         invoke_context,
@@ -66,34 +59,7 @@ fn get_parent_program_id(
             .map_or_else(|| "None".to_string(), |id| id.to_string())
     );
 
-    Ok(parent_program_id.copied())
-}
-
-#[cfg(test)]
-fn get_parent_program_id(
-    invoke_context: &mut InvokeContext,
-) -> Result<Option<Pubkey>, InstructionError> {
-    use solana_account::ReadableAccount;
-    let transaction_context = &*invoke_context.transaction_context;
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-
-    // Action-only bundles may legitimately contain only payer + magic context.
-    // In unit tests we cannot recover CPI frames, so use a stable placeholder
-    // instead of failing before we can exercise the scheduling logic.
-    if ix_ctx.get_number_of_instruction_accounts() as usize <= ACCOUNTS_OFFSET {
-        return Ok(Some(crate::id()));
-    }
-
-    use crate::utils::accounts::get_instruction_account_with_idx;
-
-    let first_committee_owner = *get_instruction_account_with_idx(
-        transaction_context,
-        ACCOUNTS_OFFSET as u16,
-    )?
-    .borrow()?
-    .owner();
-
-    Ok(Some(first_committee_owner))
+    Ok(parent_program_id)
 }
 
 pub(crate) fn get_clock(

@@ -65,13 +65,13 @@ magicblock-task-scheduler = { path = "magicblock-task-scheduler" }
 magicblock-validator-admin = { path = "magicblock-validator-admin" }
 magicblock-version = { path = "magicblock-version" }
 
-accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
+accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
 
 agave-geyser-plugin-interface = { version = "4.1" }
 agave-precompiles = { version = "4.1", features = ["agave-unstable-api"] }
@@ -234,8 +234,8 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 [patch.crates-io]
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 
-agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.2" }
+agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.3.3" }
