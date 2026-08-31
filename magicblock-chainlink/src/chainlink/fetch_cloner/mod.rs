@@ -395,7 +395,7 @@ const RISK_RELEVANT_PROGRAMS: [Pubkey; 6] = [
 /// the signers of these post-delegation actions.
 fn delegation_actions_require_risk_check(
     strategy: AmlCheckStrategy,
-    delegation_actions: &DelegationActions,
+    delegation_actions: &[solana_instruction::Instruction],
 ) -> bool {
     match strategy {
         AmlCheckStrategy::AllSigners => true,
@@ -1241,8 +1241,14 @@ where
         fetch_context: AccountFetchContext,
     ) -> ClonerResult<Option<MaterializedAccount>> {
         let pubkey = request.pubkey;
-        request.post_delegation_mode =
-            ClonePostDelegationMode::RescueUndelegate;
+        request.post_delegation_mode = request
+            .post_delegation_mode
+            .rescue_undelegate()
+            .ok_or_else(|| {
+                cloner::errors::ClonerError::UndelegationSchedulingUnavailable(
+                    pubkey,
+                )
+            })?;
         let remote_result = Self::clone_remote_result_for_request(&request);
         let clone_intent = Self::clone_intent_for_request(&request);
 
@@ -1587,7 +1593,7 @@ where
                 &account,
                 update_source,
                 deleg_record.as_ref(),
-                &delegation_actions,
+                delegation_actions.as_ref(),
                 &companion_fetch_log_context,
             )
             .await;
@@ -1808,7 +1814,7 @@ where
         &'a self,
         pubkey: Pubkey,
         remote_slot: u64,
-        delegation_actions: &'a DelegationActions,
+        delegation_actions: &'a [solana_instruction::Instruction],
         fetch_context: AccountFetchContext,
     ) -> Pin<Box<dyn Future<Output = ChainlinkResult<()>> + Send + 'a>> {
         Box::pin(async move {
@@ -1891,7 +1897,7 @@ where
 
     fn collect_post_delegation_action_dependencies(
         target: Pubkey,
-        delegation_actions: &DelegationActions,
+        delegation_actions: &[solana_instruction::Instruction],
     ) -> (HashSet<Pubkey>, HashSet<Pubkey>) {
         let mut dependencies = HashSet::new();
         let mut writable_dependencies = HashSet::new();
@@ -1914,7 +1920,7 @@ where
 
     async fn validate_post_delegation_action_signers(
         &self,
-        delegation_actions: &DelegationActions,
+        delegation_actions: &[solana_instruction::Instruction],
     ) -> ChainlinkResult<()> {
         let Some(risk_service) = self.risk_service.as_ref() else {
             return Ok(());
@@ -2189,8 +2195,6 @@ where
             );
             return true;
         }
-        let delegation_actions = delegation_actions.unwrap_or_default();
-
         let greedy_ata_pubkeys = delegation::parse_raw_eata_pda(
             &pubkey,
             account.data(),
@@ -2263,7 +2267,7 @@ where
                         )),
                         update.source,
                         Some(&deleg_record),
-                        &delegation_actions,
+                        delegation_actions.as_ref(),
                         &CompanionFetchLogContext {
                             origin: discovery_context.clone(),
                             primary_pubkey: pubkey,
@@ -2428,7 +2432,7 @@ where
     ) -> (
         Option<AccountBuilder>,
         Option<DelegationRecord>,
-        DelegationActions,
+        Option<DelegationActions>,
     ) {
         let ForwardedSubscriptionUpdate {
             pubkey,
@@ -2569,13 +2573,13 @@ where
                                 (
                                     Some(account),
                                     Some(delegation_record),
-                                    delegation_actions.unwrap_or_default(),
+                                    delegation_actions,
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None, DelegationActions::default())
+                                (None, None, None)
                             }
                         } else if let Ok(request) =
                             UndelegationRequest::try_from_bytes_with_discriminator(
@@ -2609,7 +2613,7 @@ where
                             (
                                 Some(account),
                                 None,
-                                DelegationActions::default(),
+                                None,
                             )
                         } else if is_internal_dlp_account_data(
                             account.read().data(),
@@ -2617,14 +2621,14 @@ where
                             (
                                 Some(account),
                                 None,
-                                DelegationActions::default(),
+                                None,
                             )
                         } else {
                             trace!(
                                 pubkey = %pubkey,
                                 "Skipping DLP-owned subscription update without delegation record"
                             );
-                            (None, None, DelegationActions::default())
+                            (None, None, None)
                         };
 
                         if !subs_to_remove.is_empty() {
@@ -2655,7 +2659,7 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, None)
                     }
                     Err(err) => {
                         log_companion_fetch_failure(
@@ -2675,7 +2679,7 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, None)
                     }
                 }
             } else {
@@ -2687,20 +2691,16 @@ where
                     )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
-                    (
-                        Some(account),
-                        Some(deleg_record),
-                        actions.unwrap_or_default(),
-                    )
+                    (Some(account), Some(deleg_record), actions)
                 } else {
-                    (Some(account), None, DelegationActions::default())
+                    (Some(account), None, None)
                 }
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, "BUG: Received subscription update without fresh account");
-            (None, None, DelegationActions::default())
+            (None, None, None)
         }
     }
 
@@ -2710,7 +2710,7 @@ where
         eata_account: &AccountBuilder,
         update_source: SubscriptionSource,
         deleg_record: Option<&DelegationRecord>,
-        delegation_actions: &DelegationActions,
+        delegation_actions: Option<&DelegationActions>,
         companion_fetch_log_context: &CompanionFetchLogContext,
     ) -> Option<AccountCloneRequest> {
         ata_projection::maybe_build_projected_ata_clone_request_from_subscription_update(

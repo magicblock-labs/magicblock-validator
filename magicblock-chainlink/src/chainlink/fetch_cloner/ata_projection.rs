@@ -120,7 +120,7 @@ pub(crate) async fn maybe_build_projected_ata_clone_request_from_subscription_up
     eata_account: &AccountBuilder,
     update_source: SubscriptionSource,
     deleg_record: Option<&DelegationRecord>,
-    delegation_actions: &DelegationActions,
+    delegation_actions: Option<&DelegationActions>,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<AccountCloneRequest>
 where
@@ -166,14 +166,12 @@ where
             companion_fetch_log_context,
         )
         .await?;
-    let delegation_actions = delegation_actions.unwrap_or_default();
-
     maybe_build_projected_ata_clone_request_from_eata(
         this,
         eata_pubkey,
         eata_account,
         &deleg_record,
-        &delegation_actions,
+        delegation_actions.as_ref(),
         companion_fetch_log_context,
     )
     .await
@@ -184,7 +182,7 @@ async fn maybe_build_projected_ata_clone_request_from_eata<T, U>(
     eata_pubkey: Pubkey,
     eata_account: &AccountBuilder,
     deleg_record: &DelegationRecord,
-    delegation_actions: &DelegationActions,
+    delegation_actions: Option<&DelegationActions>,
     companion_fetch_log_context: &CompanionFetchLogContext,
 ) -> Option<AccountCloneRequest>
 where
@@ -261,7 +259,7 @@ where
         account: projected_ata,
         commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::from(
-            delegation_actions.clone(),
+            delegation_actions.cloned(),
         ),
         delegated_to_other: None,
     })
@@ -689,9 +687,7 @@ where
             pubkey: input.ata_pubkey,
             account: account_to_clone,
             commit_frequency_ms,
-            post_delegation_mode: ClonePostDelegationMode::from(
-                actions.unwrap_or_default(),
-            ),
+            post_delegation_mode: ClonePostDelegationMode::from(actions),
             delegated_to_other,
         });
     }

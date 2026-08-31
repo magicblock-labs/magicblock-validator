@@ -71,12 +71,14 @@ fn clone_request_classification() {
 
     let mut dependency = request(account());
     dependency.post_delegation_mode =
-        DelegationActions::from(vec![Instruction::new_with_bytes(
-            system_program::id(),
-            &[1],
-            vec![],
-        )])
-        .into();
+        ClonePostDelegationMode::from(DelegationActions::new(
+            Pubkey::new_unique(),
+            vec![Instruction::new_with_bytes(
+                system_program::id(),
+                &[1],
+                vec![],
+            )],
+        ));
     assert_eq!(
         TestFetchCloner::clone_intent_for_request(&dependency),
         ChainlinkCloneIntent::ActionDependency
@@ -103,8 +105,7 @@ mod aml_check_strategy {
     #[test]
     fn all_signers_strategy_always_requires_check() {
         // An action that touches no risk-relevant program still gets checked.
-        let actions: DelegationActions =
-            vec![action_for_program(Pubkey::new_unique())].into();
+        let actions = vec![action_for_program(Pubkey::new_unique())];
         assert!(delegation_actions_require_risk_check(
             AmlCheckStrategy::AllSigners,
             &actions,
@@ -113,11 +114,10 @@ mod aml_check_strategy {
 
     #[test]
     fn relevant_programs_strategy_skips_unrelated_actions() {
-        let actions: DelegationActions = vec![
+        let actions = vec![
             action_for_program(Pubkey::new_unique()),
             action_for_program(Pubkey::new_unique()),
-        ]
-        .into();
+        ];
         assert!(!delegation_actions_require_risk_check(
             AmlCheckStrategy::RelevantPrograms,
             &actions,
@@ -136,8 +136,7 @@ mod aml_check_strategy {
             system_program::ID,
             magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
         ] {
-            let actions: DelegationActions =
-                vec![action_for_program(program)].into();
+            let actions = vec![action_for_program(program)];
             assert!(
                 delegation_actions_require_risk_check(
                     AmlCheckStrategy::RelevantPrograms,
@@ -147,8 +146,8 @@ mod aml_check_strategy {
             );
 
             // Referenced as a CPI target account, not the invoked program.
-            let actions: DelegationActions =
-                vec![action_referencing(Pubkey::new_unique(), program)].into();
+            let actions =
+                vec![action_referencing(Pubkey::new_unique(), program)];
             assert!(
                 delegation_actions_require_risk_check(
                     AmlCheckStrategy::RelevantPrograms,
@@ -168,13 +167,11 @@ mod aml_check_strategy {
 
     #[test]
     fn relevant_programs_strategy_matches_native_sol_transfers() {
-        let actions: DelegationActions =
-            vec![solana_system_interface::instruction::transfer(
-                &Pubkey::new_unique(),
-                &Pubkey::new_unique(),
-                1_000,
-            )]
-            .into();
+        let actions = vec![solana_system_interface::instruction::transfer(
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique(),
+            1_000,
+        )];
         assert!(delegation_actions_require_risk_check(
             AmlCheckStrategy::RelevantPrograms,
             &actions,
@@ -183,11 +180,10 @@ mod aml_check_strategy {
 
     #[test]
     fn relevant_programs_strategy_matches_when_any_action_is_relevant() {
-        let actions: DelegationActions = vec![
+        let actions = vec![
             action_for_program(Pubkey::new_unique()),
             action_for_program(EATA_PROGRAM_ID),
-        ]
-        .into();
+        ];
         assert!(delegation_actions_require_risk_check(
             AmlCheckStrategy::RelevantPrograms,
             &actions,
