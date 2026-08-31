@@ -8,7 +8,7 @@ use solana_message::VersionedMessage;
 use crate::{
     persist::IntentPersister,
     tasks::{
-        commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
+        preparation_task::CleanupTask, task_strategist::TransactionStrategy,
         utils::TransactionUtils, BaseTaskImpl,
     },
     transaction_preparator::{

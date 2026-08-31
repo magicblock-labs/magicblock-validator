@@ -546,6 +546,12 @@ where
             Err(IntentExecutorError::SignerError(_)) => {
                 Some(CommitStatus::Failed)
             }
+            Err(IntentExecutorError::FailedToRecoverError(_)) => {
+                // Occurs while preparing a finalize retry, before any
+                // transaction is sent — same treatment as
+                // FailedFinalizePreparationError.
+                None
+            }
         };
 
         if let Some(update_status) = update_status {
@@ -685,6 +691,7 @@ mod tests {
     fn test_requires_uniqueness_nonce_on_first_commit_only() {
         let finalize = BaseTaskImpl::Finalize(FinalizeTask {
             delegated_account: Pubkey::new_unique(),
+            state_size: 0,
         });
 
         assert!(requires_uniqueness_nonce(&[commit_task(1)]));

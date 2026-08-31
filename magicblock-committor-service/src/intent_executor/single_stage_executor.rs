@@ -16,8 +16,9 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         utils::{
-            handle_actions_result, handle_commit_id_error,
-            handle_undelegation_error, prepare_and_execute_strategy,
+            fetch_finalize_state_size, handle_actions_result,
+            handle_commit_id_error, handle_undelegation_error,
+            prepare_and_execute_strategy,
         },
         IntentExecutionReport,
     },
@@ -279,8 +280,15 @@ where
         delegated_account: Pubkey,
         transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
+        // Fetch commit_state to size prealloca
+        let state_size =
+            fetch_finalize_state_size(&self.intent_client, delegated_account)
+                .await?;
+        let finalize_task: BaseTaskImpl = FinalizeTask {
+            delegated_account,
+            state_size,
+        }
+        .into();
         prepare_and_execute_strategy(
             &self.intent_client,
             &self.authority,

@@ -84,6 +84,7 @@ impl IntentSizeValidator {
         fn finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
             FinalizeTask {
                 delegated_account: account.pubkey,
+                state_size: account.account.data.len(),
             }
             .into()
         }
@@ -96,6 +97,7 @@ impl IntentSizeValidator {
                 rent_reimbursement: Pubkey::default(),
                 // We lack context here so let's assume worst case scenario
                 include_undelegation_request: true,
+                state_size: account.account.data.len(),
             }
             .into()
         }

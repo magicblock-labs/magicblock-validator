@@ -4,6 +4,7 @@ use magicblock_rpc_client::{
     utils::TransactionErrorMapper, MagicBlockRpcClientError,
 };
 use solana_instruction::error::InstructionError;
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
     request::{RpcError, RpcRequest},
@@ -78,6 +79,23 @@ impl InternalError {
 }
 
 #[derive(thiserror::Error, Debug)]
+pub enum FailedToRecoverError {
+    #[error("FailedToFetchAccountError: {0}")]
+    FailedToFetchAccountError(#[source] InternalError),
+    #[error("MissingCommitStateAccount for delegated account {0}")]
+    MissingCommitStateAccount(Pubkey),
+}
+
+impl FailedToRecoverError {
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::FailedToFetchAccountError(err) => err.is_transient(),
+            Self::MissingCommitStateAccount(_) => false,
+        }
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
 pub enum IntentExecutorError {
     #[error("EmptyIntentError")]
     EmptyIntentError,
@@ -105,6 +123,8 @@ pub enum IntentExecutorError {
     FailedCommitPreparationError(#[source] TransactionPreparatorError),
     #[error("FailedFinalizePreparationError: {0}")]
     FailedFinalizePreparationError(#[source] TransactionPreparatorError),
+    #[error("FailedToRecoverError: {0}")]
+    FailedToRecoverError(#[from] FailedToRecoverError),
 }
 
 impl IntentExecutorError {
@@ -149,6 +169,7 @@ impl IntentExecutorError {
             Self::FailedToFinalizeError { .. }
             | Self::FailedFinalizePreparationError(_) => false,
             Self::FailedCommitPreparationError(err) => err.is_transient(),
+            Self::FailedToRecoverError(err) => err.is_transient(),
         }
     }
 
@@ -171,7 +192,8 @@ impl IntentExecutorError {
             } => commit_signature.map(|el| (el, *finalize_signature)),
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
-            | IntentExecutorError::SignerError(_) => None,
+            | IntentExecutorError::SignerError(_)
+            | IntentExecutorError::FailedToRecoverError(_) => None,
         }
     }
 }

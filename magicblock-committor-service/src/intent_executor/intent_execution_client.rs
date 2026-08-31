@@ -6,11 +6,14 @@ use magicblock_rpc_client::{
         decide_rpc_error_flow, map_magicblock_client_error,
         send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
     },
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockRpcClientResult,
+    MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
+    MagicblockRpcClient,
 };
+use solana_account::Account;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
@@ -210,5 +213,12 @@ impl IntentExecutionClient {
             Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
             _ => {}
         }
+    }
+
+    pub(in crate::intent_executor) async fn get_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> MagicBlockRpcClientResult<Option<Account>> {
+        self.rpc_client.get_account(pubkey).await
     }
 }

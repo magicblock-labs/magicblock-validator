@@ -30,7 +30,7 @@ use tracing::{error, info};
 use crate::{
     persist::{CommitStatus, IntentPersister},
     tasks::{
-        commit_stage_task::{CleanupTask, PreparationTask},
+        preparation_task::{BufferPreparationTask, CleanupTask, Preallocate},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
         BaseTaskImpl,
@@ -44,6 +44,11 @@ pub struct DeliveryPreparator {
     table_mania: TableMania,
     compute_budget_config: ComputeBudgetConfig,
 }
+
+/// Preallocate instructions are packed this many per transaction.
+/// TX wire ceiling is 36, but due yo MaxInstructionTraceLengthExceeded
+/// ceiling is 31
+const PREALLOCATE_CHUNK_SIZE: usize = 31;
 
 const MAX_PARALLEL_BUFFER_SENDS: usize = 8;
 
@@ -68,41 +73,157 @@ impl DeliveryPreparator {
         persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let _timer =
-                    metrics::observe_committor_intent_task_preparation_time(
-                        &*task,
-                    );
-                self.prepare_task_handling_errors(
-                    authority,
-                    task,
-                    persister,
-                    uniqueness_nonce,
-                )
-                .await
-            });
 
-        let task_preparations = join_all(preparation_futures);
-        let alts_preparations = async {
+        let tasks_preparation = self.prepare_tasks(
+            authority,
+            &mut strategy.optimized_tasks,
+            persister,
+            uniqueness_nonce,
+        );
+        let alts_preparation = async {
             let _timer =
                 metrics::observe_committor_intent_alt_preparation_time();
             self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
                 .await
+                .map_err(DeliveryPreparatorError::FailedToCreateALTError)
         };
 
-        let (res1, res2) = join(task_preparations, alts_preparations).await;
+        let (res1, res2) = join(tasks_preparation, alts_preparation).await;
+        res1?;
+        res2
+    }
+
+    /// Prepares buffer content (writes) and account/buffer preallocation for
+    /// all tasks concurrently, since the two touch independent on-chain
+    /// state.
+    async fn prepare_tasks<P: IntentPersister>(
+        &self,
+        authority: &Keypair,
+        tasks: &mut [BaseTaskImpl],
+        persister: &Option<P>,
+        uniqueness_nonce: Option<u64>,
+    ) -> DeliveryPreparatorResult<()> {
+        // Preallocate futures
+        let mut preallocate_chunks =
+            Self::chunk_preallocate_instructions(tasks, &authority.pubkey());
+        let preallocate_preparations = self.send_preallocate_chunks(
+            authority,
+            &mut preallocate_chunks,
+            uniqueness_nonce,
+        );
+
+        // Buffer preparation futures
+        let buffer_preparation_futs = tasks.iter_mut().map(|task| async move {
+            let _timer =
+                metrics::observe_committor_intent_task_preparation_time(&*task);
+            self.prepare_buffer_handling_errors(
+                authority,
+                task,
+                persister,
+                uniqueness_nonce,
+            )
+            .await
+        });
+        let task_preparations = join_all(buffer_preparation_futs);
+
+        // Run both in parallel
+        let (res1, res2) =
+            join(task_preparations, preallocate_preparations).await;
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
-        let lookup_tables =
-            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
+        res2.map_err(DeliveryPreparatorError::FailedToPreallocateError)?;
 
-        Ok(lookup_tables)
+        Ok(())
+    }
+
+    /// Preallocates accounts for tasks which may require it, such as:
+    /// Commit, CommitFinalize, Finalize, Undelegate
+    /// IXs can be executed in any order so for fee optimization we group them
+    pub async fn preallocate(
+        &self,
+        authority: &Keypair,
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> DeliveryPreparatorResult<()> {
+        let mut chunked_ixs =
+            Self::chunk_preallocate_instructions(tasks, &authority.pubkey());
+        self.send_preallocate_chunks(
+            authority,
+            &mut chunked_ixs,
+            uniqueness_nonce,
+        )
+        .await
+        .map_err(DeliveryPreparatorError::FailedToPreallocateError)
+    }
+
+    /// Derives the chunked PreallocateBuffer instructions for whichever
+    /// tasks need it. Synchronous, owned output — only needs a shared
+    /// borrow of `tasks`, so it can run before anything takes `&mut`
+    /// access to them.
+    fn chunk_preallocate_instructions(
+        tasks: &[BaseTaskImpl],
+        authority: &Pubkey,
+    ) -> Vec<Vec<Instruction>> {
+        // Iterator with preallocate instructions
+        let mut preallocate_instructions = tasks
+            .iter()
+            .filter_map(|task| match task {
+                BaseTaskImpl::Commit(value) => Preallocate::from_commit(value)
+                    .map(|el| el.instructions(authority)),
+                BaseTaskImpl::CommitFinalize(value) => {
+                    Preallocate::from_commit_finalize(value)
+                        .map(|el| el.instructions(authority))
+                }
+                BaseTaskImpl::Finalize(value) => {
+                    Preallocate::from_finalize_task(value)
+                        .map(|el| el.instructions(authority))
+                }
+                // TODO: not supported by dlp. use Preallocate<UndelegateTask> once enabled
+                BaseTaskImpl::Undelegate(_) => None,
+                _ => None,
+            })
+            .flatten();
+
+        // Get ix chunks that optimally fit into tx to save mOney
+        let mut chunked_ixs = Vec::new();
+        loop {
+            let chunk: Vec<_> = preallocate_instructions
+                .by_ref()
+                .take(PREALLOCATE_CHUNK_SIZE)
+                .collect();
+            if chunk.is_empty() {
+                break;
+            }
+            chunked_ixs.push(chunk);
+        }
+        chunked_ixs
+    }
+
+    /// Sends already-derived preallocate instruction chunks. Takes owned
+    /// instruction data, not the originating tasks — never conflicts with
+    /// `&mut` access to those tasks elsewhere.
+    async fn send_preallocate_chunks(
+        &self,
+        authority: &Keypair,
+        chunked_ixs: &mut [Vec<Instruction>],
+        uniqueness_nonce: Option<u64>,
+    ) -> Result<(), TransactionSendError> {
+        let iter = chunked_ixs.iter_mut().map(|el| {
+            self.send_ixs_with_retry(
+                el,
+                authority,
+                3,
+                uniqueness_nonce,
+                PreallocateErrorMapper,
+            )
+        });
+
+        join_all(iter).await.into_iter().try_for_each(|el| el)
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
-    pub async fn prepare_task<P: IntentPersister>(
+    pub async fn prepare_buffer<P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
@@ -111,10 +232,12 @@ impl DeliveryPreparator {
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
             BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
+                BufferPreparationTask::from_commit(commit_task)
             }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                PreparationTask::from_commit_finalize(commit_finalize_task)
+                BufferPreparationTask::from_commit_finalize(
+                    commit_finalize_task,
+                )
             }
             _ => None,
         };
@@ -170,7 +293,7 @@ impl DeliveryPreparator {
 
     /// Runs `prepare_task` and, if the buffer was already initialized,
     /// performs cleanup and retries once.
-    pub async fn prepare_task_handling_errors<P: IntentPersister>(
+    pub async fn prepare_buffer_handling_errors<P: IntentPersister>(
         &self,
         authority: &Keypair,
         task: &mut BaseTaskImpl,
@@ -178,7 +301,7 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self
-            .prepare_task(authority, task, persister, uniqueness_nonce)
+            .prepare_buffer(authority, task, persister, uniqueness_nonce)
             .await;
         match res {
             Err(InternalError::BufferExecutionError(
@@ -196,10 +319,12 @@ impl DeliveryPreparator {
         // Preparation failed due to buffer existing - cleanup and retry
         let preparation_task = match task {
             BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
+                BufferPreparationTask::from_commit(commit_task)
             }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                PreparationTask::from_commit_finalize(commit_finalize_task)
+                BufferPreparationTask::from_commit_finalize(
+                    commit_finalize_task,
+                )
             }
             _ => None,
         };
@@ -214,7 +339,7 @@ impl DeliveryPreparator {
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Retry preparation
-        self.prepare_task(authority, task, persister, uniqueness_nonce)
+        self.prepare_buffer(authority, task, persister, uniqueness_nonce)
             .await
     }
 
@@ -223,7 +348,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &BufferPreparationTask<'_>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
@@ -262,6 +387,9 @@ impl DeliveryPreparator {
             authority,
             5,
             uniqueness_nonce,
+            BufferErrorMapper {
+                transaction_error_mapper: BufferTransactionErrorMapper,
+            },
         )
         .await?;
 
@@ -275,6 +403,9 @@ impl DeliveryPreparator {
                     authority,
                     5,
                     uniqueness_nonce,
+                    BufferErrorMapper {
+                        transaction_error_mapper: BufferTransactionErrorMapper,
+                    },
                 )
             });
             try_join_all(preparation_futs).await?;
@@ -287,7 +418,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &BufferPreparationTask<'_>,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
@@ -334,6 +465,9 @@ impl DeliveryPreparator {
                     authority,
                     5,
                     uniqueness_nonce,
+                    BufferErrorMapper {
+                        transaction_error_mapper: BufferTransactionErrorMapper,
+                    },
                 )
             });
             try_join_all(fut_iter).await?;
@@ -343,82 +477,26 @@ impl DeliveryPreparator {
     }
 
     // CommitProcessor::init_accounts analog
-    async fn send_ixs_with_retry(
+    async fn send_ixs_with_retry<E>(
         &self,
         instructions: &mut Vec<Instruction>,
         authority: &Keypair,
         max_attempts: usize,
         uniqueness_nonce: Option<u64>,
-    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        send_error_mapper: impl SendErrorMapper<
+            TransactionSendError,
+            ExecutionError = E,
+        >,
+    ) -> DeliveryPreparatorResult<(), E> {
         if let Some(nonce) = uniqueness_nonce {
             instructions
                 .push(TransactionUtils::uniqueness_noop_instruction(nonce));
         }
 
-        /// Error mappers
-        struct IntentTransactionErrorMapper;
-        impl TransactionErrorMapper for IntentTransactionErrorMapper {
-            type ExecutionError = BufferExecutionError;
-            fn try_map(
-                &self,
-                error: TransactionError,
-                signature: Option<Signature>,
-            ) -> Result<Self::ExecutionError, TransactionError> {
-                match error {
-                    err @ TransactionError::InstructionError(
-                        _,
-                        InstructionError::AccountAlreadyInitialized,
-                    ) => Ok(
-                        BufferExecutionError::AccountAlreadyInitializedError(
-                            err, signature,
-                        ),
-                    ),
-                    err => Err(err),
-                }
-            }
-        }
-
-        struct BufferErrorMapper<TxMap> {
-            transaction_error_mapper: TxMap,
-        }
-        impl<TxMap> SendErrorMapper<TransactionSendError> for BufferErrorMapper<TxMap>
-        where
-            TxMap:
-                TransactionErrorMapper<ExecutionError = BufferExecutionError>,
-        {
-            type ExecutionError = BufferExecutionError;
-            fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
-                match error {
-                    TransactionSendError::MagicBlockRpcClientError(err) => {
-                        map_magicblock_client_error(
-                            &self.transaction_error_mapper,
-                            *err,
-                        )
-                    }
-                    err => BufferExecutionError::TransactionSendError(err),
-                }
-            }
-
-            fn decide_flow(
-                &self,
-                err: &Self::ExecutionError,
-            ) -> ControlFlow<(), Duration> {
-                match err {
-                    BufferExecutionError::TransactionSendError(
-                        TransactionSendError::MagicBlockRpcClientError(err),
-                    ) => decide_rpc_error_flow(err),
-                    _ => ControlFlow::Break(()),
-                }
-            }
-        }
-
-        let default_error_mapper = BufferErrorMapper {
-            transaction_error_mapper: IntentTransactionErrorMapper,
-        };
         let attempt =
             || async { self.try_send_ixs(instructions, authority).await };
 
-        send_transaction_with_retries(attempt, default_error_mapper, |i, _| {
+        send_transaction_with_retries(attempt, send_error_mapper, |i, _| {
             i >= max_attempts
         })
         .await?;
@@ -549,6 +627,9 @@ impl DeliveryPreparator {
                         .iter()
                         .map(|task| task.instruction(&authority.pubkey())),
                 );
+                let buffer_error_mapper = BufferErrorMapper {
+                    transaction_error_mapper: BufferTransactionErrorMapper,
+                };
 
                 async move {
                     (
@@ -558,6 +639,7 @@ impl DeliveryPreparator {
                             authority,
                             1,
                             uniqueness_nonce,
+                            buffer_error_mapper,
                         )
                         .await,
                     )
@@ -607,6 +689,30 @@ impl TransactionSendError {
         match self {
             Self::CompileError(_) | Self::SignerError(_) => false,
             Self::MagicBlockRpcClientError(err) => err.is_transient(),
+        }
+    }
+}
+
+/// Dummy error mapper for preallocate
+/// We introduce it to reuse `decide_rpc_error_flow` mechanics
+/// Atm there's no need to map error to anything as we assume idempotent execution of preallocate
+pub struct PreallocateErrorMapper;
+impl SendErrorMapper<TransactionSendError> for PreallocateErrorMapper {
+    type ExecutionError = TransactionSendError;
+    fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
+        error
+    }
+
+    fn decide_flow(
+        &self,
+        mapped_error: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
+        match mapped_error {
+            TransactionSendError::CompileError(_)
+            | TransactionSendError::SignerError(_) => ControlFlow::Break(()),
+            TransactionSendError::MagicBlockRpcClientError(value) => {
+                decide_rpc_error_flow(value.as_ref())
+            }
         }
     }
 }
@@ -694,8 +800,66 @@ impl InternalError {
     }
 }
 
+// Error mappers
+struct BufferTransactionErrorMapper;
+impl TransactionErrorMapper for BufferTransactionErrorMapper {
+    type ExecutionError = BufferExecutionError;
+    fn try_map(
+        &self,
+        error: TransactionError,
+        signature: Option<Signature>,
+    ) -> Result<Self::ExecutionError, TransactionError> {
+        match error {
+            err @ TransactionError::InstructionError(
+                _,
+                InstructionError::AccountAlreadyInitialized,
+            ) => Ok(BufferExecutionError::AccountAlreadyInitializedError(
+                err, signature,
+            )),
+            err => Err(err),
+        }
+    }
+}
+
+struct BufferErrorMapper<TxMap> {
+    transaction_error_mapper: TxMap,
+}
+impl<TxMap> SendErrorMapper<TransactionSendError> for BufferErrorMapper<TxMap>
+where
+    TxMap: TransactionErrorMapper<ExecutionError = BufferExecutionError>,
+{
+    type ExecutionError = BufferExecutionError;
+    fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
+        match error {
+            TransactionSendError::MagicBlockRpcClientError(err) => {
+                map_magicblock_client_error(
+                    &self.transaction_error_mapper,
+                    *err,
+                )
+            }
+            err => BufferExecutionError::TransactionSendError(err),
+        }
+    }
+
+    fn decide_flow(
+        &self,
+        err: &Self::ExecutionError,
+    ) -> ControlFlow<(), Duration> {
+        match err {
+            BufferExecutionError::TransactionSendError(
+                TransactionSendError::MagicBlockRpcClientError(err),
+            ) => decide_rpc_error_flow(err),
+            _ => ControlFlow::Break(()),
+        }
+    }
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum DeliveryPreparatorError {
+    #[error(
+        "Failed to preallocate delegated account for finalize instruction: {0}"
+    )]
+    FailedToPreallocateError(#[source] TransactionSendError),
     #[error("FailedToPrepareBufferAccounts: {0}")]
     FailedToPrepareBufferAccounts(#[source] InternalError),
     #[error("FailedToCreateALTError: {0}")]
@@ -707,6 +871,7 @@ impl DeliveryPreparatorError {
         match self {
             Self::FailedToCreateALTError(err)
             | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+            Self::FailedToPreallocateError(err) => err.signature(),
         }
     }
 
@@ -714,9 +879,74 @@ impl DeliveryPreparatorError {
         match self {
             Self::FailedToCreateALTError(err)
             | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
+            Self::FailedToPreallocateError(err) => err.is_transient(),
         }
     }
 }
 
 pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =
     Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use dlp_api::args::PreallocateBufferKind;
+    use solana_hash::Hash;
+    use solana_keypair::Keypair;
+    use solana_message::v0::Message;
+    use solana_signer::Signer;
+    use solana_transaction::versioned::VersionedTransaction;
+
+    use super::*;
+    use crate::transactions::{
+        serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE,
+    };
+
+    /// Justifies `PREALLOCATE_CHUNK_SIZE`: packs that many real
+    /// PreallocateBuffer instructions (plus a uniqueness noop, the worst
+    /// case send_preallocate_chunks actually produces) into one transaction
+    /// and asserts it still fits on the wire. All three PreallocateBufferKind
+    /// variants produce the same fixed-shape instruction (7 accounts + a
+    /// small enum tag + u32), so the choice of kind here doesn't matter.
+    #[test]
+    fn preallocate_chunk_of_max_size_fits_in_one_tx() {
+        let authority = Keypair::new();
+        let delegated_account = Pubkey::new_unique();
+
+        let mut instructions: Vec<Instruction> = (0..PREALLOCATE_CHUNK_SIZE)
+            .map(|_| {
+                dlp_api::instruction_builder::preallocate_buffer(
+                    authority.pubkey(),
+                    delegated_account,
+                    PreallocateBufferKind::CommitState,
+                    u32::MAX,
+                )
+            })
+            .collect();
+        instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+        let message = Message::try_compile(
+            &authority.pubkey(),
+            &instructions,
+            &[],
+            Hash::new_unique(),
+        )
+        .expect("compile preallocate chunk transaction");
+        let transaction = VersionedTransaction::try_new(
+            VersionedMessage::V0(message),
+            &[&authority],
+        )
+        .expect("sign preallocate chunk transaction");
+
+        let transaction_size = serialized_transaction_size(&transaction);
+        info!(
+            transaction_size,
+            chunk_size = PREALLOCATE_CHUNK_SIZE,
+            "Preallocate chunk transaction size"
+        );
+        assert!(
+            transaction_size <= MAX_TRANSACTION_WIRE_SIZE,
+            "PREALLOCATE_CHUNK_SIZE={PREALLOCATE_CHUNK_SIZE} no longer fits \
+             in one tx ({transaction_size} > {MAX_TRANSACTION_WIRE_SIZE})"
+        );
+    }
+}
