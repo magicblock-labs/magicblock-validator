@@ -1,3 +1,5 @@
+use core::fmt;
+
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_signature::Signature;
@@ -35,7 +37,7 @@ impl ExecutionStage {
     pub fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), StageTransitionError> {
         match (self, stage) {
             // Current sig wasn't confirmed, we replace it with new attempt
             (Self::SingleStage(this_sig), Self::SingleStage(sig)) => {
@@ -55,7 +57,7 @@ impl ExecutionStage {
                 Self::SingleStage(_),
                 Self::TwoStage(TwoStageProgress::Finalizing { .. }),
             ) => {
-                return Err("cannot transition from SingleStage to Finalizing");
+                return Err(StageTransitionError::SingleStageToFinalizingError);
             }
             // Transitions within TwoStage states
             (Self::TwoStage(this), Self::TwoStage(value)) => {
@@ -63,9 +65,7 @@ impl ExecutionStage {
             }
             // TwoStage can't be downgraded into SingleStage
             (Self::TwoStage(_), Self::SingleStage(_)) => {
-                return Err(
-                    "cannot change execution type from TwoStage to SingleStage",
-                );
+                return Err(StageTransitionError::TwoStageToSingleStageError);
             }
         }
 
@@ -84,7 +84,7 @@ impl TwoStageProgress {
     fn apply_stage_transition(
         &mut self,
         stage: TwoStageProgress,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), StageTransitionError> {
         let new_state = match (&self, stage) {
             // Current sig didn't succeed on Base, we replace it with new attempt
             (Self::Committing(_), Self::Committing(new_sig)) => {
@@ -97,7 +97,7 @@ impl TwoStageProgress {
             ) => {
                 if this_pending.signature != commit {
                     return Err(
-                        "commit signature mismatch on advance to Finalizing",
+                        StageTransitionError::CommitSignatureMismatchError,
                     );
                 }
 
@@ -113,7 +113,7 @@ impl TwoStageProgress {
             ) => {
                 if this_commit != &commit {
                     return Err(
-                        "commit signature can't be replaced in Finalize stage",
+                        StageTransitionError::CommitSignatureReplacementError,
                     );
                 }
 
@@ -122,7 +122,7 @@ impl TwoStageProgress {
             // Incorrect state transition
             (Self::Finalizing { .. }, Self::Committing(_)) => {
                 return Err(
-                    "downgrade from Finalizing to Committing not permitted",
+                    StageTransitionError::FinalizingToCommittingDowngradeError,
                 );
             }
         };
@@ -136,5 +136,44 @@ impl TwoStageProgress {
             Self::Committing(pending) => pending,
             Self::Finalizing { finalize, .. } => finalize,
         }
+    }
+}
+
+/// Rejected [`ExecutionStage`]/[`TwoStageProgress`] transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StageTransitionError {
+    /// `SingleStage` can only advance into `TwoStage::Committing`.
+    SingleStageToFinalizingError,
+    /// `TwoStage` execution can't be downgraded back to `SingleStage`.
+    TwoStageToSingleStageError,
+    /// The commit signature recorded in `Finalizing` didn't match the one
+    /// being advanced from `Committing`.
+    CommitSignatureMismatchError,
+    /// `Finalizing`'s commit signature is fixed once recorded.
+    CommitSignatureReplacementError,
+    /// `Finalizing` can't regress back to `Committing`.
+    FinalizingToCommittingDowngradeError,
+}
+
+impl fmt::Display for StageTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let msg = match self {
+            Self::SingleStageToFinalizingError => {
+                "cannot transition from SingleStage to Finalizing"
+            }
+            Self::TwoStageToSingleStageError => {
+                "cannot change execution type from TwoStage to SingleStage"
+            }
+            Self::CommitSignatureMismatchError => {
+                "commit signature mismatch on advance to Finalizing"
+            }
+            Self::CommitSignatureReplacementError => {
+                "commit signature can't be replaced in Finalize stage"
+            }
+            Self::FinalizingToCommittingDowngradeError => {
+                "downgrade from Finalizing to Committing not permitted"
+            }
+        };
+        f.write_str(msg)
     }
 }

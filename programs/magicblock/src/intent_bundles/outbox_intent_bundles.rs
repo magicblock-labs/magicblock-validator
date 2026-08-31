@@ -1,8 +1,8 @@
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{
-    ExecutionStage, PendingTransaction, TwoStageProgress,
+    ExecutionStage, PendingTransaction, StageTransitionError, TwoStageProgress,
 };
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
@@ -47,7 +47,7 @@ impl OutboxIntentBundle {
     pub(crate) fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OutboxStageTransitionError> {
         self.status.apply_stage_transition(stage)
     }
 
@@ -115,7 +115,7 @@ impl OutboxIntentBundleStatus {
     fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OutboxStageTransitionError> {
         match (self, stage) {
             (this @ Self::Accepted, ExecutionStage::TwoStage(stage)) => {
                 match stage {
@@ -126,7 +126,7 @@ impl OutboxIntentBundleStatus {
                     // Transition from Accepted state to TwoStage::Finalizing is invalid
                     TwoStageProgress::Finalizing { .. } => {
                         return Err(
-                            "cannot transition from Accepted to Finalizing",
+                            OutboxStageTransitionError::AcceptedToFinalizingError,
                         );
                     }
                 }
@@ -138,6 +138,7 @@ impl OutboxIntentBundleStatus {
                 this.apply_stage_transition(stage)?;
             }
         };
+
         Ok(())
     }
 }
@@ -147,5 +148,30 @@ impl Deref for OutboxIntentBundle {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+/// Rejected [`OutboxIntentBundleStatus`] transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxStageTransitionError {
+    /// `Accepted` can only advance into `TwoStage::Committing` or `SingleStage`.
+    AcceptedToFinalizingError,
+    StageError(StageTransitionError),
+}
+
+impl From<StageTransitionError> for OutboxStageTransitionError {
+    fn from(err: StageTransitionError) -> Self {
+        Self::StageError(err)
+    }
+}
+
+impl fmt::Display for OutboxStageTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AcceptedToFinalizingError => {
+                f.write_str("cannot transition from Accepted to Finalizing")
+            }
+            Self::StageError(err) => write!(f, "{err}"),
+        }
     }
 }
