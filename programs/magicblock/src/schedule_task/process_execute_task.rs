@@ -94,7 +94,7 @@ pub(crate) fn process_execute_crank(
 
     let len = instructions.len();
     for ix in instructions {
-        invoke_context.native_invoke(ix, &[crank_signer])?;
+        invoke_context.native_invoke_as(crate::id(), ix, &[crank_signer])?;
     }
 
     ic_msg!(invoke_context, "Executed crank with {} instructions", len);

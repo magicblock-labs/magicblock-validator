@@ -28,13 +28,11 @@ impl From<CommittedAccountRef> for CommittedAccount {
 }
 
 impl CommittedAccount {
-    /// Build a CommittedAccount from an AccountSharedData reference, optionally
-    /// overriding the owner with `parent_program_id` and remapping ATA -> eATA
-    /// if applicable.
+    /// Build a CommittedAccount from an AccountSharedData reference, remapping
+    /// ATA -> eATA if applicable.
     pub fn from_account_shared(
         pubkey: Pubkey,
         account_shared: &AccountSharedData,
-        parent_program_id: Option<Pubkey>,
     ) -> Self {
         let remote_slot = account_shared.slot();
         if let Some((eata_pubkey, eata)) =
@@ -47,19 +45,40 @@ impl CommittedAccount {
             };
         }
 
-        let mut account = Account {
+        let account = Account {
             lamports: account_shared.lamports(),
             data: account_shared.data().to_vec(),
             owner: *account_shared.owner(),
             executable: account_shared.executable(),
             rent_epoch: account_shared.rent_epoch(),
         };
-        account.owner = parent_program_id.unwrap_or(account.owner);
-
         CommittedAccount {
             pubkey,
             account,
             remote_slot,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_account::{AccountSharedData, WritableAccount};
+
+    use super::*;
+
+    /// Proves commit serialization retains account-state ownership without
+    /// substituting invocation-frame provenance.
+    #[test]
+    fn committed_account_preserves_account_owner() {
+        let owner = Pubkey::new_unique();
+        let mut account = AccountSharedData::default();
+        account.set_owner(owner);
+
+        let committed = CommittedAccount::from_account_shared(
+            Pubkey::new_unique(),
+            &account,
+        );
+
+        assert_eq!(committed.account.owner, owner);
     }
 }

@@ -18,7 +18,7 @@ pub(crate) fn process_close_ephemeral_account(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    let caller_program_id = validate_common(transaction_context)?;
+    let caller_program_id = validate_common(invoke_context)?;
     let ephemeral =
         validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 

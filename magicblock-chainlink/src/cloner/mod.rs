@@ -1,6 +1,4 @@
-use std::ops::Deref;
-
-use engine::Engine;
+use engine::{Engine, PostFinalize};
 use errors::ClonerResult;
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
@@ -28,47 +26,46 @@ pub(crate) enum AccountMaterialization {
     Update,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct DelegationActions(Vec<Instruction>);
+/// Non-empty post-delegation actions paired with their slot-matched owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DelegationActions {
+    source_program: Pubkey,
+    actions: Vec<Instruction>,
+}
 
 impl DelegationActions {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    /// Returns a provenance-bearing bundle, or `None` when there are no actions.
+    pub(crate) fn new(
+        source_program: Pubkey,
+        actions: Vec<Instruction>,
+    ) -> Option<Self> {
+        (!actions.is_empty()).then_some(Self {
+            source_program,
+            actions,
+        })
     }
-}
 
-impl From<Vec<Instruction>> for DelegationActions {
-    fn from(value: Vec<Instruction>) -> Self {
-        Self(value)
+    /// Program that owned the delegated account at the matched base-layer slot.
+    pub(crate) fn source_program(&self) -> Pubkey {
+        self.source_program
     }
-}
 
-impl From<DelegationActions> for Vec<Instruction> {
-    fn from(value: DelegationActions) -> Self {
-        value.0
+    /// Instructions to execute after account activation.
+    pub(crate) fn actions(&self) -> &[Instruction] {
+        &self.actions
     }
-}
 
-impl IntoIterator for DelegationActions {
-    type Item = Instruction;
-    type IntoIter = std::vec::IntoIter<Instruction>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
-    }
-}
-
-impl Deref for DelegationActions {
-    type Target = [Instruction];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    fn into_post_finalize(self) -> PostFinalize {
+        PostFinalize {
+            source_program: self.source_program,
+            actions: self.actions,
+        }
     }
 }
 
 /// Mutually exclusive post-delegation behavior for a clone request.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum ClonePostDelegationMode {
+pub(crate) enum ClonePostDelegationMode {
     /// Clone without post-delegation actions or rescue undelegation.
     #[default]
     None,
@@ -78,33 +75,63 @@ pub enum ClonePostDelegationMode {
     ///
     /// Used for delegated accounts whose post-delegation actions cannot be
     /// executed safely, for example because they include risky signers.
-    RescueUndelegate,
+    RescueUndelegate(Pubkey),
 }
 
 impl ClonePostDelegationMode {
-    pub fn actions(&self) -> Option<&DelegationActions> {
+    pub(crate) fn actions(&self) -> Option<&[Instruction]> {
         match self {
-            Self::ExecuteActions(actions) => Some(actions),
-            Self::None | Self::RescueUndelegate => None,
+            Self::ExecuteActions(actions) => Some(actions.actions()),
+            Self::None | Self::RescueUndelegate(_) => None,
         }
     }
 
-    pub fn has_actions(&self) -> bool {
-        self.actions().is_some_and(|actions| !actions.is_empty())
+    pub(crate) fn has_actions(&self) -> bool {
+        self.actions().is_some()
     }
 
-    pub fn is_rescue_undelegate(&self) -> bool {
-        matches!(self, Self::RescueUndelegate)
+    pub(crate) fn is_rescue_undelegate(&self) -> bool {
+        matches!(self, Self::RescueUndelegate(_))
+    }
+
+    pub(crate) fn rescue_undelegate(self) -> Option<Self> {
+        match self {
+            Self::ExecuteActions(actions) => {
+                Some(Self::RescueUndelegate(actions.source_program()))
+            }
+            Self::None | Self::RescueUndelegate(_) => None,
+        }
     }
 }
 
-impl From<DelegationActions> for ClonePostDelegationMode {
-    fn from(actions: DelegationActions) -> Self {
-        if actions.is_empty() {
-            Self::None
-        } else {
-            Self::ExecuteActions(actions)
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Proves rescue fallback retains the delegation record owner from the
+    /// failed normal post-delegation action path.
+    #[test]
+    fn rescue_undelegation_preserves_source_program() {
+        let source_program = Pubkey::new_unique();
+        let mode = ClonePostDelegationMode::from(DelegationActions::new(
+            source_program,
+            vec![Instruction::new_with_bytes(
+                Pubkey::new_unique(),
+                &[],
+                vec![],
+            )],
+        ));
+
+        assert_eq!(
+            mode.rescue_undelegate(),
+            Some(ClonePostDelegationMode::RescueUndelegate(source_program))
+        );
+    }
+}
+
+impl From<Option<DelegationActions>> for ClonePostDelegationMode {
+    fn from(actions: Option<DelegationActions>) -> Self {
+        actions.map_or(Self::None, Self::ExecuteActions)
     }
 }
 
@@ -113,7 +140,9 @@ pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountBuilder,
     pub commit_frequency_ms: Option<u64>,
-    pub post_delegation_mode: ClonePostDelegationMode,
+    /// Trusted post-delegation state; kept private to prevent external callers
+    /// from constructing requests with unverified invocation provenance.
+    pub(crate) post_delegation_mode: ClonePostDelegationMode,
     /// If the account is delegated to another validator,
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
@@ -169,16 +198,20 @@ pub(crate) async fn clone_account(
 
     let mode = request.account.read().mode();
     let actions = match request.post_delegation_mode {
-        ClonePostDelegationMode::None => Vec::new(),
-        ClonePostDelegationMode::ExecuteActions(actions) => actions.into(),
-        ClonePostDelegationMode::RescueUndelegate => {
-            vec![undelegation_action(engine, request.pubkey)]
+        ClonePostDelegationMode::None => None,
+        ClonePostDelegationMode::ExecuteActions(actions) => {
+            Some(actions.into_post_finalize())
+        }
+        ClonePostDelegationMode::RescueUndelegate(source_program) => {
+            Some(PostFinalize {
+                source_program,
+                actions: vec![undelegation_action(engine, request.pubkey)],
+            })
         }
     };
     let account = request.account;
     let result = match materialization {
         AccountMaterialization::Create => {
-            let actions = (!actions.is_empty()).then_some(actions);
             engine
                 .account(request.pubkey)
                 .create(account, actions)
