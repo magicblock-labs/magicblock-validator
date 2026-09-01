@@ -1,15 +1,13 @@
 use std::time::Duration;
 
 use cleanass::assert;
-use hydra_api::state::region_len_for;
+use hydra_api::state::{crank_account_size, region_len_for};
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_program::{
     ephemeral::rent_for, instruction_utils::InstructionUtils,
 };
 use magicblock_task_scheduler::crank_pubkey;
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use test_task_scheduler::{
     cancel_task, schedule_noop_task, setup_validator, wait_for_hydra_crank,
     wait_for_hydra_crank_closed,
@@ -23,14 +21,10 @@ use test_task_scheduler::{
 fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
     let (_temp_dir, mut validator, ctx, sponsor) = setup_validator();
 
-    let payer = Keypair::new();
-    expect!(
-        ctx.airdrop_chain(&payer.pubkey(), 10 * LAMPORTS_PER_SOL),
-        validator
-    );
-
     let sponsor_before =
         expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
+
+    let payer = Keypair::new();
 
     let task_id = 1;
     let iterations = 3;
@@ -50,7 +44,10 @@ fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
     // The scheduler must pre-fund the crank with its rent
     let ix = InstructionUtils::noop_instruction(0);
     let min_funding = expect!(
-        rent_for(region_len_for(ix.accounts.len(), ix.data.len()) as u32),
+        rent_for(crank_account_size(region_len_for(
+            ix.accounts.len(),
+            ix.data.len()
+        )) as u32),
         validator
     );
     assert!(
@@ -67,17 +64,19 @@ fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
         &mut validator,
     );
 
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
     // Cancelling drains the crank back to the sponsor and refunds its rent, so
     // the sponsor ends up whole again apart from transaction fees.
     let sponsor_after =
         expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
     assert!(
-        sponsor_after > sponsor_while_scheduled,
+        sponsor_after == sponsor_while_scheduled + min_funding,
         cleanup(&mut validator),
         "cancelling did not refund the crank budget: {sponsor_after} <= {sponsor_while_scheduled}"
     );
     assert!(
-        sponsor_after >= sponsor_before,
+        sponsor_after == sponsor_before,
         cleanup(&mut validator),
         "sponsor was drained across a schedule/cancel cycle: {sponsor_after} vs {sponsor_before}"
     );
