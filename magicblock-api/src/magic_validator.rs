@@ -367,10 +367,10 @@ impl MagicValidator {
 
         // Rent must match the base layer exactly: commits there are paid by
         // the validator under the assumption they were paid 1:1 in the ER.
-        // Replicas skip the fetch and inherit the sysvar via replication.
-        if !Self::replication_mode_uses_disabled_chainlink(
-            &config.validator.replication_mode,
-        ) {
+        // Replicas fetch as well, since the primary's direct AccountsDb
+        // write of the sysvar is not carried over by replication. Offline
+        // mode keeps the default rent and needs no remote.
+        if config.lifecycle.needs_remote_account_provider() {
             let step_start = Instant::now();
             Self::sync_rent_from_base_chain(config.rpc_url(), &accountsdb)
                 .await?;
@@ -827,8 +827,13 @@ impl MagicValidator {
     /// while a lower rate admits account states the base layer refuses on
     /// commit — settlement the validator pays for assuming 1:1 rent parity.
     ///
-    /// NOTE: a rate reduction activating on the base chain while the
-    /// validator is running requires a restart to be picked up.
+    /// NOTE: rent is a startup-frozen input to execution. A rate reduction
+    /// activating on the base chain while the validator runs requires a
+    /// restart to be picked up, a ledger spanning a rate change replays
+    /// entirely under the rate fetched at boot (snapshot on activation to
+    /// avoid replay divergence), and Offline mode deliberately keeps the
+    /// last persisted value so recovered ledgers replay under the rate
+    /// they were produced with.
     async fn sync_rent_from_base_chain(
         rpc_url: &str,
         accountsdb: &AccountsDb,
@@ -848,7 +853,9 @@ impl MagicValidator {
         info!(?rent, "Synced rent parameters from base chain");
         let account = AccountSharedData::new_data(1, &rent, &sysvar::ID)
             .map_err(|e| err(&e))?;
-        let _ = accountsdb.insert_account(&sysvar::rent::ID, &account);
+        accountsdb
+            .insert_account(&sysvar::rent::ID, &account)
+            .map_err(|e| err(&e))?;
         Ok(())
     }
 
