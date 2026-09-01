@@ -15,7 +15,7 @@ members = [
     "test-table-mania",
     "test-task-scheduler",
     "test-tools",
-    "test-validator-services"
+    "test-validator-services",
 ]
 resolver = "2"
 
@@ -33,16 +33,14 @@ cleanass = "0.0.1"
 color-backtrace = { version = "0.7" }
 ctrlc = "3.4.7"
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.4.1", features = [
-    "testkit"
+    "testkit",
 ] }
-ephemeral-rollups-sdk = { version = "0.14", default-features = false, features = ["modular-sdk"] }
 futures = "0.3.31"
-# TODO: remove this once the hydra-api crate is published
-hydra-api = { git = "https://github.com/magicblock-labs/hydra.git", rev = "07d584a5b43a9d2ff23f42f0458ccba14c74239d" }
+hydra-api = "0.2"
 integration-test-tools = { path = "test-tools" }
 isocountry = "0.3.2"
 keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.4.1", features = [
-    "testkit"
+    "testkit",
 ] }
 lazy_static = "1.4.0"
 light-client = "0.23"
@@ -52,9 +50,7 @@ light-sdk-types = "0.23"
 
 magicblock-aml = { path = "../magicblock-aml" }
 magicblock-chainlink = { path = "../magicblock-chainlink", features = ["dev-context"] }
-magicblock-committor-program = { path = "../magicblock-committor-program", features = [
-    "no-entrypoint"
-] }
+magicblock-committor-program = { path = "../magicblock-committor-program", features = ["no-entrypoint"] }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
@@ -117,7 +113,7 @@ tracing = "0.1"
 ureq = "2.9.6"
 url = "2.5.0"
 v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.4.1", features = [
-    "builder"
+    "builder",
 ] }
 
 [patch.crates-io]
