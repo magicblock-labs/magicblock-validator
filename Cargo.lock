@@ -126,7 +126,7 @@ dependencies = [
 [[package]]
 name = "agave-transaction-view"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "ahash 0.8.12",
  "solana-hash 4.4.0",
@@ -3696,8 +3696,8 @@ dependencies = [
 
 [[package]]
 name = "magic-root-interface"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "solana-account 4.3.1",
  "solana-instruction 3.4.0",
@@ -3707,8 +3707,8 @@ dependencies = [
 
 [[package]]
 name = "magic-root-program"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "magic-root-interface",
  "magicblock-engine-nucleus",
@@ -3757,8 +3757,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accountsdb"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "ahash 0.8.12",
  "bincode",
@@ -4048,8 +4048,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-engine"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -4081,8 +4081,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-engine-nucleus"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "agave-transaction-view",
  "derive_more",
@@ -4113,8 +4113,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-keeper"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "agave-feature-set",
  "ahash 0.8.12",
@@ -4152,8 +4152,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "agave-transaction-view",
  "bitcode",
@@ -4235,8 +4235,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "agave-feature-set",
  "agave-precompiles",
@@ -4308,8 +4308,8 @@ dependencies = [
 
 [[package]]
 name = "magicblock-replicator"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "derive_more",
  "flume",
@@ -6744,7 +6744,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "4.3.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "bincode",
  "bitflags 2.13.0",
@@ -8357,7 +8357,7 @@ dependencies = [
 [[package]]
 name = "solana-program-runtime"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "base64 0.22.1",
  "bincode",
@@ -9082,7 +9082,7 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "ahash 0.8.12",
  "magic-root-interface",
@@ -9469,7 +9469,7 @@ dependencies = [
 [[package]]
 name = "solana-transaction-context"
 version = "4.1.1"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "bincode",
  "serde",
@@ -10906,8 +10906,8 @@ dependencies = [
 
 [[package]]
 name = "v42-calculator-interface"
-version = "0.4.0"
-source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.0#2dc279bd2f6fd1878ea647c27756c93263634e6b"
+version = "0.4.1"
+source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.4.1#e4fef5ccfe28ea3ab4c589a3a0a7bfdc14a2d382"
 dependencies = [
  "solana-instruction 3.4.0",
  "solana-pubkey 4.2.0",
