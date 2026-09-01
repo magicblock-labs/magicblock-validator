@@ -8,7 +8,9 @@ use std::{
 
 use async_trait::async_trait;
 use dlp_api::{
-    delegation_metadata_seeds_from_delegated_account, state::DelegationMetadata,
+    delegation_metadata_seeds_from_delegated_account,
+    delegation_record_seeds_from_delegated_account,
+    state::{DelegationMetadata, DelegationRecord},
 };
 use lru::LruCache;
 use magicblock_metrics::metrics;
@@ -85,16 +87,30 @@ impl RpcTaskInfoFetcher {
             return Ok(Vec::new());
         }
 
+        // Fetch the delegation record alongside the metadata to pin the
+        // delegation session: a record created after `min_context_slot`
+        // (the slot of the state snapshot being committed) belongs to a
+        // newer delegation of the same account, and committing the old
+        // snapshot into it must fail terminally.
         let pda_accounts: Vec<Pubkey> = pubkeys
             .iter()
-            .map(|delegated_account| {
-                Pubkey::find_program_address(
-                    delegation_metadata_seeds_from_delegated_account!(
-                        delegated_account
-                    ),
-                    &dlp_api::id(),
-                )
-                .0
+            .flat_map(|delegated_account| {
+                [
+                    Pubkey::find_program_address(
+                        delegation_record_seeds_from_delegated_account!(
+                            delegated_account
+                        ),
+                        &dlp_api::id(),
+                    )
+                    .0,
+                    Pubkey::find_program_address(
+                        delegation_metadata_seeds_from_delegated_account!(
+                            delegated_account
+                        ),
+                        &dlp_api::id(),
+                    )
+                    .0,
+                ]
             })
             .collect();
 
@@ -107,13 +123,32 @@ impl RpcTaskInfoFetcher {
         .await?;
 
         accounts
-            .into_iter()
-            .zip(pda_accounts)
-            .map(|(account, pda)| {
+            .chunks_exact(2)
+            .zip(pda_accounts.chunks_exact(2))
+            .zip(pubkeys)
+            .map(|((pair, pdas), delegated_account)| {
+                let record =
+                    DelegationRecord::try_from_bytes_with_discriminator(
+                        &pair[0].data,
+                    )
+                    .map_err(|_| {
+                        TaskInfoFetcherError::InvalidAccountDataError(pdas[0])
+                    })?;
+                if record.delegation_slot > min_context_slot {
+                    return Err(
+                        TaskInfoFetcherError::DelegationSessionChangedError {
+                            delegated_account: *delegated_account,
+                            delegation_slot: record.delegation_slot,
+                            min_context_slot,
+                        },
+                    );
+                }
                 DelegationMetadata::try_from_bytes_with_discriminator(
-                    &account.data,
+                    &pair[1].data,
                 )
-                .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(pda))
+                .map_err(|_| {
+                    TaskInfoFetcherError::InvalidAccountDataError(pdas[1])
+                })
             })
             .collect()
     }
@@ -154,7 +189,10 @@ impl RpcTaskInfoFetcher {
                         "Account not found, possibly stale RPC read"
                     );
                 }
-                err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
+                err @ (TaskInfoFetcherError::InvalidAccountDataError(_)
+                | TaskInfoFetcherError::DelegationSessionChangedError {
+                    ..
+                }) => {
                     error!(error = ?err, "Unexpected error");
                     break Err(err);
                 }
@@ -655,6 +693,12 @@ pub enum TaskInfoFetcherError {
     AccountNotFoundError(Pubkey),
     #[error("InvalidAccountDataError for: {0}")]
     InvalidAccountDataError(Pubkey),
+    #[error("Delegation session changed for {delegated_account}: delegated at slot {delegation_slot}, committed state is from slot {min_context_slot}")]
+    DelegationSessionChangedError {
+        delegated_account: Pubkey,
+        delegation_slot: u64,
+        min_context_slot: u64,
+    },
     #[error("Minimum context slot {0} not reached: {1}")]
     MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
     #[error("MagicBlockRpcClientError: {0}")]
@@ -665,14 +709,17 @@ impl TaskInfoFetcherError {
     /// RPC-side fetch failures are transient; malformed delegation
     /// accounts are deterministic. Not-found is transient too: the
     /// accounts fetched here exist from the ER's perspective, so it is
-    /// most likely a lagging RPC node. The bounded intent-level retry
-    /// makes a genuinely absent account fail terminally.
+    /// most likely a lagging RPC node. Retries are session-guarded — a
+    /// delegation created after the committed snapshot fails terminally
+    /// via `DelegationSessionChangedError`, as does a genuinely absent
+    /// account once the bounded intent-level retries are exhausted.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::AccountNotFoundError(_) => true,
             Self::MinContextSlotNotReachedError(_, _) => true,
             Self::MagicBlockRpcClientError(err) => err.is_transient(),
             Self::InvalidAccountDataError(_) => false,
+            Self::DelegationSessionChangedError { .. } => false,
         }
     }
 
@@ -739,6 +786,7 @@ impl TaskInfoFetcherError {
         match self {
             Self::AccountNotFoundError(_) => None,
             Self::InvalidAccountDataError(_) => None,
+            Self::DelegationSessionChangedError { .. } => None,
             Self::MinContextSlotNotReachedError(_, err) => err.signature(),
             Self::MagicBlockRpcClientError(err) => err.signature(),
         }
