@@ -5,7 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use magicblock_accounts_db::AccountsDb;
+use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::{
     link::{
         accounts::AccountUpdateTx,
@@ -18,8 +18,10 @@ use magicblock_core::{
     Slot,
 };
 use magicblock_ledger::{LatestBlock, Ledger};
+use solana_account::ReadableAccount;
 use solana_feature_set::FeatureSet;
-use solana_program::slot_hashes::SlotHashes;
+use solana_program::{rent::Rent, slot_hashes::SlotHashes};
+use solana_sdk_ids::sysvar;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
 };
@@ -226,6 +228,7 @@ impl TransactionExecutor {
             self.block_history.pop_first();
         }
         self.block_history.insert(block.slot, block);
+        self.refresh_rent();
     }
 
     fn apply_block(&mut self, block: LatestBlockInner) {
@@ -234,6 +237,33 @@ impl TransactionExecutor {
         self.environment.blockhash = block.blockhash;
         self.processor.slot = slot;
         self.set_sysvars(&block);
+    }
+
+    /// Adopts rent parameter changes at the block boundary. Runs on every
+    /// new block registration, which covers both the primary path (latest
+    /// block broadcast) and the replica path (`apply_block`).
+    ///
+    /// Rent is synced from the base chain only after ledger replay has
+    /// completed (see `sync_rent_from_base_chain`), so the environment
+    /// captured at executor spawn can be stale; picking the sysvar up here
+    /// switches every executor within one block of the sync, keeping the
+    /// rent-state checks and the sysvar programs read consistent.
+    fn refresh_rent(&mut self) {
+        let Some(account) = self.accountsdb.get_account(&sysvar::rent::ID)
+        else {
+            return;
+        };
+        let Ok(rent) = bincode::deserialize::<Rent>(account.data()) else {
+            return;
+        };
+        if rent != self.environment.rent {
+            if let Ok(mut cache) =
+                self.processor.writable_sysvar_cache().write()
+            {
+                cache.set_sysvar_for_tests(&rent);
+            }
+            self.environment.rent = rent;
+        }
     }
 
     fn transition_to_slot(&mut self, slot: Slot) {

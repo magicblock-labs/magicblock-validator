@@ -365,18 +365,6 @@ impl MagicValidator {
         }
         let base_fee = config.validator.basefee;
 
-        // Rent must match the base layer exactly: commits there are paid by
-        // the validator under the assumption they were paid 1:1 in the ER.
-        // Replicas fetch as well, since the primary's direct AccountsDb
-        // write of the sysvar is not carried over by replication. Offline
-        // mode keeps the default rent and needs no remote.
-        if config.lifecycle.needs_remote_account_provider() {
-            let step_start = Instant::now();
-            Self::sync_rent_from_base_chain(config.rpc_url(), &accountsdb)
-                .await?;
-            log_timing("startup", "sync_rent_from_base_chain", step_start);
-        }
-
         let svm_env = build_svm_env(&accountsdb, latest_block.blockhash, 0);
         let feature_set = svm_env.feature_set.clone();
         let txn_scheduler_state = TransactionSchedulerState {
@@ -827,13 +815,15 @@ impl MagicValidator {
     /// while a lower rate admits account states the base layer refuses on
     /// commit — settlement the validator pays for assuming 1:1 rent parity.
     ///
-    /// NOTE: rent is a startup-frozen input to execution. A rate reduction
-    /// activating on the base chain while the validator runs requires a
-    /// restart to be picked up, a ledger spanning a rate change replays
-    /// entirely under the rate fetched at boot (snapshot on activation to
-    /// avoid replay divergence), and Offline mode deliberately keeps the
-    /// last persisted value so recovered ledgers replay under the rate
-    /// they were produced with.
+    /// Called only after ledger replay has completed: replay must run under
+    /// the persisted rent its transactions were recorded with, and the new
+    /// value takes effect at the next block boundary (see `refresh_rent` in
+    /// the transaction executor).
+    ///
+    /// NOTE: a rate reduction activating on the base chain while the
+    /// validator runs still requires a restart to be picked up. Offline mode
+    /// deliberately keeps the last persisted value so recovered ledgers
+    /// replay under the rate they were produced with.
     async fn sync_rent_from_base_chain(
         rpc_url: &str,
         accountsdb: &AccountsDb,
@@ -1143,6 +1133,24 @@ impl MagicValidator {
         self.maybe_process_ledger().await?;
 
         log_timing("startup", "maybe_process_ledger", step_start);
+
+        // Rent must match the base layer exactly: commits there are paid by
+        // the validator under the assumption they were paid 1:1 in the ER.
+        // Synced only after ledger replay, which must run under the persisted
+        // rent its transactions were recorded with; executors adopt the new
+        // value at the next block boundary (see `refresh_rent`). Replicas
+        // fetch as well, since the direct AccountsDb write of the sysvar is
+        // not carried over by replication. Offline mode keeps the persisted
+        // rent and needs no remote.
+        if self.config.lifecycle.needs_remote_account_provider() {
+            let step_start = Instant::now();
+            Self::sync_rent_from_base_chain(
+                self.config.rpc_url(),
+                &self.accountsdb,
+            )
+            .await?;
+            log_timing("startup", "sync_rent_from_base_chain", step_start);
+        }
 
         if self.config.accountsdb.defragment_on_startup {
             let step_start = Instant::now();
