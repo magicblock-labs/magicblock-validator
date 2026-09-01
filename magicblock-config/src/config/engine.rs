@@ -46,12 +46,16 @@ pub struct LeaderReplication {
 
 /// Replication settings for a validator that follows an upstream leader.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct FollowerReplication {
     /// TCP address of the immediate upstream validator.
     pub upstream_address: SocketAddr,
     /// Identity whose signed replication responses are accepted.
     pub upstream_authority: SerdePubkey,
+    /// TCP address on which downstream followers connect.
+    pub bind_address: BindAddress,
+    /// Local identities permitted to follow this verifier.
+    pub allowed_followers: Vec<SerdePubkey>,
 }
 
 impl<R: Default> Default for EngineConfig<R> {
@@ -72,9 +76,7 @@ impl<R: Default> Default for EngineConfig<R> {
 impl Default for LeaderReplication {
     fn default() -> Self {
         Self {
-            bind_address: consts::DEFAULT_REPLICATION_BIND_ADDRESS
-                .parse()
-                .expect("default replication bind address must be valid"),
+            bind_address: default_replication_bind_address(),
             allowed_followers: Vec::new(),
         }
     }
@@ -85,8 +87,16 @@ impl Default for FollowerReplication {
         Self {
             upstream_address: SocketAddr::from(([0, 0, 0, 0], 0)),
             upstream_authority: SerdePubkey(Default::default()),
+            bind_address: default_replication_bind_address(),
+            allowed_followers: Vec::new(),
         }
     }
+}
+
+fn default_replication_bind_address() -> BindAddress {
+    consts::DEFAULT_REPLICATION_BIND_ADDRESS
+        .parse()
+        .expect("default replication bind address must be valid")
 }
 
 impl<R: fmt::Debug> fmt::Debug for EngineConfig<R> {
