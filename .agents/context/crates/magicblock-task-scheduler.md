@@ -2,57 +2,94 @@
 
 ## Purpose
 
-`magicblock-task-scheduler` is the validator-side service that turns Magic Program scheduled-task requests into recurring local crank transactions. Programs schedule or cancel tasks during normal ER execution; the processor forwards those `TaskRequest`s to this crate, which persists them in SQLite, delays them until their next execution time, and submits validator-signed crank transactions back through the validator RPC endpoint.
+`magicblock-task-scheduler` is the leader-side service that turns Magic Program
+scheduled-task side effects into Hydra ephemeral crank create/cancel
+transactions. Programs schedule or cancel tasks during normal ER execution;
+the Magic Program enqueues a `TaskRequest` through `nucleus::tls::TlsManager`;
+the engine publishes that payload as a service message after the originating
+transaction commits; this crate deserializes the request and submits a
+validator-sponsored Hydra transaction through the local Aperture HTTP
+endpoint.
+
+This crate does **not** persist tasks, delay them, retry them, or execute
+them. Recurring execution is owned by the ephemeral Hydra program once the
+crank account exists. The service is stateless: each crank PDA is derived
+from `(authority, task_id)`, so cancel and reschedule need no database
+lookup.
 
 High-level responsibilities:
 
-- persist scheduled task definitions and failure records in `task_scheduler.sqlite`;
-- load and reschedule persisted tasks when the primary validator starts;
-- receive `ScheduleTaskRequest` and `CancelTaskRequest` values from the transaction executor channel;
-- maintain an in-memory `DelayQueue` for due tasks, including replacement/cancellation state;
-- submit crank transactions that call Magic Program `ExecuteTask` with validator authority and crank signer accounts;
-- record execution success, final completion, retryable failures, permanent failures, and failed scheduling records;
-- periodically clean up old failed scheduling/execution records according to validator config.
+- subscribe to engine service messages and ignore anything that is not a
+  `TaskRequest`;
+- create and fund a Hydra crank for `Schedule` requests;
+- close a Hydra crank for `Cancel` requests, refunding remaining lamports to
+  the validator identity;
+- replace an existing crank on reschedule by cancelling then recreating it in
+  one transaction;
+- convert millisecond intervals into Hydra's slot-based cadence using the
+  validator blocktime.
 
-This crate sits on the scheduled-task/crank path and can affect transaction execution latency indirectly by how quickly it drains executor-produced task requests and how much RPC/SQLite work it performs. It is also persistence-sensitive: task definitions and failure records survive restart unless `task_scheduler.reset` is enabled.
+This crate sits on the schedule/cancel path and can affect request latency by
+how quickly it drains service messages and how much local RPC work it
+performs. It is not persistence-sensitive: restart recovery is Hydra account
+state, not a local SQLite file.
 
 ## Update requirement
 
-Queue an update to this guide for the weekly documentation-maintenance task whenever behavior or contracts in `magicblock-task-scheduler` change. Include changes to:
+Queue an update to this guide for the weekly documentation-maintenance task
+whenever behavior or contracts in `magicblock-task-scheduler` change. Include
+changes to:
 
-- public exports in `src/lib.rs`, `SchedulerDatabase`, `TaskSchedulerService`, or `TaskSchedulerError`;
-- SQLite schema, database path, WAL/PRAGMA settings, retention behavior, optimistic `updated_at` concurrency, or restart recovery semantics;
-- scheduling/cancellation authorization, interval clamping, iteration handling, retry/backoff policy, or stale completion handling;
-- crank transaction layout, signer requirements, Magic Program instruction construction, blockhash source, send configuration, or RPC endpoint selection;
-- startup/shutdown wiring in `magicblock-api`, primary/replica gating, cancellation handling, or draining of in-flight crank completions;
-- `TaskSchedulerConfig` fields/defaults/env keys or README configuration examples;
-- task scheduler tests or validation commands.
+- public exports in `src/lib.rs`, `TaskSchedulerService`, `crank_pubkey`, or
+  `TaskSchedulerError`;
+- crank PDA derivation, Hydra `Create`/`Cancel` instruction construction, or
+  the `i64::MAX` → Hydra-infinite iteration mapping;
+- interval validation, millisecond-to-slot conversion, or start-slot
+  selection;
+- sponsor/signer/payer selection, blockhash source, RPC endpoint, or
+  send-and-forget submit behavior;
+- startup/shutdown wiring in `bins/magicblock-validator/src/leader.rs` or
+  `nucleus` `Service::TaskScheduler` handling;
+- task scheduler unit tests or `test-integration/test-task-scheduler`.
 
-Because this crate consumes task requests emitted by Magic Program execution, also update this file when `magicblock-program`, `magicblock-magic-program-api`, `magicblock-core`, or `magicblock-processor` changes `ScheduleTask`, `CancelTask`, `ExecuteTask`, `TaskRequest`, `ExecutionTlsStash`, or the scheduled-task channel semantics.
+Because this crate consumes task requests emitted by Magic Program execution
+and creates Hydra cranks, also update this file when `magicblock-program`,
+`magicblock-magic-program-api`, engine service-message publishing,
+`nucleus::tls::TlsManager`, or `hydra-api` ephemeral `Create`/`Cancel`
+semantics change.
 
-For the general documentation-update rule, see `.agents/memory/agent-memory-and-docs.md`.
+For the general documentation-update rule, see
+`.agents/memory/agent-memory-and-docs.md`.
 
 ## Where it sits in the repository
 
 | Path | Role |
-|---|---|
-| `magicblock-task-scheduler/Cargo.toml` | Package metadata and dependencies on config, core channels, ledger latest blockhash, Magic Program instruction helpers, Solana RPC/transaction crates, Tokio, and SQLite. |
-| `magicblock-task-scheduler/README.md` | Operator-facing overview, `[task-scheduler]` config example, and performance notes. Keep it aligned with config and service behavior. |
-| `magicblock-task-scheduler/src/lib.rs` | Public crate surface. Re-exports `SchedulerDatabase`, `TaskSchedulerError`, and `TaskSchedulerService`. |
-| `magicblock-task-scheduler/src/db.rs` | SQLite persistence layer, task/failure record types, task serialization, optimistic concurrency tokens, and batch crank-completion transaction. |
-| `magicblock-task-scheduler/src/service.rs` | Runtime service, startup recovery, request processing, delay queue, crank send batching, retry/backoff, cleanup ticker, and cancellation handling. |
-| `magicblock-task-scheduler/src/errors.rs` | `TaskSchedulerError` and `TaskSchedulerResult`. Wraps SQLite, wincode writes, RPC, I/O, invalid config, and unauthorized replacement errors. |
-| `magicblock-config/src/config/scheduler.rs` | `TaskSchedulerConfig` (`reset`, `min_interval`, failed-record retention and cleanup interval). |
-| `magicblock-api/src/magic_validator.rs` | Constructs the service at startup and starts it only after the validator leaves `StartingUp` in primary mode. |
-| `magicblock-core/src/link/transactions.rs` | Defines `ScheduledTasksTx`/`ScheduledTasksRx`, the channel carrying `TaskRequest`s from executor to service. |
-| `magicblock-processor/src/executor/processing.rs` | Drains `ExecutionTlsStash` after transaction execution and sends scheduled-task requests to this crate. |
-| `programs/magicblock/src/schedule_task/` | Magic Program processors that validate schedule/cancel/execute-task instructions and register `TaskRequest`s. |
+| --- | --- |
+| `magicblock-task-scheduler/Cargo.toml` | Package metadata. Depends on `engine`, `hydra-api` (`client`, `ephemeral`), `keeper`, `magicblock-program`, `nucleus`, Solana transaction/RPC crates, Tokio, and wincode. |
+| `magicblock-task-scheduler/src/lib.rs` | Public crate surface. Re-exports `crank_pubkey`, `TaskSchedulerError`, and `TaskSchedulerService`. |
+| `magicblock-task-scheduler/src/service.rs` | Runtime service: service-message loop, schedule/cancel processing, Hydra submit, and shutdown. |
+| `magicblock-task-scheduler/src/crank.rs` | Crank PDA derivation, Hydra `Create` instruction builder, interval validation, and millisecond-to-slot conversion. |
+| `magicblock-task-scheduler/src/errors.rs` | `TaskSchedulerError` and `TaskSchedulerResult`. Live variants are RPC and Keeper errors; several leftover variants are unused. |
+| `bins/magicblock-validator/src/leader.rs` | Constructs the service with the engine, Aperture HTTP URL, and `engine.blockstore.blocktime`, then starts it under `Service::TaskScheduler`. |
+| `programs/magicblock/src/schedule_task/` | Magic Program processors that validate schedule/cancel instructions and enqueue `TaskRequest`s through `TlsManager`. |
+| `magicblock-magic-program-api/src/args.rs` | `TaskRequest`, `ScheduleTaskRequest`, and `CancelTaskRequest` wire types. |
+| `test-integration/test-task-scheduler/` | Integration tests that start a leader with the ephemeral Hydra program preloaded. |
+
+`magicblock-task-scheduler/README.md` and `docs/task-scheduler.md` still
+describe the pre-Hydra SQLite delay-queue design. Do not treat them as
+current until they are rewritten.
 
 Main consumers:
 
-- `magicblock-api`, which owns construction/startup and passes the local aperture HTTP URL as the RPC endpoint;
-- `magicblock-processor`, which sends task requests after successful instruction execution through `ScheduledTasksTx`;
-- Magic Program task instructions, which define the wire/request semantics this crate persists and executes;
+- `mbv-leader` (`bins/magicblock-validator`), which owns construction and
+  startup;
+- Magic Program schedule/cancel instructions, which define the request
+  semantics this crate turns into Hydra cranks;
+- integration tests that locate cranks via `crank_pubkey`.
+
+There is no `TaskSchedulerConfig`, `SchedulerDatabase`, `db.rs`, or
+`ExecuteTask` path. `magicblock-config` no longer has scheduler reset,
+min-interval, or failed-record retention settings.
 
 ## Public API shape / Main public types and APIs
 
@@ -60,193 +97,250 @@ Main consumers:
 
 `src/lib.rs` exposes:
 
-- `pub mod db`, `pub mod errors`, and `pub mod service`;
-- `pub use db::SchedulerDatabase`;
+- `pub mod crank`, `pub mod errors`, and `pub mod service`;
+- `pub use crank::crank_pubkey`;
 - `pub use errors::TaskSchedulerError`;
 - `pub use service::TaskSchedulerService`.
 
-### `SchedulerDatabase`
+### `crank_pubkey`
 
-`SchedulerDatabase` wraps a single `rusqlite::Connection` in `Arc<tokio::sync::Mutex<_>>`. It is cloneable, but all DB operations serialize through that mutex.
-
-Important API:
-
-- `SchedulerDatabase::path(path)` returns `path.join("task_scheduler.sqlite")`;
-- `new(path)` opens SQLite, enables WAL, `synchronous=NORMAL`, and `busy_timeout=5000`, then creates the legacy-compatible `tasks` table if missing;
-- `insert_task`, `get_tasks`, `get_task_ids`, and `remove_task` manage the migration-only task rows used to seed Hydra cranks.
-
-`DbTask` is the legacy persisted task shape used during Hydra migration. It stores task IDs and timestamps as `i64`, serializes `Vec<Instruction>` with byte-compatible wincode, stores authority as a stringified `Pubkey`, and carries `last_execution_millis` so migration can preserve the legacy cadence when choosing the Hydra `start_slot`.
+`crank_pubkey(authority, task_id)` derives the Hydra crank PDA. The seed is
+`sha256(authority || task_id.to_le_bytes())`; the PDA is
+`hydra_api::instruction::ephemeral::find_crank_pda(&seed)`. Each authority
+has its own namespace: the same `task_id` under a different authority is a
+different crank.
 
 ### `TaskSchedulerService`
 
-`TaskSchedulerService::new(path, config, rpc_url, scheduled_tasks, block, slot_interval, token)` creates the service. It may remove the DB file first when `config.reset` is true, validates that `config.min_interval` fits in `u32::MAX` milliseconds, opens the database, and constructs a nonblocking Solana `RpcClient` pointed at `rpc_url`.
+`TaskSchedulerService::new(engine, self_rpc_url, slot_interval)` subscribes
+to `engine.transactions().subscribe_service_messages()`, stores the engine
+handle (accounts, blockhash/slot, signer), and builds a nonblocking
+`RpcClient` pointed at `self_rpc_url`.
 
-`start(self)` loads persisted tasks and spawns the main Tokio task, returning `JoinHandle<TaskSchedulerResult<()>>`.
+`run(self, shutdown)` owns the service for its lifetime and reports a
+terminal `ShutdownReason` through the `nucleus` handle:
+
+- `Error` if the loop returns a service-level error;
+- `Signalled` if the loop exits because shutdown was requested;
+- `Unexpected` if the loop exits without a shutdown request (for example the
+  service-message stream closed).
 
 Internally the service owns:
 
-- the SQLite database;
-- a `ScheduledTasksRx` channel from the processor;
-- a `LatestBlock` handle for crank transaction blockhashes;
-- a `DelayQueue<DbTask>` plus `task_queue_keys` for cancellation/replacement;
-- `task_versions` keyed by task ID to reject stale in-flight completions;
-- retry counters and exponential backoff state;
-- a cancellation token and failed-record cleanup interval;
-- an `AtomicU64` counter used to create unique noop instructions in crank transactions.
+- an `mpsc::Receiver<Vec<u8>>` of engine service messages;
+- an `Engine` for account loads, current slot, latest blockhash, and the
+  validator signer;
+- an `RpcClient` for send-and-forget local submission;
+- the validator slot interval used to convert millisecond cadences into
+  Hydra slot intervals.
 
-The type has manual `unsafe impl Send`/`Sync` with an explicit safety comment: the service is moved into one Tokio task by `start()` and is not cloned. Do not make it shared/mutated from multiple tasks without revisiting this assumption.
+The type has manual `unsafe impl Send`/`Sync` with an explicit safety
+comment: the service is moved into one Tokio task by `run()` and is not
+cloned. Do not make it shared or mutated from multiple tasks without
+revisiting this assumption.
 
 ### Errors
 
-`TaskSchedulerError` wraps invalid configuration, SQLite, wincode writes, Solana RPC client errors, I/O, unauthorized task replacement, and a currently unused `SizeMismatch` variant. Schedule/cancel processing errors are normally recorded as failed scheduling and treated as recoverable; service-level failures returned from the main loop cause `magicblock-api` to log and exit the process.
+Live failures from the current loop are `TaskSchedulerError::RpcClient` (Hydra
+submit) and `TaskSchedulerError::Keeper` (service-message subscribe). Schedule
+and cancel processing errors are logged and treated as recoverable; they do
+not stop the loop.
+
+`InvalidConfiguration`, `UnauthorizedReplacing`, `SizeMismatch`,
+`CrankWorker`, `Instruction`, `Wincode`, `TransactionExecution`, and `Io`
+are leftover variants from the SQLite delay-queue implementation and are not
+constructed by the current service.
 
 ## Runtime flows
 
-### Startup and primary-mode gating
+### Startup
 
 ```text
-MagicValidator::try_new
-  -> SchedulerDatabase::path(storage parent)
-  -> TaskSchedulerService::new(..., aperture HTTP URL, ScheduledTasksRx, LatestBlock, slot interval)
-MagicValidator::start
-  -> wait until CoordinationMode != StartingUp
-  -> if Primary: tokio::spawn(task_scheduler.start())
-  -> if Replica: do not start task scheduler
+Leader::try_from_config
+  -> TaskSchedulerService::new(
+       engine,
+       config.aperture.listen.http(),
+       config.engine.blockstore.blocktime,
+     )
+Leader start
+  -> tokio::spawn(task_scheduler.run(shutdown.handle(Service::TaskScheduler)))
 ```
 
-On `start()`, `migrate_persisted_tasks` reads all legacy rows from `tasks`, removes invalid rows (`execution_interval_millis <= 0`, `>= u32::MAX`, or `executions_left <= 0`), waits for a usable blockhash and delegated/funded faucet, creates each valid Hydra crank, and removes each row only if its crank was created successfully; rows whose crank creation fails remain in the legacy database to be retried on the next startup. If a legacy row has `last_execution_millis > 0`, migration preserves its cadence by converting the remaining wall-clock delay until `last_execution_millis + execution_interval_millis` into slots and adding those slots to the current block snapshot slot for Hydra `start_slot`; overdue or never-run tasks start at the current slot.
+The leader always constructs and starts the service. There is no
+primary/replica gate and no SQLite open, reset, or legacy-task migration in
+this crate.
 
 ### Schedule request flow
 
 ```text
 Magic Program ScheduleTask instruction
-  -> ExecutionTlsStash::register_task(TaskRequest::Schedule)
-  -> executor process_scheduled_tasks sends over ScheduledTasksTx
-  -> TaskSchedulerService::process_schedule_request
-  -> SQLite upsert + DelayQueue insert
+  -> TlsManager::enqueue(TaskRequest::Schedule)
+  -> engine publishes the encoded request after the transaction commits
+  -> TaskSchedulerService deserializes TaskRequest
+  -> process_schedule_request
+  -> send_create (optional cancel + Hydra Create)
+  -> RpcClient::send_transaction
 ```
 
 Processing details:
 
-1. Invalid intervals are ignored by the service. The Magic Program also validates intervals, but the service keeps this guard for persisted/channel inputs.
-2. Valid intervals are clamped to at least `config.min_interval` and at most `u32::MAX` milliseconds.
-3. If the task ID already exists, only the same authority may replace it; a different authority records a failed scheduling row and leaves the original task intact.
-4. `insert_task` writes a monotonic `updated_at` token, replacing any existing row.
-5. The service removes any queued old instance, clears retry state, records the new version, and inserts the replacement task with zero delay so it can run immediately.
+1. Invalid intervals (`<= 0` or `>= u32::MAX`) are ignored. The Magic
+   Program also validates intervals; the service keeps this guard for
+   channel inputs.
+2. `iterations <= 0` is ignored.
+3. `i64::MAX` iterations is the Magic API spelling of "run forever" and is
+   sent to Hydra as `remaining = 0`. Passing the raw `i64::MAX` count would
+   create a finite crank of ~9.2e18 executions.
+4. `start_slot` is the engine's current slot. Cadence is
+   `interval_slots(interval_millis, slot_interval)` (ceiling division, one
+   slot minimum).
+5. If a Hydra-owned account already exists at the PDA, the transaction is
+   `[Cancel, Create]` so a reschedule replaces the crank atomically.
+6. The validator identity is sponsor, fee payer, and Hydra cancel
+   authority. User task authority is used only to derive the PDA.
+
+Scheduled instruction signer flags are dropped when building `CreateArgs`.
+Hydra rejects scheduled instructions that declare signers; the Magic Program
+already rejects signer accounts and validator-authority accounts in the
+payload.
 
 ### Cancel request flow
 
 ```text
 Magic Program CancelTask instruction
-  -> ExecutionTlsStash::register_task(TaskRequest::Cancel)
-  -> executor sends over ScheduledTasksTx
-  -> TaskSchedulerService::process_cancel_request
-  -> remove runtime state and SQLite row when authority matches
+  -> TlsManager::enqueue(TaskRequest::Cancel)
+  -> engine publishes after commit
+  -> process_cancel_request
+  -> Hydra Cancel to crank_pubkey(authority, task_id)
+  -> remaining lamports return to the validator identity
 ```
 
-If the task is missing, runtime queue/retry state is cleaned and the request succeeds. If the authority does not match the persisted task authority, the service logs and returns success without removing the task. This mirrors the service's defensive behavior; signer validation happens in the Magic Program.
+The service does not check whether the crank exists and does not compare
+authorities against persisted state. Signer validation happens in the Magic
+Program. A cancel for a missing crank fails at RPC submit and is logged.
 
-### Crank execution flow
+### What this crate no longer does
 
-1. The main loop waits for `DelayQueue` expirations.
-2. When one task expires, it drains all currently expired tasks in the same tick into one batch.
-3. The service spawns a Tokio task to send the batch so the main loop can continue receiving schedule/cancel requests and cleanup ticks.
-4. `send_crank_batch` reads the latest blockhash, then uses a `JoinSet` to send one transaction per task concurrently.
-5. Each transaction includes a Magic Program noop instruction with a unique counter and an `execute_task_instruction(task.authority, task.instructions.clone())` instruction, signed by `validator_authority()` with `validator_authority_id()` as payer.
-6. The batch result is sent back over an internal unbounded channel.
-7. `on_crank_batch_completed` prepares success/failure DB mutations, applies them through `apply_crank_batch_completion`, then updates the delay queue only for rows whose optimistic `updated_at` token still matches.
+Hydra, not this service, fires due cranks. There is no local `DelayQueue`,
+no `ExecuteTask` transaction, no retry/backoff, no failed-record tables, and
+no cleanup ticker. Completions, remaining iterations, and slot cadence live
+in the Hydra crank account.
 
-A successful first execution anchors `last_execution_millis` at completion time; recurring executions preserve fixed-rate cadence by adding the interval to the previous `last_execution_millis`. Overdue recurring executions are requeued with zero delay.
-
-### Failure, retry, and stale completion flow
-
-- Only `TaskSchedulerError::Rpc(_)` is retryable for crank execution.
-- Retryable failures use exponential backoff based on `max(slot_interval, 100ms)`, capped at 5 seconds, for at most 10 retries.
-- Non-retryable failures and exhausted retries delete the task from `tasks` and insert a `failed_tasks` row.
-- Stale in-flight completions are ignored using both SQLite `updated_at` checks and in-memory `task_versions`. This protects task replacement/cancellation that races with an already spawned crank send.
-- On cancellation-token shutdown, the service breaks the select loop, drops the internal sender, and drains completed crank batches still present on the internal receiver before returning.
-
-### Failed-record cleanup flow
-
-The service creates a Tokio interval from `failed_task_cleanup_interval.max(1ms)` with `MissedTickBehavior::Delay`. On each tick it computes `now - failed_task_retention` and deletes older rows from both `failed_scheduling` and `failed_tasks` in a single transaction. Cleanup failures are logged and do not stop the service.
+`legacy_start_slot` in `crank.rs` is an unused leftover from the SQLite-to-
+Hydra migration and is not called by the service.
 
 ## Important internals and caveats
 
-### SQLite persistence and optimistic concurrency
+### Deterministic crank identity
 
-The task row's `updated_at` is a version token as well as a timestamp. `insert_task` ensures replacement tokens are monotonic even when the system clock does not advance. Batch completion updates/deletes include `WHERE id = ? AND updated_at = ?`; if a row changed during an in-flight crank send, completion maps omit that task and runtime state is left untouched.
+Cancel and reschedule are lookups by PDA, not by a local task table. Changing
+`crank_pubkey` seed layout silently orphans existing Hydra accounts.
 
-Do not replace batch completion with per-task commits without considering throughput and race behavior. The current one-transaction batch is intentional.
+### Validator-sponsored Hydra authority
 
-### Unbounded channels and concurrent sends
+`CreateArgs.authority` is the validator sponsor, not the user task
+authority. That is why this service must issue Hydra `Cancel`: only the
+sponsor can close the crank. Do not change signer layout, payer selection, or
+cancel recipient without checking `hydra-api` ephemeral `create`/`cancel`
+and `test_undrained_sponsor.rs`.
 
-The service uses the processor's unbounded scheduled-task channel and an internal unbounded crank-completion channel. Crank sends inside a batch are parallelized with a `JoinSet` and are currently not explicitly bounded beyond the number of tasks that expire together. Heavy scheduled-task workloads can therefore amplify RPC sends; preserve or improve this behavior carefully and report performance risk when changing it.
+Submit is send-and-forget. The service relies on the identity account write
+lock to serialize overlapping sponsor transactions rather than waiting for
+confirmation.
 
-### Validator authority and crank signer assumptions
+### Service-message filtering
 
-Crank transactions are built with `validator_authority()` and include Magic Program `ExecuteTask` instruction helpers that derive the required crank signer PDA from task authority. The Magic Program verifies validator/crank signer constraints. Do not change signer layout or payer selection in this crate without checking `programs/magicblock/src/schedule_task/process_execute_task.rs` and the scheduler service tests.
+The engine stream carries every service message. Deserialization failure is
+treated as "not a `TaskRequest`" and ignored. Do not log or fail the loop on
+unrecognized payloads.
 
-### Primary-only execution
+### Leftover helpers and error variants
 
-`magicblock-api` starts the task scheduler only in primary mode. This crate gates local crank execution based on that startup decision; the broader coordination-mode model lives in `magicblock-core` and `.agents/specs/validator-specification.md`. Replica behavior must remain intentional: replicas should not independently crank scheduled tasks unless the validator lifecycle/coordination model is explicitly changed.
+`legacy_start_slot` and several `TaskSchedulerError` variants are unused by
+the live path. Do not revive SQLite persistence, optimistic `updated_at`
+tokens, or unauthorized-replacement DB checks unless the Hydra model itself
+changes.
 
 ## Important invariants
 
-1. Persisted task rows must remain recoverable across restart unless `task_scheduler.reset` removes the database file.
-2. Invalid or completed persisted tasks must be removed on startup, not requeued forever.
-3. A task ID may be replaced only by the same authority; unauthorized replacement must not mutate the existing task.
-4. Cancel requests must remove a task only when the persisted authority matches the cancel authority.
-5. `execution_interval_millis` must remain in the valid Magic Program/service range and must be clamped to `config.min_interval` for runtime scheduling.
-6. `updated_at` tokens must be preserved on queued/in-flight `DbTask`s and checked before applying completion state.
-7. Stale crank completions must not mutate a replacement or resurrect a cancelled task.
-8. Successful recurring tasks must decrement `executions_left`, update `last_execution_millis`, and preserve fixed-rate cadence.
-9. Final successful executions, unretryable failures, and exhausted retries must remove the active task row.
-10. Retryable RPC failures must use bounded backoff and must not busy-loop the delay queue.
-11. Crank transactions must use a fresh/latest blockhash and validator authority signer from the local validator context.
-12. Shutdown must drain already completed crank batch results from the internal channel before returning.
-13. Changes must avoid unnecessary SQLite transactions, long-held mutexes, unbounded logging, and RPC amplification on the scheduled-task path.
+1. The service must remain stateless: crank identity is `crank_pubkey
+   (authority, task_id)`.
+2. A `TaskRequest` must be applied only after the originating transaction
+   commits (engine service-message publish).
+3. Non-`TaskRequest` service messages must be ignored.
+4. Invalid intervals and `iterations <= 0` must be no-ops.
+5. `iterations == i64::MAX` must map to Hydra infinite (`remaining = 0`).
+6. Reschedule of an existing Hydra-owned crank must cancel then create in
+   one transaction.
+7. Cancel must refund remaining crank lamports to the validator sponsor.
+8. Hydra `Create` authority must be the validator sponsor so only this
+   service can cancel through Hydra.
+9. Scheduled instruction signer flags must not be forwarded to Hydra.
+10. Create/cancel transactions must use the engine signer, the latest engine
+    blockhash, and the local Aperture HTTP endpoint.
+11. Different authorities with the same `task_id` must get independent
+    cranks.
+12. Shutdown must report a terminal `ShutdownReason` through the nucleus
+    handle rather than exiting silently.
+13. Changes must avoid unnecessary RPC amplification, long-held identity
+    locks, and unbounded logging on the schedule/cancel path.
 
 ## Common change areas and what to inspect
 
 ### Changing schedule/cancel semantics
 
-Start with `magicblock-task-scheduler/src/service.rs` (`process_request`, `process_schedule_request`, `process_cancel_request`) and `src/db.rs` (`insert_task`, `remove_task`, `get_task`). Then inspect `programs/magicblock/src/schedule_task/process_schedule_task.rs`, `process_cancel_task.rs`, and `magicblock-magic-program-api/src/args.rs`.
+Start with `magicblock-task-scheduler/src/service.rs`
+(`process_request`, `process_schedule_request`, `process_cancel_request`)
+and `src/crank.rs` (`crank_pubkey`, `build_create_ix`,
+`is_valid_task_interval`, `interval_slots`). Then inspect
+`programs/magicblock/src/schedule_task/process_schedule_task.rs`,
+`process_cancel_task.rs`, `mod.rs` (`validate_cranks_instructions`), and
+`magicblock-magic-program-api/src/args.rs`.
 
-Validate authority checks, invalid intervals, iterations, task replacement, cancellation races, and failure-record behavior. Integration tests to inspect include `test_schedule_task.rs`, `test_reschedule_task.rs`, `test_cancel_ongoing_task.rs`, `test_schedule_error.rs`, and `test_unauthorized_reschedule.rs`.
+Validate interval/iteration guards, per-authority namespacing, reschedule
+cancel+create, missing-crank cancel, and signer-flag stripping. Integration
+tests: `test_schedule_task.rs` and `test_undrained_sponsor.rs`.
 
-### Changing crank transaction construction or send behavior
+### Changing Hydra instruction construction or submit behavior
 
-Start with `send_crank_batch`, `on_crank_batch_completed`, and `programs/magicblock/src/utils/instruction_utils.rs` for `execute_task_instruction`. Inspect Magic Program execute-task validation in `programs/magicblock/src/schedule_task/process_execute_task.rs`.
+Start with `send_create`, `send_cancel`, `submit`, and `build_create_ix`.
+Inspect `hydra-api` ephemeral `create`/`cancel`, `CreateArgs` (`remaining`,
+`authority`, scheduled metas), and leader wiring for RPC URL and blocktime.
 
-Check validator authority, crank signer PDA, noop uniqueness, blockhash source, payer, transaction signing, RPC endpoint, retry classification, and concurrency. Run or inspect `test_schedule_magic_cpi_crank.rs`, `test_schedule_task_signed.rs`, and `test_use_crank_signer.rs`.
+Check sponsor, cancel recipient, infinite-iteration mapping, blockhash
+source, and send-and-forget races on the identity account.
 
-### Changing persistence, recovery, or schema
+### Changing startup/shutdown
 
-Start with `magicblock-task-scheduler/src/db.rs` and `load_persisted_tasks` in `service.rs`. Also inspect `magicblock-api/src/magic_validator.rs` for the database path and `magicblock-config/src/config/scheduler.rs` for reset/retention config.
-
-Schema changes need migration/recovery thought; the current code only creates missing tables and does not run versioned migrations. Preserve the established byte layout for stored `Vec<Instruction>` or add an explicit migration/compatibility path.
-
-### Changing retry/backoff or cleanup
-
-Inspect constants in `service.rs` (`MAX_TASK_EXECUTION_RETRIES`, `TASK_EXECUTION_RETRY_BASE_DELAY`, `TASK_EXECUTION_RETRY_MAX_DELAY`), `is_retryable_task_execution_error`, `task_execution_retry_delay`, `prepare_crank_failure_outcome`, `apply_crank_failure_outcome`, and the failed-record cleanup select branch.
-
-Check that transient RPC failures do not delete tasks too eagerly, permanent errors do not retry forever, and cleanup cannot stop the scheduler.
-
-### Changing startup/shutdown or mode behavior
-
-Inspect `TaskSchedulerService::start`, `run`, and `magicblock-api/src/magic_validator.rs` around task scheduler initialization and primary-mode gating. Preserve cancellation-token handling and the behavior that scheduler startup failures cause the validator process to exit rather than silently running without task cranking.
+Inspect `TaskSchedulerService::new`, `run`, `run_loop`, and
+`bins/magicblock-validator/src/leader.rs`. Preserve nucleus
+`Service::TaskScheduler` termination: a service-level error must surface as
+`ShutdownReason::Error` rather than leaving the leader running without
+scheduling.
 
 ## Tests and validation
 
-- Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
-- Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-task-scheduler`.
-- Config changes should also include focused `magicblock-config` task-scheduler coverage.
-- Performance-sensitive changes should report whether concurrency, SQLite transaction count, lock hold time, RPC send volume, or scheduler startup/recovery latency was measured or only reasoned about.
+- Markdown-only guide changes: run `git diff --check` for this file; no Rust
+  checks are needed.
+- Rust changes in this crate: use `.agents/rules/testing-and-validation.md`
+  or `mbv-check`; include focused package checks for
+  `magicblock-task-scheduler`.
+- Schedule/cancel behavior that creates or funds Hydra accounts should also
+  run `test-integration/test-task-scheduler` (`test_schedule_task`,
+  `test_undrained_sponsor`). Those tests preload the ephemeral Hydra program
+  from `test-integration/programs/hydra/hydra.so`.
+- Performance-sensitive changes should report whether service-message drain
+  latency, RPC send volume, or identity-account lock hold time was measured
+  or only reasoned about.
 
 ## Adjacent implementation references
 
-- See `.agents/context/crates/magicblock-api.md` for the validator orchestration and startup code that owns the scheduler service.
-- Consult `.agents/context/crates/magicblock-config.md` when changing config loading or env/TOML behavior for scheduler settings.
-- Inspect `.agents/context/crates/magicblock-core.md` to understand shared channels, coordination mode, and `ExecutionTlsStash` boundaries.
-- Refer to `.agents/context/crates/magicblock-magic-program-api.md` for task request and Magic Program instruction wire types.
-- Use `magicblock-task-scheduler/README.md` for operator-facing scheduler configuration and performance notes.
+- See `.agents/context/crates/mbv-leader.md` for the leader lifecycle that
+  constructs and starts this service.
+- Refer to `.agents/context/crates/magicblock-magic-program-api.md` for
+  `TaskRequest` and Magic Program instruction wire types. That guide still
+  mentions `ExecutionTlsStash`; the live enqueue path is
+  `nucleus::tls::TlsManager`.
+- Hydra crate docs and `hydra-api` ephemeral instruction types own crank
+  execution, remaining-iteration accounting, and on-chain cancel
+  constraints.
