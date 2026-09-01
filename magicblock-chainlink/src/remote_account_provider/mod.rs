@@ -2076,6 +2076,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.received_updates_count.load(Ordering::Relaxed)
     }
 
+    /// Shuts down the chain subscriptions feeding this provider, so no
+    /// further account updates are delivered.
+    pub async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        self.pubsub_client.shutdown().await
+    }
+
     fn listen_for_account_updates(
         &self,
         mut updates: mpsc::Receiver<SubscriptionUpdate>,
