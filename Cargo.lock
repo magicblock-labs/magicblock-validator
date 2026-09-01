@@ -3679,6 +3679,7 @@ version = "0.14.12"
 dependencies = [
  "agave-feature-set",
  "anyhow",
+ "bincode",
  "borsh 1.6.1",
  "fd-lock",
  "magic-domain-program",
