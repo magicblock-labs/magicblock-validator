@@ -1,14 +1,18 @@
 use std::time::Duration;
 
-use hydra_api::consts::ephemeral::CRANKER_REWARD;
+use cleanass::assert;
+use hydra_api::state::region_len_for;
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::{crank::crank_rent_floor, crank_pubkey};
+use magicblock_program::{
+    ephemeral::rent_for, instruction_utils::InstructionUtils,
+};
+use magicblock_task_scheduler::crank_pubkey;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
 use test_task_scheduler::{
-    cancel_task, noop_task_instructions, schedule_noop_task, setup_validator,
-    wait_for_funded_sponsor, wait_for_hydra_crank, wait_for_hydra_crank_closed,
+    cancel_task, schedule_noop_task, setup_validator, wait_for_hydra_crank,
+    wait_for_hydra_crank_closed,
 };
 
 /// Hydra cranks are sponsored by the validator identity. Scheduling moves
@@ -25,14 +29,8 @@ fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
         validator
     );
 
-    // Sample the sponsor only once it carries a balance in the ER, otherwise
-    // the baseline races validator startup.
-    let sponsor_before = wait_for_funded_sponsor(
-        &ctx,
-        &sponsor,
-        Duration::from_secs(30),
-        &mut validator,
-    );
+    let sponsor_before =
+        expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
 
     let task_id = 1;
     let iterations = 3;
@@ -46,28 +44,19 @@ fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
         &mut validator,
     );
 
-    // The scheduler must pre-fund the crank with its rent *and* the whole
-    // reward pool, or the last iterations would never be worth cranking.
-    // Checking the reward pool on its own would pass on rent alone, since rent
-    // dwarfs the per-trigger reward.
-    let crank_lamports =
-        expect!(ctx.fetch_ephem_account_balance(&crank_pda), validator);
-    let reward_pool = (iterations as u64).saturating_mul(CRANKER_REWARD);
-    let min_funding =
-        expect!(crank_rent_floor(&noop_task_instructions()), validator)
-            .saturating_add(reward_pool);
-    assert!(
-        crank_lamports >= min_funding,
-        "crank underfunded by sponsor: {crank_lamports} < {min_funding}"
-    );
-
-    // That funding came out of the sponsor, so the refund asserted below is a
-    // real recovery rather than a vacuous no-op.
     let sponsor_while_scheduled =
         expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
+
+    // The scheduler must pre-fund the crank with its rent
+    let ix = InstructionUtils::noop_instruction(0);
+    let min_funding = expect!(
+        rent_for(region_len_for(ix.accounts.len(), ix.data.len()) as u32),
+        validator
+    );
     assert!(
-        sponsor_while_scheduled < sponsor_before,
-        "sponsor did not pay for the crank: {sponsor_while_scheduled} >= {sponsor_before}"
+        sponsor_while_scheduled == sponsor_before - min_funding,
+        cleanup(&mut validator),
+        "sponsor did not pre-fund the crank: {sponsor_while_scheduled} != {sponsor_before} - {min_funding}"
     );
 
     cancel_task(&ctx, &mut validator, &payer, task_id);
@@ -84,10 +73,12 @@ fn test_sponsor_is_refunded_when_a_task_is_cancelled() {
         expect!(ctx.fetch_ephem_account_balance(&sponsor), validator);
     assert!(
         sponsor_after > sponsor_while_scheduled,
+        cleanup(&mut validator),
         "cancelling did not refund the crank budget: {sponsor_after} <= {sponsor_while_scheduled}"
     );
     assert!(
-        sponsor_after + reward_pool >= sponsor_before,
+        sponsor_after >= sponsor_before,
+        cleanup(&mut validator),
         "sponsor was drained across a schedule/cancel cycle: {sponsor_after} vs {sponsor_before}"
     );
 
