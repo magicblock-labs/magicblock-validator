@@ -4,14 +4,14 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use clap::Parser;
+use clap::{Error as CliError, Parser};
 use config::{
     EngineConfig, FollowerReplication, LeaderReplication, LifecycleMode,
     aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
     metrics::MetricsConfig,
 };
 use figment::{
-    Figment, Profile,
+    Error as FigmentError, Figment, Profile,
     providers::{Env, Format, Serialized, Toml},
     value::Uncased,
 };
@@ -33,6 +33,17 @@ use crate::{
 };
 
 const VERIFIER_ENV_VAR_PREFIX: &str = "MBV_VERIFIER_";
+
+/// Failure while parsing process arguments or assembling configuration.
+#[derive(Debug, thiserror::Error)]
+pub enum ConfigError {
+    /// Command-line parsing failed or requested display-only output.
+    #[error(transparent)]
+    Cli(#[from] CliError),
+    /// Layered configuration could not be loaded or validated.
+    #[error(transparent)]
+    Config(#[from] Box<FigmentError>),
+}
 
 /// Leader configuration assembled from defaults, TOML, environment, and CLI.
 #[derive(Clone, Deserialize, Serialize, Default)]
@@ -83,9 +94,9 @@ impl LeaderParams {
     /// - At least one WebSocket endpoint is configured (for subscriptions)
     pub fn try_new(
         args: impl Iterator<Item = OsString>,
-    ) -> Result<Self, Box<figment::error::Error>> {
+    ) -> Result<Self, ConfigError> {
         // 1. Parse CLI arguments into the "Overlay" struct
-        let cli = CliParams::parse_from(args);
+        let cli = CliParams::try_parse_from(args)?;
 
         // 2. Start with system defaults (Figment will use serde defaults for each field)
         let mut figment = Figment::new();
@@ -107,7 +118,7 @@ impl LeaderParams {
         figment = figment.merge(Serialized::from(&cli, Profile::Default));
 
         let params: Self = figment.extract().map_err(Box::new)?;
-        params.validate()
+        params.validate().map_err(Into::into)
     }
 
     /// Loads a leader config file with the same defaults and environment
@@ -127,9 +138,9 @@ impl LeaderParams {
         params.validate()
     }
 
-    fn validate(mut self) -> Result<Self, Box<figment::error::Error>> {
+    fn validate(mut self) -> Result<Self, Box<FigmentError>> {
         if self.engine.authority.remote.is_some() {
-            return Err(Box::new(figment::error::Error::from(
+            return Err(Box::new(FigmentError::from(
                 "engine.authority.remote is reserved for follower validators",
             )));
         }
@@ -139,12 +150,10 @@ impl LeaderParams {
         Ok(self)
     }
 
-    fn ensure_valid_aperture_listen(
-        &self,
-    ) -> Result<(), Box<figment::error::Error>> {
+    fn ensure_valid_aperture_listen(&self) -> Result<(), Box<FigmentError>> {
         let port = self.aperture.listen.0.port();
         if port == u16::MAX {
-            return Err(Box::new(figment::error::Error::from(format!(
+            return Err(Box::new(FigmentError::from(format!(
                 "aperture.listen port {port} is invalid: the WebSocket server \
                  binds to port + 1, which has no valid value at {}. Use a \
                  listen port <= {}.",
@@ -372,8 +381,8 @@ impl VerifierParams {
     /// Loads a verifier config from TOML followed by `MBV_VERIFIER_` overrides.
     pub fn try_new(
         args: impl Iterator<Item = OsString>,
-    ) -> Result<Self, Box<figment::error::Error>> {
-        let cli = VerifierCli::parse_from(args);
+    ) -> Result<Self, ConfigError> {
+        let cli = VerifierCli::try_parse_from(args)?;
         let figment = Figment::new()
             .merge(Toml::file(&cli.config).profile(Profile::Default))
             .merge(
@@ -384,20 +393,23 @@ impl VerifierParams {
             );
         let mut params: Self = figment.extract().map_err(Box::new)?;
         if params.engine.authority.remote.is_some() {
-            return Err(Box::new(figment::error::Error::from(
+            return Err(Box::new(FigmentError::from(
                 "engine.authority.remote is derived from replication.upstream-authority",
-            )));
+            ))
+            .into());
         }
         if params.engine.replication.upstream_address.port() == 0 {
-            return Err(Box::new(figment::error::Error::from(
+            return Err(Box::new(FigmentError::from(
                 "engine.replication.upstream-address must use a non-zero port",
-            )));
+            ))
+            .into());
         }
         if params.engine.replication.upstream_authority.0 == Default::default()
         {
-            return Err(Box::new(figment::error::Error::from(
+            return Err(Box::new(FigmentError::from(
                 "engine.replication.upstream-authority is required",
-            )));
+            ))
+            .into());
         }
         params.engine.authority.remote =
             Some(params.engine.replication.upstream_authority.0);

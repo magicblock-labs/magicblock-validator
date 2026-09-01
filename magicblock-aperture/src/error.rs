@@ -15,6 +15,8 @@ pub(crate) const PARSE_ERROR: i16 = -32700;
 
 #[derive(thiserror::Error, Debug)]
 pub enum ApertureError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
     #[error("RPC error: {0}")]
     Rpc(#[from] RpcError),
     #[error("Geyser error: {0}")]

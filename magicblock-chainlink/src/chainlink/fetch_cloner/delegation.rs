@@ -63,7 +63,7 @@ pub(crate) fn parse_delegation_record(
             validator_keypair,
         )?;
 
-        Ok((record, Some(actions)))
+        Ok((record, DelegationActions::new(record.owner, actions)))
     }
 }
 
@@ -71,7 +71,7 @@ fn parse_post_delegation_actions(
     actions_data: &[u8],
     delegation_record_pubkey: Pubkey,
     validator_keypair: &Keypair,
-) -> ChainlinkResult<DelegationActions> {
+) -> ChainlinkResult<Vec<solana_instruction::Instruction>> {
     let actions: PostDelegationActions = borsh::from_slice(actions_data)
         .map_err(|err| {
             ChainlinkError::InvalidDelegationActions(
@@ -89,7 +89,7 @@ fn parse_post_delegation_actions(
             )
         })?;
 
-    Ok(instructions.into())
+    Ok(instructions)
 }
 
 pub(crate) fn apply_delegation_record_to_account<T, U>(
@@ -332,14 +332,15 @@ mod tests {
             },
         );
 
-        let (_, actions) =
+        let (record, actions) =
             parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
                 .unwrap();
 
-        let actions: Vec<Instruction> = actions.unwrap().into();
+        let actions = actions.unwrap();
+        assert_eq!(actions.source_program(), record.owner);
         assert_eq!(
-            actions,
-            vec![Instruction {
+            actions.actions(),
+            [Instruction {
                 program_id,
                 accounts: vec![
                     AccountMeta::new_readonly(signer, true),
@@ -348,6 +349,45 @@ mod tests {
                 data: vec![7, 8, 9],
             }]
         );
+    }
+
+    /// Proves projected ATA actions retain the eATA program from their
+    /// slot-matched delegation record as invocation provenance.
+    #[test]
+    fn preserves_eata_source_program_for_post_delegation_actions() {
+        let validator = Keypair::new();
+        let record = DelegationRecord {
+            owner: EATA_PROGRAM_ID,
+            authority: validator.pubkey(),
+            commit_frequency_ms: 1_000,
+            delegation_slot: 1,
+            lamports: 1_000_000,
+        };
+        let mut payload = vec![0; DelegationRecord::size_with_discriminator()];
+        record.to_bytes_with_discriminator(&mut payload).unwrap();
+        payload.extend_from_slice(
+            &borsh::to_vec(&PostDelegationActions {
+                inserted_signers: 0,
+                inserted_non_signers: 0,
+                signers: vec![*Pubkey::new_unique().as_array()],
+                non_signers: vec![],
+                instructions: vec![MaybeEncryptedInstruction {
+                    program_id: 0,
+                    accounts: vec![],
+                    data: MaybeEncryptedIxData {
+                        prefix: vec![],
+                        suffix: EncryptedBuffer::default(),
+                    },
+                }],
+            })
+            .unwrap(),
+        );
+
+        let (_, actions) =
+            parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
+                .unwrap();
+
+        assert_eq!(actions.unwrap().source_program(), EATA_PROGRAM_ID);
     }
 
     #[test]
@@ -403,10 +443,10 @@ mod tests {
             parse_delegation_record(&payload, Pubkey::new_unique(), &validator)
                 .unwrap();
 
-        let actions: Vec<Instruction> = actions.unwrap().into();
+        let actions = actions.unwrap();
         assert_eq!(
-            actions,
-            vec![Instruction {
+            actions.actions(),
+            [Instruction {
                 program_id,
                 accounts: vec![
                     AccountMeta::new_readonly(signer, true),
