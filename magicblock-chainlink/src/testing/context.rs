@@ -314,7 +314,8 @@ impl TestContext {
             .expect("account exists before undelegation");
         self.bank
             .account(*pubkey)
-            .update(account)
+            .await
+            .materialize(account, None)
             .await
             .expect("mark account undelegating through engine");
     }

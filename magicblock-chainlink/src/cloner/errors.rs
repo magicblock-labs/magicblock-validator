@@ -21,17 +21,10 @@ pub enum ClonerError {
     CommittorServiceError(String),
 
     #[error("engine error: {0}")]
-    Engine(String),
+    Engine(#[from] engine::EngineError),
 
-    #[error("account update for {0} unexpectedly contains delegation actions")]
-    UnexpectedDelegationActionsOnUpdate(Pubkey),
-
-    /// Rescue undelegation is a post-finalize creation action. Updates cannot
-    /// attach it and must refuse rather than silently skip undelegation.
-    #[error(
-        "account {0} cannot schedule rescue undelegation during update materialization"
-    )]
-    UndelegationSchedulingUnavailable(Pubkey),
+    #[error("account materialization rejected for {0}: {1}")]
+    InvalidAccountMaterialization(Pubkey, String),
 
     #[error(
         "Clone transaction for account {pubkey} is too large: {size} bytes (max {max_size} bytes)"
