@@ -144,8 +144,15 @@ impl RpcTaskInfoFetcher {
             };
 
             match err {
-                TaskInfoFetcherError::AccountNotFoundError(_) => {
-                    break Err(err)
+                // Not-found can be a stale read from a load-balanced RPC
+                // pool right after the account was created, so retry
+                TaskInfoFetcherError::AccountNotFoundError(ref pubkey) => {
+                    warn!(
+                        %pubkey,
+                        min_context_slot,
+                        attempt = i,
+                        "Account not found, possibly stale RPC read"
+                    );
                 }
                 err @ TaskInfoFetcherError::InvalidAccountDataError(_) => {
                     error!(error = ?err, "Unexpected error");
@@ -655,13 +662,17 @@ pub enum TaskInfoFetcherError {
 }
 
 impl TaskInfoFetcherError {
-    /// RPC-side fetch failures are transient; malformed or absent
-    /// delegation accounts are deterministic.
+    /// RPC-side fetch failures are transient; malformed delegation
+    /// accounts are deterministic. Not-found is transient too: the
+    /// accounts fetched here exist from the ER's perspective, so it is
+    /// most likely a lagging RPC node. The bounded intent-level retry
+    /// makes a genuinely absent account fail terminally.
     pub fn is_transient(&self) -> bool {
         match self {
+            Self::AccountNotFoundError(_) => true,
             Self::MinContextSlotNotReachedError(_, _) => true,
             Self::MagicBlockRpcClientError(err) => err.is_transient(),
-            _ => false,
+            Self::InvalidAccountDataError(_) => false,
         }
     }
 

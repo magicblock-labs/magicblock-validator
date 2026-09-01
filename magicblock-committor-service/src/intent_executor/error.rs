@@ -604,6 +604,16 @@ mod tests {
         );
         assert!(err.is_transient());
 
+        // Not-found on fetch is transient (may be a stale RPC read)
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::FinalizedTasksBuildError(
+                TaskInfoFetcherError::AccountNotFoundError(
+                    solana_pubkey::Pubkey::new_unique(),
+                ),
+            ),
+        );
+        assert!(err.is_transient());
+
         // Missing delegation metadata is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(
             TaskBuilderError::MissingDelegationMetadata(
