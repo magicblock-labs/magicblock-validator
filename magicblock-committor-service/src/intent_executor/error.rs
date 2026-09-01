@@ -620,7 +620,7 @@ mod tests {
                 TaskInfoFetcherError::DelegationSessionChangedError {
                     delegated_account: solana_pubkey::Pubkey::new_unique(),
                     delegation_slot: 2,
-                    min_context_slot: 1,
+                    snapshot_slot: 1,
                 },
             ),
         );
