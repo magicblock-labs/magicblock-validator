@@ -136,6 +136,31 @@ pub(crate) async fn subscription_key_owned_guard_from_map(
     lock.lock_owned().await
 }
 
+/// Holds the per-pubkey subscription boundary across an account eviction.
+pub(crate) struct SubscriptionEvictionGuard<
+    'a,
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+> {
+    provider: &'a RemoteAccountProvider<T, U>,
+    pubkey: Pubkey,
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+}
+
+impl<T: ChainRpcClient, U: ChainPubsubClient>
+    SubscriptionEvictionGuard<'_, T, U>
+{
+    /// Returns whether a subscription was acquired before this eviction began.
+    pub(crate) fn is_watching(&self) -> bool {
+        self.provider.is_watching(&self.pubkey)
+    }
+
+    /// Removes the subscription while retaining the per-pubkey boundary.
+    pub(crate) async fn unsubscribe(&self) -> RemoteAccountProviderResult<()> {
+        self.provider.unsubscribe_locked(&self.pubkey).await
+    }
+}
+
 type ChainUpdatesPubsub = (Arc<ChainUpdatesClient>, mpsc::Receiver<()>);
 
 #[allow(clippy::too_many_arguments)]
@@ -2004,24 +2029,22 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.subscribed_accounts.contains(pubkey)
     }
 
-    pub(crate) async fn evict_unwatched_with_subscription_lock<F, Fut>(
+    /// Locks subscription ownership for `pubkey` until its eviction decision
+    /// and any resulting unsubscribe and account deletion have completed.
+    pub(crate) async fn lock_account_eviction(
         &self,
         pubkey: &Pubkey,
-        evict: F,
-    ) -> bool
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = ()>,
-    {
-        let subscription_key_lock = self.subscription_key_lock(pubkey).await;
-        let _subscription_guard = subscription_key_lock.lock().await;
-
-        if self.is_watching(pubkey) {
-            return false;
+    ) -> SubscriptionEvictionGuard<'_, T, U> {
+        let guard = subscription_key_owned_guard_from_map(
+            &self.subscription_key_locks,
+            *pubkey,
+        )
+        .await;
+        SubscriptionEvictionGuard {
+            provider: self,
+            pubkey: *pubkey,
+            _guard: guard,
         }
-
-        evict().await;
-        true
     }
 
     async fn subscription_key_lock(
@@ -2357,7 +2380,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
     ) -> RemoteAccountProviderResult<()> {
         let subscription_key_lock = self.subscription_key_lock(pubkey).await;
         let _subscription_guard = subscription_key_lock.lock().await;
+        self.unsubscribe_locked(pubkey).await
+    }
 
+    async fn unsubscribe_locked(
+        &self,
+        pubkey: &Pubkey,
+    ) -> RemoteAccountProviderResult<()> {
         if self.subscribed_accounts.is_internally_managed(pubkey) {
             warn!(pubkey = %pubkey, "Tried to unsubscribe an internally managed account");
             inc_chainlink_subscription_cleanup_accounts(
