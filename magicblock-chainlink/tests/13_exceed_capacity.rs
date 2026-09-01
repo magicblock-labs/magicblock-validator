@@ -1,5 +1,5 @@
 use magicblock_chainlink::{
-    AccountFetchContext, assert_cloned_as_delegated,
+    AccountFetchEntrypoint, assert_cloned_as_delegated,
     testing::{
         context::TestContext, deleg::add_delegation_record_for, init_logger,
         utils::random_pubkeys,
@@ -31,7 +31,7 @@ async fn delegated_account_survives_readonly_cache_pressure() {
     ctx.chainlink
         .ensure_accounts(
             &[delegated],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -51,7 +51,7 @@ async fn delegated_account_survives_readonly_cache_pressure() {
         ctx.chainlink
             .ensure_accounts(
                 batch,
-                AccountFetchContext::rpc_get_multiple_accounts(),
+                AccountFetchEntrypoint::RpcGetMultipleAccounts,
             )
             .await
             .unwrap();

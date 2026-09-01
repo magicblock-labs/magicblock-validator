@@ -1,4 +1,4 @@
-use magicblock_metrics::metrics::AccountFetchContext;
+use magicblock_metrics::metrics::AccountFetchEntrypoint;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     parse_account_data::SplTokenAdditionalDataV2,
@@ -52,7 +52,7 @@ impl HttpDispatcher {
             let (token_account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &pubkey,
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchEntrypoint::RpcGetAccount,
                     reader,
                 )
                 .await;
@@ -80,7 +80,7 @@ impl HttpDispatcher {
             let (mint_account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &mint,
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchEntrypoint::RpcGetAccount,
                     reader,
                 )
                 .await;

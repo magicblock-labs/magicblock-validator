@@ -15,9 +15,7 @@ use intent_client::{
     ERIntentClient, InternalIntentClientError, ScheduledBaseIntentMeta,
 };
 use magicblock_chainlink::{ProdChainlink, errors::ChainlinkResult};
-use magicblock_metrics::metrics::{
-    self, AccountFetchContext, AccountFetchReason,
-};
+use magicblock_metrics::metrics::{self, AccountFetchEntrypoint};
 use magicblock_program::{
     Pubkey, magic_scheduled_base_intent::ScheduledIntentBundle,
 };
@@ -497,9 +495,7 @@ where
             .chainlink
             .account_delegation_sessions(
                 pubkeys,
-                AccountFetchContext::internal(
-                    AccountFetchReason::RequestedAccount,
-                ),
+                AccountFetchEntrypoint::Internal,
             )
             .await?
             .into_iter()

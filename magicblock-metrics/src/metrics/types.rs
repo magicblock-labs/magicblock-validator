@@ -161,31 +161,19 @@ impl AccountFetchContext {
     }
 
     pub fn rpc_get_account() -> Self {
-        Self::new(
-            AccountFetchEntrypoint::RpcGetAccount,
-            AccountFetchReason::RequestedAccount,
-        )
+        AccountFetchEntrypoint::RpcGetAccount.into()
     }
 
     pub fn rpc_get_multiple_accounts() -> Self {
-        Self::new(
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-            AccountFetchReason::RequestedAccount,
-        )
+        AccountFetchEntrypoint::RpcGetMultipleAccounts.into()
     }
 
     pub fn send_transaction(signature: Signature) -> Self {
-        Self::new(
-            AccountFetchEntrypoint::SendTransaction(signature),
-            AccountFetchReason::RequestedAccount,
-        )
+        AccountFetchEntrypoint::SendTransaction(signature).into()
     }
 
     pub fn simulate_transaction(signature: Signature) -> Self {
-        Self::new(
-            AccountFetchEntrypoint::SimulateTransaction(signature),
-            AccountFetchReason::RequestedAccount,
-        )
+        AccountFetchEntrypoint::SimulateTransaction(signature).into()
     }
 
     pub fn subscription_update(reason: AccountFetchReason) -> Self {
@@ -241,6 +229,13 @@ impl AccountFetchContext {
 
     pub fn signature(&self) -> Option<&Signature> {
         self.entrypoint.signature()
+    }
+}
+
+/// Starts shared requested-account fetch tracking from a copyable origin.
+impl From<AccountFetchEntrypoint> for AccountFetchContext {
+    fn from(entrypoint: AccountFetchEntrypoint) -> Self {
+        Self::new(entrypoint, AccountFetchReason::RequestedAccount)
     }
 }
 
@@ -363,76 +358,6 @@ impl fmt::Display for ChainlinkCompanionFetchOutcome {
 }
 
 impl LabelValue for ChainlinkCompanionFetchOutcome {
-    fn value(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BankPrecheckOutcome {
-    BankHitNoFetch,
-    BankHitUndelegatingRefreshRequired,
-    BankMissRemoteRequired,
-    ForcedRefreshRemoteRequired,
-}
-
-impl BankPrecheckOutcome {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::BankHitNoFetch => "bank_hit_no_fetch",
-            Self::BankHitUndelegatingRefreshRequired => {
-                "bank_hit_undelegating_refresh_required"
-            }
-            Self::BankMissRemoteRequired => "bank_miss_remote_required",
-            Self::ForcedRefreshRemoteRequired => {
-                "forced_refresh_remote_required"
-            }
-        }
-    }
-}
-
-impl fmt::Display for BankPrecheckOutcome {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl LabelValue for BankPrecheckOutcome {
-    fn value(&self) -> &str {
-        self.as_str()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BankPrecheckReason {
-    Absent,
-    NonUndelegatingPresent,
-    UndelegatingStillValid,
-    UndelegatingCheckTimeout,
-    UndelegatingRefresh,
-    ForcedRefresh,
-}
-
-impl BankPrecheckReason {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Absent => "absent",
-            Self::NonUndelegatingPresent => "non_undelegating_present",
-            Self::UndelegatingStillValid => "undelegating_still_valid",
-            Self::UndelegatingCheckTimeout => "undelegating_check_timeout",
-            Self::UndelegatingRefresh => "undelegating_refresh",
-            Self::ForcedRefresh => "forced_refresh",
-        }
-    }
-}
-
-impl fmt::Display for BankPrecheckReason {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
-impl LabelValue for BankPrecheckReason {
     fn value(&self) -> &str {
         self.as_str()
     }

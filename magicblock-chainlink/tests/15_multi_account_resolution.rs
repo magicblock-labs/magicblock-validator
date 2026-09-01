@@ -1,7 +1,7 @@
 use engine::IntoTransactionView;
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_subscribed, assert_subscribed,
+    AccountFetchEntrypoint, assert_cloned_as_delegated,
+    assert_cloned_as_undelegated, assert_not_subscribed, assert_subscribed,
     testing::{
         context::TestContext, deleg::add_delegation_record_for, init_logger,
     },
@@ -72,7 +72,12 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
     .unwrap();
 
     ctx.chainlink
-        .ensure_transaction_accounts(&transaction)
+        .ensure_accounts(
+            transaction.static_account_keys(),
+            AccountFetchEntrypoint::SendTransaction(
+                transaction.signatures()[0],
+            ),
+        )
         .await
         .unwrap();
 

@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
-    AccountFetchContext, assert_cloned_as_delegated,
+    AccountFetchEntrypoint, assert_cloned_as_delegated,
     assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed, assert_not_undelegating,
     assert_remain_undelegating, assert_subscribed_without_delegation_record,
@@ -38,6 +38,7 @@ async fn seed_undelegating_account(ctx: &TestContext, pubkey: Pubkey) {
 #[tokio::test]
 async fn ensure_account_scenarios() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
+    resident_accounts_skip_remote_resolution(&ctx).await;
     write_non_existing_account(&ctx).await;
     existing_account_undelegated(&ctx).await;
     existing_account_missing_delegation_record(&ctx).await;
@@ -46,6 +47,59 @@ async fn ensure_account_scenarios() {
     write_undelegating_account_undelegated_to_other_validator(&ctx).await;
     write_undelegating_account_still_being_undelegated(&ctx).await;
     write_existing_account_invalid_delegation_record(&ctx).await;
+}
+
+async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
+    let pubkeys = [
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+        Pubkey::new_unique(),
+    ];
+    let accounts = [
+        (
+            pubkeys[0],
+            AccountBuilder::default()
+                .lamports(1)
+                .mode(AccountMode::Delegated)
+                .build(),
+        ),
+        (
+            pubkeys[1],
+            AccountBuilder::default()
+                .lamports(1)
+                .mode(AccountMode::Ephemeral)
+                .build(),
+        ),
+        (
+            pubkeys[2],
+            AccountBuilder::default()
+                .lamports(1)
+                .mode(AccountMode::ReadOnly)
+                .build(),
+        ),
+        (
+            pubkeys[3],
+            AccountBuilder::default()
+                .mode(AccountMode::Placeholder)
+                .build(),
+        ),
+    ];
+    ctx.bank.accounts().store(&accounts).unwrap();
+
+    let fetches = ctx.chainlink.fetch_count().unwrap();
+    let claims = ctx
+        .chainlink
+        .ensure_accounts(
+            &pubkeys,
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(claims, 0);
+    assert_eq!(ctx.chainlink.fetch_count().unwrap(), fetches);
+    assert_not_subscribed!(ctx.chainlink, &pubkeys);
 }
 
 // NOTE: Case comments refer to the case studies in the relevant tabs of draw.io document, i.e. Fetch
@@ -59,14 +113,15 @@ async fn write_non_existing_account(ctx: &TestContext) {
 
     let pubkey = Pubkey::new_unique();
     let pubkeys = [pubkey];
-    chainlink
+    let claims = chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
 
+    assert_eq!(claims, 1);
     assert_cloned_as_empty_placeholder!(bank, &pubkeys);
     let mode = bank
         .accounts()
@@ -93,7 +148,7 @@ async fn existing_account_undelegated(ctx: &TestContext) {
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -123,7 +178,7 @@ async fn existing_account_missing_delegation_record(ctx: &TestContext) {
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -165,7 +220,7 @@ async fn write_existing_account_valid_delegation_record(ctx: &TestContext) {
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -204,7 +259,7 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -254,7 +309,7 @@ async fn write_undelegating_account_undelegated_to_other_validator(
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -288,7 +343,7 @@ async fn write_undelegating_account_still_being_undelegated(ctx: &TestContext) {
     chainlink
         .ensure_accounts(
             &pubkeys,
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -325,7 +380,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
     let res = chainlink
         .ensure_accounts(
             &[pubkey],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await;
 
