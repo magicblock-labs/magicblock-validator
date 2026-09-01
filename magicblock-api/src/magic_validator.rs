@@ -70,11 +70,14 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_account::AccountSharedData;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
+use solana_rent::Rent;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk_ids::sysvar;
 use solana_signer::Signer;
 use tokio::{
     runtime::Builder,
@@ -803,6 +806,49 @@ impl MagicValidator {
         }
     }
 
+    /// Mirrors the base chain's rent sysvar into the ER's own rent sysvar.
+    ///
+    /// The stored value drives both the SVM rent-state checks and the sysvar
+    /// programs read to fund new accounts (see `build_svm_env`). A higher
+    /// rate than the base chain's rejects cloning of accounts that are
+    /// legitimately rent-exempt there (SIMD-0437 lowers the rate in steps),
+    /// while a lower rate admits account states the base layer refuses on
+    /// commit — settlement the validator pays for assuming 1:1 rent parity.
+    ///
+    /// Called only after ledger replay has completed: replay must run under
+    /// the persisted rent its transactions were recorded with, and the new
+    /// value takes effect at the next block boundary (see `refresh_rent` in
+    /// the transaction executor).
+    ///
+    /// NOTE: a rate reduction activating on the base chain while the
+    /// validator runs still requires a restart to be picked up. Offline mode
+    /// deliberately keeps the last persisted value so recovered ledgers
+    /// replay under the rate they were produced with.
+    async fn sync_rent_from_base_chain(
+        rpc_url: &str,
+        accountsdb: &AccountsDb,
+    ) -> ApiResult<()> {
+        let err = |err: &dyn std::fmt::Display| {
+            ApiError::FailedToSyncBaseChainRent(err.to_string())
+        };
+        let account = RpcClient::new_with_commitment(
+            rpc_url.to_owned(),
+            CommitmentConfig::confirmed(),
+        )
+        .get_account(&sysvar::rent::ID)
+        .await
+        .map_err(|e| err(&e))?;
+        let rent: Rent =
+            bincode::deserialize(&account.data).map_err(|e| err(&e))?;
+        info!(?rent, "Synced rent parameters from base chain");
+        let account = AccountSharedData::new_data(1, &rent, &sysvar::ID)
+            .map_err(|e| err(&e))?;
+        accountsdb
+            .insert_account(&sysvar::rent::ID, &account)
+            .map_err(|e| err(&e))?;
+        Ok(())
+    }
+
     async fn ensure_validator_funded_on_chain(
         rpc_url: String,
         identity: Pubkey,
@@ -1087,6 +1133,24 @@ impl MagicValidator {
         self.maybe_process_ledger().await?;
 
         log_timing("startup", "maybe_process_ledger", step_start);
+
+        // Rent must match the base layer exactly: commits there are paid by
+        // the validator under the assumption they were paid 1:1 in the ER.
+        // Synced only after ledger replay, which must run under the persisted
+        // rent its transactions were recorded with; executors adopt the new
+        // value at the next block boundary (see `refresh_rent`). Replicas
+        // fetch as well, since the direct AccountsDb write of the sysvar is
+        // not carried over by replication. Offline mode keeps the persisted
+        // rent and needs no remote.
+        if self.config.lifecycle.needs_remote_account_provider() {
+            let step_start = Instant::now();
+            Self::sync_rent_from_base_chain(
+                self.config.rpc_url(),
+                &self.accountsdb,
+            )
+            .await?;
+            log_timing("startup", "sync_rent_from_base_chain", step_start);
+        }
 
         if self.config.accountsdb.defragment_on_startup {
             let step_start = Instant::now();
