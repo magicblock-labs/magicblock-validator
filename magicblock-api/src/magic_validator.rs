@@ -70,11 +70,14 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_account::AccountSharedData;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
+use solana_rent::Rent;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk_ids::sysvar;
 use solana_signer::Signer;
 use tokio::{
     runtime::Builder,
@@ -361,6 +364,18 @@ impl MagicValidator {
             validator::set_validator_authority_override(pk);
         }
         let base_fee = config.validator.basefee;
+
+        // Rent must match the base layer exactly: commits there are paid by
+        // the validator under the assumption they were paid 1:1 in the ER.
+        // Replicas skip the fetch and inherit the sysvar via replication.
+        if !Self::replication_mode_uses_disabled_chainlink(
+            &config.validator.replication_mode,
+        ) {
+            let step_start = Instant::now();
+            Self::sync_rent_from_base_chain(config.rpc_url(), &accountsdb)
+                .await?;
+            log_timing("startup", "sync_rent_from_base_chain", step_start);
+        }
 
         let svm_env = build_svm_env(&accountsdb, latest_block.blockhash, 0);
         let feature_set = svm_env.feature_set.clone();
@@ -801,6 +816,40 @@ impl MagicValidator {
                 error!(error = ?err, "Failed to send unregister");
             }
         }
+    }
+
+    /// Mirrors the base chain's rent sysvar into the ER's own rent sysvar.
+    ///
+    /// The stored value drives both the SVM rent-state checks and the sysvar
+    /// programs read to fund new accounts (see `build_svm_env`). A higher
+    /// rate than the base chain's rejects cloning of accounts that are
+    /// legitimately rent-exempt there (SIMD-0437 lowers the rate in steps),
+    /// while a lower rate admits account states the base layer refuses on
+    /// commit — settlement the validator pays for assuming 1:1 rent parity.
+    ///
+    /// NOTE: a rate reduction activating on the base chain while the
+    /// validator is running requires a restart to be picked up.
+    async fn sync_rent_from_base_chain(
+        rpc_url: &str,
+        accountsdb: &AccountsDb,
+    ) -> ApiResult<()> {
+        let err = |err: &dyn std::fmt::Display| {
+            ApiError::FailedToSyncBaseChainRent(err.to_string())
+        };
+        let account = RpcClient::new_with_commitment(
+            rpc_url.to_owned(),
+            CommitmentConfig::confirmed(),
+        )
+        .get_account(&sysvar::rent::ID)
+        .await
+        .map_err(|e| err(&e))?;
+        let rent: Rent =
+            bincode::deserialize(&account.data).map_err(|e| err(&e))?;
+        info!(?rent, "Synced rent parameters from base chain");
+        let account = AccountSharedData::new_data(1, &rent, &sysvar::ID)
+            .map_err(|e| err(&e))?;
+        let _ = accountsdb.insert_account(&sysvar::rent::ID, &account);
+        Ok(())
     }
 
     async fn ensure_validator_funded_on_chain(
