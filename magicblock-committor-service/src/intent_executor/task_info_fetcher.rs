@@ -140,7 +140,11 @@ impl RpcTaskInfoFetcher {
                     .map_err(|_| {
                         TaskInfoFetcherError::InvalidAccountDataError(pdas[0])
                     })?;
-                if record.delegation_slot > *snapshot_slot {
+                // Snapshot slot 0 means the intent carries no snapshot
+                // provenance (synthetic/test intents); skip the session
+                // comparison since there is nothing to compare against.
+                if *snapshot_slot > 0 && record.delegation_slot > *snapshot_slot
+                {
                     return Err(
                         TaskInfoFetcherError::DelegationSessionChangedError {
                             delegated_account: *delegated_account,
