@@ -28,10 +28,9 @@ use magicblock_core::token_programs::{
     TOKEN_PROGRAM_ID, is_ata, normalize_native_token_account_for_local_clone,
 };
 use magicblock_metrics::metrics::{
-    self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
-    BankPrecheckReason, ChainlinkCloneIntent, ChainlinkCloneOutcome,
-    ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
-    ChainlinkEmptyPlaceholderStage, Outcome,
+    self, AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
+    ChainlinkCloneIntent, ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkCompanionFetchKind, ChainlinkEmptyPlaceholderStage, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use solana_account::{
@@ -3210,24 +3209,25 @@ where
         RefreshDecision::No
     }
 
-    /// Fetches and clones accounts while the engine serializes mutations for
-    /// each target account.
+    /// Fetches requested accounts while the engine serializes target mutations.
+    /// Returns the number of requested remote accounts claimed by this call.
     #[instrument(skip(self, pubkeys))]
-    pub async fn fetch_and_clone_accounts_with_dedup(
+    pub(crate) async fn fetch_and_clone_requested_accounts(
         &self,
         pubkeys: &[Pubkey],
-        slot: Option<u64>,
-        fetch_context: AccountFetchContext,
-    ) -> ChainlinkResult<FetchAndCloneResult> {
+        fetch_origin: AccountFetchEntrypoint,
+    ) -> ChainlinkResult<u64> {
+        let fetch_context = AccountFetchContext::from(fetch_origin);
         self.fetch_and_clone_accounts_with_dedup_forced_refresh(
             pubkeys,
             Some(pubkeys),
-            slot,
-            fetch_context,
+            None,
+            fetch_context.clone(),
             &HashSet::new(),
             None,
         )
-        .await
+        .await?;
+        Ok(fetch_context.remote_account_claims_value())
     }
 
     async fn fetch_and_clone_accounts_with_dedup_forced_refresh(
@@ -3247,12 +3247,6 @@ where
 
         let mut in_bank = HashSet::new();
         let mut extra_mark_empty = Vec::new();
-        let mut bank_hit_no_fetch_non_undelegating_count = 0_u64;
-        let mut bank_hit_no_fetch_undelegating_still_valid_count = 0_u64;
-        let mut bank_hit_no_fetch_undelegating_timeout_count = 0_u64;
-        let mut bank_hit_undelegating_refresh_required_count = 0_u64;
-        let mut bank_miss_remote_required_count = 0_u64;
-        let mut forced_refresh_remote_required_count = 0_u64;
 
         // Phase 1: Sync bank check — separate undelegating accounts
         // (which need async RPC) from non-undelegating (handled
@@ -3280,13 +3274,10 @@ where
                             },
                         );
                         if !can_replace {
-                            bank_hit_no_fetch_undelegating_still_valid_count +=
-                                1;
                             in_bank.insert(**pubkey);
                             continue;
                         }
                     }
-                    forced_refresh_remote_required_count += 1;
                     continue;
                 }
                 let reader = |account: &AccountSharedData| {
@@ -3331,12 +3322,9 @@ where
                                     "Account found in bank in valid state, no fetch needed"
                                 );
                             }
-                            bank_hit_no_fetch_non_undelegating_count += 1;
                             in_bank.insert(**pubkey);
                         }
                     }
-                } else {
-                    bank_miss_remote_required_count += 1;
                 }
             }
         }
@@ -3384,7 +3372,6 @@ where
                             pubkey = %pubkey,
                             "Account completed undelegation which was missed and is fetched again"
                         );
-                        bank_hit_undelegating_refresh_required_count += 1;
                         metrics::inc_unstuck_undelegation_count();
                         if let RefreshDecision::YesAndMarkEmptyIfNotFound =
                             decision
@@ -3399,54 +3386,14 @@ where
                                 "Undelegating account still valid, no fetch needed"
                             );
                         }
-                        bank_hit_no_fetch_undelegating_still_valid_count += 1;
                         in_bank.insert(pubkey);
                     }
                     None => {
-                        bank_hit_no_fetch_undelegating_timeout_count += 1;
                         in_bank.insert(pubkey);
                     }
                 }
             }
         }
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context.clone(),
-            BankPrecheckOutcome::BankHitNoFetch,
-            BankPrecheckReason::NonUndelegatingPresent,
-            bank_hit_no_fetch_non_undelegating_count,
-        );
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context.clone(),
-            BankPrecheckOutcome::BankHitNoFetch,
-            BankPrecheckReason::UndelegatingStillValid,
-            bank_hit_no_fetch_undelegating_still_valid_count,
-        );
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context.clone(),
-            BankPrecheckOutcome::BankHitNoFetch,
-            BankPrecheckReason::UndelegatingCheckTimeout,
-            bank_hit_no_fetch_undelegating_timeout_count,
-        );
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context
-                .clone()
-                .with_reason(AccountFetchReason::UndelegatingRefresh),
-            BankPrecheckOutcome::BankHitUndelegatingRefreshRequired,
-            BankPrecheckReason::UndelegatingRefresh,
-            bank_hit_undelegating_refresh_required_count,
-        );
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context.clone(),
-            BankPrecheckOutcome::BankMissRemoteRequired,
-            BankPrecheckReason::Absent,
-            bank_miss_remote_required_count,
-        );
-        metrics::inc_chainlink_bank_precheck_accounts_with_context(
-            fetch_context.clone(),
-            BankPrecheckOutcome::ForcedRefreshRemoteRequired,
-            BankPrecheckReason::ForcedRefresh,
-            forced_refresh_remote_required_count,
-        );
         pubkeys.retain(|p| !in_bank.contains(p));
 
         let mut mark_empty = mark_empty_if_not_found

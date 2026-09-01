@@ -3,17 +3,18 @@ use std::{
     time::Duration,
 };
 
-use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
+use keeper::error::KeeperError;
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump,
 };
-use magicblock_metrics::metrics::AccountFetchContext;
-use nucleus::runtime::TransactionView;
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint,
+};
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -137,14 +138,6 @@ pub struct InnerChainlink<T: ChainRpcClient, U: ChainPubsubClient> {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
-    fn contains_account(&self, pubkey: &Pubkey) -> bool {
-        self.engine
-            .accounts()
-            .loader()
-            .contains(pubkey)
-            .unwrap_or(false)
-    }
-
     pub fn try_new(
         engine: Engine,
         fetch_cloner: Option<Arc<FetchCloner<T, U>>>,
@@ -415,75 +408,62 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures all transaction accounts are materialized locally. Accounts
-    /// missing on chain are represented as placeholders.
-    #[instrument(skip(self, tx, fetch_context))]
-    pub async fn ensure_transaction_accounts_with_context(
-        &self,
-        tx: &TransactionView,
-        fetch_context: impl Into<AccountFetchContext>,
-    ) -> ChainlinkResult<u64> {
-        let fetch_context = fetch_context.into();
-        let mut pubkeys = tx.static_account_keys().to_vec();
-        let feepayer = &tx.static_account_keys()[0];
-
-        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
-
-        // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = !self.contains_account(&balance_pda);
-
-        // If cloning escrow, add the balance PDA
-        if clone_escrow {
-            trace!(
-                balance_pda = %balance_pda,
-                feepayer = %feepayer,
-                "Adding balance PDA for feepayer"
-            );
-            pubkeys.push(balance_pda);
-        }
-
-        self.ensure_accounts(&pubkeys, fetch_context).await
-    }
-
-    pub async fn ensure_transaction_accounts(
-        &self,
-        tx: &TransactionView,
-    ) -> ChainlinkResult<()> {
-        self.ensure_transaction_accounts_with_context(
-            tx,
-            AccountFetchContext::send_transaction(tx.signatures()[0]),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    /// Same as fetch accounts, but does not return the accounts. Missing
-    /// requested accounts are materialized as placeholders.
+    /// Ensures requested accounts are materialized locally. Missing remote
+    /// accounts are represented as placeholders.
+    /// Returns the number of requested remote accounts claimed by this call.
     /// If we're offline and not syncing accounts then this is a no-op.
-    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<u64> {
-        let fetch_context = fetch_context.into();
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(0);
         };
-        self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-            .await
+
+        let pending = {
+            let accessor = self.engine.accounts();
+            let loader = accessor.loader();
+            let mut pending = None;
+            for pubkey in pubkeys {
+                let mode = loader
+                    .read(pubkey, |account| account.mode())
+                    .map_err(KeeperError::from)?;
+                if mode.is_none_or(|mode| mode == AccountMode::Transient) {
+                    pending
+                        .get_or_insert_with(|| {
+                            Vec::with_capacity(pubkeys.len())
+                        })
+                        .push(*pubkey);
+                }
+            }
+            pending
+        };
+        let Some(pending) = pending else {
+            return Ok(0);
+        };
+
+        tokio::time::timeout(
+            ENSURE_ACCOUNTS_TIMEOUT,
+            fetch_cloner
+                .fetch_and_clone_requested_accounts(&pending, fetch_origin),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(ChainlinkError::EnsureAccountsTimeout(
+                ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
+            ))
+        })
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
     /// Otherwise materializes requested accounts locally, using placeholders
     /// for accounts missing on chain, and returns their state from the bank.
-    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
-        let fetch_context = fetch_context.into();
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
@@ -491,17 +471,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let snapshot = |account: &AccountSharedData| {
             AccountSharedData::from(account.owned())
         };
-        let Some(fetch_cloner) = self.fetch_cloner() else {
-            // If we're offline and not syncing accounts then we just get them from the bank
-            let accessor = self.engine.accounts();
-            let loader = accessor.loader();
-            return Ok(pubkeys
-                .iter()
-                .map(|pubkey| loader.read(pubkey, snapshot).ok().flatten())
-                .collect());
-        };
-        self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-            .await?;
+        self.ensure_accounts(pubkeys, fetch_origin).await?;
 
         let accessor = self.engine.accounts();
         let loader = accessor.loader();
@@ -517,13 +487,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     pub async fn account_delegation_sessions(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<Vec<Option<AccountDelegationSession>>> {
-        let fetch_context = fetch_context.into();
-        if let Some(fetch_cloner) = self.fetch_cloner() {
-            self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-                .await?;
-        }
+        self.ensure_accounts(pubkeys, fetch_origin).await?;
 
         let accessor = self.engine.accounts();
         let loader = accessor.loader();
@@ -611,32 +577,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 }
             })
             .collect())
-    }
-
-    #[instrument(skip(self, fetch_cloner, pubkeys))]
-    async fn fetch_accounts_common(
-        &self,
-        fetch_cloner: &FetchCloner<T, U>,
-        pubkeys: &[Pubkey],
-        fetch_context: AccountFetchContext,
-    ) -> ChainlinkResult<u64> {
-        // If any of the accounts was invalid and couldn't be fetched/cloned then
-        // we return an error.
-        tokio::time::timeout(
-            ENSURE_ACCOUNTS_TIMEOUT,
-            fetch_cloner.fetch_and_clone_accounts_with_dedup(
-                pubkeys,
-                None,
-                fetch_context.clone(),
-            ),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(ChainlinkError::EnsureAccountsTimeout(
-                ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
-            ))
-        })?;
-        Ok(fetch_context.remote_account_claims_value())
     }
 
     /// This is called via the committor service when an account is about to be undelegated

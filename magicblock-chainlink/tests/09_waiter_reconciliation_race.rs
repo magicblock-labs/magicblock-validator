@@ -9,7 +9,7 @@ use dlp_api::{
     state::DelegationRecord,
 };
 use magicblock_chainlink::{
-    AccountFetchContext, assert_cloned_as_delegated, assert_not_subscribed,
+    AccountFetchEntrypoint, assert_cloned_as_delegated, assert_not_subscribed,
     testing::{context::TestContext, deleg::delegation_record_to_vec},
 };
 use solana_account::{Account, AccountBuilder, AccountMode, ReadableAccount};
@@ -123,7 +123,7 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     let requested = [account_pubkey];
     let ensure = chainlink.ensure_accounts(
         &requested,
-        AccountFetchContext::rpc_get_multiple_accounts(),
+        AccountFetchEntrypoint::RpcGetMultipleAccounts,
     );
     let subscription = ctx.send_and_receive_account_update(
         account_pubkey,

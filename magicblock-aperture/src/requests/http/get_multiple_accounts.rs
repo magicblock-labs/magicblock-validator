@@ -1,4 +1,4 @@
-use magicblock_metrics::metrics::AccountFetchContext;
+use magicblock_metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -38,7 +38,7 @@ impl HttpDispatcher {
             let (ensured_accounts, remote_account_claims) = self
                 .read_accounts_with_ensure(
                     &pubkeys,
-                    AccountFetchContext::rpc_get_multiple_accounts(),
+                    AccountFetchEntrypoint::RpcGetMultipleAccounts,
                     reader,
                 )
                 .await;
