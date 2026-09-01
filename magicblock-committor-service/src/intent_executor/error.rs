@@ -621,6 +621,28 @@ mod tests {
         );
         assert!(err.is_transient());
 
+        // Not-found on fetch is transient (may be a stale RPC read)
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::FinalizedTasksBuildError(
+                TaskInfoFetcherError::AccountNotFoundError(
+                    solana_pubkey::Pubkey::new_unique(),
+                ),
+            ),
+        );
+        assert!(err.is_transient());
+
+        // A delegation created after the committed snapshot is terminal
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::FinalizedTasksBuildError(
+                TaskInfoFetcherError::DelegationSessionChangedError {
+                    delegated_account: solana_pubkey::Pubkey::new_unique(),
+                    delegation_slot: 2,
+                    snapshot_slot: 1,
+                },
+            ),
+        );
+        assert!(!err.is_transient());
+
         // Missing delegation metadata is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(
             TaskBuilderError::MissingDelegationMetadata(

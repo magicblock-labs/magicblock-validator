@@ -313,6 +313,16 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
         }
     }
 
+    /// Stops chain subscriptions and in-flight clones. Must run before the
+    /// transaction scheduler is cancelled: clones are scheduled
+    /// transactions, and updates arriving after the scheduler is gone fail
+    /// with `ClusterMaintenance` and retry for the rest of the shutdown.
+    pub async fn shutdown(&self) {
+        if let Some(fetch_cloner) = self.fetch_cloner() {
+            fetch_cloner.shutdown().await;
+        }
+    }
+
     pub fn is_watching(&self, pubkey: &Pubkey) -> bool {
         match self {
             Self::Enabled(chainlink) => chainlink.is_watching(pubkey),

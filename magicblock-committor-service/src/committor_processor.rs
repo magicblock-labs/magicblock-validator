@@ -26,8 +26,8 @@ use crate::{
     intent_executor::{
         intent_executor_factory::ExecutorConfig,
         task_info_fetcher::{
-            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherResult,
+            AccountSnapshot, CacheTaskInfoFetcher, RpcTaskInfoFetcher,
+            TaskInfoFetcher, TaskInfoFetcherResult,
         },
     },
     persist::{
@@ -349,11 +349,11 @@ impl CommittorProcessor {
     /// Fetches current commit nonces
     pub async fn fetch_current_commit_nonces(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         self.task_info_fetcher
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .fetch_current_commit_nonces(accounts, min_context_slot)
             .await
     }
 
