@@ -8,7 +8,7 @@ use agave_syscalls::{
 };
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::blocks::BlockHash;
-use solana_account::{AccountSharedData, WritableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_feature_gate_interface::state::Feature;
 use solana_feature_set::{
     curve25519_restrict_msm_length, curve25519_syscall_enabled,
@@ -25,6 +25,7 @@ use solana_program_runtime::{
 };
 use solana_sdk_ids::{
     ed25519_program, native_loader, secp256k1_program, secp256r1_program,
+    sysvar,
 };
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
 use tracing::error;
@@ -102,13 +103,33 @@ pub fn build_svm_env(
         program_runtime_environments_for_execution: runtime_environments
             .clone(),
         program_runtime_environments_for_deployment: runtime_environments,
-        rent: Rent::default(),
+        // Sourced from the local rent sysvar, which mirrors the base chain
+        // (synced at startup on the primary, replicated to replicas). Rent
+        // must match the base layer exactly: a higher rate rejects cloning
+        // of accounts that are legitimately rent-exempt there (SIMD-0437
+        // lowers the rate in steps), while a lower rate admits account
+        // states the base layer refuses on commit — settlement the
+        // validator pays for assuming 1:1 rent parity.
+        rent: read_rent_sysvar(accountsdb),
     };
 
     SvmEnv {
         environment,
         feature_set,
     }
+}
+
+/// Reads the rent parameters from the local rent sysvar account, falling
+/// back to the classic defaults when it's absent (fresh ledgers with
+/// chainlink disabled, tests).
+fn read_rent_sysvar(accountsdb: &AccountsDb) -> Rent {
+    let Some(account) = accountsdb.get_account(&sysvar::rent::ID) else {
+        return Rent::default();
+    };
+    bincode::deserialize(account.data()).unwrap_or_else(|err| {
+        error!(?err, "Failed to deserialize rent sysvar, using defaults");
+        Rent::default()
+    })
 }
 
 #[cfg(test)]

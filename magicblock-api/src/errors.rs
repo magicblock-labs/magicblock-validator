@@ -22,6 +22,9 @@ pub enum ApiError {
     #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
     FailedToObtainValidatorOnChainBalance(Pubkey, String),
 
+    #[error("Failed to sync rent sysvar from base chain: {0}")]
+    FailedToSyncBaseChainRent(String),
+
     #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
     ValidatorInsufficientlyFunded(Pubkey, u64),
 
