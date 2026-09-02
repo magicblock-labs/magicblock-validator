@@ -21,7 +21,7 @@ use tracing::trace;
 
 use super::accounts::account_shared_with_owner_and_slot;
 use crate::{
-    AccountFetchContext, InnerChainlink,
+    AccountFetchEntrypoint, InnerChainlink,
     errors::ChainlinkResult,
     fetch_cloner::FetchCloner,
     remote_account_provider::{
@@ -288,7 +288,7 @@ impl TestContext {
         self.chainlink
             .ensure_accounts(
                 &[*pubkey],
-                AccountFetchContext::rpc_get_multiple_accounts(),
+                AccountFetchEntrypoint::RpcGetMultipleAccounts,
             )
             .await
             .map(|_| ())
@@ -314,7 +314,8 @@ impl TestContext {
             .expect("account exists before undelegation");
         self.bank
             .account(*pubkey)
-            .update(account)
+            .await
+            .materialize(account, None)
             .await
             .expect("mark account undelegating through engine");
     }

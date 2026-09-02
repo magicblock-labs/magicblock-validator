@@ -3,17 +3,18 @@ use std::{
     time::Duration,
 };
 
-use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
+use keeper::error::KeeperError;
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump,
 };
-use magicblock_metrics::metrics::AccountFetchContext;
-use nucleus::runtime::TransactionView;
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint,
+};
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -137,14 +138,6 @@ pub struct InnerChainlink<T: ChainRpcClient, U: ChainPubsubClient> {
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
-    fn contains_account(&self, pubkey: &Pubkey) -> bool {
-        self.engine
-            .accounts()
-            .loader()
-            .contains(pubkey)
-            .unwrap_or(false)
-    }
-
     pub fn try_new(
         engine: Engine,
         fetch_cloner: Option<Arc<FetchCloner<T, U>>>,
@@ -261,35 +254,49 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
 
         task::spawn(async move {
             while let Some(pubkey) = stale_accounts_rx.recv().await {
-                // Removal notifications can race with a new acquire_subscription for the same
-                // pubkey. The provider helper holds the same per-pubkey subscription lock used
-                // by acquire/release while it re-checks is_watching and submits eviction. This
-                // prevents an EvictAccount transaction from being submitted after a fresh
-                // subscription has made the account watched again, without blocking unrelated
-                // pubkeys on the defensive-eviction slow path.
-                let engine = engine.clone();
-                let evicted = remote_account_provider
-                    .evict_unwatched_with_subscription_lock(&pubkey, || async move {
-                        // MagicRoot is the authoritative deletion boundary and
-                        // rejects the request if the account became mutable.
-                        trace!(
-                            pubkey = %pubkey,
-                            "Submitting eviction transaction for unwatched account"
-                        );
-                        if let Err(err) = cloner::evict_account(&engine, pubkey).await {
-                            warn!(
-                                pubkey = %pubkey,
-                                error = ?err,
-                                "Failed to submit eviction transaction"
-                            );
-                        }
-                    })
+                let subscription = remote_account_provider
+                    .lock_account_eviction(&pubkey)
                     .await;
-
-                if !evicted {
+                if subscription.is_watching() {
                     trace!(
                         pubkey = %pubkey,
                         "Skipping removal notification because account is watched again"
+                    );
+                    continue;
+                }
+                let mut accessor =
+                    match cloner::claim_account_eviction(&engine, pubkey).await
+                    {
+                        Ok(Some(accessor)) => accessor,
+                        Ok(None) => continue,
+                        Err(err) => {
+                            warn!(
+                                pubkey = %pubkey,
+                                error = ?err,
+                                "Failed to claim unwatched account eviction"
+                            );
+                            continue;
+                        }
+                    };
+                trace!(
+                    pubkey = %pubkey,
+                    "Submitting eviction transaction for unwatched account"
+                );
+                if let Err(err) = subscription.unsubscribe().await {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to unsubscribe unwatched account"
+                    );
+                    continue;
+                }
+                if let Err(err) =
+                    cloner::delete_claimed_account(&mut accessor, pubkey).await
+                {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Failed to submit eviction transaction"
                     );
                 }
             }
@@ -317,24 +324,32 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                         let engine = engine.clone();
                         let remote_account_provider = remote_account_provider.clone();
                         pending.spawn(async move {
-                            let ata_info = {
-                                let accessor = engine.accounts();
-                                let loader = accessor.loader();
-                                loader
-                                    .read(&pubkey, |account| {
-                                        is_ata(
-                                            &pubkey,
-                                            *account.owner(),
-                                            account.data(),
-                                        )
-                                    })
-                                    .ok()
-                                    .flatten()
-                                    .flatten()
+                            let subscription = remote_account_provider
+                                .lock_account_eviction(&pubkey)
+                                .await;
+                            let (mut accessor, ata_info) = match cloner::claim_cached_account_eviction(
+                                &engine,
+                                pubkey,
+                                |account| {
+                                    is_ata(
+                                        &pubkey,
+                                        *account.owner(),
+                                        account.data(),
+                                    )
+                                },
+                            ).await {
+                                Ok(Some(claim)) => claim,
+                                Ok(None) => return,
+                                Err(err) => {
+                                    warn!(
+                                        pubkey = %pubkey,
+                                        error = ?err,
+                                        "Failed to claim engine-evicted account"
+                                    );
+                                    return;
+                                }
                             };
-                            // Engine emits only cache-tracked readonly accounts;
-                            // MagicRoot still rejects a later mutable transition.
-                            if let Err(err) = remote_account_provider.unsubscribe(&pubkey).await {
+                            if let Err(err) = subscription.unsubscribe().await {
                                 warn!(
                                     pubkey = %pubkey,
                                     error = ?err,
@@ -342,7 +357,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                                 );
                                 return;
                             }
-                            if let Err(err) = cloner::evict_account(&engine, pubkey).await {
+                            if let Err(err) = cloner::delete_claimed_account(
+                                &mut accessor,
+                                pubkey,
+                            )
+                            .await
+                            {
                                 warn!(
                                     pubkey = %pubkey,
                                     error = ?err,
@@ -350,6 +370,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                                 );
                                 return;
                             }
+                            drop(subscription);
                             let Some(ata_info) = ata_info else {
                                 return;
                             };
@@ -387,75 +408,62 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures all transaction accounts are materialized locally. Accounts
-    /// missing on chain are represented as placeholders.
-    #[instrument(skip(self, tx, fetch_context))]
-    pub async fn ensure_transaction_accounts_with_context(
-        &self,
-        tx: &TransactionView,
-        fetch_context: impl Into<AccountFetchContext>,
-    ) -> ChainlinkResult<u64> {
-        let fetch_context = fetch_context.into();
-        let mut pubkeys = tx.static_account_keys().to_vec();
-        let feepayer = &tx.static_account_keys()[0];
-
-        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
-
-        // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow = !self.contains_account(&balance_pda);
-
-        // If cloning escrow, add the balance PDA
-        if clone_escrow {
-            trace!(
-                balance_pda = %balance_pda,
-                feepayer = %feepayer,
-                "Adding balance PDA for feepayer"
-            );
-            pubkeys.push(balance_pda);
-        }
-
-        self.ensure_accounts(&pubkeys, fetch_context).await
-    }
-
-    pub async fn ensure_transaction_accounts(
-        &self,
-        tx: &TransactionView,
-    ) -> ChainlinkResult<()> {
-        self.ensure_transaction_accounts_with_context(
-            tx,
-            AccountFetchContext::send_transaction(tx.signatures()[0]),
-        )
-        .await
-        .map(|_| ())
-    }
-
-    /// Same as fetch accounts, but does not return the accounts. Missing
-    /// requested accounts are materialized as placeholders.
+    /// Ensures requested accounts are materialized locally. Missing remote
+    /// accounts are represented as placeholders.
+    /// Returns the number of requested remote accounts claimed by this call.
     /// If we're offline and not syncing accounts then this is a no-op.
-    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn ensure_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<u64> {
-        let fetch_context = fetch_context.into();
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(0);
         };
-        self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-            .await
+
+        let pending = {
+            let accessor = self.engine.accounts();
+            let loader = accessor.loader();
+            let mut pending = None;
+            for pubkey in pubkeys {
+                let mode = loader
+                    .read(pubkey, |account| account.mode())
+                    .map_err(KeeperError::from)?;
+                if mode.is_none_or(|mode| mode == AccountMode::Transient) {
+                    pending
+                        .get_or_insert_with(|| {
+                            Vec::with_capacity(pubkeys.len())
+                        })
+                        .push(*pubkey);
+                }
+            }
+            pending
+        };
+        let Some(pending) = pending else {
+            return Ok(0);
+        };
+
+        tokio::time::timeout(
+            ENSURE_ACCOUNTS_TIMEOUT,
+            fetch_cloner
+                .fetch_and_clone_requested_accounts(&pending, fetch_origin),
+        )
+        .await
+        .unwrap_or_else(|_| {
+            Err(ChainlinkError::EnsureAccountsTimeout(
+                ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
+            ))
+        })
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
     /// Otherwise materializes requested accounts locally, using placeholders
     /// for accounts missing on chain, and returns their state from the bank.
-    #[instrument(skip(self, pubkeys, fetch_context))]
     pub async fn fetch_accounts(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
-        let fetch_context = fetch_context.into();
         if tracing::enabled!(tracing::Level::TRACE) {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
@@ -463,17 +471,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let snapshot = |account: &AccountSharedData| {
             AccountSharedData::from(account.owned())
         };
-        let Some(fetch_cloner) = self.fetch_cloner() else {
-            // If we're offline and not syncing accounts then we just get them from the bank
-            let accessor = self.engine.accounts();
-            let loader = accessor.loader();
-            return Ok(pubkeys
-                .iter()
-                .map(|pubkey| loader.read(pubkey, snapshot).ok().flatten())
-                .collect());
-        };
-        self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-            .await?;
+        self.ensure_accounts(pubkeys, fetch_origin).await?;
 
         let accessor = self.engine.accounts();
         let loader = accessor.loader();
@@ -489,13 +487,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     pub async fn account_delegation_sessions(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: impl Into<AccountFetchContext>,
+        fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<Vec<Option<AccountDelegationSession>>> {
-        let fetch_context = fetch_context.into();
-        if let Some(fetch_cloner) = self.fetch_cloner() {
-            self.fetch_accounts_common(fetch_cloner, pubkeys, fetch_context)
-                .await?;
-        }
+        self.ensure_accounts(pubkeys, fetch_origin).await?;
 
         let accessor = self.engine.accounts();
         let loader = accessor.loader();
@@ -583,32 +577,6 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 }
             })
             .collect())
-    }
-
-    #[instrument(skip(self, fetch_cloner, pubkeys))]
-    async fn fetch_accounts_common(
-        &self,
-        fetch_cloner: &FetchCloner<T, U>,
-        pubkeys: &[Pubkey],
-        fetch_context: AccountFetchContext,
-    ) -> ChainlinkResult<u64> {
-        // If any of the accounts was invalid and couldn't be fetched/cloned then
-        // we return an error.
-        tokio::time::timeout(
-            ENSURE_ACCOUNTS_TIMEOUT,
-            fetch_cloner.fetch_and_clone_accounts_with_dedup(
-                pubkeys,
-                None,
-                fetch_context.clone(),
-            ),
-        )
-        .await
-        .unwrap_or_else(|_| {
-            Err(ChainlinkError::EnsureAccountsTimeout(
-                ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
-            ))
-        })?;
-        Ok(fetch_context.remote_account_claims_value())
     }
 
     /// This is called via the committor service when an account is about to be undelegated
@@ -730,8 +698,10 @@ mod tests {
         )
     }
 
+    /// Proves the subscription boundary remains held until same-pubkey account
+    /// eviction work finishes.
     #[tokio::test]
-    async fn test_defensive_eviction_blocks_same_pubkey_subscription_until_eviction_finishes()
+    async fn test_account_eviction_blocks_same_pubkey_subscription_until_eviction_finishes()
      {
         init_logger();
 
@@ -747,15 +717,11 @@ mod tests {
         let eviction_started_for_task = eviction_started.clone();
         let release_eviction_for_task = release_eviction.clone();
         let eviction_task = tokio::spawn(async move {
-            eviction_provider
-                .evict_unwatched_with_subscription_lock(
-                    &eviction_pubkey,
-                    || async move {
-                        eviction_started_for_task.notify_one();
-                        release_eviction_for_task.notified().await;
-                    },
-                )
-                .await
+            let _eviction = eviction_provider
+                .lock_account_eviction(&eviction_pubkey)
+                .await;
+            eviction_started_for_task.notify_one();
+            release_eviction_for_task.notified().await;
         });
 
         eviction_started.notified().await;
@@ -777,11 +743,11 @@ mod tests {
             tokio::time::timeout(Duration::from_millis(50), &mut result_rx,)
                 .await
                 .is_err(),
-            "same-pubkey subscribe must wait while defensive eviction holds the per-pubkey subscription lock"
+            "same-pubkey subscribe must wait while account eviction holds the subscription lock"
         );
 
         release_eviction.notify_one();
-        assert!(eviction_task.await.unwrap());
+        eviction_task.await.unwrap();
         let subscribe_result = tokio::time::timeout(
             Duration::from_secs(1),
             &mut result_rx,

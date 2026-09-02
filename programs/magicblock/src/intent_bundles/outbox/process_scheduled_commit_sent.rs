@@ -324,7 +324,7 @@ mod tests {
         MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
     };
     use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
-    use solana_account::{AccountMode, AccountSharedData};
+    use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
@@ -493,16 +493,25 @@ mod tests {
             bump,
         );
         let data = bundle.try_to_bytes().unwrap();
-        let mut pda_account =
-            AccountSharedData::new(0, data.len(), &crate::id());
+        let mut pda_account = AccountBuilder::from(AccountSharedData::new(
+            0,
+            data.len(),
+            &crate::id(),
+        ))
+        .mode(AccountMode::Ephemeral)
+        .build::<AccountSharedData>();
         pda_account.set_data_from_slice(&data);
-        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut account_data = {
             let mut map = HashMap::new();
             // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
-            let mut vault = AccountSharedData::new(10_000, 0, &crate::id());
-            vault.set_mode(AccountMode::Ephemeral).unwrap();
+            let vault = AccountBuilder::from(AccountSharedData::new(
+                10_000,
+                0,
+                &crate::id(),
+            ))
+            .mode(AccountMode::Ephemeral)
+            .build::<AccountSharedData>();
             map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
             // Add outbox PDA as existing ephemeral account (created by accept)
             map.insert(pda, pda_account);

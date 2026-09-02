@@ -12,14 +12,11 @@ use super::{
     CompanionFetchLogContext, FetchCloner, ProgramVerifyState,
     log_companion_fetch_failure, subscription::release_program_data_subs,
 };
-use crate::{
-    cloner::AccountMaterialization,
-    remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, SubscriptionReason,
-        program_account::{
-            LOADER_V1, LOADER_V2, LOADER_V3, ProgramAccountResolver,
-            get_loaderv3_get_program_data_address,
-        },
+use crate::remote_account_provider::{
+    ChainPubsubClient, ChainRpcClient, SubscriptionReason,
+    program_account::{
+        LOADER_V1, LOADER_V2, LOADER_V3, ProgramAccountResolver,
+        get_loaderv3_get_program_data_address,
     },
 };
 
@@ -345,11 +342,7 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
         }
     };
     match this
-        .clone_program(
-            loaded_program,
-            program_load_context,
-            AccountMaterialization::Update,
-        )
+        .clone_program(loaded_program, program_load_context)
         .await
     {
         // Only successful loads are remembered: a failure leaves the next

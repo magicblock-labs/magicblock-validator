@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use engine::Engine;
 use magicblock_config::{ConfigError, VerifierParams};
 use nucleus::shutdown::{Service, ShutdownManager, ShutdownReason};
-use replicator::ReplicationClient;
+use replicator::{ReplicationClient, ReplicationDispatcher};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
@@ -70,22 +70,41 @@ async fn run_engine(
     let engine = Engine::new(builder, Some(blocks), &mut shutdown)
         .await
         .context("failed to open verifier engine")?;
-    ReplicationClient::spawn(
-        config.engine.replication.upstream_address,
-        engine.clone(),
-        pacer,
-        &mut shutdown,
-    )
-    .context("failed to start replication client")?;
-
-    let reason = tokio::select! {
-        biased;
-        reason = metrics_shutdown.wait() => reason,
-        reason = shutdown.wait() => reason,
-    };
-    let reason = reason.combine(shutdown.terminate().await);
+    let replication = &config.engine.replication;
+    let lifecycle = async {
+        ReplicationClient::spawn(
+            replication.upstream_address,
+            engine.clone(),
+            pacer,
+            &mut shutdown,
+        )
+        .context("failed to start replication client")?;
+        if !replication.allowed_followers.is_empty() {
+            let allowed = replication
+                .allowed_followers
+                .iter()
+                .map(|follower| follower.0)
+                .collect::<Vec<_>>()
+                .into();
+            ReplicationDispatcher::spawn(
+                replication.bind_address.0,
+                engine.clone(),
+                allowed,
+                &mut shutdown,
+            )
+            .await
+            .context("failed to start replication dispatcher")?;
+        }
+        Ok(tokio::select! {
+            biased;
+            reason = metrics_shutdown.wait() => reason,
+            reason = shutdown.wait() => reason,
+        })
+    }
+    .await;
+    let shutdown_reason = shutdown.terminate().await;
     drop(engine);
-    Ok(reason)
+    lifecycle.map(|reason| reason.combine(shutdown_reason))
 }
 
 fn exit(reason: ShutdownReason) -> ExitCode {

@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use base64::{Engine, prelude::BASE64_STANDARD};
-use magicblock_chainlink::errors::ChainlinkResult;
 use magicblock_metrics::metrics::{
-    AccountFetchContext, ENSURE_ACCOUNTS_TIME, TRANSACTION_PROCESSING_TIME,
+    AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME, TRANSACTION_PROCESSING_TIME,
     TRANSACTION_SKIP_PREFLIGHT,
 };
 use nucleus::runtime::TransactionView;
@@ -64,42 +63,28 @@ impl HttpDispatcher {
             Err(error) => return (Err(error), 0),
         };
         let signature = transaction.signatures()[0];
-        let fetch_context = match kind {
+        let fetch_origin = match kind {
             TransactionKind::Send => {
-                AccountFetchContext::send_transaction(signature)
+                AccountFetchEntrypoint::SendTransaction(signature)
             }
             TransactionKind::Simulate => {
-                AccountFetchContext::simulate_transaction(signature)
+                AccountFetchEntrypoint::SimulateTransaction(signature)
             }
         };
-        let outcome = self
-            .ensure_transaction_accounts(&transaction, fetch_context)
-            .await;
-        match outcome {
-            Ok(claims) => (Ok(transaction), claims),
-            Err(error) => (Err(RpcError::transaction_verification(error)), 0),
-        }
-    }
-
-    async fn ensure_transaction_accounts(
-        &self,
-        transaction: &TransactionView,
-        fetch_context: AccountFetchContext,
-    ) -> ChainlinkResult<u64> {
         let _timer = ENSURE_ACCOUNTS_TIME
             .with_label_values(&["transaction"])
             .start_timer();
         let outcome = self
             .chainlink
-            .ensure_transaction_accounts_with_context(
-                transaction,
-                fetch_context,
-            )
+            .ensure_accounts(transaction.static_account_keys(), fetch_origin)
             .await;
         if let Err(error) = &outcome {
             warn!(?error, "failed to ensure transaction accounts");
         }
-        outcome
+        match outcome {
+            Ok(claims) => (Ok(transaction), claims),
+            Err(error) => (Err(RpcError::transaction_verification(error)), 0),
+        }
     }
 
     pub(crate) async fn send_transaction(

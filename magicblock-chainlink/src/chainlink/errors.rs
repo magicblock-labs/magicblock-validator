@@ -64,9 +64,6 @@ pub enum ChainlinkError {
     #[error("Missing accounts required by delegation actions: {0:?}")]
     MissingDelegationActionAccounts(Vec<Pubkey>),
 
-    #[error("account load failed for {0}")]
-    AccountLoadFailed(Pubkey),
-
     #[error("Failed to perform risk check: {0}")]
     RiskCheckFailed(#[from] RiskError),
 }

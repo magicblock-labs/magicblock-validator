@@ -1,4 +1,4 @@
-use solana_account::{Account, AccountBuilder, AccountMode};
+use solana_account::{Account, AccountBuilder, AccountMode, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
@@ -10,7 +10,7 @@ type TestFetchCloner = FetchCloner<ChainRpcClientMock, ChainPubsubClientMock>;
 use crate::{
     cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
     remote_account_provider::chain_pubsub_client::mock::ChainPubsubClientMock,
-    testing::rpc_client_mock::ChainRpcClientMock,
+    testing::{context::TestContext, rpc_client_mock::ChainRpcClientMock},
 };
 
 fn request(account: AccountBuilder) -> AccountCloneRequest {
@@ -83,6 +83,87 @@ fn clone_request_classification() {
         TestFetchCloner::clone_intent_for_request(&dependency),
         ChainlinkCloneIntent::ActionDependency
     );
+}
+
+/// Proves absent writable dependencies remain available for ER-only creation,
+/// while missing read-only and stale local writable dependencies are fetched.
+#[test]
+fn post_delegation_dependency_fetch_policy() {
+    assert!(!TestFetchCloner::action_dependency_needs_fetch(
+        None, 10, true,
+    ));
+    assert!(TestFetchCloner::action_dependency_needs_fetch(
+        None, 10, false,
+    ));
+    assert!(TestFetchCloner::action_dependency_needs_fetch(
+        Some((9, AccountMode::ReadOnly)),
+        10,
+        true,
+    ));
+    assert!(!TestFetchCloner::action_dependency_needs_fetch(
+        Some((10, AccountMode::ReadOnly)),
+        10,
+        true,
+    ));
+    assert!(!TestFetchCloner::action_dependency_needs_fetch(
+        Some((9, AccountMode::Delegated)),
+        10,
+        true,
+    ));
+}
+
+/// Proves a newer request waiting behind an older materialization re-reads the
+/// bank and applies its own image instead of inheriting the older result.
+#[tokio::test]
+async fn waiter_applies_newer_account_image() {
+    let ctx = TestContext::init(11).await;
+    let fetch = ctx
+        .chainlink
+        .fetch_cloner()
+        .expect("test Chainlink has a fetch cloner");
+    let pubkey = Pubkey::new_unique();
+    let build = |slot, byte| AccountCloneRequest {
+        pubkey,
+        account: AccountBuilder::default()
+            .lamports(1_000_000)
+            .data(vec![byte])
+            .owner(system_program::id())
+            .mode(AccountMode::ReadOnly)
+            .slot(slot),
+        commit_frequency_ms: None,
+        post_delegation_mode: ClonePostDelegationMode::None,
+        delegated_to_other: None,
+    };
+    let older = build(11, 1);
+    let newer = build(12, 2);
+    let mut accessor = ctx.bank.account(pubkey).await;
+    let older = async {
+        let result = fetch
+            .submit_account(
+                &mut accessor,
+                older,
+                AccountFetchContext::rpc_get_multiple_accounts(),
+            )
+            .await;
+        drop(accessor);
+        result
+    };
+    let newer = fetch.clone_account_with_post_delegation_action_invariants(
+        newer,
+        AccountFetchContext::rpc_get_multiple_accounts(),
+    );
+    let (older, newer) = tokio::join!(older, newer);
+    older.expect("older materialization succeeds");
+    newer.expect("newer waiter materializes its own image");
+
+    let state = ctx
+        .bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| (account.slot(), account.data().to_vec()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(state, (12, vec![2]));
 }
 
 mod aml_check_strategy {
