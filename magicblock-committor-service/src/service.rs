@@ -1,17 +1,15 @@
 use std::{
-    collections::HashSet, future::Future, mem, num::NonZeroUsize, sync::Arc,
+    collections::HashSet, future::Future, num::NonZeroUsize, sync::Arc,
     time::Duration,
 };
 
-use magicblock_account_cloner::ChainlinkCloner;
-use magicblock_chainlink::{ProdChainlink, ProdInnerChainlink};
+use magicblock_chainlink::ProdChainlink;
+use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use magicblock_metrics::metrics::{self};
-use magicblock_program::{outbox_intent_bundles::OutboxIntentBundle, Pubkey};
+use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_transaction::Transaction;
-use tokio::{
-    task,
-    task::{JoinError, JoinHandle},
-};
+use tokio::task;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
 
@@ -21,98 +19,17 @@ use crate::{
     intent_engine::db::BacklogDB,
     intent_executor::error::IntentExecutorError,
     outbox::{
+        OutboxClient,
         outbox_client::InternalOutboxClientError,
         outbox_intent_bundles_reader::{
             OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
         },
-        OutboxClient,
     },
 };
 
-pub type InnerChainlinkImpl = ProdInnerChainlink<ChainlinkCloner>;
-pub type ChainlinkImpl = ProdChainlink<ChainlinkCloner>;
+pub type ChainlinkImpl = ProdChainlink;
 
-pub enum IntentExecutionService<O, D> {
-    Created(ServiceInner<O, D>),
-    Started(JoinHandle<()>),
-    Stopped,
-    /// Not in `CoordinationMode::Primary` - accept/schedule loop must not run.
-    Disabled,
-    Error,
-}
-
-impl<O, D> IntentExecutionService<O, D> {
-    /// Makes `start`/`stop` no-ops. Use when not primary.
-    pub fn disabled() -> Self {
-        Self::Disabled
-    }
-}
-
-impl<O, D: BacklogDB> IntentExecutionService<O, D>
-where
-    O: OutboxClient,
-    // OutboxClient errors should be convertible to Service errors
-    O::Error: Into<IntentExecutionServiceError>,
-    // OutboxClient errors should be convertible to IntentExecutor error
-    O::Error: Into<IntentExecutorError>,
-    // OutboxReader errors should be convertible to Service errors
-    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
-        Into<IntentExecutionServiceError>,
-{
-    pub fn new(
-        chainlink: Arc<ChainlinkImpl>,
-        intent_client: Arc<O>,
-        processor: Arc<CommittorProcessor<D>>,
-        slot_interval: Duration,
-        cancellation_token: CancellationToken,
-    ) -> Self {
-        Self::Created(ServiceInner::new(
-            chainlink,
-            intent_client,
-            processor,
-            slot_interval,
-            cancellation_token,
-        ))
-    }
-
-    fn take(&mut self) -> Self {
-        mem::replace(self, Self::Error)
-    }
-
-    pub fn start(&mut self) -> Result<(), IntentExecutionServiceError> {
-        if matches!(self, Self::Disabled) {
-            return Ok(());
-        }
-
-        let Self::Created(service) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Created state to start".into(),
-            ));
-        };
-
-        let handle = service.start();
-        *self = Self::Started(handle);
-        Ok(())
-    }
-
-    pub async fn stop(&mut self) -> Result<(), IntentExecutionServiceError> {
-        if matches!(self, Self::Disabled) {
-            return Ok(());
-        }
-
-        let Self::Started(handle) = self.take() else {
-            return Err(IntentExecutionServiceError::InvalidState(
-                "service must be in Started state to stop".into(),
-            ));
-        };
-
-        handle.await?;
-        *self = Self::Stopped;
-        Ok(())
-    }
-}
-
-pub struct ServiceInner<O, D> {
+pub struct IntentExecutionService<O, D> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
@@ -122,10 +39,9 @@ pub struct ServiceInner<O, D> {
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
-    cancellation_token: CancellationToken,
 }
 
-impl<O, D: BacklogDB> ServiceInner<O, D>
+impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
     O: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
@@ -141,22 +57,29 @@ where
         outbox_client: Arc<O>,
         processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
-        cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             chainlink,
             outbox_client,
             processor,
             slot_interval,
-            cancellation_token,
         }
     }
 
-    fn start(self) -> JoinHandle<()> {
-        tokio::task::spawn(self.accept_worker())
+    pub async fn run(self, mut shutdown: ShutdownHandle) {
+        let result = self.accept_worker(shutdown.child()).await;
+        let reason = match result {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 
-    async fn accept_worker(self) {
+    async fn accept_worker(
+        self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), IntentExecutionServiceError> {
         // Reschedule existing outbox intents first
         // We need to ensure that accounts in outbox a scheduled before
         // we accept new incoming Intents
@@ -169,7 +92,8 @@ where
         loop {
             tokio::select! {
                 biased;
-                _ = self.cancellation_token.cancelled() => {
+                _ = cancellation_token.cancelled() => {
+                    // Durable execution of intents makes its safe to exit right away
                     break;
                 }
                 _ = interval.tick() => {
@@ -182,13 +106,17 @@ where
                         accepted_intents
                     });
 
-                    let intent_bundles= intent_bundles.into_iter().map(OutboxIntentBundle::accepted).collect();
+                    let intent_bundles = intent_bundles.into_iter().map(|bundle| {
+                        let bump = outbox_intent_pda_with_bump(bundle.id).1;
+                        OutboxIntentBundle::accepted(bundle, bump)
+                    }).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
                         error!("Failed to schedule intent execution: {}", err);
                     }
                 }
             }
         }
+        Ok(())
     }
 
     async fn reschedule_intents(
@@ -205,14 +133,15 @@ where
                 .read(RESCHEDULE_CHUNK_SIZE.get())
                 .await
                 .map_err(Into::into)?;
+            if intent_bundles_chunk.is_empty() {
+                return Ok(());
+            }
+
             // Original blockhash is stale after restart; signal recovery so
             // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
             intent_bundles_chunk.iter_mut().for_each(|b| {
                 b.inner.sent_transaction = Transaction::default()
             });
-            if intent_bundles_chunk.is_empty() {
-                return Ok(());
-            }
 
             let read_len = intent_bundles_chunk.len();
             // Schedule  without initial persistence as bundle already exists in db
@@ -316,10 +245,8 @@ where
 
 #[derive(thiserror::Error, Debug)]
 pub enum IntentExecutionServiceError {
-    #[error("Invalid state: {0}")]
-    InvalidState(String),
-    #[error("JoinError: {0}")]
-    JoinError(#[from] JoinError),
+    #[error("Intent execution worker '{0}' stopped unexpectedly")]
+    WorkerStopped(&'static str),
     #[error("IntentRpcClientError: {0}")]
     IntentRpcClientError(#[from] InternalOutboxClientError),
     #[error("OutboxReaderError")]

@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 
-use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::args::{
     ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest,
 };
+use nucleus::tls::TlsManager;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -107,8 +107,9 @@ pub(crate) fn process_schedule_task(
         iterations: args.iterations,
     };
 
-    // Add schedule request to execution TLS stash
-    ExecutionTlsStash::register_task(TaskRequest::Schedule(schedule_request));
+    // Hand the request to the engine, which publishes queued service
+    // messages once the transaction commits successfully.
+    TlsManager::enqueue(&TaskRequest::Schedule(schedule_request))?;
 
     ic_msg!(
         invoke_context,
@@ -130,7 +131,7 @@ mod test {
 
     use super::*;
     use crate::{
-        test_utils::{process_instruction, COUNTER_PROGRAM_ID},
+        test_utils::{COUNTER_PROGRAM_ID, process_instruction},
         utils::instruction_utils::InstructionUtils,
         validator::{
             generate_validator_authority_if_needed, validator_authority_id,
@@ -282,7 +283,7 @@ mod test {
             instructions: vec![create_simple_ix()],
         };
         let account_metas = vec![AccountMeta::new(payer.pubkey(), false)];
-        let ix = Instruction::new_with_bincode(
+        let ix = Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleTask(args),
             account_metas,
@@ -336,8 +337,8 @@ mod test {
 
     #[test]
     fn test_process_schedule_task_with_invalid_execution_interval() {
-        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
         for execution_interval_millis in [-12345, 0, u32::MAX as i64 + 1] {
+            let (payer, _pdas, transaction_accounts) = setup_accounts(0);
             let args = ScheduleTaskArgs {
                 task_id: 1,
                 execution_interval_millis,
@@ -350,7 +351,7 @@ mod test {
             );
             process_instruction(
                 &ix.data,
-                transaction_accounts.clone(),
+                transaction_accounts,
                 ix.accounts,
                 Err(InstructionError::InvalidInstructionData),
             );

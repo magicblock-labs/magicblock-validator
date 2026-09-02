@@ -19,6 +19,7 @@ use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
     outbox_intent_bundles::OutboxIntentBundleStatus,
 };
+use solana_keypair::Keypair;
 use solana_signature::Signature;
 use strategy_executor::error::TransactionStrategyExecutionError;
 
@@ -83,6 +84,8 @@ where
 }
 
 pub struct IntentExecutorCtx<T, F, A, O> {
+    /// Base-layer signing identity — the engine's authority keypair.
+    pub authority: Keypair,
     pub intent_client: IntentExecutionClient,
     pub transaction_preparator: T,
     pub task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,

@@ -71,6 +71,8 @@ pub enum IntentExecutorError {
     OutboxClientError(#[from] InternalOutboxClientError),
     #[error("Failed to get pending signature status: {0}")]
     GetPendingSignatureStatusError(#[source] MagicBlockRpcClientError),
+    #[error("Failed to resolve pending signature: {0}")]
+    PendingSignatureResolutionError(Signature),
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("FailedToCommitError: {err}")]
@@ -125,7 +127,10 @@ impl IntentExecutorError {
             | Self::FailedToFitError
             | Self::PoisonedIntentError
             | Self::SignerError(_)
-            | Self::OutboxClientError(_) => false,
+            | Self::OutboxClientError(_)
+            // The underlying tx may have already landed; blindly
+            // re-executing from scratch risks double-execution.
+            | Self::PendingSignatureResolutionError(_) => false,
             Self::GetPendingSignatureStatusError(err) => err.is_transient(),
             Self::TaskBuilderError(err) => err.is_transient(),
             Self::FailedToCommitError { err, .. } => err.is_transient(),
@@ -158,6 +163,9 @@ impl IntentExecutorError {
                 commit_signature,
                 finalize_signature,
             } => commit_signature.map(|el| (el, *finalize_signature)),
+            IntentExecutorError::PendingSignatureResolutionError(signature) => {
+                Some((*signature, None))
+            }
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
             | IntentExecutorError::PoisonedIntentError
@@ -220,8 +228,7 @@ mod tests {
     use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
-    const TX_TOO_LARGE_MAGICBLOCK: &str =
-        "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
+    const TX_TOO_LARGE_MAGICBLOCK: &str = "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
 
     fn make_send_transaction_error(message: &str) -> InternalError {
         let rpc_error = RpcClientError {

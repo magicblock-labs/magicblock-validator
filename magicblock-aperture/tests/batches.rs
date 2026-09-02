@@ -1,5 +1,7 @@
 use json::{JsonContainerTrait, JsonValueTrait, Value};
-use setup::{remote_account_claims_header, RpcTestEnv};
+use keeper::testkit::store_v42;
+use setup::{RpcTestEnv, remote_account_claims_header};
+use solana_account::AccountMode;
 
 mod setup;
 
@@ -62,8 +64,8 @@ async fn test_batch_requests() {
 }
 
 #[tokio::test]
-async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered(
-) {
+async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered()
+ {
     let env = RpcTestEnv::new().await;
     let client = reqwest::Client::new();
     let rpc_url = env.rpc.url();
@@ -94,19 +96,19 @@ async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetc
 #[tokio::test]
 async fn test_mixed_batch_requests_emit_remote_account_claims_header_zero() {
     let env = RpcTestEnv::new().await;
-    let account = env.create_account();
+    let account = store_v42(&env.engine, 0, AccountMode::Ephemeral);
     let batch_request = json::json!([
         {"jsonrpc": "2.0", "method": "getVersion", "id": 1},
         {
             "jsonrpc": "2.0",
             "method": "getAccountInfo",
-            "params": [account.pubkey.to_string()],
+            "params": [account.to_string()],
             "id": 2
         },
         {
             "jsonrpc": "2.0",
             "method": "getBalance",
-            "params": [account.pubkey.to_string()],
+            "params": [account.to_string()],
             "id": 3
         }
     ]);

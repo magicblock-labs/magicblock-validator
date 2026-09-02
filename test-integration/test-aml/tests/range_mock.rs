@@ -3,13 +3,14 @@ use std::{thread::sleep, time::Duration};
 use cleanass::assert;
 use ephemeral_rollups_sdk::spl::{
     builders::{
+        DelegateEphemeralAtaBuilder, InitializeEphemeralAtaBuilder,
         InitializeGlobalVaultBuilder, InitializeRentPdaBuilder,
         SetupAndDelegateShuttleEphemeralAtaWithMergeBuilder,
     },
     find_rent_pda, find_shuttle_ata, find_shuttle_ephemeral_ata,
 };
 use integration_test_tools::{
-    expect,
+    expect, init_logger,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     tmpdir::resolve_tmp_dir,
 };
@@ -22,11 +23,10 @@ use solana_system_interface::instruction as system_instruction;
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 use test_aml::{
-    cleanup_both, delegation_record_exists, delegation_record_persists,
-    setup_validator_with_local_remote, wait_for_delegation_record_absent,
-    MockRangeServer,
+    cleanup_both, setup_validator_with_local_remote, token_balance_ephem,
+    wait_for_delegation_record_absent, wait_for_delegation_record_present,
+    wait_for_token_balance_ephem, MockRangeServer,
 };
-use test_kit::init_logger;
 
 const SHUTTLE_AMOUNT: u64 = 200;
 const SHUTTLE_ID: u32 = 0;
@@ -45,13 +45,17 @@ fn test_low_risk_shuttle_owner_merge_is_allowed() {
 /// Drives the shuttle + merge flow for a single owner risk score and asserts
 /// the AML risk gate decision.
 ///
-/// `SetupAndDelegateShuttleEphemeralAtaWithMerge` delegates the shuttle ATA with
-/// the merge attached as a post-delegation action. The merge's only signer is
-/// the shuttle `owner`, so the validator risk-checks the owner before acting on
-/// the delegation:
-/// - a low-risk owner is allowed, so the shuttle ATA stays delegated;
-/// - a risky owner is blocked, so the shuttle ATA is undelegated back to chain
-///   instead of running the merge.
+/// `SetupAndDelegateShuttleEphemeralAtaWithMerge` delegates the shuttle ATA and
+/// attaches two post-delegation actions: the merge, then an undelegate-and-close
+/// of the shuttle. The merge's only signer is the shuttle `owner`, so the
+/// validator risk-checks the owner before acting on the delegation:
+/// - a low-risk owner is allowed, so the merge runs and credits the recipient;
+/// - a risky owner is blocked, so nothing runs and the recipient stays uncredited.
+///
+/// The shuttle ATA ends up undelegated either way — the allowed path gets there
+/// through its own undelegate-and-close action, the blocked path because the
+/// validator undelegates instead of running anything — so the token movement,
+/// not the delegation record, is what separates the two verdicts.
 ///
 /// Both cases must query the Range risk service for the owner.
 fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
@@ -156,6 +160,39 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
         "mint/ATA setup transaction failed"
     );
 
+    // The merge credits the recipient's ATA from inside the ephemeral rollup,
+    // so that ATA has to be writable there. A plain SPL ATA is cloned read-only
+    // and the merge would be rejected. Giving the recipient an ephemeral ATA
+    // delegated to this validator is what lets chainlink project the eATA onto
+    // the base ATA and clone it delegated, which is what makes it writable.
+    let mut eata_tx = Transaction::new_with_payer(
+        &[
+            InitializeEphemeralAtaBuilder {
+                payer: fee_payer.pubkey(),
+                user: recipient.pubkey(),
+                mint: mint.pubkey(),
+            }
+            .instruction(),
+            DelegateEphemeralAtaBuilder {
+                payer: fee_payer.pubkey(),
+                user: recipient.pubkey(),
+                mint: mint.pubkey(),
+                validator: Some(validator_pk),
+            }
+            .instruction(),
+        ],
+        Some(&fee_payer.pubkey()),
+    );
+    let (_sig, confirmed) = expect!(
+        ctx.send_and_confirm_transaction_chain(&mut eata_tx, &[&fee_payer]),
+        validator
+    );
+    assert!(
+        confirmed,
+        cleanup_both(&mut validator, &mut server),
+        "recipient ephemeral ATA setup failed"
+    );
+
     // Initialize the shuttle prerequisites: the rent PDA (a shared vault that
     // fronts rent for the delegated shuttle accounts, so it must hold lamports
     // beyond its own rent exemption) and the per-mint global vault.
@@ -231,8 +268,9 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
         cleanup_both(&mut validator, &mut server),
         "shuttle setup + delegation transaction failed"
     );
+    let record_created = wait_for_delegation_record_present(&ctx, &shuttle_ata);
     assert!(
-        delegation_record_exists(&ctx, &shuttle_ata),
+        record_created,
         cleanup_both(&mut validator, &mut server),
         "shuttle ATA delegation record was not created on base chain"
     );
@@ -260,21 +298,43 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
         requested_addresses
     );
 
+    // Both verdicts end with the shuttle ATA undelegated: the allowed path runs
+    // the merge and then the attached undelegate-and-close action, the blocked
+    // path undelegates instead of running anything. What separates them is
+    // whether the tokens actually moved.
+    let was_undelegated = wait_for_delegation_record_absent(&ctx, &shuttle_ata);
+    assert!(
+        was_undelegated,
+        cleanup_both(&mut validator, &mut server),
+        "shuttle ATA was not undelegated on base chain"
+    );
+
+    // The merge credits the recipient inside the rollup, against the ATA
+    // chainlink projects from the recipient's delegated eATA. The base chain
+    // only sees those tokens once the eATA is settled, which this flow does not
+    // do, so the rollup is where the verdict is observable.
     if expect_allowed {
-        // Low-risk owner: the merge is allowed, so the shuttle ATA keeps its
-        // delegation and is never undelegated back to chain.
+        // Low-risk owner: the merge ran, so the shuttle's tokens landed in the
+        // recipient's ATA.
+        let merged = wait_for_token_balance_ephem(
+            &ctx,
+            &destination_ata,
+            SHUTTLE_AMOUNT,
+        );
         assert!(
-            delegation_record_persists(&ctx, &shuttle_ata),
+            merged,
             cleanup_both(&mut validator, &mut server),
-            "low-risk shuttle ATA was unexpectedly undelegated on base chain"
+            "low-risk merge did not credit the recipient; balance: {:?}",
+            token_balance_ephem(&ctx, &destination_ata)
         );
     } else {
-        // Risky owner: the merge is blocked, so the shuttle ATA is undelegated
-        // back to the base chain instead.
+        // Risky owner: the merge was blocked, so the recipient was never
+        // credited.
+        let balance = token_balance_ephem(&ctx, &destination_ata).unwrap_or(0);
         assert!(
-            wait_for_delegation_record_absent(&ctx, &shuttle_ata),
+            balance == 0,
             cleanup_both(&mut validator, &mut server),
-            "high-risk shuttle ATA was not undelegated on base chain"
+            "high-risk merge credited the recipient with {balance}"
         );
     }
 

@@ -1,29 +1,25 @@
 //! Validation helpers for ephemeral account instructions.
 
 use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount};
 use solana_instruction::error::InstructionError;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use super::{EPHEMERAL_IDX, SPONSOR_IDX, VAULT_IDX};
-use crate::utils::{
-    accounts::{self, InstructionAccount},
-    instruction_context_frames::InstructionContextFrames,
-};
+use crate::utils::accounts::{self, InstructionAccount};
 
 /// Returns the program ID of the CPI caller.
 ///
 /// Fails with [`InstructionError::IncorrectProgramId`] when invoked
 /// outside of CPI, so this implicitly rejects direct top-level calls.
 fn get_caller_program_id(
-    tc: &TransactionContext<'_>,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<Pubkey, InstructionError> {
-    let frames = InstructionContextFrames::try_from(tc)?;
-    frames
-        .find_program_id_of_parent_of_current_instruction()
-        .copied()
+    invoke_context
+        .effective_caller()?
         .ok_or(InstructionError::IncorrectProgramId)
 }
 
@@ -56,9 +52,10 @@ fn validate_vault(tc: &TransactionContext<'_>) -> Result<(), InstructionError> {
 /// Checks CPI context, sponsor signature, and vault identity.
 /// Returns the caller program ID on success.
 pub(super) fn validate_common(
-    tc: &TransactionContext<'_>,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<Pubkey, InstructionError> {
-    let caller_program_id = get_caller_program_id(tc)?;
+    let tc = &*invoke_context.transaction_context;
+    let caller_program_id = get_caller_program_id(invoke_context)?;
     validate_sponsor(tc)?;
     validate_vault(tc)?;
     Ok(caller_program_id)
@@ -102,7 +99,7 @@ pub(super) fn validate_existing_ephemeral<'a, 'ix_data>(
         accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
     let ep_ref = ephemeral.borrow()?;
 
-    if !ep_ref.ephemeral() {
+    if !ep_ref.is(AccountMode::Ephemeral) {
         return Err(InstructionError::InvalidAccountData);
     }
     if ep_ref.owner() != caller_program_id {

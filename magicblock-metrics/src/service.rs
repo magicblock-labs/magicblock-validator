@@ -1,101 +1,82 @@
 use std::net::SocketAddr;
 
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{
-    body::Bytes, server::conn::http1, service::service_fn, Method, Request,
-    Response, StatusCode,
+    Method, Request, Response, StatusCode, body::Bytes, server::conn::http1,
+    service::service_fn,
 };
 use hyper_util::rt::TokioIo;
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use prometheus::TextEncoder;
-use tokio::{net::TcpListener, select};
-use tokio_util::sync::CancellationToken;
+use tokio::{net::TcpListener, select, task::JoinSet};
 use tracing::{instrument, *};
 
 use crate::metrics;
 
-pub fn try_start_metrics_service(
-    addr: SocketAddr,
-    cancellation_token: CancellationToken,
-) -> std::io::Result<MetricsService> {
-    metrics::register();
-    let service = MetricsService::try_new(addr, cancellation_token)?;
-    service.spawn();
-    Ok(service)
-}
-
 pub struct MetricsService {
     addr: SocketAddr,
-    cancellation_token: CancellationToken,
+    listener: TcpListener,
 }
 
 impl MetricsService {
-    fn try_new(
-        addr: SocketAddr,
-        cancellation_token: CancellationToken,
-    ) -> std::io::Result<MetricsService> {
-        Ok(MetricsService {
-            addr,
-            cancellation_token,
-        })
+    pub async fn bind(addr: SocketAddr) -> std::io::Result<Self> {
+        metrics::register();
+        let listener = TcpListener::bind(addr).await?;
+        let addr = listener.local_addr()?;
+        Ok(Self { addr, listener })
     }
 
-    fn spawn(&self) {
-        let addr = self.addr;
-        let cancellation_token = self.cancellation_token.clone();
-        tokio::spawn(async move {
-            Self::run(addr, cancellation_token).await;
-        });
-    }
-
-    async fn run(addr: SocketAddr, cancellation_token: CancellationToken) {
-        start_metrics_server(addr, cancellation_token).await;
+    /// Serves metrics until its shutdown tier is cancelled.
+    pub async fn run(self, mut shutdown: ShutdownHandle) {
+        let reason = match serve(self.addr, self.listener, &shutdown).await {
+            Err(error) => ShutdownReason::Error(Box::new(error)),
+            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
+            Ok(()) => ShutdownReason::Unexpected,
+        };
+        shutdown.terminate(reason);
     }
 }
 
-#[instrument(skip(cancellation_token), fields(addr = %addr))]
-async fn start_metrics_server(
+#[instrument(skip(shutdown), fields(addr = %addr))]
+async fn serve(
     addr: SocketAddr,
-    cancellation_token: CancellationToken,
-) {
-    let listener = match TcpListener::bind(&addr).await {
-        Ok(listener) => {
-            info!("Metrics server started");
-            listener
-        }
-        Err(err) => {
-            error!(error = ?err, "Failed to bind");
-            return;
-        }
-    };
+    listener: TcpListener,
+    shutdown: &ShutdownHandle,
+) -> std::io::Result<()> {
+    info!("Metrics server started");
+    let mut connections = JoinSet::new();
 
-    loop {
+    let result = loop {
         select!(
-            _ = cancellation_token.cancelled() => {
-                break;
+            _ = shutdown.signalled() => {
+                break Ok(());
+            }
+            Some(result) = connections.join_next(), if !connections.is_empty() => {
+                if let Err(error) = result {
+                    debug!(?error, "Metrics connection task failed");
+                }
             }
             result = listener.accept() => {
-                match result {
-                    Ok((stream, _)) => {
-                        let io = TokioIo::new(stream);
-                        tokio::task::spawn(async move {
-                            if let Err(err) = http1::Builder::new()
+                let (stream, _) = match result {
+                    Ok(connection) => connection,
+                    Err(error) => break Err(error),
+                };
+                let io = TokioIo::new(stream);
+                connections.spawn(async move {
+                    if let Err(err) = http1::Builder::new()
                             .serve_connection(io, service_fn(metrics_service_router))
                             .await
-                        {
-                            debug!(error = ?err, "Metrics connection closed");
-                        }
-                        });
+                    {
+                        debug!(error = ?err, "Metrics connection closed");
                     }
-                    Err(err) => error!(
-                        error = ?err,
-                        "Failed to accept connection"
-                    ),
-                };
+                });
             }
         );
-    }
+    };
 
+    connections.shutdown().await;
     info!("Metrics server shutdown");
+    result
 }
 
 #[instrument(
@@ -125,8 +106,10 @@ async fn metrics_service_router(
 
     let result = match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
+            let mut metric_families = metrics::REGISTRY.gather();
+            metric_families.extend(prometheus::gather());
             let metrics = TextEncoder::new()
-                .encode_to_string(&metrics::REGISTRY.gather())
+                .encode_to_string(&metric_families)
                 .unwrap_or_else(|error| {
                     warn!(error = %error, "Failed to encode metrics");
                     String::new()

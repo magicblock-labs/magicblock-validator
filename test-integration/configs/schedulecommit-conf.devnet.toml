@@ -24,16 +24,12 @@ max-snapshots = 7
 reset = true
 
 [ledger]
-reset = true
 block-time = "50ms"
+reset = true
 
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../schedulecommit/elfs/dlp.so"
-
-[[programs]]
-id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
-path = "../schedulecommit/elfs/mdp.so"
 
 # NOTE: `cargo build-sbf` needs to run from the root to build the program
 [[programs]]
@@ -47,6 +43,10 @@ path = "../target/deploy/program_schedulecommit.so"
 [[programs]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
 path = "../target/deploy/program_schedulecommit_security.so"
+
+[[programs]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
 
 [metrics]
 address = "0.0.0.0:9000"

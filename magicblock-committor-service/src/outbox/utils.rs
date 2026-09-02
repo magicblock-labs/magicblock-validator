@@ -3,7 +3,7 @@ use tracing::{error, info};
 
 use crate::{
     intent_executor::{
-        error::IntentExecutorResult, ExecutionOutput, IntentExecutionReport,
+        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
     },
     outbox::ScheduledBaseIntentMeta,
 };

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::TwoStageProgress, validator::validator_authority,
+    outbox::TwoStageProgress,
 };
 use solana_keypair::Keypair;
 use solana_signature::Signature;
@@ -12,21 +12,21 @@ use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
             utils::{
-                execute_with_timeout, requires_uniqueness_nonce,
-                resolve_pending_signature, FinalizeStage,
+                FinalizeStage, execute_with_timeout, requires_uniqueness_nonce,
+                resolve_pending_signature,
             },
         },
         utils::{
             build_commit_finalize_tasks, execute_two_stage_flow,
             report_and_close_intent,
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
@@ -63,7 +63,7 @@ where
         actions_timeout: Duration,
         stage: TwoStageProgress,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             authority,
             stage,

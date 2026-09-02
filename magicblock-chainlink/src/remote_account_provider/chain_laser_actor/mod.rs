@@ -2,8 +2,8 @@ use std::{collections::HashSet, pin::Pin, sync::Arc};
 
 use futures_util::Stream;
 use helius_laserstream::{
-    grpc::{SubscribeRequest, SubscribeUpdate},
     LaserstreamError,
+    grpc::{SubscribeRequest, SubscribeUpdate},
 };
 use parking_lot::RwLock;
 use solana_pubkey::Pubkey;

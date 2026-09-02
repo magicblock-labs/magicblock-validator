@@ -1,26 +1,29 @@
 [package]
-name = "magicblock-magic-program-api"
-description = "Magicblock magic program api"
-license = "MIT"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
-homepage.workspace = true
+description = "Magicblock magic program api"
 edition.workspace = true
+homepage.workspace = true
+license = "MIT"
+name = "magicblock-magic-program-api"
+repository.workspace = true
+version.workspace = true
 
 [features]
+backward-compat = ["dep:bincode", "dep:solana-program-compat", "dep:solana-signature-compat"]
 default = []
-backward-compat = [
-    "dep:solana-program-compat",
-    "dep:solana-signature-compat",
-]
 
 [dependencies]
+bincode = { version = "^1.3.3", optional = true }
+const-crypto = "0.3.0"
+serde = { version = "^1.0.228", features = ["derive"] }
+solana-hash = { workspace = true, features = ["serde", "wincode"] }
 solana-program = { workspace = true }
 solana-program-compat = { package = "solana-program", version = ">=2.0, <3", default-features = false, optional = true }
-solana-hash = { workspace = true, features = ["serde"] }
-solana-signature = { workspace = true, features = ["serde"] }
-solana-signature-compat = { package = "solana-signature", version = ">=2.0, <3", default-features = false, features = ["serde"], optional = true }
-bincode = "^1.3.3"
-serde = { version = "^1.0.228", features = ["derive"] }
-const-crypto = "0.3.0"
+solana-signature = { workspace = true, features = ["serde", "wincode"] }
+solana-signature-compat = { package = "solana-signature", version = ">=2.0, <3", default-features = false, features = [
+    "serde"
+], optional = true }
+# Task requests cross into the engine through its wincode-encoded service
+# message queue, so the types they are built from need a wincode schema.
+solana-instruction = { workspace = true, features = ["wincode"] }
+wincode = { workspace = true }

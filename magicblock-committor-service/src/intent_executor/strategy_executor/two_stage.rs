@@ -12,16 +12,16 @@ use tracing::instrument;
 
 use crate::{
     intent_executor::{
+        IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
             patcher::{CommitStagePatcher, FinalizeStagePatcher},
             two_stage::sealed::Sealed,
             utils::{
-                handle_actions_result, stage_execution_loop, ExecutionState,
+                ExecutionState, handle_actions_result, stage_execution_loop,
             },
         },
-        IntentExecutionReport,
     },
     outbox::OutboxClient,
     tasks::{

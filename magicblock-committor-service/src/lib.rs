@@ -11,7 +11,7 @@ pub mod outbox;
 pub mod service;
 #[cfg(test)]
 pub mod test_utils;
-pub mod utils;
+pub(crate) mod utils;
 
 pub use compute_budget::ComputeBudgetConfig;
 pub use config::DEFAULT_ACTIONS_TIMEOUT;

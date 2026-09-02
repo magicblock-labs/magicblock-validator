@@ -7,17 +7,17 @@ use std::{
 use async_trait::async_trait;
 use magicblock_config::config::GrpcConfig;
 use solana_commitment_config::CommitmentLevel;
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::{Pubkey, pubkey};
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::{mpsc, oneshot};
 use tracing::*;
 
 use crate::remote_account_provider::{
+    ChainPubsubClient, ReconnectableClient, RemoteAccountProviderError,
+    RemoteAccountProviderResult,
     chain_laser_actor::{ChainLaserActor, SharedSubscriptions, Slots},
     chain_rpc_client::ChainRpcClientImpl,
     pubsub_common::{ChainPubsubActorMessage, SubscriptionUpdate},
-    ChainPubsubClient, PubsubTransport, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
 };
 
 /// Reserved pubkey used to track implicit slot subscriptions for GRPC clients.
@@ -266,10 +266,6 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 
     fn id(&self) -> &str {
         &self.client_id
-    }
-
-    fn transport(&self) -> PubsubTransport {
-        PubsubTransport::Grpc
     }
 }
 

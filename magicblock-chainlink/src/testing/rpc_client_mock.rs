@@ -2,8 +2,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -200,7 +200,7 @@ impl ChainRpcClientMock {
         use solana_program::sysvar::SysvarId;
 
         trace!(clock = ?clock, "Setting clock sysvar");
-        let clock_data = bincode::serialize(&clock).unwrap();
+        let clock_data = wincode::serialize(&clock).unwrap();
         let account = Account {
             lamports: 1_000_000_000,
             data: clock_data,

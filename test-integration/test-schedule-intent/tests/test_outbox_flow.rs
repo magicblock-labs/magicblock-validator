@@ -122,6 +122,7 @@ impl TestEnv {
 
     fn executor_ctx_builder(&self) -> TestIntentExecutorCtxBuilder {
         let ctx = TestIntentExecutorCtx {
+            authority: ensure_validator_authority(),
             intent_client: self.intent_client.clone(),
             transaction_preparator: self.transaction_preparator(),
             task_info_fetcher: self.task_info_fetcher.clone(),

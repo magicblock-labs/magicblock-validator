@@ -1,18 +1,18 @@
 //! Create ephemeral account instruction processor
 
-use solana_account::WritableAccount;
+use solana_account::{AccountMode, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
-use solana_transaction_context::TransactionContext;
+use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
-    rent_for, transfer_rent,
+    MAX_DATA_LEN, rent_for, transfer_rent,
     validation::{
         validate_common, validate_ephemeral_signer, validate_new_ephemeral,
     },
-    MAX_DATA_LEN,
 };
+use crate::utils::account_actions::set_account_mode;
 
 /// Creates a new ephemeral account with rent paid by the sponsor.
 /// The account is owned by the calling program (inferred from CPI context).
@@ -25,7 +25,7 @@ pub(crate) fn process_create_ephemeral_account(
         return Err(InstructionError::InvalidArgument);
     }
 
-    let caller_program_id = validate_common(transaction_context)?;
+    let caller_program_id = validate_common(invoke_context)?;
     validate_ephemeral_signer(transaction_context)?;
     let ephemeral = validate_new_ephemeral(transaction_context)?;
 
@@ -37,7 +37,7 @@ pub(crate) fn process_create_ephemeral_account(
     acc.set_lamports(0);
     acc.set_owner(caller_program_id);
     acc.resize(data_len as usize, 0);
-    acc.set_ephemeral(true);
+    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)?;
 
     ic_msg!(
         invoke_context,

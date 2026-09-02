@@ -2,15 +2,13 @@ use std::{
     cmp::Ordering,
     collections::{BinaryHeap, VecDeque},
     num::NonZeroUsize,
-    sync::Arc,
 };
 
+use accountsdb::AccountsDBError;
 use async_trait::async_trait;
-use magicblock_accounts_db::{
-    error::AccountsDbError, traits::AccountsBank, AccountsDb,
-};
+use engine::Engine;
 use magicblock_core::intent::outbox::{
-    outbox_intent_pda, OUTBOX_INTENT_DISCRIMINATOR,
+    OUTBOX_INTENT_DISCRIMINATOR, outbox_intent_pda,
 };
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -41,23 +39,22 @@ pub struct InternalOutboxIntentBundlesReader {
     buffer: VecDeque<OutboxIntentBundle>,
     /// Max id returned so far; refill skips ids <= this
     last_consumed_id: Option<u64>,
-    /// Accounts DB where we read intents from
-    /// Could be an RpcClient in the future
-    accounts_db: Arc<AccountsDb>,
+    /// Engine handle we read outbox intents from
+    engine: Engine,
 }
 
 impl InternalOutboxIntentBundlesReader {
-    pub fn new(accounts_db: Arc<AccountsDb>, capacity: NonZeroUsize) -> Self {
+    pub fn new(engine: Engine, capacity: NonZeroUsize) -> Self {
         Self {
             capacity,
             buffer: VecDeque::new(),
             last_consumed_id: None,
-            accounts_db,
+            engine,
         }
     }
 
     // Refills buffer with OutboxIntents up to capacity
-    fn refill(&mut self) -> Result<(), AccountsDbError> {
+    fn refill(&mut self) -> Result<(), AccountsDBError> {
         #[repr(transparent)]
         struct OrderedIntent {
             inner: OutboxIntentBundle,
@@ -79,13 +76,13 @@ impl InternalOutboxIntentBundlesReader {
             }
         }
 
-        let outbox_candidates_iter = self.accounts_db.get_program_accounts(
-            &magicblock_program::ID,
-            Self::outbox_accounts_filter,
-        )?;
+        let accounts = self.engine.accounts();
+        let outbox_candidates_iter =
+            accounts.program(&magicblock_program::ID)?;
 
         // Create iterator that yields valid, unconsumed intents
         let outbox_iter = outbox_candidates_iter
+            .filter(|(_, account)| Self::outbox_accounts_filter(account))
             .map(|(address, account)| {
                 (address, OutboxIntentBundle::try_from_bytes(account.data()))
             })
@@ -147,8 +144,8 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
     /// Returns up to `n` outbox intents sorted ascending by `ScheduledIntentBundle::id`.
     /// If `Vec::len() < n`, no more intents are available.
     ///
-    /// When the internal buffer runs low, triggers a full `getProgramAccounts` scan
-    /// to refill — O(N log C) where N is open intent count and C is capacity.
+    /// When the internal buffer runs low, triggers a full program-owned-accounts
+    /// scan to refill — O(N log C) where N is open intent count and C is capacity.
     /// Callers recommended to drive each read batch to completion and close the accounts
     /// before reading again; closed accounts are removed from the DB and won't
     /// be scanned on the next refill.
@@ -179,7 +176,7 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
         intent_id: u64,
     ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
         let pda = outbox_intent_pda(intent_id);
-        let Some(account) = self.accounts_db.get_account(&pda) else {
+        let Some(account) = self.engine.accounts().loader().load(&pda)? else {
             return Ok(None);
         };
         Ok(Some(OutboxIntentBundle::try_from_bytes(account.data())?))
@@ -191,9 +188,9 @@ pub enum OutboxIntentBundlesReaderError {
     #[error("Requested read exceeded capacity, n: {0}, capacity: {1}")]
     ReadExceedsCapacityError(usize, usize),
     #[error("AccountsDbError: {0}")]
-    AccountsDbError(#[from] AccountsDbError),
-    #[error("BincodeError: {0}")]
-    BincodeError(#[from] bincode::Error),
+    AccountsDbError(#[from] AccountsDBError),
+    #[error("WincodeError: {0}")]
+    WincodeError(#[from] wincode::ReadError),
 }
 
 pub type OutboxIntentBundlesReaderResult<T> =
@@ -201,28 +198,24 @@ pub type OutboxIntentBundlesReaderResult<T> =
 
 #[cfg(test)]
 mod tests {
-    use std::{num::NonZeroUsize, sync::Arc};
+    use std::num::NonZeroUsize;
 
-    use magicblock_accounts_db::AccountsDb;
-    use magicblock_core::intent::outbox::outbox_intent_pda;
+    use engine::testkit::TestEngine;
+    use magicblock_core::intent::outbox::{
+        outbox_intent_pda, outbox_intent_pda_with_bump,
+    };
     use magicblock_program::{
         magic_scheduled_base_intent::{
             MagicIntentBundle, ScheduledIntentBundle,
         },
         outbox_intent_bundles::OutboxIntentBundle,
     };
-    use solana_account::{AccountSharedData, WritableAccount};
+    use solana_account::{AccountBuilder, AccountMode};
     use solana_hash::Hash;
     use solana_pubkey::Pubkey;
     use solana_transaction::Transaction;
 
     use super::{InternalOutboxIntentBundlesReader, OutboxIntentBundlesReader};
-
-    fn make_db() -> (Arc<AccountsDb>, tempfile::TempDir) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let db = AccountsDb::open(dir.path()).expect("db init").into();
-        (db, dir)
-    }
 
     fn make_bundle(id: u64) -> OutboxIntentBundle {
         let inner = ScheduledIntentBundle {
@@ -233,27 +226,33 @@ mod tests {
             payer: Pubkey::default(),
             intent_bundle: MagicIntentBundle::default(),
         };
-        OutboxIntentBundle::accepted(inner)
+        let bump = outbox_intent_pda_with_bump(id).1;
+        OutboxIntentBundle::accepted(inner, bump)
     }
 
-    fn insert_bundle(db: &AccountsDb, bundle: &OutboxIntentBundle) {
+    async fn insert_bundle(te: &TestEngine, bundle: &OutboxIntentBundle) {
         let bytes = bundle.try_to_bytes().expect("serialize");
         let pubkey = outbox_intent_pda(bundle.inner.id);
-        let mut account =
-            AccountSharedData::new(1, bytes.len(), &magicblock_program::ID);
-        account.data_as_mut_slice().copy_from_slice(&bytes);
-        db.insert_account(&pubkey, &account).expect("insert");
+        let account = AccountBuilder::default()
+            .lamports(0)
+            .data(bytes)
+            .owner(magicblock_program::ID)
+            .mode(AccountMode::Ephemeral);
+        te.account(pubkey)
+            .create(account, None)
+            .await
+            .expect("insert outbox account");
     }
 
     #[tokio::test]
     async fn read_returns_ascending_order() {
-        let (db, _dir) = make_db();
-        insert_bundle(&db, &make_bundle(9));
-        insert_bundle(&db, &make_bundle(1));
-        insert_bundle(&db, &make_bundle(4));
+        let te = TestEngine::new().await;
+        insert_bundle(&te, &make_bundle(9)).await;
+        insert_bundle(&te, &make_bundle(1)).await;
+        insert_bundle(&te, &make_bundle(4)).await;
 
         let mut reader = InternalOutboxIntentBundlesReader::new(
-            db,
+            (*te).clone(),
             NonZeroUsize::new(10).unwrap(),
         );
         let result = reader.read(3).await.unwrap();
@@ -261,31 +260,35 @@ mod tests {
         assert_eq!(result[0].inner.id, 1);
         assert_eq!(result[1].inner.id, 4);
         assert_eq!(result[2].inner.id, 9);
+
+        te.close().await;
     }
 
     #[tokio::test]
     async fn read_fewer_than_n_when_db_has_less() {
-        let (db, _dir) = make_db();
-        insert_bundle(&db, &make_bundle(3));
+        let te = TestEngine::new().await;
+        insert_bundle(&te, &make_bundle(3)).await;
 
         let mut reader = InternalOutboxIntentBundlesReader::new(
-            db,
+            (*te).clone(),
             NonZeroUsize::new(10).unwrap(),
         );
         let result = reader.read(5).await.unwrap();
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].inner.id, 3);
+
+        te.close().await;
     }
 
     #[tokio::test]
     async fn read_respects_capacity_smallest() {
-        let (db, _dir) = make_db();
+        let te = TestEngine::new().await;
         for id in [10, 5, 1, 8, 3] {
-            insert_bundle(&db, &make_bundle(id));
+            insert_bundle(&te, &make_bundle(id)).await;
         }
 
         let mut reader = InternalOutboxIntentBundlesReader::new(
-            db,
+            (*te).clone(),
             NonZeroUsize::new(3).unwrap(),
         );
         let result = reader.read(3).await.unwrap();
@@ -293,27 +296,31 @@ mod tests {
             result.iter().map(|b| b.inner.id).collect::<Vec<_>>(),
             vec![1, 3, 5]
         );
+
+        te.close().await;
     }
 
     #[tokio::test]
     async fn read_exceeds_capacity_errors() {
-        let (db, _dir) = make_db();
+        let te = TestEngine::new().await;
         let mut reader = InternalOutboxIntentBundlesReader::new(
-            db,
+            (*te).clone(),
             NonZeroUsize::new(3).unwrap(),
         );
         assert!(reader.read(4).await.is_err());
+
+        te.close().await;
     }
 
     #[tokio::test]
     async fn sequential_reads_dont_repeat() {
-        let (db, _dir) = make_db();
+        let te = TestEngine::new().await;
         for id in 1..=6 {
-            insert_bundle(&db, &make_bundle(id));
+            insert_bundle(&te, &make_bundle(id)).await;
         }
 
         let mut reader = InternalOutboxIntentBundlesReader::new(
-            db,
+            (*te).clone(),
             NonZeroUsize::new(5).unwrap(),
         );
         let first = reader.read(3).await.unwrap();
@@ -323,5 +330,7 @@ mod tests {
         let second_ids: Vec<_> = second.iter().map(|b| b.inner.id).collect();
         assert_eq!(first_ids, vec![1, 2, 3]);
         assert_eq!(second_ids, vec![4, 5, 6]);
+
+        te.close().await;
     }
 }

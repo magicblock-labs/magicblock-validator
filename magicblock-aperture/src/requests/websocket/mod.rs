@@ -1,9 +1,17 @@
+use engine::Engine;
+
 mod prelude {
+    pub(super) use super::context_slot;
     pub(super) use crate::{
-        requests::{params::Serde32Bytes, JsonWsRequest as JsonRequest},
-        server::websocket::dispatch::{SubResult, WsDispatcher},
         RpcResult,
+        requests::{JsonWsRequest as JsonRequest, params::Serde32Bytes},
+        server::websocket::dispatch::{SubResult, WsDispatcher},
+        state::subscriptions::next_subid,
     };
+}
+
+fn context_slot(engine: &Engine) -> u64 {
+    engine.blocks().latest().slot
 }
 
 pub(crate) mod account_subscribe;

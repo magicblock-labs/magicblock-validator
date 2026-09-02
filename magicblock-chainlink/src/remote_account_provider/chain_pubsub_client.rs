@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -389,11 +389,14 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             warn!(total_subs, "Re-subscription made no progress");
             return Err(err);
         }
-        if remaining.is_empty() {
-            // Clean pass: restore the configured pacing
+        if remaining.len() < total_subs {
+            // Any progress restores the configured pacing: an escalated
+            // delay stretches the restore window past the connection's
+            // lifetime and wedges reconnects into a permanent loop.
             self.current_resub_delay_ms
                 .store(self.initial_resub_delay_ms, Ordering::SeqCst);
-        } else {
+        }
+        if !remaining.is_empty() {
             // Leftovers are repaired by the subscription reconciler
             warn!(
                 total_subs,
@@ -427,7 +430,7 @@ pub mod mock {
 
     use parking_lot::Mutex;
     use solana_account::Account;
-    use solana_account_decoder::{encode_ui_account, UiAccountEncoding};
+    use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
     use solana_program::clock::Slot;
     use solana_rpc_client_api::response::{
         Response as RpcResponse, RpcResponseContext,
@@ -437,8 +440,8 @@ pub mod mock {
 
     use super::*;
     use crate::remote_account_provider::{
-        pubsub_common::SubscriptionSource, RemoteAccountProviderError,
-        RemoteAccountProviderResult,
+        RemoteAccountProviderError, RemoteAccountProviderResult,
+        pubsub_common::SubscriptionSource,
     };
 
     #[derive(Clone)]

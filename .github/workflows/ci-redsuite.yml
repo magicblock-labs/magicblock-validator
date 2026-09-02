@@ -4,41 +4,17 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
-on:
-  push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
-  pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+# Temporarily manual-only while RedSuite migrates to the leader's structured
+# Engine configuration. Restore the push and pull_request triggers once its
+# topology no longer invokes the removed legacy CLI options.
+on: workflow_dispatch
 
 permissions:
   contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: c0eedc9ec2aa85424cefd64b05fedeec4972d5f5
-  SOLANA_VERSION: v4.0.3
-  RUST_TOOLCHAIN: "1.94.1"
-  BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
+  REDSUITE_REV: eea13bfb51990f8d9b37daa1960f591ad5bcef27
 
 jobs:
   build_er:
@@ -57,7 +33,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-redsuite-${{ hashFiles('magicblock-validator/Cargo.lock') }}"
-          rust_toolchain_release: ${{ env.RUST_TOOLCHAIN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install lld linker
@@ -66,14 +41,12 @@ jobs:
 
       - name: Build validator release binary
         run: |
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld -C target-cpu=native" \
             cargo build --release --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
         shell: bash
         working-directory: magicblock-validator
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
 
       - name: Build committor program
         run: |
@@ -114,15 +87,14 @@ jobs:
           persist-credentials: false
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          solana_version: ${{ env.SOLANA_VERSION }}
+        id: agave
 
       - name: Restore redsuite build
         id: redsuite-cache
         uses: actions/cache@v4
         with:
           path: redsuite-dist
-          key: redsuite-bin-${{ env.REDSUITE_REV }}-rust${{ env.RUST_TOOLCHAIN }}-solana${{ env.SOLANA_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+          key: redsuite-bin-${{ env.REDSUITE_REV }}-agave${{ steps.agave.outputs.agave_version }}-${{ runner.os }}-${{ runner.arch }}
 
       - name: Checkout redsuite
         if: steps.redsuite-cache.outputs.cache-hit != 'true'
@@ -137,8 +109,9 @@ jobs:
         if: steps.redsuite-cache.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
-          cargo build --release --locked -p redsuite
+          rustup toolchain install
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
+            cargo build --release --locked -p redsuite
           cargo xtask programs
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/
@@ -232,84 +205,3 @@ jobs:
         shell: bash
         env:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
-
-      - name: Comment PR with brief compare
-        if: github.event_name != 'push' && steps.baseline.outcome == 'success' && github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          marker='<!-- redsuite-compare -->'
-          compare_output="$(./redsuite-dist/redsuite report compare --brief)"
-          body="$(printf '%s\n## redsuite: PR vs %s\n_Single-run diff on shared runners — indicative only; statistical verdicts come from Bencher thresholds._\n```\n%s\n```\n' "$marker" "$BASE_REF" "$compare_output")"
-          comment_id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq '.[] | select(.body | startswith("<!-- redsuite-compare -->")) | .id' | head -n1)
-          if [ -n "$comment_id" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$comment_id" -f body="$body" >/dev/null
-          else
-            gh api -X POST "repos/$REPO/issues/$PR/comments" -f body="$body" >/dev/null
-          fi
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-
-      - name: Export Bencher Metric Format
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
-        shell: bash
-
-      - uses: bencherdev/bencher@v0.6.10
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-
-      - name: Track results with Bencher
-        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        run: |
-          set -euo pipefail
-          if [ -z "${BENCHER_API_KEY:-}" ]; then
-            echo "BENCHER_API_KEY not set — skipping Bencher tracking"
-            exit 0
-          fi
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            bencher run \
-              --project "$BENCHER_PROJECT" \
-              --key "$BENCHER_API_KEY" \
-              --branch "$GITHUB_REF_NAME" \
-              --testbed blacksmith-8vcpu-ubuntu-2404 \
-              --threshold-measure latency \
-              --threshold-test t_test \
-              --threshold-min-sample-size 4 \
-              --threshold-max-sample-size 30 \
-              --threshold-lower-boundary _ \
-              --threshold-upper-boundary 0.99 \
-              --threshold-measure throughput \
-              --threshold-test t_test \
-              --threshold-min-sample-size 4 \
-              --threshold-max-sample-size 30 \
-              --threshold-lower-boundary 0.99 \
-              --threshold-upper-boundary _ \
-              --thresholds-reset \
-              --adapter json \
-              --file redsuite-bmf.json
-          else
-            bencher run \
-              --project "$BENCHER_PROJECT" \
-              --key "$BENCHER_API_KEY" \
-              --branch "$HEAD_REF" \
-              --start-point "$BASE_REF" \
-              --start-point-hash "$BASE_SHA" \
-              --start-point-clone-thresholds \
-              --start-point-reset \
-              --testbed blacksmith-8vcpu-ubuntu-2404 \
-              --adapter json \
-              --github-actions "$GH_TOKEN" \
-              --file redsuite-bmf.json
-          fi
-        shell: bash
-        env:
-          BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

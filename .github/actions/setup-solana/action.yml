@@ -3,13 +3,33 @@ description: 'Install Solana Test Validator and ensure it works'
 
 inputs:
   solana_version:
-    description: 'Anza Solana release version to install'
+    description: 'Agave release version override'
     required: false
-    default: 'v4.0.3'
+
+outputs:
+  agave_version:
+    description: 'Agave release version used by this action'
+    value: ${{ steps.version.outputs.agave_version }}
 
 runs:
   using: "composite"
   steps:
+      - name: Resolve Agave version
+        id: version
+        shell: bash
+        env:
+          REQUESTED_VERSION: ${{ inputs.solana_version }}
+        run: |
+          version="$REQUESTED_VERSION"
+          if [ -z "$version" ]; then
+            version="$(tr -d '[:space:]' < "$GITHUB_ACTION_PATH/agave-version")"
+          fi
+          if [ -z "$version" ]; then
+            echo "Unable to resolve the Agave version" >&2
+            exit 1
+          fi
+          echo "agave_version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Cache Solana CLI install
         id: cache-solana
         uses: actions/cache@v4
@@ -19,7 +39,7 @@ runs:
           # caches separate — the build job and matrix shards may run on
           # different runner labels with different architectures.
           path: ~/.local/share/solana
-          key: solana-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ inputs.solana_version }}
+          key: solana-cli-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.agave_version }}
 
       # Platform-tools (the BPF toolchain) is downloaded by `cargo build-sbf`
       # into ~/.cache/solana/<tools-version>/ on first use. Cache it so we
@@ -28,13 +48,13 @@ runs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/solana
-          key: solana-platform-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ inputs.solana_version }}
+          key: solana-platform-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.agave_version }}
 
       - name: Install Solana Test Validator
         if: steps.cache-solana.outputs.cache-hit != 'true'
         shell: "bash"
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana_version }}/install)"
+          sh -c "$(curl -sSfL https://release.anza.xyz/${{ steps.version.outputs.agave_version }}/install)"
 
       - name: Add Solana to PATH
         shell: "bash"
@@ -49,8 +69,7 @@ runs:
           # failing the workflow.
           if ! command -v solana-test-validator >/dev/null 2>&1; then
             echo "solana-test-validator not found after cache restore; reinstalling"
-            sh -c "$(curl -sSfL https://release.anza.xyz/${{ inputs.solana_version }}/install)"
+            sh -c "$(curl -sSfL https://release.anza.xyz/${{ steps.version.outputs.agave_version }}/install)"
             export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
           fi
           solana-test-validator --version
-

@@ -23,8 +23,8 @@ index-size = 2048576
 max-snapshots = 7
 
 [ledger]
-reset = true
 block-time = "50ms"
+reset = true
 
 [[programs]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
@@ -34,13 +34,13 @@ path = "../schedulecommit/elfs/dlp.so"
 id = "ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq"
 path = "../../target/deploy/magicblock_committor_program.so"
 
-[[programs]]
-id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
-path = "../target/deploy/program_flexi_counter.so"
-
 [metrics]
 address = "0.0.0.0:9000"
 
 [[programs]]
 id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
 path = "../schedulecommit/elfs/noop.so"
+
+[[programs]]
+id = "V42CaLcu1atormagicb1ock11111111111111111111"
+path = "../target/deploy/v42_calculator_program.so"

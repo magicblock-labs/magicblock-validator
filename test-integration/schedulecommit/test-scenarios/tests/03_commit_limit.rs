@@ -1,6 +1,6 @@
 use std::sync::OnceLock;
 
-use integration_test_tools::run_test;
+use integration_test_tools::{init_logger, run_test};
 use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
@@ -24,7 +24,6 @@ use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Signer,
     transaction::Transaction,
 };
-use test_kit::init_logger;
 use tracing::*;
 use utils::{
     assert_account_was_undelegated_on_chain, assert_committee_was_committed,

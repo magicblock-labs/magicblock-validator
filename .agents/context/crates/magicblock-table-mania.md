@@ -47,14 +47,12 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `magicblock-table-mania/src/error.rs` | `TableManiaError`, `TableManiaResult`, signature extraction, and invalid-instruction-data classification used by extension fallback. |
 | `magicblock-committor-service/src/committor_processor.rs` | Constructs one `TableMania` with `GarbageCollectorConfig::default()` for the committor processor. |
 | `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` | Main runtime consumer. Reserves lookup-table pubkeys, fetches finalized ALT accounts, and releases pubkeys during cleanup. |
-| `test-integration/test-table-mania/` | Integration tests for create/extend/deactivate/close, reserve, release, ensure, and table-discovery behavior. |
 | `magicblock-metrics/src/metrics/mod.rs` | Defines metrics emitted by TableMania local instrumentation. |
 
 Main consumers:
 
 - `magicblock-committor-service`, especially `DeliveryPreparator`, for ALT preparation before base-layer transaction delivery;
 - `magicblock-account-cloner`, indirectly through committor errors that may carry a `TableManiaError` signature for diagnostics;
-- `test-integration/test-table-mania` and committor integration tests.
 
 ## Public API shape / Main public types and APIs
 
@@ -186,7 +184,7 @@ This crate increments local instrumentation around finalized remote-read readine
 
 ### Changing reservation, release, or concurrency behavior
 
-Start with `magicblock-table-mania/src/manager.rs` (`reserve_pubkeys`, `reserve_new_pubkeys`, `extend_table`, `release_pubkeys`) and `src/lookup_table_rc.rs` (`RefcountedPubkeys`, `reserve_pubkey`, `release_pubkey`, `has_reservations`). Then inspect `test-integration/test-table-mania/tests/ix_reserve_pubkeys.rs`, `ix_release_pubkeys.rs`, and `ix_ensure_pubkey_table.rs`.
+Start with `magicblock-table-mania/src/manager.rs` (`reserve_pubkeys`, `reserve_new_pubkeys`, `extend_table`, `release_pubkeys`) and `src/lookup_table_rc.rs` (`RefcountedPubkeys`, `reserve_pubkey`, `release_pubkey`, `has_reservations`).
 
 Check for duplicate table creation, missing releases, refcount changes for overlapping requests, and awaits while holding locks.
 
@@ -212,7 +210,6 @@ Inspect `src/derive_keypair.rs`, `LookupTableRc::derive_keypair`, `create_new_ta
 
 - Markdown-only guide changes: run `git diff --check` for this file; no Rust checks are needed.
 - Rust changes in this crate: use `.agents/rules/testing-and-validation.md` or `mbv-check`; include focused package checks for `magicblock-table-mania`.
-- Relevant integration suites: TableMania lifecycle/reservation tests, the long close/deactivation path when close behavior changes, and committor preparator tests for settlement-path changes; use `.agents/rules/testing-and-validation.md` for exact setup/test commands.
 - Performance validation intent: report whether settlement-preparation behavior was measured or only reasoned about, especially for reservation, remote readiness, compute budgets, RPC behavior, and lock contention.
 
 
@@ -222,4 +219,3 @@ Inspect `src/derive_keypair.rs`, `LookupTableRc::derive_keypair`, `create_new_ta
 - Consult `.agents/context/crates/magicblock-committor-service.md` when changing the main runtime ALT preparation and cleanup consumer.
 - Inspect `magicblock-committor-service/src/transaction_preparator/delivery_preparator.rs` to understand the main runtime call site.
 - Refer to `magicblock-metrics/src/metrics/mod.rs` for local metric definitions emitted by this crate.
-- Use `test-integration/test-table-mania/` to review integration coverage of table lifecycle and reservation behavior.

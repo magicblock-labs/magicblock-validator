@@ -2,14 +2,13 @@ DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 TUI_RPC_URL ?= http://127.0.0.1:7799
 TUI_WS_URL ?= ws://127.0.0.1:7800
 
-CARGO_TEST=nextest run --no-fail-fast -j8
+CARGO_TEST=nextest run --no-fail-fast
 CARGO_TEST_NOCAP=nextest run --nocapture
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test --no-fail-fast))
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test --no-fail-fast -- --nocapture))
 
 test:
-	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \
-	$(MAKE) -C $(DIR)/test-integration test
+	RUST_BACKTRACE=1 cargo $(CARGO_TEST)
 
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
@@ -30,21 +29,18 @@ ex-rpc-release:
 	cargo run --release --package=magicblock-rpc --example rpc
 
 run-release:
-	cargo run --release
+	cargo run --release -p magicblock-validator
 
 run-tui:
-	cargo run --features tui --bin magicblock-validator
+	cargo run -p magicblock-validator-tui -- --rpc-url $(TUI_RPC_URL) --ws-url $(TUI_WS_URL)
 
 run-release-no-geyser-cache:
 	GEYSER_CACHE_DISABLE=accounts,transactions \
-	cargo run --release
+	cargo run --release -p magicblock-validator
 
 run-release-no-geyser:
 	GEYSER_DISABLE=accounts,transactions \
-	cargo run --release
-
-update-sysvars:
-	$(DIR)/test-integration/sysvars/sh/update
+	cargo run --release -p magicblock-validator
 
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
@@ -57,7 +53,7 @@ ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
 
 ci-test-integration:
-	RUN_TESTS=$(RUN_TESTS) $(MAKE) -C $(DIR)/test-integration test
+	$(MAKE) -C test-integration ci-test
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.
@@ -68,8 +64,11 @@ ci-test-integration:
 #  are more strict than the non-nightly ones.
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
+	$(MAKE) -C test-integration ci-fmt
 
-ci-lint: lint
+ci-lint:
+	cargo clippy --all-targets -- -D warnings
+	$(MAKE) -C test-integration ci-lint
 
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml
@@ -78,10 +77,10 @@ ci-lint: lint
 # rustflags = ["--cfg", "tokio_unstable"]
 # ```
 tokio-console:
-	RUSTFLAGS="--cfg tokio_unstable" cargo run --release --features=tokio-console
+	RUSTFLAGS="--cfg tokio_unstable" cargo run --release -p magicblock-validator --features=tokio-console
 
 tui-client:
-	cargo run -p magicblock-tui-client -- --rpc-url $(TUI_RPC_URL) --ws-url $(TUI_WS_URL)
+	cargo run -p magicblock-validator-tui -- --rpc-url $(TUI_RPC_URL) --ws-url $(TUI_WS_URL)
 
 .PHONY:
 	list test test-log test-bank fmt lint ex-clone-custom ex-rpc ex-rpc-release tokio-console tui-client run-tui

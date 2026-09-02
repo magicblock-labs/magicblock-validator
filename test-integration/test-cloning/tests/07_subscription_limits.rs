@@ -1,11 +1,10 @@
 use std::{sync::Arc, time::Duration};
 
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{init_logger, IntegrationTestContext};
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, rent::Rent, signature::Keypair,
     signer::Signer,
 };
-use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;
 

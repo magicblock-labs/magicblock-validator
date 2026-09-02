@@ -1,140 +1,42 @@
-language: en-US
-tone_instructions: ''
-early_access: true
-enable_free_tier: true
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+
 reviews:
-  # Review style + summary placement
-  profile: assertive
-  high_level_summary_placeholder: "<!-- coderabbit-summary -->"
-  review_status: true
-  collapse_walkthrough: true
-
-  # Noise reduction (these default to true; we explicitly turn them off)
-  changed_files_summary: false
-  sequence_diagrams: false
-  estimate_code_review_effort: false
-  related_issues: false
-  related_prs: false
-  suggested_labels: false
-  labeling_instructions: []
-  auto_apply_labels: false
-  suggested_reviewers: true
-  auto_assign_reviewers: false
-  in_progress_fortune: false
+  profile: "chill"
+  high_level_summary: false
+  review_status: false
+  review_details: false
   poem: false
-  enable_prompt_for_ai_agents: true
+  request_changes_workflow: true
 
-  # Auto-review behavior
+  
+  
   auto_review:
-    enabled: true
+    enabled: true               
     drafts: true
+    base_branches:
+      - ".*"
     auto_incremental_review: true
-    base_branches: [".*"]
 
-  # Don’t auto-generate docstrings/tests (reduce chatter)
-  finishing_touches:
-    docstrings:
-      enabled: false
-    unit_tests:
-      enabled: true
-  pre_merge_checks:
-    docstrings:
-      mode: off
-    title:
-      mode: off
-    description:
-      mode: off
-    issue_assessment:
-      mode: off
+  # Never pause after repeated pushes.
+  auto_pause_after_reviewed_commits: 0
 
-  # Lightweight, high-signal tools for this repo
-  tools:
-    # Audited languages: Rust, Shell, TypeScript/JavaScript, Protobuf, Markdown, YAML, TOML, Makefile.
-    ast-grep:
-      rule_dirs: []
-      util_dirs: []
-      essential_rules: true
-      packages: []
-    shellcheck:
-      enabled: true
-    markdownlint:
-      enabled: true
-    github-checks:
-      enabled: false
-      timeout_ms: 90000
-    languagetool:
-      enabled: true
-      enabled_rules: []
-      disabled_rules: []
-      enabled_categories: []
-      disabled_categories: []
-      enabled_only: false
-      level: default
-    biome:
-      enabled: true
-    yamllint:
-      enabled: true
-    gitleaks:
-      enabled: true
-    eslint:
-      enabled: true
-    buf:
-      enabled: true
-    actionlint:
-      enabled: true
-    semgrep:
-      enabled: true
-    clippy:
-      enabled: true
-    oxc:
-      enabled: true
-    dotenvLint:
-      enabled: true
-    checkmake:
-      enabled: true
-    osvScanner:
-      enabled: true
   path_instructions:
-    - path: "{magicblock-*,programs,storage-proto}/**"
+    - path: "**/*.rs"
       instructions: |
-        Treat any usage of `.unwrap()` or `.expect()` in production Rust code as a MAJOR issue.
-        These should not be categorized as trivial or nit-level concerns.
-        Request proper error handling or explicit justification with invariants.
-    - path: "{test-*,tools}/**"
-      instructions: Usage of `.unwrap()` or `.expect()` in test code is acceptable and may be treated as trivial.
-chat:
-  # We leave emoji/ASCII art, but no auto-replies
-  art: true
-  auto_reply: false
+        Review only when there is a meaningful issue in one of these buckets:
+        1. Critical security issues.
+        2. Critical correctness issues.
+        3. Maintenance issues that materially increase long-term complexity, duplication, or unnecessary abstraction. Focus on clear DRY/YAGNI violations only.
+        4. Typos in identifiers, comments, or user-facing strings.
+        5. Documentation inconsistencies between code, comments, examples, and public behavior.
 
-knowledge_base:
-  # Avoid web-search commentary in reviews
-  web_search:
-    enabled: false
-  code_guidelines:
-    enabled: true
-    filePatterns: []
-  learnings:
-    scope: auto
-  issues:
-    scope: auto
-  jira:
-    usage: auto
-    project_keys: []
-  linear:
-    usage: auto
-    team_keys: []
-  pull_requests:
-    scope: auto
-  mcp:
-    usage: auto
-    disabled_servers: []
-code_generation:
-  docstrings:
-    language: en-US
-    path_instructions: []
-  unit_tests:
-    path_instructions: []
-issue_enrichment:
-  planning:
-    enabled: true
+        For Rust workspace code:
+        - Prioritize ownership, borrowing, lifetimes, unsafe usage, panic paths, concurrency, and API contract correctness.
+        - Do not suggest changes unless the issue is concrete and actionable.
+
+    - path: "{**/*.md,**/*.rs}"
+      instructions: |
+        Check docs and rustdoc for factual consistency with the code.
+        Flag only real mismatches, broken examples, stale comments, or important omissions.

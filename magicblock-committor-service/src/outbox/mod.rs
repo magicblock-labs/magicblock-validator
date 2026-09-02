@@ -8,7 +8,7 @@ use solana_transaction::Transaction;
 
 use crate::{
     intent_executor::{
-        error::IntentExecutorResult, ExecutionOutput, IntentExecutionReport,
+        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
     },
     outbox::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
 };
