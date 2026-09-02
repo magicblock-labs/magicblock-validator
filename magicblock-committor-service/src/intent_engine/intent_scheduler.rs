@@ -172,16 +172,13 @@ impl IntentScheduler {
         if self.blocked_intents.contains_key(&intent_id) {
             true
         } else {
-            let duplicate_executing =
-                self.blocked_keys.iter().any(|(_, queue)| {
-                    if let Some(executing_id) = queue.front() {
-                        &intent_id == executing_id
-                    } else {
-                        false
-                    }
-                });
-
-            duplicate_executing
+            self.blocked_keys.iter().any(|(_, queue)| {
+                if let Some(executing_id) = queue.front() {
+                    &intent_id == executing_id
+                } else {
+                    false
+                }
+            })
         }
     }
 

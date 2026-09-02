@@ -363,11 +363,11 @@ where
         broadcasted_result: BroadcastedIntentExecutionResult,
         result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
-        if result_sender.receiver_count() != 0 {
-            if let Err(err) = result_sender.send(broadcasted_result) {
-                warn!(error = ?err, "No result listeners");
-            }
-        }
+        if result_sender.receiver_count() != 0
+            && let Err(err) = result_sender.send(broadcasted_result)
+        {
+            warn!(error = ?err, "No result listeners");
+        };
     }
 
     fn report_poisoned_intents(
