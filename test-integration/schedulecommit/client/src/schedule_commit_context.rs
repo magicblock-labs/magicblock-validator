@@ -12,8 +12,6 @@ use solana_commitment_config::CommitmentConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-#[allow(unused_imports)]
-use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
     hash::Hash,
     native_token::LAMPORTS_PER_SOL,
@@ -85,7 +83,7 @@ impl ScheduleCommitTestContext {
         let payer_chain = if random_keys {
             Keypair::new()
         } else {
-            Keypair::from_seed(&[0u8; 32]).unwrap()
+            Keypair::new_from_array([0u8; 32])
         };
         let lamports = LAMPORTS_PER_SOL * 10;
         let payer_chain_airdrop_sig =
@@ -106,7 +104,7 @@ impl ScheduleCommitTestContext {
                 let payer_ephem = if random_keys {
                     Keypair::new()
                 } else {
-                    Keypair::from_seed(&[_idx as u8 + 100; 32]).unwrap()
+                    Keypair::new_from_array([_idx as u8 + 100; 32])
                 };
                 ictx.airdrop_chain_and_delegate(
                     &payer_chain,
@@ -270,13 +268,18 @@ impl ScheduleCommitTestContext {
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
-        let ixs = init_payer_escrow(self.payer_ephem.pubkey());
+        let ixs = init_payer_escrow(
+            self.payer_chain.pubkey(),
+            self.payer_ephem.pubkey(),
+        );
 
-        // The init tx for all payers is funded by the first payer for simplicity
+        // The ephemeral payer is already delegated on L1, so it cannot pay the
+        // transaction fee. It still signs the escrow instructions, while the
+        // system-owned chain payer funds the transaction.
         let tx = Transaction::new_signed_with_payer(
             &ixs,
-            Some(&self.payer_ephem.pubkey()),
-            &[&self.payer_ephem],
+            Some(&self.payer_chain.pubkey()),
+            &[&self.payer_chain, &self.payer_ephem],
             self.try_chain_blockhash()?,
         );
         self.try_chain_client()?

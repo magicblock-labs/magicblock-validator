@@ -1,8 +1,8 @@
 use std::{
     collections::HashSet,
     sync::{
-        atomic::{AtomicU16, AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU16, AtomicU64, Ordering},
     },
 };
 
@@ -14,11 +14,11 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use crate::remote_account_provider::{
+    ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
+    RemoteAccountProviderError, RemoteAccountProviderResult,
     chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
     chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
-    pubsub_common::SubscriptionUpdate, ChainPubsubClient,
-    ChainPubsubClientImpl, Endpoint, PubsubTransport, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
+    pubsub_common::SubscriptionUpdate,
 };
 
 #[derive(Clone)]
@@ -43,7 +43,11 @@ impl ChainUpdatesClient {
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
 
         match endpoint {
-            WebSocket { url, label } => {
+            WebSocket {
+                url,
+                label,
+                subs_per_connection,
+            } => {
                 debug!(url = %url, "Initializing WebSocket client");
                 let client_id = format!(
                     "ws:{label}-{}",
@@ -56,7 +60,7 @@ impl ChainUpdatesClient {
                         abort_sender,
                         commitment,
                         resubscription_delay,
-                        ws_subs_per_connection,
+                        (*subs_per_connection).or(ws_subs_per_connection),
                     )
                     .await?,
                 ))
@@ -170,14 +174,6 @@ impl ChainPubsubClient for ChainUpdatesClient {
         match self {
             WebSocket(client) => client.id(),
             Laser(client) => client.id(),
-        }
-    }
-
-    fn transport(&self) -> PubsubTransport {
-        use ChainUpdatesClient::*;
-        match self {
-            WebSocket(client) => client.transport(),
-            Laser(client) => client.transport(),
         }
     }
 }

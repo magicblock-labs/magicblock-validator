@@ -4,7 +4,7 @@ use solana_keypair::Keypair;
 use crate::{
     tasks::task_strategist::TransactionStrategy,
     transaction_preparator::{
-        delivery_preparator::BufferExecutionError, TransactionPreparator,
+        TransactionPreparator, delivery_preparator::BufferExecutionError,
     },
 };
 

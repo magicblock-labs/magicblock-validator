@@ -2,13 +2,14 @@ use std::{ops::ControlFlow, time::Duration};
 
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    utils::{
-        decide_rpc_error_flow, get_with_retries, map_magicblock_client_error,
-        send_transaction_with_retries, SendErrorMapper, TransactionErrorMapper,
-    },
     MagicBlockRpcClientError, MagicBlockRpcClientResult,
     MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,
+    utils::{
+        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
+        get_with_retries, map_magicblock_client_error,
+        send_transaction_with_retries,
+    },
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_hash::Hash;
@@ -22,11 +23,11 @@ use tracing::warn;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput,
         error::{IntentExecutorResult, InternalError},
         strategy_executor::error::{
             IntentTransactionErrorMapper, TransactionStrategyExecutionError,
         },
-        ExecutionOutput,
     },
     tasks::BaseTaskImpl,
 };
@@ -109,14 +110,15 @@ impl IntentExecutionClient {
         Ok(())
     }
 
-    /// Queries the full transaction history for the given signatures.
+    /// Queries the full transaction history for the given signatures and
+    /// filters each result down to `commitment_config`.
     /// Each entry is `None` if the signature was never included in a block,
     /// or if it landed but hasn't yet reached the configured commitment
     /// level - callers must not treat such an entry as final, since a
     /// merely-processed transaction can still be dropped by a fork.
     /// Use this for restart recovery where txs may be older than the RPC
     /// node's recent signature cache.
-    pub(in crate::intent_executor) async fn get_signature_statuses_with_history(
+    pub(in crate::intent_executor) async fn get_signature_statuses_with_history_at_commitment(
         &self,
         signatures: &[Signature],
         commitment_config: CommitmentConfig,
@@ -185,6 +187,11 @@ impl IntentExecutionClient {
             VersionedMessage::Legacy(value) => {
                 warn!("Legacy message not expected");
                 value.recent_blockhash = latest_blockhash;
+            }
+            VersionedMessage::V1(value) => {
+                warn!("V1 message not expected");
+                // V1 renames the blockhash to the lifetime specifier.
+                value.lifetime_specifier = latest_blockhash;
             }
         };
 

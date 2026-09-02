@@ -1,7 +1,7 @@
 mod common;
 use common::*;
 use integration_test_tools::{
-    conversions::stringify_simulation_result,
+    conversions::stringify_simulation_result, init_logger,
     loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use program_flexi_counter::{
@@ -17,7 +17,6 @@ use solana_sdk::{
     pubkey::Pubkey, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
-use test_kit::init_logger;
 use tracing::*;
 
 #[test]

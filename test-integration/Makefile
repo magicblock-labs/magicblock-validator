@@ -1,4 +1,4 @@
-# Makefile for building and testing Solana programs and test suitesk
+# Makefile for building and testing Solana programs and test suites
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
 ROOT_DEPLOY_DIR := $(DIR)../target/deploy
@@ -34,10 +34,9 @@ list-programs:
 
 programs: $(PROGRAMS_SO)
 
+ci-test: test
+
 test: $(PROGRAMS_SO)
-	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning),'; then \
-		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
-	fi && \
 	if [ -n "$(INTEGRATION_TEST_RUNNER_BIN)" ] && [ -x "$(INTEGRATION_TEST_RUNNER_BIN)" ]; then \
 		RUST_BACKTRACE=1 \
 		RUST_LOG=$(RUST_LOG) \
@@ -82,14 +81,6 @@ setup-schedulecommit-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-chainlink:
-	RUN_TESTS=chainlink \
-	$(MAKE) test
-setup-chainlink-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=chainlink \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
 test-cloning:
 	RUN_TESTS=cloning \
 	$(MAKE) test
@@ -109,31 +100,23 @@ setup-cloning-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-restore-ledger:
-	RUN_TESTS=restore_ledger \
-	$(MAKE) test
-setup-restore-ledger-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=restore_ledger \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
 
-test-magicblock-api:
-	RUN_TESTS=magicblock_api \
+test-validator-services:
+	RUN_TESTS=validator_services \
 	$(MAKE) test
-setup-magicblock-api-devnet:
+setup-validator-services-devnet:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
-setup-magicblock-api-ephem:
+setup-validator-services-ephem:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=ephem \
 	$(MAKE) test
-setup-magicblock-api-both:
+setup-validator-services-both:
 	RUST_LOG_STYLE=none \
-	RUN_TESTS=magicblock_api \
+	RUN_TESTS=validator_services \
 	SETUP_ONLY=both \
 	$(MAKE) test
 
@@ -186,25 +169,6 @@ setup-committor-devnet:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=$(COMMITTOR_TESTS) \
 	SETUP_ONLY=devnet \
-	$(MAKE) test
-
-test-pubsub:
-	RUN_TESTS=pubsub \
-	$(MAKE) test
-setup-pubsub-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-setup-pubsub-ephem:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=ephem \
-	$(MAKE) test
-setup-pubsub-both:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=pubsub \
-	SETUP_ONLY=both \
 	$(MAKE) test
 
 test-config:
@@ -272,9 +236,11 @@ lint:
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
 
-ci-lint: lint
+ci-lint:
+	cargo clippy --workspace --all-targets --locked -- -D warnings
 
 .PHONY: \
+	ci-test \
 	ci-fmt \
 	lint \
 	ci-lint \
@@ -284,19 +250,14 @@ ci-lint: lint
 	list-programs \
 	programs \
 	setup-aml-devnet \
-	setup-chainlink-devnet \
 	setup-cloning-both \
 	setup-cloning-devnet \
 	setup-cloning-ephem \
 	setup-committor-devnet \
 	setup-config-devnet \
-	setup-magicblock-api-both \
-	setup-magicblock-api-devnet \
-	setup-magicblock-api-ephem \
-	setup-pubsub-both \
-	setup-pubsub-devnet \
-	setup-pubsub-ephem \
-	setup-restore-ledger-devnet \
+	setup-validator-services-both \
+	setup-validator-services-devnet \
+	setup-validator-services-ephem \
 	setup-schedule-intents-both \
 	setup-schedule-intents-devnet \
 	setup-schedule-intents-ephem \
@@ -307,7 +268,6 @@ ci-lint: lint
 	setup-task-scheduler-devnet \
 	test \
 	test-aml \
-	test-chainlink \
 	test-cloning \
 	test-committor \
 	test-committor-ix-singles \
@@ -321,10 +281,8 @@ ci-lint: lint
 	test-committor-intent-executor \
 	test-config \
 	test-force-mb \
-	test-magicblock-api \
-	test-pubsub \
-	test-restore-ledger \
 	test-schedule-intents \
 	test-schedulecommit \
 	test-table-mania \
-	test-task-scheduler
+	test-task-scheduler \
+	test-validator-services

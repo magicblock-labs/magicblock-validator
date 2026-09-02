@@ -1,0 +1,25 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "magicblock-runtime"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+keeper = { workspace = true }
+magicblock-config = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
+magicblock-program = { workspace = true }
+solana-account = { workspace = true }
+solana-native-token = { workspace = true }
+solana-program-option = { workspace = true }
+solana-program-pack = { workspace = true }
+solana-program-runtime = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rent = { workspace = true }
+solana-sdk-ids = { workspace = true }
+spl-token = { workspace = true }
+thiserror = { workspace = true }
+v42-calculator-interface = { workspace = true }

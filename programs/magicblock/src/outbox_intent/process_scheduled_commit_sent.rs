@@ -4,8 +4,8 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use magicblock_core::{coordination_mode, intent::outbox::outbox_intent_pda};
-use magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID;
+use magicblock_core::intent::outbox::verify_outbox_intent_pda;
+use solana_account::ReadableAccount;
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
@@ -16,8 +16,11 @@ use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx,
-    validator::effective_validator_authority_id,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    },
+    validator::authority,
 };
 
 /// Error code returned when an intent execution failed.
@@ -117,16 +120,10 @@ pub fn process_scheduled_commit_sent(
     invoke_context: &mut InvokeContext,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    let mode = coordination_mode::CoordinationMode::current();
-    if !mode.should_schedule_intents() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommitSent: skipped (mode={:?})",
-            mode
-        );
-        return Ok(());
-    }
-
+    // No replica gating here: on a replica this will fail (the commit was
+    // never registered in its local SENT_COMMITS map), but that's fine since
+    // this instruction only clears bookkeeping state, not AccountsDB - it has
+    // no effect on the replicated account state a replica needs to converge on.
     validate(&signers, invoke_context, intent_id)?;
 
     // Only after we passed all checks do we remove the commit from the global hashmap
@@ -171,9 +168,7 @@ fn validate(
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     const VALIDATOR_IDX: u16 = 0;
-    const ESP_IDX: u16 = VALIDATOR_IDX + 1;
-    const MAGIC_VAULT_IDX: u16 = ESP_IDX + 1;
-    const CLOSING_PDA_IDX: u16 = MAGIC_VAULT_IDX + 1;
+    const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -192,28 +187,15 @@ fn validate(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = effective_validator_authority_id();
+    let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: provided validator account {} does not match validator identity {}",
-            validator_pubkey, validator_authority_id
+            validator_pubkey,
+            validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
-    }
-
-    // Assert ephemeral system program account (CPI target for the close)
-    let esp_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, ESP_IDX)?;
-    if *esp_pubkey != EPHEMERAL_SYSTEM_PROGRAM_ID {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected ephemeral system program {}",
-            ESP_IDX,
-            esp_pubkey,
-            EPHEMERAL_SYSTEM_PROGRAM_ID
-        );
-        return Err(InstructionError::IncorrectProgramId);
     }
 
     // Assert signers
@@ -225,17 +207,31 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
+    // Deserialize first so the PDA can be validated cheaply against its
+    // own stored bump, instead of re-deriving via find_program_address.
+    let intent_acc =
+        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(
+        intent_acc.borrow()?.data(),
+    )
+    .map_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent ERR: failed to deserialize outbox intent {}",
+            intent_id
+        );
+        InstructionError::InvalidAccountData
+    })?;
+
     // Validate outbox intent PDA
     let provided_pda =
         get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(intent_id);
-    if *provided_pda != expected_pda {
+    if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected PDA {} for intent {}",
+            "ScheduleCommitSent ERR: account at idx {} is {}, invalid PDA for intent {}",
             CLOSING_PDA_IDX,
             provided_pda,
-            expected_pda,
             intent_id
         );
         return Err(InstructionError::InvalidArgument);
@@ -309,18 +305,21 @@ fn log_sent_commit(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_magic_program_api::{
-        EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    use magicblock_core::intent::{
+        MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
     };
-    use solana_account::AccountSharedData;
-    use solana_instruction::{error::InstructionError, Instruction};
+    use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+    use solana_account::{AccountMode, AccountSharedData};
+    use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
-    use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
+    use solana_sdk_ids::system_program;
     use solana_signer::Signer;
+    use solana_transaction::Transaction;
 
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
+        magic_scheduled_base_intent::ScheduledIntentBundle,
         test_utils::{
             ensure_started_validator, process_outbox_intent_instruction,
         },
@@ -430,55 +429,29 @@ mod tests {
     }
 
     #[test]
-    fn test_registered_but_invalid_program() {
-        let commit = setup_registered_commit();
-
-        let fake_program = Keypair::new();
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                fake_program.pubkey(),
-                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
-            );
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
-            commit.message_id,
-        );
-        ix.accounts[1].pubkey = fake_program.pubkey();
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
-
-        process_outbox_intent_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::IncorrectProgramId),
-        );
-
-        assert!(
-            get_scheduled_commit(commit.message_id).is_some(),
-            "does not remove scheduled commit data"
-        );
-    }
-
-    #[test]
     fn test_registered_all_checks_out() {
         let commit = setup_registered_commit();
 
-        let pda = outbox_intent_pda(commit.message_id);
+        let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
+        let bundle = OutboxIntentBundle::accepted(
+            ScheduledIntentBundle {
+                id: commit.message_id,
+                slot: 0,
+                blockhash: Hash::default(),
+                sent_transaction: Transaction::default(),
+                payer: Pubkey::new_unique(),
+                intent_bundle: MagicIntentBundle::default(),
+            },
+            bump,
+        );
+        let data = bundle.try_to_bytes().unwrap();
         let mut pda_account =
-            AccountSharedData::new(0, 0, &OUTBOX_INTENT_PROGRAM_ID);
-        pda_account.set_ephemeral(true);
+            AccountSharedData::new(0, data.len(), &OUTBOX_INTENT_PROGRAM_ID);
+        pda_account.set_data_from_slice(&data);
+        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut account_data = {
             let mut map = HashMap::new();
-            // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
-            let mut vault = AccountSharedData::new(10_000, 0, &crate::id());
-            vault.set_ephemeral(true);
-            map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
             // Add outbox PDA as existing ephemeral account (created by accept)
             map.insert(pda, pda_account);
             map

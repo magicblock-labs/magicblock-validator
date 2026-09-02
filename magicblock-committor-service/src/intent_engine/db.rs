@@ -1,12 +1,15 @@
-use std::{cell::RefCell, collections::VecDeque, sync::Arc};
+use std::{cell::RefCell, collections::VecDeque};
 
-/// DB for storing intents that overflow committor channel
-use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
+use engine::Engine;
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
 
+/// Queues intents that overflow the in-memory execution channel, preserving
+/// FIFO order until the committor can process them. Implementations only
+/// need to track ordering (e.g. by id) - the intent bundle itself already
+/// lives durably in the outbox account on-chain.
 pub trait BacklogDB: Send + 'static {
     fn store_intent_bundle(
         &self,
@@ -22,21 +25,21 @@ pub trait BacklogDB: Send + 'static {
     fn is_empty(&self) -> bool;
 }
 
-pub struct DummyIntentBacklog {
-    accounts_db: Arc<AccountsDb>,
+pub struct AccountsDbIntentBacklog {
+    engine: Engine,
     queue: RefCell<VecDeque<u64>>,
 }
 
-impl DummyIntentBacklog {
-    pub fn new(accounts_db: Arc<AccountsDb>) -> Self {
+impl AccountsDbIntentBacklog {
+    pub fn new(engine: Engine) -> Self {
         Self {
-            accounts_db,
+            engine,
             queue: RefCell::new(VecDeque::new()),
         }
     }
 }
 
-impl BacklogDB for DummyIntentBacklog {
+impl BacklogDB for AccountsDbIntentBacklog {
     fn store_intent_bundle(
         &self,
         intent_bundle: OutboxIntentBundle,
@@ -69,8 +72,10 @@ impl BacklogDB for DummyIntentBacklog {
 
         let intent_pda = outbox_intent_pda(id);
         let account = self
-            .accounts_db
-            .get_account(&intent_pda)
+            .engine
+            .accounts()
+            .loader()
+            .load(&intent_pda)?
             .ok_or(Error::IntentNotFoundError(id))?;
 
         let outbox_intent = OutboxIntentBundle::try_from_bytes(account.data())?;
@@ -135,7 +140,9 @@ pub enum Error {
     #[error("Failed to find intent in AccountsDB, id: {0}")]
     IntentNotFoundError(u64),
     #[error("Failed to deserialize Outbox Account")]
-    DeserializeError(#[from] bincode::Error),
+    DeserializeError(#[from] wincode::ReadError),
+    #[error("AccountsDbError: {0}")]
+    AccountsDbError(#[from] accountsdb::AccountsDBError),
 }
 
 pub type DBResult<T, E = Error> = Result<T, E>;

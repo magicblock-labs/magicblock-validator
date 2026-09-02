@@ -1,24 +1,24 @@
 use std::collections::HashSet;
 
 use dlp_api::DLP_PROGRAM_DATA_SIZE_CLASS;
-use magicblock_core::intent::{types::CommittedAccount, BaseAction};
+use magicblock_core::intent::{BaseAction, types::CommittedAccount};
 use solana_account::Account;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_message::{
-    v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
+    AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message,
 };
-use solana_pubkey::{pubkey, Pubkey};
+use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
 use crate::tasks::{
+    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
     commit_finalize_task::CommitFinalizeTask,
     commit_task::{CommitDelivery, CommitTask},
     task_strategist::TaskStrategistResult,
-    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
 };
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to

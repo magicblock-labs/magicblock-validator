@@ -1,18 +1,10 @@
-use std::collections::HashMap;
-
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::ScheduleTaskArgs,
-    instruction::{
-        AccountModification, AccountModificationForInstruction,
-        MagicBlockInstruction, OutboxIntentInstruction,
-        PostDelegationActionExecutorInstruction,
-    },
+    instruction::{MagicBlockInstruction, OutboxIntentInstruction},
     outbox,
     pda::crank_signer_pda,
-    CRANK_PROGRAM_ID, EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
-    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
-    POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -23,6 +15,11 @@ use solana_transaction::Transaction;
 
 use crate::validator::{validator_authority, validator_authority_id};
 
+/// Builders for the MagicBlock program instructions.
+///
+/// Most builders return bare [`Instruction`]s for the engine to compose and
+/// sign. `scheduled_commit_sent` is pre-signed while scheduling so its future
+/// signature can be returned in the scheduling transaction logs.
 pub struct InstructionUtils;
 impl InstructionUtils {
     // -----------------
@@ -49,7 +46,7 @@ impl InstructionUtils {
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new_readonly(*pubkey, true));
         }
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommit,
             account_metas,
@@ -59,18 +56,6 @@ impl InstructionUtils {
     // -----------------
     // Schedule Commit and Undelegate
     // -----------------
-    pub fn schedule_commit_and_undelegate(
-        payer: &Keypair,
-        pubkeys: Vec<Pubkey>,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            pubkeys,
-        );
-        Self::into_transaction(payer, ix, recent_blockhash)
-    }
-
     pub fn schedule_commit_and_undelegate_instruction(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
@@ -82,7 +67,7 @@ impl InstructionUtils {
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new(*pubkey, true));
         }
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommitAndUndelegate,
             account_metas,
@@ -115,7 +100,7 @@ impl InstructionUtils {
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new(*pubkey, false));
         }
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommitAndUndelegate,
             account_metas,
@@ -136,7 +121,7 @@ impl InstructionUtils {
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new_readonly(*pubkey, true));
         }
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommit,
             account_metas,
@@ -158,12 +143,10 @@ impl InstructionUtils {
         scheduled_commit_id: u64,
     ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
         ];
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             OUTBOX_INTENT_PROGRAM_ID,
             &OutboxIntentInstruction::ScheduledCommitSent(scheduled_commit_id),
             account_metas,
@@ -185,12 +168,10 @@ impl InstructionUtils {
         intent_id: u64,
     ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
+            AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             OUTBOX_INTENT_PROGRAM_ID,
             &OutboxIntentInstruction::CloseOutboxIntent(intent_id),
             account_metas,
@@ -212,11 +193,9 @@ impl InstructionUtils {
         intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
         let mut account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new_readonly(OUTBOX_INTENT_PROGRAM_ID, false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-            AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-            AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
         ];
 
         // Add outbox intent accounts
@@ -226,7 +205,7 @@ impl InstructionUtils {
             .map(|intent_pda| AccountMeta::new(intent_pda, false));
         account_metas.extend(outbox_intent_metas);
 
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::AcceptScheduleCommits,
             account_metas,
@@ -254,7 +233,7 @@ impl InstructionUtils {
             AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             OUTBOX_INTENT_PROGRAM_ID,
             &OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,
@@ -265,62 +244,32 @@ impl InstructionUtils {
     }
 
     // -----------------
-    // ModifyAccounts
+    // Utils
     // -----------------
-
-    pub fn modify_accounts_instruction(
-        account_modifications: Vec<AccountModification>,
-        message: Option<String>,
-    ) -> Instruction {
-        let mut account_metas =
-            vec![AccountMeta::new(validator_authority_id(), true)];
-        let mut account_mods: HashMap<
-            Pubkey,
-            AccountModificationForInstruction,
-        > = HashMap::new();
-        for account_modification in account_modifications {
-            account_metas
-                .push(AccountMeta::new(account_modification.pubkey, false));
-            let account_mod_for_instruction =
-                AccountModificationForInstruction {
-                    owner: account_modification.owner,
-                    delegated: account_modification.delegated,
-                    confined: account_modification.confined,
-                };
-            account_mods.insert(
-                account_modification.pubkey,
-                account_mod_for_instruction,
-            );
-        }
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::ModifyAccounts {
-                accounts: account_mods,
-                message,
-            },
-            account_metas,
+    pub(crate) fn into_transaction(
+        signer: &Keypair,
+        instruction: Instruction,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let signers = &[signer];
+        Transaction::new_signed_with_payer(
+            &[instruction],
+            Some(&signer.pubkey()),
+            signers,
+            recent_blockhash,
         )
     }
 
     // -----------------
     // Schedule Task
     // -----------------
-    pub fn schedule_task(
-        payer: &Keypair,
-        args: ScheduleTaskArgs,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::schedule_task_instruction(&payer.pubkey(), args);
-        Self::into_transaction(payer, ix, recent_blockhash)
-    }
-
     pub fn schedule_task_instruction(
         payer: &Pubkey,
         args: ScheduleTaskArgs,
     ) -> Instruction {
         let account_metas = vec![AccountMeta::new(*payer, true)];
 
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleTask(args),
             account_metas,
@@ -330,22 +279,13 @@ impl InstructionUtils {
     // -----------------
     // Cancel Task
     // -----------------
-    pub fn cancel_task(
-        authority: &Keypair,
-        task_id: i64,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::cancel_task_instruction(&authority.pubkey(), task_id);
-        Self::into_transaction(authority, ix, recent_blockhash)
-    }
-
     pub fn cancel_task_instruction(
         authority: &Pubkey,
         task_id: i64,
     ) -> Instruction {
         let account_metas = vec![AccountMeta::new(*authority, true)];
 
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::CancelTask { task_id },
             account_metas,
@@ -356,11 +296,12 @@ impl InstructionUtils {
     // Execute Crank
     // -----------------
     pub fn execute_task_instruction(
+        validator_authority: Pubkey,
         authority: Pubkey,
         instructions: Vec<Instruction>,
     ) -> Instruction {
         let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator_authority, true),
             AccountMeta::new_readonly(crank_signer_pda(&authority), false),
         ];
         for instruction in &instructions {
@@ -374,7 +315,7 @@ impl InstructionUtils {
                 }
             }));
         }
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             CRANK_PROGRAM_ID,
             &MagicBlockInstruction::ExecuteCrank {
                 authority,
@@ -384,313 +325,14 @@ impl InstructionUtils {
         )
     }
 
-    pub fn execute_task(
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let ix = Self::execute_task_instruction(authority, instructions);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
-    // -----------------
-    // Executable Check
-    // -----------------
-    pub fn disable_executable_check_instruction(
-        authority: &Pubkey,
-    ) -> Instruction {
-        let account_metas = vec![AccountMeta::new(*authority, true)];
-
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::DisableExecutableCheck,
-            account_metas,
-        )
-    }
-
-    pub fn enable_executable_check_instruction(
-        authority: &Pubkey,
-    ) -> Instruction {
-        let account_metas = vec![AccountMeta::new(*authority, true)];
-
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::EnableExecutableCheck,
-            account_metas,
-        )
-    }
-
     // -----------------
     // Noop
     // -----------------
     pub fn noop_instruction(data: u64) -> Instruction {
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::Noop(data),
             vec![],
-        )
-    }
-
-    // -----------------
-    // EvictAccount
-    // -----------------
-    pub fn evict_account_instruction(pubkey: Pubkey) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::EvictAccount { pubkey },
-            vec![
-                AccountMeta::new(validator_authority_id(), true),
-                AccountMeta::new(pubkey, false),
-            ],
-        )
-    }
-
-    // -----------------
-    // CloneAccount
-    // -----------------
-    fn append_action_accounts(
-        account_metas: &mut Vec<AccountMeta>,
-        actions: &[Instruction],
-    ) {
-        for action in actions {
-            Self::push_or_update_account_meta(
-                account_metas,
-                AccountMeta::new_readonly(action.program_id, false),
-            );
-            for account in &action.accounts {
-                let mut account = account.clone();
-                account.is_signer = false;
-                Self::push_or_update_account_meta(account_metas, account);
-            }
-        }
-    }
-
-    fn push_or_update_account_meta(
-        account_metas: &mut Vec<AccountMeta>,
-        account_meta: AccountMeta,
-    ) {
-        if let Some(existing) = account_metas
-            .iter_mut()
-            .find(|existing| existing.pubkey == account_meta.pubkey)
-        {
-            existing.is_writable |= account_meta.is_writable;
-            existing.is_signer |= account_meta.is_signer;
-            return;
-        }
-        account_metas.push(account_meta);
-    }
-
-    fn append_instructions_sysvar_account(
-        account_metas: &mut Vec<AccountMeta>,
-        actions: &[Instruction],
-    ) {
-        if !actions.is_empty() {
-            Self::push_or_update_account_meta(
-                account_metas,
-                AccountMeta::new_readonly(
-                    solana_sdk_ids::sysvar::instructions::id(),
-                    false,
-                ),
-            );
-        }
-    }
-
-    pub fn clone_account_instruction(
-        pubkey: Pubkey,
-        data: Vec<u8>,
-        fields: magicblock_magic_program_api::instruction::AccountCloneFields,
-        actions: Vec<Instruction>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new(pubkey, false),
-        ];
-        Self::append_instructions_sysvar_account(&mut account_metas, &actions);
-        Self::append_action_accounts(&mut account_metas, &actions);
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CloneAccount {
-                pubkey,
-                data,
-                fields,
-                actions,
-            },
-            account_metas,
-        )
-    }
-
-    pub fn clone_account_init_instruction(
-        pubkey: Pubkey,
-        total_data_len: u32,
-        initial_data: Vec<u8>,
-        fields: magicblock_magic_program_api::instruction::AccountCloneFields,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CloneAccountInit {
-                pubkey,
-                total_data_len,
-                initial_data,
-                fields,
-            },
-            vec![
-                AccountMeta::new(validator_authority_id(), true),
-                AccountMeta::new(pubkey, false),
-            ],
-        )
-    }
-
-    pub fn clone_account_continue_instruction(
-        pubkey: Pubkey,
-        offset: u32,
-        data: Vec<u8>,
-        is_last: bool,
-        actions: Vec<Instruction>,
-        needs_undelegation: bool,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new(pubkey, false),
-        ];
-        Self::append_instructions_sysvar_account(&mut account_metas, &actions);
-        Self::append_action_accounts(&mut account_metas, &actions);
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CloneAccountContinue {
-                pubkey,
-                offset,
-                data,
-                is_last,
-                actions,
-                needs_undelegation,
-            },
-            account_metas,
-        )
-    }
-
-    pub fn post_delegation_action_executor_instruction(
-        cloned_account_pubkey: Pubkey,
-        actions: Vec<Instruction>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(cloned_account_pubkey, false),
-            AccountMeta::new_readonly(
-                solana_sdk_ids::sysvar::instructions::id(),
-                false,
-            ),
-        ];
-        Self::append_action_accounts(&mut account_metas, &actions);
-        Instruction::new_with_bincode(
-            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
-            &PostDelegationActionExecutorInstruction::Execute {
-                cloned_account_pubkey,
-                actions,
-            },
-            account_metas,
-        )
-    }
-
-    pub fn schedule_cloned_account_undelegation_instruction(
-        cloned_account_pubkey: Pubkey,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
-            &PostDelegationActionExecutorInstruction::ScheduleUndelegation {
-                cloned_account_pubkey,
-            },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(cloned_account_pubkey, false),
-                AccountMeta::new_readonly(
-                    solana_sdk_ids::sysvar::instructions::id(),
-                    false,
-                ),
-                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-            ],
-        )
-    }
-
-    pub fn cleanup_partial_clone_instruction(pubkey: Pubkey) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::CleanupPartialClone { pubkey },
-            vec![
-                AccountMeta::new(validator_authority_id(), true),
-                AccountMeta::new(pubkey, false),
-            ],
-        )
-    }
-
-    // -----------------
-    // Program Cloning
-    // -----------------
-    pub fn finalize_program_from_buffer_instruction(
-        program: Pubkey,
-        buffer: Pubkey,
-        remote_slot: u64,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::FinalizeProgramFromBuffer { remote_slot },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-                AccountMeta::new(buffer, false),
-            ],
-        )
-    }
-
-    pub fn finalize_v1_program_from_buffer_instruction(
-        program: Pubkey,
-        program_data: Pubkey,
-        buffer: Pubkey,
-        remote_slot: u64,
-        authority: Pubkey,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::FinalizeV1ProgramFromBuffer {
-                remote_slot,
-                authority,
-            },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-                AccountMeta::new(program_data, false),
-                AccountMeta::new(buffer, false),
-            ],
-        )
-    }
-
-    pub fn set_program_authority_instruction(
-        program: Pubkey,
-        authority: Pubkey,
-    ) -> Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &MagicBlockInstruction::SetProgramAuthority { authority },
-            vec![
-                AccountMeta::new_readonly(validator_authority_id(), true),
-                AccountMeta::new(program, false),
-            ],
-        )
-    }
-
-    // -----------------
-    // Utils
-    // -----------------
-    pub(crate) fn into_transaction(
-        signer: &Keypair,
-        instruction: Instruction,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let signers = &[&signer];
-        Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&signer.pubkey()),
-            signers,
-            recent_blockhash,
         )
     }
 }

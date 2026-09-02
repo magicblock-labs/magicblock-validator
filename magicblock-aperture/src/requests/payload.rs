@@ -1,10 +1,48 @@
-use hyper::{body::Bytes, header::CONTENT_TYPE, Response, StatusCode};
+use std::{
+    convert::Infallible,
+    pin::Pin,
+    task::{Context, Poll},
+};
+
+use hyper::{
+    Response, StatusCode,
+    body::{Body, Bytes, Frame, SizeHint},
+    header::CONTENT_TYPE,
+};
 use json::{Serialize, Value};
 use magicblock_core::Slot;
 
-use crate::{
-    error::RpcError, state::subscriptions::SubscriptionID, utils::JsonBody,
-};
+use crate::{error::RpcError, state::subscriptions::SubscriptionID};
+
+pub(crate) struct JsonBody(pub(crate) Vec<u8>);
+
+impl<S: Serialize> From<S> for JsonBody {
+    fn from(value: S) -> Self {
+        Self(json::to_vec(&value).unwrap_or_default())
+    }
+}
+
+impl Body for JsonBody {
+    type Data = Bytes;
+    type Error = Infallible;
+
+    fn size_hint(&self) -> SizeHint {
+        SizeHint::with_exact(self.0.len() as u64)
+    }
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        if self.0.is_empty() {
+            Poll::Ready(None)
+        } else {
+            Poll::Ready(Some(Ok(Frame::data(
+                std::mem::take(&mut self.0).into(),
+            ))))
+        }
+    }
+}
 
 /// Represents a JSON-RPC 2.0 Notification object, used for pub/sub updates.
 /// It is generic over the type of the result payload.
@@ -113,10 +151,10 @@ impl<'id> ResponseErrorPayload<'id> {
             id,
         };
         let mut response = build_json_response(payload);
-        if http_status != 200 {
-            if let Ok(status) = StatusCode::from_u16(http_status) {
-                *response.status_mut() = status;
-            }
+        if http_status != 200
+            && let Ok(status) = StatusCode::from_u16(http_status)
+        {
+            *response.status_mut() = status;
         }
         response
     }

@@ -1,62 +1,46 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{
-    instruction::EphemeralSystemInstruction, EPHEMERAL_SYSTEM_PROGRAM_ID,
-};
-use solana_account::WritableAccount;
-use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
+use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
+use solana_transaction_context::transaction::TransactionContext;
 
 use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    utils::{
+        account_actions::set_account_mode,
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
 
 const SPONSOR_IDX: u16 = 0;
 const PDA_IDX: u16 = 1;
-const VAULT_IDX: u16 = 2;
-const EPHEMERAL_SYSTEM_PROGRAM_IDX: u16 = 3;
 
 /// Creates and populates the outbox intent PDA. CPI-only, called by the
-/// magic program's `AcceptScheduleCommits`. CPIs into the ephemeral system
-/// program to create the account (which becomes its owner, since we are the
-/// immediate caller), then writes `data` into it directly.
+/// magic program's `AcceptScheduleCommits`. Claims ownership of the fresh,
+/// system-owned, zero-lamport PDA directly - no ephemeral system program CPI
+/// is needed since no lamports are transferred.
 pub fn process_create_outbox_intent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     data: Vec<u8>,
 ) -> Result<(), InstructionError> {
-    let (sponsor, pda, vault) = validate(&signers, invoke_context, &data)?;
-
-    create_ephemeral_account_cpi(
-        invoke_context,
-        sponsor,
-        pda,
-        vault,
-        data.len() as u32,
-    )?;
-
-    let transaction_context = &*invoke_context.transaction_context;
-    let pda_acc =
-        get_instruction_account_with_idx(transaction_context, PDA_IDX)?;
-    pda_acc
-        .borrow_mut()?
-        .data_as_mut_slice()
-        .copy_from_slice(&data);
-
-    Ok(())
+    validate(&signers, invoke_context, &data)?;
+    create_ephemeral_outbox_account(invoke_context, PDA_IDX, data)
 }
 
 fn validate(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     data: &[u8],
-) -> Result<(Pubkey, Pubkey, Pubkey), InstructionError> {
+) -> Result<(), InstructionError> {
     OutboxIntentBundle::try_from_bytes(data).map_err(|_| {
         ic_msg!(
             invoke_context,
@@ -69,7 +53,7 @@ fn validate(
 
     let sponsor =
         *get_instruction_pubkey_with_idx(transaction_context, SPONSOR_IDX)?;
-    let validator_auth = effective_validator_authority_id();
+    let validator_auth = authority();
     if sponsor != validator_auth {
         ic_msg!(
             invoke_context,
@@ -88,49 +72,35 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let ephemeral_system_program = get_instruction_pubkey_with_idx(
-        transaction_context,
-        EPHEMERAL_SYSTEM_PROGRAM_IDX,
-    )?;
-    if *ephemeral_system_program != EPHEMERAL_SYSTEM_PROGRAM_ID {
-        ic_msg!(
-            invoke_context,
-            "CreateOutboxIntent ERR: account at idx {} is {}, expected ephemeral system program {}",
-            EPHEMERAL_SYSTEM_PROGRAM_IDX,
-            ephemeral_system_program,
-            EPHEMERAL_SYSTEM_PROGRAM_ID
-        );
-        return Err(InstructionError::IncorrectProgramId);
-    }
-
-    let pda = *get_instruction_pubkey_with_idx(transaction_context, PDA_IDX)?;
-    let vault =
-        *get_instruction_pubkey_with_idx(transaction_context, VAULT_IDX)?;
-
-    Ok((sponsor, pda, vault))
+    validate_new_pda(transaction_context, PDA_IDX)
 }
 
-fn create_ephemeral_account_cpi(
-    invoke_context: &mut InvokeContext,
-    sponsor: Pubkey,
-    pda: Pubkey,
-    vault: Pubkey,
-    data_len: u32,
+/// Validates that the account at `idx` is an empty system-owned account
+/// (0 lamports, system program owner), ready to be claimed as the outbox PDA.
+fn validate_new_pda(
+    transaction_context: &TransactionContext,
+    idx: u16,
 ) -> Result<(), InstructionError> {
-    invoke_context.native_invoke(
-        Instruction {
-            program_id: EPHEMERAL_SYSTEM_PROGRAM_ID,
-            accounts: vec![
-                AccountMeta::new(sponsor, true),
-                AccountMeta::new(pda, true),
-                AccountMeta::new(vault, false),
-            ],
-            data: EphemeralSystemInstruction::CreateEphemeralAccount {
-                data_len,
-            }
-            .try_to_vec()
-            .map_err(|_| InstructionError::InvalidInstructionData)?,
-        },
-        &[pda],
-    )
+    let pda_acc = get_instruction_account_with_idx(transaction_context, idx)?;
+    let acc = pda_acc.borrow()?;
+    if acc.lamports() != 0 || *acc.owner() != system_program::ID {
+        return Err(InstructionError::InvalidAccountData);
+    }
+    Ok(())
+}
+
+fn create_ephemeral_outbox_account(
+    invoke_context: &InvokeContext,
+    pda_idx: u16,
+    data: Vec<u8>,
+) -> Result<(), InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
+    let pda_acc =
+        get_instruction_account_with_idx(transaction_context, pda_idx)?;
+
+    let mut acc = pda_acc.borrow_mut()?;
+    acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);
+    acc.resize(data.len(), 0);
+    acc.data_as_mut_slice().copy_from_slice(&data);
+    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)
 }

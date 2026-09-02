@@ -1,50 +1,111 @@
-use std::sync::{atomic::AtomicU64, Arc};
-
+use magicblock_metrics::metrics::{AccountFetchContext, ENSURE_ACCOUNTS_TIME};
+use solana_account::{AccountMode, AccountSharedData};
+use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
-use tracing::*;
+use tracing::warn;
 
-use super::prelude::*;
+use super::ClaimedHandlerResult;
+use crate::{
+    requests::{
+        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
+        payload::ResponsePayload,
+    },
+    server::http::dispatch::HttpDispatcher,
+};
 
 impl HttpDispatcher {
-    /// Handles the `getAccountInfo` RPC request.
-    ///
-    /// Fetches an account by its public key, encodes it using the provided
-    /// configuration, and returns it wrapped in a standard JSON-RPC response
-    /// with the current slot context. Returns `null` if the account is not found.
-    #[instrument(skip(self, request), fields(pubkey = tracing::field::Empty))]
+    pub(super) fn account_is_visible(account: &AccountSharedData) -> bool {
+        !account.is(AccountMode::Placeholder)
+    }
+
+    pub(super) async fn read_account_with_ensure<R>(
+        &self,
+        pubkey: &Pubkey,
+        fetch_context: AccountFetchContext,
+        reader: impl Fn(&AccountSharedData) -> R,
+    ) -> (Option<R>, u64) {
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["account"])
+            .start_timer();
+        let claims = self
+            .chainlink
+            .ensure_accounts(&[*pubkey], fetch_context)
+            .await
+            .unwrap_or_default();
+        let account = self
+            .engine
+            .accounts()
+            .loader()
+            .read(pubkey, reader)
+            .ok()
+            .flatten();
+        (account, claims)
+    }
+
+    pub(super) async fn read_accounts_with_ensure<R>(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_context: AccountFetchContext,
+        reader: impl Fn(&Pubkey, &AccountSharedData) -> R,
+    ) -> (Vec<Option<R>>, u64) {
+        let _timer = ENSURE_ACCOUNTS_TIME
+            .with_label_values(&["multi-account"])
+            .start_timer();
+        let claims = self
+            .chainlink
+            .ensure_accounts(pubkeys, fetch_context)
+            .await
+            .inspect_err(|error| warn!(?error, "failed to ensure accounts"))
+            .unwrap_or_default();
+        let accounts = {
+            let accessor = self.engine.accounts();
+            let loader = accessor.loader();
+            pubkeys
+                .iter()
+                .map(|pubkey| {
+                    loader
+                        .read(pubkey, |account| reader(pubkey, account))
+                        .ok()
+                        .flatten()
+                })
+                .collect()
+        };
+        (accounts, claims)
+    }
+
     pub(crate) async fn get_account_info(
         &self,
-        request: &mut JsonRequest,
-        remote_account_claims: Arc<AtomicU64>,
-    ) -> HandlerResult {
-        let (pubkey, config) = parse_params!(
-            request.params()?,
-            Serde32Bytes,
-            RpcAccountInfoConfig
-        );
+        request: &JsonRequest,
+    ) -> ClaimedHandlerResult {
+        let mut claims = 0;
+        let result = async {
+            let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
+            let config = request
+                .optional::<RpcAccountInfoConfig>(1)?
+                .unwrap_or_default();
+            let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+            let slice = config.data_slice;
+            let reader = |account: &AccountSharedData| {
+                Self::account_is_visible(account).then(|| {
+                    encode_ui_account(&pubkey, account, encoding, None, slice)
+                })
+            };
 
-        let pubkey: Pubkey = some_or_err!(pubkey);
-        tracing::Span::current()
-            .record("pubkey", tracing::field::display(&pubkey));
-        let config = config.unwrap_or_default();
-        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
-        let slice = config.data_slice;
+            let (account, remote_account_claims) = self
+                .read_account_with_ensure(
+                    &pubkey,
+                    AccountFetchContext::rpc_get_account(),
+                    reader,
+                )
+                .await;
+            claims += remote_account_claims;
+            let account = account.flatten();
 
-        debug!("Getting account info");
-
-        // `read_account_with_ensure` guarantees the account is clone from chain if not in database.
-        let fetch_context =
-            Self::rpc_get_account_context(remote_account_claims);
-        let account = self
-            .read_account_with_ensure(&pubkey, fetch_context)
-            .await
-            .filter(|acc| !Self::account_should_render_as_null(acc))
-            // `LockedAccount` provides a race-free read of the account data before encoding.
-            .map(|acc| {
-                LockedAccount::new(pubkey, acc).ui_encode(encoding, slice)
-            });
-
-        let slot = self.blocks.block_height();
-        Ok(ResponsePayload::encode(&request.id, account, slot))
+            let slot = self.engine.blocks().latest().slot;
+            Ok(ResponsePayload::encode(&request.id, account, slot))
+        }
+        .await;
+        (result, claims)
     }
 }

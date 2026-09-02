@@ -1,0 +1,21 @@
+[package]
+name = "magicblock-verifier"
+
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+engine = { workspace = true }
+magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-runtime = { workspace = true }
+nucleus = { workspace = true }
+replicator = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

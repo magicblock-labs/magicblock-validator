@@ -2,15 +2,15 @@ use std::{
     fs,
     path::Path,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 use rocksdb::{
-    AsColumnFamilyRef, CStrLike, ColumnFamily, DBIterator, DBPinnableSlice,
+    AsColumnFamilyRef, CStrLike, ColumnFamily, DB, DBIterator, DBPinnableSlice,
     DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
-    Options, WriteBatch as RWriteBatch, DB,
+    Options, WriteBatch as RWriteBatch,
 };
 use solana_clock::Slot;
 
@@ -19,7 +19,7 @@ use super::{
     columns::Column,
     iterator::IteratorMode,
     options::{AccessType, LedgerOptions},
-    rocksdb_options::{get_rocksdb_options, RateLimiterHandle},
+    rocksdb_options::get_rocksdb_options,
 };
 use crate::errors::{LedgerError, LedgerResult};
 
@@ -32,8 +32,6 @@ pub struct Rocks {
     access_type: AccessType,
     /// Oldest slot we want to keep in DB, slots before will be removed
     oldest_slot: Arc<AtomicU64>,
-    /// This DB's background IO rate limiter; kept so shutdown can lift it.
-    rate_limiter: RateLimiterHandle,
 }
 
 impl Rocks {
@@ -44,7 +42,7 @@ impl Rocks {
         fs::create_dir_all(path)?;
 
         let oldest_slot = Arc::new(DEFAULT_OLD_SLOT.into());
-        let (db_options, rate_limiter) = get_rocksdb_options(&access_type);
+        let db_options = get_rocksdb_options(&access_type);
         let descriptors = cf_descriptors(path, &options, &oldest_slot);
 
         let db = match access_type {
@@ -58,15 +56,7 @@ impl Rocks {
             db,
             access_type,
             oldest_slot,
-            rate_limiter,
         })
-    }
-
-    /// Raises the background IO rate limit to effectively unlimited so
-    /// shutdown flushes run at disk speed; call only after compactions
-    /// have been stopped.
-    pub fn lift_rate_limit(&self) {
-        self.rate_limiter.lift();
     }
 
     pub fn destroy(path: &Path) -> LedgerResult<()> {
@@ -114,16 +104,14 @@ impl Rocks {
         cf: &ColumnFamily,
         keys: Vec<&[u8]>,
     ) -> Vec<LedgerResult<Option<DBPinnableSlice<'_>>>> {
-        let values = self
-            .db
+        self.db
             .batched_multi_get_cf(cf, keys, false)
             .into_iter()
             .map(|result| match result {
                 Ok(opt) => Ok(opt),
                 Err(e) => Err(LedgerError::RocksDb(e)),
             })
-            .collect::<Vec<_>>();
-        values
+            .collect::<Vec<_>>()
     }
 
     pub fn delete_cf(&self, cf: &ColumnFamily, key: &[u8]) -> LedgerResult<()> {
@@ -286,14 +274,12 @@ mod tests {
 
     use rocksdb::Options;
     use tempfile::tempdir;
-    use test_kit::init_logger;
 
     use super::*;
     use crate::database::columns::columns;
 
     #[test]
     fn test_cf_names_and_descriptors_equal_length() {
-        init_logger!();
         let path = PathBuf::default();
         let options = LedgerOptions::default();
         // The names and descriptors don't need to be in the same order for our use cases;
@@ -307,7 +293,6 @@ mod tests {
 
     #[test]
     fn test_open_unknown_columns() {
-        init_logger!();
         let temp_dir = tempdir().unwrap();
         let db_path = temp_dir.path();
 

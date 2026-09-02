@@ -1,31 +1,40 @@
-use std::ops::Deref;
+use std::{fmt, ops::Deref};
 
 use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use magicblock_magic_program_api::outbox::{
-    ExecutionStage, PendingTransaction, TwoStageProgress,
+    ExecutionStage, PendingTransaction, StageTransitionError, TwoStageProgress,
 };
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_signature::Signature;
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::intent_bundles::magic_scheduled_base_intent::ScheduledIntentBundle;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
     status: OutboxIntentBundleStatus,
+    bump: u8,
 }
 
 impl OutboxIntentBundle {
-    pub fn accepted(intent_bundle: ScheduledIntentBundle) -> Self {
+    pub fn accepted(intent_bundle: ScheduledIntentBundle, bump: u8) -> Self {
         Self {
             inner: intent_bundle,
             status: OutboxIntentBundleStatus::Accepted,
+            bump,
         }
     }
 
     pub fn status(&self) -> &OutboxIntentBundleStatus {
         &self.status
+    }
+
+    pub fn bump(&self) -> u8 {
+        self.bump
     }
 
     /// Whether execution has reached its last stage.
@@ -44,53 +53,56 @@ impl OutboxIntentBundle {
     pub(crate) fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OutboxStageTransitionError> {
         self.status.apply_stage_transition(stage)
     }
 
     #[cfg(not(feature = "dev-context-only-utils"))]
-    pub(crate) fn try_to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
+    pub(crate) fn try_to_bytes(&self) -> Result<Vec<u8>, wincode::WriteError> {
         self.try_to_bytes_impl()
     }
 
     #[cfg(feature = "dev-context-only-utils")]
-    pub fn try_to_bytes(&self) -> Result<Vec<u8>, bincode::Error> {
+    pub fn try_to_bytes(&self) -> Result<Vec<u8>, wincode::WriteError> {
         self.try_to_bytes_impl()
     }
 
-    fn try_to_bytes_impl(&self) -> Result<Vec<u8>, bincode::Error> {
+    fn try_to_bytes_impl(&self) -> Result<Vec<u8>, wincode::WriteError> {
         const DISCRIMINATOR_LEN: usize = OUTBOX_INTENT_DISCRIMINATOR.len();
 
-        // bincode serializes structs as field concatenation, so max body size
+        // wincode serializes structs as field concatenation, so max body size
         // is inner size + worst-case status size (TwoStage::Finalizing with 2 sigs)
-        let max_body_size = (bincode::serialized_size(&self.inner)?
-            + bincode::serialized_size(
+        // + the bump byte
+        let max_body_size = (wincode::serialized_size(&self.inner)?
+            + wincode::serialized_size(
                 &OutboxIntentBundleStatus::max_size_variant(),
-            )?) as usize;
+            )?
+            + wincode::serialized_size(&self.bump)?)
+            as usize;
 
         let mut out = vec![0u8; DISCRIMINATOR_LEN + max_body_size];
         out[..DISCRIMINATOR_LEN].copy_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);
-        bincode::serialize_into(
+        wincode::serialize_into(
             std::io::Cursor::new(&mut out[DISCRIMINATOR_LEN..]),
             self,
         )?;
         Ok(out)
     }
 
-    pub fn try_from_bytes(data: &[u8]) -> Result<Self, bincode::Error> {
+    pub fn try_from_bytes(data: &[u8]) -> Result<Self, wincode::ReadError> {
         let disc_len = OUTBOX_INTENT_DISCRIMINATOR.len();
         if data.len() < disc_len
             || data[..disc_len] != OUTBOX_INTENT_DISCRIMINATOR
         {
-            return Err(Box::new(bincode::ErrorKind::Custom(
-                "invalid discriminator".into(),
-            )));
+            return Err(wincode::ReadError::Custom("invalid discriminator"));
         }
-        bincode::deserialize(&data[disc_len..])
+        wincode::deserialize(&data[disc_len..])
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite,
+)]
 pub enum OutboxIntentBundleStatus {
     Accepted,
     Executing(ExecutionStage),
@@ -112,7 +124,7 @@ impl OutboxIntentBundleStatus {
     fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
-    ) -> Result<(), &'static str> {
+    ) -> Result<(), OutboxStageTransitionError> {
         match (self, stage) {
             (this @ Self::Accepted, ExecutionStage::TwoStage(stage)) => {
                 match stage {
@@ -123,18 +135,19 @@ impl OutboxIntentBundleStatus {
                     // Transition from Accepted state to TwoStage::Finalizing is invalid
                     TwoStageProgress::Finalizing { .. } => {
                         return Err(
-                            "cannot transition from Accepted to Finalizing",
-                        )
+                            OutboxStageTransitionError::AcceptedToFinalizingError,
+                        );
                     }
                 }
             }
             (this @ Self::Accepted, val @ ExecutionStage::SingleStage(_)) => {
                 *this = Self::Executing(val);
             }
-            (Self::Executing(ref mut this), stage) => {
+            (Self::Executing(this), stage) => {
                 this.apply_stage_transition(stage)?;
             }
         };
+
         Ok(())
     }
 }
@@ -144,5 +157,30 @@ impl Deref for OutboxIntentBundle {
 
     fn deref(&self) -> &Self::Target {
         &self.inner
+    }
+}
+
+/// Rejected [`OutboxIntentBundleStatus`] transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutboxStageTransitionError {
+    /// `Accepted` can only advance into `TwoStage::Committing` or `SingleStage`.
+    AcceptedToFinalizingError,
+    StageError(StageTransitionError),
+}
+
+impl From<StageTransitionError> for OutboxStageTransitionError {
+    fn from(err: StageTransitionError) -> Self {
+        Self::StageError(err)
+    }
+}
+
+impl fmt::Display for OutboxStageTransitionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AcceptedToFinalizingError => {
+                f.write_str("cannot transition from Accepted to Finalizing")
+            }
+            Self::StageError(err) => write!(f, "{err}"),
+        }
     }
 }

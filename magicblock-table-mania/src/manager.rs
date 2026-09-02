@@ -1,8 +1,8 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -22,9 +22,9 @@ use tokio::{
 use tracing::*;
 
 use crate::{
+    TableManiaComputeBudget, TableManiaComputeBudgets,
     error::{TableManiaError, TableManiaResult},
     lookup_table_rc::{LookupTableRc, MAX_ENTRIES_AS_PART_OF_EXTEND},
-    TableManiaComputeBudget, TableManiaComputeBudgets,
 };
 
 const REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS: u32 = 32;
@@ -298,46 +298,46 @@ impl TableMania {
                 let active_tables_write_lock = self.active_tables.write().await;
 
                 // Try to use the last table if it's not full
-                if let Some(table) = active_tables_write_lock.last() {
-                    if !table.is_full() {
-                        if let Err(err) = self
-                            .extend_table(
-                                table,
-                                authority,
-                                &mut remaining,
-                                &mut tables_used,
-                                existing_pubkey_action,
-                            )
-                            .await
-                        {
-                            match Self::handle_extend_table_error(
-                                &err,
-                                &mut extend_errors,
-                            ) {
-                                ExtendTableErrorAction::CreateNewTable => {
-                                    error!(
-                                        error = ?err,
-                                        table_address = %table.table_address(),
-                                        "Failed to extend table with invalid instruction data; creating a new table"
-                                    );
-                                    table.mark_non_extendable();
-                                    force_new_table_after =
-                                        Some(*table.table_address());
-                                }
-                                ExtendTableErrorAction::Retry => {
-                                    error!(
-                                        error = ?err,
-                                        table_address = %table.table_address(),
-                                        "Failed to extend table"
-                                    );
-                                }
-                                ExtendTableErrorAction::ReturnError => {
-                                    return Err(err);
-                                }
+                if let Some(table) = active_tables_write_lock.last()
+                    && !table.is_full()
+                {
+                    if let Err(err) = self
+                        .extend_table(
+                            table,
+                            authority,
+                            &mut remaining,
+                            &mut tables_used,
+                            existing_pubkey_action,
+                        )
+                        .await
+                    {
+                        match Self::handle_extend_table_error(
+                            &err,
+                            &mut extend_errors,
+                        ) {
+                            ExtendTableErrorAction::CreateNewTable => {
+                                error!(
+                                    error = ?err,
+                                    table_address = %table.table_address(),
+                                    "Failed to extend table with invalid instruction data; creating a new table"
+                                );
+                                table.mark_non_extendable();
+                                force_new_table_after =
+                                    Some(*table.table_address());
                             }
-                        } else {
-                            stored_in_existing = true;
+                            ExtendTableErrorAction::Retry => {
+                                error!(
+                                    error = ?err,
+                                    table_address = %table.table_address(),
+                                    "Failed to extend table"
+                                );
+                            }
+                            ExtendTableErrorAction::ReturnError => {
+                                return Err(err);
+                            }
                         }
+                    } else {
+                        stored_in_existing = true;
                     }
                 }
             }
@@ -350,15 +350,14 @@ impl TableMania {
                     self.active_tables.write().await;
 
                 // Double-check if a new table was created while we were waiting for the lock
-                if let Some(table) = active_tables_write_lock.last() {
-                    if !table.is_full()
-                        && force_new_table_after != Some(*table.table_address())
-                    {
-                        // Another task created a table we can use, so drop the write lock
-                        // and try again with the read lock
-                        drop(active_tables_write_lock);
-                        continue;
-                    }
+                if let Some(table) = active_tables_write_lock.last()
+                    && !table.is_full()
+                    && force_new_table_after != Some(*table.table_address())
+                {
+                    // Another task created a table we can use, so drop the write lock
+                    // and try again with the read lock
+                    drop(active_tables_write_lock);
+                    continue;
                 }
 
                 // Create a new table and add it to active_tables
@@ -1038,8 +1037,8 @@ mod tests {
     use solana_transaction_error::TransactionError;
 
     use super::{
-        ExtendTableErrorAction, TableMania, TableManiaError,
-        MAX_ALLOWED_EXTEND_ERRORS,
+        ExtendTableErrorAction, MAX_ALLOWED_EXTEND_ERRORS, TableMania,
+        TableManiaError,
     };
 
     fn sent_transaction_error(

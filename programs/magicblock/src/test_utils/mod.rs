@@ -2,24 +2,25 @@ use core::fmt;
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicU64, Ordering},
         Arc,
+        atomic::{AtomicU64, Ordering},
     },
 };
 
 use magicblock_core::{
-    intent::{types::CommittedAccount, MagicIntentBundle},
+    intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
 use magicblock_magic_program_api::{
-    id, EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
-    OUTBOX_INTENT_PROGRAM_ID,
+    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
+    OUTBOX_INTENT_PROGRAM_ID, id,
 };
-use solana_account::AccountSharedData;
-use solana_instruction::{error::InstructionError, AccountMeta};
+use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
+use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_program_runtime::{
-    invoke_context::{mock_process_instruction, InvokeContext},
+    invoke_context::{InvokeContext, mock_process_instruction},
     loaded_programs::ProgramCacheEntry,
+    solana_sbpf::program::BuiltinFunctionDefinition,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{native_loader, system_program};
@@ -36,19 +37,17 @@ use crate::validator;
 fn register_sibling_builtins(invoke_context: &mut InvokeContext) {
     invoke_context.program_cache_for_tx_batch.replenish(
         OUTBOX_INTENT_PROGRAM_ID,
-        Arc::new(ProgramCacheEntry::new_builtin(
-            0,
-            0,
+        Arc::new(ProgramCacheEntry::new_builtin((
             OutboxIntentEntrypoint::vm,
-        )),
+            OutboxIntentEntrypoint::codegen,
+        ))),
     );
     invoke_context.program_cache_for_tx_batch.replenish(
         EPHEMERAL_SYSTEM_PROGRAM_ID,
-        Arc::new(ProgramCacheEntry::new_builtin(
-            0,
-            0,
+        Arc::new(ProgramCacheEntry::new_builtin((
             EphemeralSystemEntrypoint::vm,
-        )),
+            EphemeralSystemEntrypoint::codegen,
+        ))),
     );
 }
 
@@ -60,17 +59,17 @@ pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
     nonces: Option<StubNonces>,
 ) {
-    validator::generate_validator_authority_if_needed();
-    let validator_authority_id = validator::validator_authority_id();
+    let validator_authority_id =
+        validator::generate_validator_authority_if_needed();
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
     });
 
     // Ensure ephemeral vault account exists
     map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
-        let mut vault = AccountSharedData::new(0, 0, &id());
-        vault.set_ephemeral(true);
-        vault
+        AccountBuilder::from(AccountSharedData::new(0, 0, &id()))
+            .mode(AccountMode::Ephemeral)
+            .build()
     });
 
     // Ensure the sibling builtin programs CPI'd into from the main
@@ -89,9 +88,6 @@ pub fn ensure_started_validator(
         },
     });
     init_magic_sys(stub);
-
-    // Ensure validator is in Primary mode (ledger replay complete)
-    magicblock_core::coordination_mode::switch_to_primary_mode();
 }
 
 pub fn process_instruction(
@@ -123,7 +119,7 @@ pub fn process_instruction_with_logs(
         transaction_accounts,
         instruction_accounts,
         expected_result,
-        Entrypoint::vm,
+        (Entrypoint::vm, Entrypoint::codegen),
         register_sibling_builtins,
         |invoke_context| {
             logs = invoke_context
@@ -167,7 +163,7 @@ pub fn process_outbox_intent_instruction_with_logs(
         transaction_accounts,
         instruction_accounts,
         expected_result,
-        OutboxIntentEntrypoint::vm,
+        (OutboxIntentEntrypoint::vm, OutboxIntentEntrypoint::codegen),
         register_sibling_builtins,
         |invoke_context| {
             logs = invoke_context

@@ -1,8 +1,8 @@
 use std::{net::SocketAddr, str::FromStr};
 
 use derive_more::{Deref, Display};
-use serde::{de, Deserialize, Deserializer, Serialize};
-use serde_with::{DeserializeFromStr, SerializeDisplay};
+use serde::{Deserialize, Deserializer, Serialize, de};
+use serde_with::SerializeDisplay;
 use url::Url;
 
 use crate::consts;
@@ -89,11 +89,59 @@ impl<'de> Deserialize<'de> for BindAddress {
 /// - **Http**: JSON-RPC HTTP endpoint (scheme: `http` or `https`)
 /// - **Websocket**: WebSocket endpoint for PubSub subscriptions (scheme: `ws` or `wss`)
 /// - **Grpc**: gRPC endpoint for streaming (schemes `grpc`/`grpcs` are converted to `http`/`https`)
-#[derive(Clone, DeserializeFromStr, SerializeDisplay, Display, Debug)]
+#[derive(Clone, SerializeDisplay, Display, Debug)]
 pub enum Remote {
     Http(ResolvedUrl),
-    Websocket(ResolvedUrl),
+    /// WebSocket endpoint with an optional per-endpoint max subscriptions
+    /// per connection, overriding `chainlink.ws-subs-per-connection`.
+    #[display("{_0}")]
+    Websocket(ResolvedUrl, Option<usize>),
     Grpc(ResolvedUrl),
+}
+
+/// Accepts either a plain URL string or
+/// `{ url = "wss://…", ws-subs-per-connection = N }`.
+impl<'de> Deserialize<'de> for Remote {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Repr {
+            Plain(String),
+            Detailed {
+                url: String,
+                #[serde(rename = "ws-subs-per-connection")]
+                ws_subs_per_connection: Option<usize>,
+            },
+        }
+
+        match Repr::deserialize(deserializer)? {
+            Repr::Plain(url) => url.parse().map_err(de::Error::custom),
+            Repr::Detailed {
+                url,
+                ws_subs_per_connection,
+            } => {
+                if ws_subs_per_connection == Some(0) {
+                    return Err(de::Error::custom(
+                        "ws-subs-per-connection must be greater than 0",
+                    ));
+                }
+                match url.parse().map_err(de::Error::custom)? {
+                    Self::Websocket(url, _) => {
+                        Ok(Self::Websocket(url, ws_subs_per_connection))
+                    }
+                    _ if ws_subs_per_connection.is_some() => {
+                        Err(de::Error::custom(
+                            "ws-subs-per-connection only applies to ws/wss remotes",
+                        ))
+                    }
+                    other => Ok(other),
+                }
+            }
+        }
+    }
 }
 
 impl FromStr for Remote {
@@ -111,7 +159,7 @@ impl FromStr for Remote {
         let remote = match parsed.0.scheme() {
             _ if is_grpc => Self::Grpc(parsed),
             "http" | "https" => Self::Http(parsed),
-            "ws" | "wss" => Self::Websocket(parsed),
+            "ws" | "wss" => Self::Websocket(parsed, None),
             _ => return Err(url::ParseError::InvalidDomainCharacter),
         };
         Ok(remote)
@@ -123,15 +171,15 @@ impl Remote {
     pub fn url_str(&self) -> &str {
         match self {
             Self::Http(u) => u.as_str(),
-            Self::Websocket(u) => u.as_str(),
+            Self::Websocket(u, _) => u.as_str(),
             Self::Grpc(u) => u.as_str(),
         }
     }
 
     /// Converts an HTTP remote to a WebSocket remote by deriving the appropriate WebSocket URL.
-    pub(crate) fn to_websocket(&self) -> Option<Self> {
+    pub fn to_websocket(&self) -> Option<Self> {
         let mut url = match self {
-            Self::Websocket(_) => return Some(self.clone()),
+            Self::Websocket(..) => return Some(self.clone()),
             Self::Grpc(_) => return None,
             Self::Http(u) => u.0.clone(),
         };
@@ -144,7 +192,7 @@ impl Remote {
             // As per solana convention websocket port is one greater than http
             let _ = url.set_port(Some(port + 1));
         }
-        Some(Self::Websocket(ResolvedUrl(url)))
+        Some(Self::Websocket(ResolvedUrl(url), None))
     }
 }
 

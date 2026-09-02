@@ -1,11 +1,11 @@
 [package]
-name = "magicblock-committor-program"
-version.workspace = true
 authors.workspace = true
-repository.workspace = true
+edition.workspace = true
 homepage.workspace = true
 license.workspace = true
-edition.workspace = true
+name = "magicblock-committor-program"
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 borsh = { workspace = true }
@@ -15,7 +15,7 @@ solana-account-info = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-sdk-ids = { workspace = true }
-solana-system-interface = { workspace = true, features = ["bincode"] }
+solana-system-interface = { workspace = true, features = ["wincode"] }
 thiserror = { workspace = true }
 
 [dev-dependencies]
@@ -25,7 +25,7 @@ crate-type = ["cdylib", "lib"]
 doctest = false
 
 [features]
-no-entrypoint = []
-default = []
 custom-heap = []
 custom-panic = []
+default = []
+no-entrypoint = []

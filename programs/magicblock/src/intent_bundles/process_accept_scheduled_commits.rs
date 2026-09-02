@@ -1,40 +1,37 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::outbox_intent_pda;
+use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use magicblock_magic_program_api::{
-    instruction::OutboxIntentInstruction, EPHEMERAL_SYSTEM_PROGRAM_ID,
-    EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    OUTBOX_INTENT_PROGRAM_ID, instruction::OutboxIntentInstruction,
 };
 use solana_account::{ReadableAccount, WritableAccount};
-use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
+    MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::effective_validator_authority_id,
-    MagicContext,
+    validator::authority,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
 const OUTBOX_PROGRAM_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
 const MAGIC_CONTEXT_IDX: u16 = OUTBOX_PROGRAM_IDX + 1;
-const VAULT_IDX: u16 = MAGIC_CONTEXT_IDX + 1;
-const EPHEMERAL_SYSTEM_PROGRAM_IDX: u16 = VAULT_IDX + 1;
-const INTENT_PDAS_OFFSET: u16 = EPHEMERAL_SYSTEM_PROGRAM_IDX + 1;
+const INTENT_PDAS_OFFSET: u16 = MAGIC_CONTEXT_IDX + 1;
 
 pub fn process_accept_scheduled_commits(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
     // Common conditions verification
-    let validator_auth = effective_validator_authority_id();
+    let validator_auth = authority();
     validate(&signers, invoke_context, &validator_auth)?;
 
     // pop first n intents
@@ -51,14 +48,15 @@ pub fn process_accept_scheduled_commits(
 
     for (i, intent) in intents.into_iter().enumerate() {
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
-        let pda = verify_intent_pda(invoke_context, intent.id, pda_idx)?;
+        let (pda, bump) =
+            verify_intent_pda(invoke_context, intent.id, pda_idx)?;
 
         // Create outbox ephemeral account
         create_outbox_intent_cpi(
             invoke_context,
             validator_auth,
             pda,
-            OutboxIntentBundle::accepted(intent),
+            OutboxIntentBundle::accepted(intent, bump),
         )?;
     }
 
@@ -90,22 +88,6 @@ fn validate(
             OUTBOX_PROGRAM_IDX,
             outbox_program_pubkey,
             OUTBOX_INTENT_PROGRAM_ID
-        );
-        return Err(InstructionError::IncorrectProgramId);
-    }
-
-    // Assert ephemeral system program account (CPI target, two levels deep)
-    let ephemeral_system_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        EPHEMERAL_SYSTEM_PROGRAM_IDX,
-    )?;
-    if *ephemeral_system_program_pubkey != EPHEMERAL_SYSTEM_PROGRAM_ID {
-        ic_msg!(
-            invoke_context,
-            "AcceptScheduledCommits ERR: account at idx {} is {}, expected ephemeral system program {}",
-            EPHEMERAL_SYSTEM_PROGRAM_IDX,
-            ephemeral_system_program_pubkey,
-            EPHEMERAL_SYSTEM_PROGRAM_ID
         );
         return Err(InstructionError::IncorrectProgramId);
     }
@@ -142,11 +124,11 @@ fn verify_intent_pda(
     invoke_context: &InvokeContext,
     intent_id: u64,
     pda_idx: u16,
-) -> Result<Pubkey, InstructionError> {
+) -> Result<(Pubkey, u8), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let provided =
         get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
-    let expected = outbox_intent_pda(intent_id);
+    let (expected, bump) = outbox_intent_pda_with_bump(intent_id);
     if *provided != expected {
         ic_msg!(
             invoke_context,
@@ -158,7 +140,7 @@ fn verify_intent_pda(
         );
         return Err(InstructionError::InvalidArgument);
     }
-    Ok(expected)
+    Ok((expected, bump))
 }
 
 fn pop_scheduled_intents(
@@ -182,7 +164,7 @@ fn pop_scheduled_intents(
         None => {
             ic_msg!(
                 invoke_context,
-                "AcceptScheduledCommits ERR: not enough accounts to accept intents ({}), need validator authority, magic context, vault, and at least one outbox intent PDA",
+                "AcceptScheduledCommits ERR: not enough accounts to accept intents ({}), need validator authority, magic program, magic context, and at least one outbox intent PDA",
                 num_ix_accounts
             );
             return Err(InstructionError::MissingAccount);
@@ -241,14 +223,13 @@ fn create_outbox_intent_cpi(
         InstructionError::InvalidAccountData
     })?;
 
-    invoke_context.native_invoke(
+    invoke_context.native_invoke_as(
+        crate::id(),
         Instruction {
             program_id: OUTBOX_INTENT_PROGRAM_ID,
             accounts: vec![
-                AccountMeta::new(validator_auth, true),
+                AccountMeta::new_readonly(validator_auth, true),
                 AccountMeta::new(pda, false),
-                AccountMeta::new(EPHEMERAL_VAULT_PUBKEY, false),
-                AccountMeta::new_readonly(EPHEMERAL_SYSTEM_PROGRAM_ID, false),
             ],
             data: OutboxIntentInstruction::CreateOutboxIntent { data }
                 .try_to_vec()

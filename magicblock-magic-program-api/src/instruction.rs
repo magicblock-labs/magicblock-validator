@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
+#[cfg(not(feature = "backward-compat"))]
+use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
+    Pubkey,
     args::{
         AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
         ScheduleTaskArgs,
     },
     compat::Instruction,
     outbox::ExecutionStage,
-    Pubkey,
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
@@ -64,14 +67,13 @@ pub enum MagicBlockInstruction {
     /// This is the second part of scheduling a commit.
     ///
     /// N is determined by the number of writable PDA accounts provided beyond
-    /// the four fixed accounts. It is run at the start of the slot.
+    /// the three fixed accounts. It is run at the start of the slot.
     ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Validator Authority
-    /// - **1.**   `[]`              Magic Program
+    /// - **0.**   `[SIGNER]`        Validator Authority
+    /// - **1.**   `[]`              Outbox Intent Program (CPI target)
     /// - **2.**   `[WRITE]`         Magic Context Account containing the initially scheduled commits
-    /// - **3.**   `[WRITE]`         Ephemeral Vault
-    /// - **4..n** `[WRITE]`         Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **3..n** `[WRITE]`         Outbox intent PDAs, one per accepted intent, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     AcceptScheduleCommits,
 
     /// Deprecated, moved into the outbox intent program. Always errors.
@@ -312,12 +314,19 @@ pub enum MagicBlockInstruction {
 }
 
 impl MagicBlockInstruction {
+    #[cfg(not(feature = "backward-compat"))]
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, wincode::WriteError> {
+        wincode::serialize(self)
+    }
+
+    #[cfg(feature = "backward-compat")]
     pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
         bincode::serialize(self)
     }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountModification {
     pub pubkey: Pubkey,
     pub owner: Option<Pubkey>,
@@ -326,6 +335,7 @@ pub struct AccountModification {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
@@ -336,6 +346,7 @@ pub struct AccountModificationForInstruction {
 #[derive(
     Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq,
 )]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountCloneFields {
     pub lamports: u64,
     pub owner: Pubkey,
@@ -347,6 +358,7 @@ pub struct AccountCloneFields {
 
 /// Instruction(s) for Callback Executor builtin-program
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum CallbackInstruction {
     /// Executes a callback
     ///
@@ -357,36 +369,10 @@ pub enum CallbackInstruction {
     ExecuteCallback { instruction: Instruction },
 }
 
-/// Instruction(s) for the post-delegation action executor builtin-program.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum PostDelegationActionExecutorInstruction {
-    /// Executes post-delegation actions immediately after a matching delegated
-    /// clone instruction in the same transaction.
-    ///
-    /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Delegated clone target
-    /// - **2.**   `[]`        Instructions sysvar
-    /// - **3..n** `[]`        Accounts required by the embedded instructions
-    Execute {
-        cloned_account_pubkey: Pubkey,
-        actions: Vec<Instruction>,
-    },
-
-    /// Schedules undelegation immediately after a matching delegated clone
-    /// instruction in the same transaction.
-    ///
-    /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Delegated clone target
-    /// - **2.**   `[]`        Instructions sysvar
-    /// - **3.**   `[WRITE]`   Magic Context account
-    ScheduleUndelegation { cloned_account_pubkey: Pubkey },
-}
-
 /// Instruction(s) for the ephemeral system builtin-program: creates,
 /// resizes, and closes ephemeral accounts.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum EphemeralSystemInstruction {
     /// # Account references
     /// - 0. [WRITE] Sponsor account (pays rent, can be PDA or oncurve)
@@ -405,45 +391,38 @@ pub enum EphemeralSystemInstruction {
     CloseEphemeralAccount,
 }
 
-impl EphemeralSystemInstruction {
-    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
-    }
-}
-
 /// Instruction(s) for the outbox intent builtin-program: stores accepted
 /// intents in per-intent PDA accounts and tracks their execution stage
 /// until they are sent to Base.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum OutboxIntentInstruction {
     /// Creates and populates an outbox intent PDA account. CPI-only, called
     /// by the magic program from `MagicBlockInstruction::AcceptScheduleCommits`
     /// after popping the intent off `MagicContext`. `data` is the already
-    /// serialized `OutboxIntentBundle` bytes.
+    /// serialized `OutboxIntentBundle` bytes. Claims ownership of the PDA
+    /// directly (it arrives as a fresh, system-owned, zero-lamport account),
+    /// so no rent-paying vault or ephemeral system program CPI is needed.
     ///
     /// # Account references
-    /// - 0. [WRITE, SIGNER] Sponsor (validator authority, pays rent)
-    /// - 1. [WRITE, SIGNER] Outbox intent PDA to create
-    /// - 2. [WRITE]         Vault account (receives rent payment)
-    /// - 3. []              Ephemeral System Program (CPI target)
+    /// - 0. [SIGNER] Sponsor (validator authority)
+    /// - 1. [WRITE]  Outbox intent PDA to create
     CreateOutboxIntent { data: Vec<u8> },
 
     /// Closes the outbox intent PDA on successful execution of the intent.
+    /// The PDA never held lamports, so this just zeroes and marks it closed
+    /// directly - no rent refund or ephemeral system program CPI is needed.
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority (receives rent refund from close)
-    /// - **1.** `[]`              Magic Program
-    /// - **2.** `[WRITE]`         Ephemeral Vault
-    /// - **3.** `[WRITE]`         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - **0.** `[SIGNER]` Validator Authority
+    /// - **1.** `[WRITE]`  Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     CloseOutboxIntent(u64),
 
     /// Records the attempt to realize a scheduled commit on chain.
     ///
     /// # Account references
-    /// - 0. [WRITE, SIGNER] Validator Authority (receives rent refund from close)
-    /// - 1. []              Ephemeral System Program (CPI target)
-    /// - 2. [WRITE]         Ephemeral Vault
-    /// - 3. [WRITE]         Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
+    /// - 0. [SIGNER] Validator Authority
+    /// - 1. []       Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     ScheduledCommitSent(u64),
 
     /// Sets or advances the execution stage of an outbox intent.
@@ -459,7 +438,7 @@ pub enum OutboxIntentInstruction {
 }
 
 impl OutboxIntentInstruction {
-    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
+    pub fn try_to_vec(&self) -> Result<Vec<u8>, wincode::WriteError> {
+        wincode::serialize(self)
     }
 }

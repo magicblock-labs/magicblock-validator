@@ -4,13 +4,15 @@ use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::PendingTransaction, validator::validator_authority,
+    outbox::PendingTransaction,
 };
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::utils::{
@@ -20,8 +22,6 @@ use crate::{
             build_commit_finalize_tasks, execute_single_stage_flow,
             report_and_close_intent,
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
@@ -57,7 +57,7 @@ where
         actions_timeout: Duration,
         pending_transaction: PendingTransaction,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             authority,
             pending_transaction,

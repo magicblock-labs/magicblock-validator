@@ -1,0 +1,24 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "magicblock-validator-tui"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
+crossterm = "0.29"
+futures-util = { workspace = true }
+percent-encoding = "2"
+ratatui = "0.30"
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+solana-pubsub-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+tokio-util = { workspace = true }
+tracing = { workspace = true }

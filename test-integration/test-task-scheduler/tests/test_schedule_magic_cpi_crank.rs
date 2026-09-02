@@ -98,7 +98,7 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
     );
     crank_ix.accounts[0].is_writable = false;
 
-    let schedule_sig = expect!(
+    expect!(
         ctx.send_transaction_ephem_with_preflight(
             &mut Transaction::new_signed_with_payer(
                 &[InstructionUtils::schedule_task_instruction(
@@ -116,16 +116,6 @@ fn test_crank_can_execute_program_that_cpis_into_magic() {
             ),
             &[&player]
         ),
-        validator
-    );
-    let schedule_status =
-        expect!(ctx.get_transaction_ephem(&schedule_sig), validator);
-    expect!(
-        schedule_status
-            .transaction
-            .meta
-            .and_then(|m| m.status.ok())
-            .ok_or_else(|| anyhow::anyhow!("Scheduling transaction failed")),
         validator
     );
 

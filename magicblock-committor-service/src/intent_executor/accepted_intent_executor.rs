@@ -2,16 +2,15 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    validator::validator_authority,
-};
+use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 use tracing::trace;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
@@ -21,18 +20,16 @@ use crate::{
             build_commit_finalize_tasks, execute_single_stage_flow,
             execute_two_stage_flow, report_and_close_intent,
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
+        TaskBuilderImpl,
         task_builder::TasksBuilder,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
             TwoStageExecutionMode,
         },
-        TaskBuilderImpl,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -58,7 +55,7 @@ where
         ctx: IntentExecutorCtx<T, F, A, O>,
         actions_timeout: Duration,
     ) -> Self {
-        let authority = validator_authority();
+        let authority = ctx.authority.insecure_clone();
         Self {
             ctx,
             authority,

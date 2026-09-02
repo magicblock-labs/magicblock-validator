@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
+use integration_test_tools::init_logger;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
-use test_kit::init_logger;
 mod utils;
 
 #[tokio::test]

@@ -1,14 +1,12 @@
-use std::net::SocketAddr;
+use std::{io, net::SocketAddr};
 
-use error::{ApertureError, RpcError};
+pub use error::{ApertureError, RpcError};
 use magicblock_config::config::aperture::ApertureConfig;
-use magicblock_core::link::DispatchEndpoints;
-pub use processor::EventProcessors;
 use server::{http::HttpServer, websocket::WebsocketServer};
-use state::SharedState;
+pub use state::SharedState;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, instrument};
+use tracing::info;
 
 type RpcResult<T> = Result<T, RpcError>;
 type ApertureResult<T> = Result<T, ApertureError>;
@@ -16,30 +14,12 @@ type ApertureResult<T> = Result<T, ApertureError>;
 pub async fn initialize_aperture(
     config: &ApertureConfig,
     state: SharedState,
-    dispatch: &DispatchEndpoints,
     cancel: CancellationToken,
 ) -> ApertureResult<JsonRpcServer> {
-    let (server, events) =
-        prepare_aperture(config, state, dispatch, cancel).await?;
-    events.start();
-    Ok(server)
-}
-
-/// Initializes Aperture without subscribing its event processors.
-///
-/// Validator startup uses this form so ledger-replay block broadcasts are not
-/// admitted into the RPC blockhash cache.
-pub async fn prepare_aperture(
-    config: &ApertureConfig,
-    state: SharedState,
-    dispatch: &DispatchEndpoints,
-    cancel: CancellationToken,
-) -> ApertureResult<(JsonRpcServer, EventProcessors)> {
-    let server =
-        JsonRpcServer::new(config, state.clone(), dispatch, cancel.clone())
-            .await?;
-    let events = EventProcessors::try_new(config, state, dispatch, cancel)?;
-    Ok((server, events))
+    // Reads, subscriptions and transaction submission are all served directly
+    // from the engine held in `state`; there is no separate event-processing
+    // stage to start here.
+    JsonRpcServer::new(config, state, cancel).await
 }
 
 /// An entrypoint to startup JSON-RPC server, for both HTTP and WS requests
@@ -55,14 +35,11 @@ impl JsonRpcServer {
     async fn new(
         config: &ApertureConfig,
         state: SharedState,
-        dispatch: &DispatchEndpoints,
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
         // try to bind to socket before spawning anything (handy in tests)
-        let http = TcpListener::bind(config.listen.0)
-            .await
-            .map_err(RpcError::internal)?;
-        let http_addr = http.local_addr().map_err(RpcError::internal)?;
+        let http = TcpListener::bind(config.listen.0).await?;
+        let http_addr = http.local_addr()?;
 
         let mut ws_addr = http_addr;
         let listen_port = config.listen.0.port();
@@ -71,24 +48,32 @@ impl JsonRpcServer {
             ws_addr.set_port(0);
         } else {
             let ws_port = listen_port.checked_add(1).ok_or_else(|| {
-                RpcError::internal(format!(
-                    "RPC listen port {listen_port} leaves no room for the \
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "RPC listen port {listen_port} leaves no room for the \
                      derived WebSocket port (listen + 1)."
-                ))
+                    ),
+                )
             })?;
             ws_addr.set_port(ws_port);
         }
-        let ws = TcpListener::bind(ws_addr)
-            .await
-            .map_err(RpcError::internal)?;
-        let ws_addr = ws.local_addr().map_err(RpcError::internal)?;
+        let ws = TcpListener::bind(ws_addr).await?;
+        let ws_addr = ws.local_addr()?;
 
-        // initialize HTTP and Websocket servers
+        // Initialize HTTP and Websocket servers before starting any background
+        // delivery tasks, so a bind failure cannot leak engine subscriptions.
         let websocket = {
             let cancel = cancel.clone();
             WebsocketServer::new(ws, &state, cancel).await?
         };
-        let http = HttpServer::new(http, state, cancel, dispatch).await?;
+        let http = HttpServer::new(http, state.clone(), cancel.clone()).await?;
+        let _geyser = geyser::start(
+            &config.geyser_plugins,
+            config.event_processors,
+            state.engine,
+            cancel,
+        )?;
         Ok(Self {
             http,
             websocket,
@@ -106,7 +91,6 @@ impl JsonRpcServer {
     }
 
     /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
-    #[instrument(skip(self))]
     pub async fn run(self) {
         info!("JSON-RPC server running");
         tokio::join! {
@@ -118,12 +102,9 @@ impl JsonRpcServer {
 }
 
 mod encoder;
-pub mod error;
+mod engine_types;
+mod error;
 mod geyser;
-mod processor;
 mod requests;
-pub mod server;
-pub mod state;
-#[cfg(test)]
-mod tests;
-mod utils;
+mod server;
+mod state;

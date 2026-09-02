@@ -1,104 +1,64 @@
 # MagicBlock Configuration
 
-A robust, layered configuration engine for the MagicBlock Validator.
+Typed configuration for the MagicBlock leader and verifier binaries.
 
-This crate centralizes the loading, parsing, and validation of configuration settings from multiple sources (CLI, Environment Variables, and TOML files). It ensures type safety, semantic validity, and a strict precedence hierarchy.
+## Leader
 
-## Features
+`LeaderParams::try_new` merges configuration in this precedence order:
 
-* **Layered Configuration**: seamlessly merges settings from Defaults, TOML files, Environment Variables, and CLI arguments.
-* **Strict Precedence**: **CLI > Environment > File > Defaults**. Explicit user intent always wins.
-* **Overlay Logic**: CLI arguments act as an "overlay," modifying only the specific fields provided without resetting the rest of the configuration.
-* **Type Safety**: uses `serde` for deserialization, supporting complex types like Keypairs, Enums, and URL aliases.
-* **Domain Separation**: configuration is modularized into logical sections (Validator, Ledger, AccountsDB, etc.).
+1. command-line arguments;
+2. `MBV_` environment variables;
+3. the TOML file passed with `--config`;
+4. defaults.
 
-## Usage
-
-The core entry point is `MagicBlockParams::try_new`. This method accepts an iterator of arguments (typically from `std::env::args_os`) and builds the final configuration struct.
+Environment nesting uses `__`, for example
+`MBV_ENGINE__LEDGER__SIZE_LIMIT`.
 
 ```rust
-use magicblock_config::ValidatorParams;
-use std::ffi::OsString;
+use magicblock_config::LeaderParams;
 
-fn main() -> Result<(), figment::Error> {
-    // 1. Collect CLI args
-    let args = std::env::args_os();
-
-    // 2. Load and Validate Configuration
-    let config = ValidatorParams::try_new(args)?;
-
-    println!("Validator Mode: {:?}", config.lifecycle);
-    println!("Listening on: {}", config.listen);
-
-    Ok(())
-}
+let config = LeaderParams::try_new(std::env::args_os())?;
 ```
 
-## Configuration Hierarchy
+[`config.example.toml`](../config.example.toml) documents the complete leader
+configuration. `LeaderParams::load` loads the same file and environment layers
+without parsing process arguments; operator tools use it to share the leader's
+RPC endpoint and signing authority.
 
-The crate resolves configuration values in the following order (highest priority first):
-
-1.  **CLI Arguments**: Explicit flags passed at runtime (e.g., `--basefee 500`).
-2.  **Environment Variables**: System environment variables (e.g., `MBV_VALIDATOR__BASEFEE`).
-3.  **TOML Configuration File**: A structured file passed via `--config <PATH>`.
-4.  **System Defaults**: Hardcoded safe defaults defined in the crate.
-
-## Environment Variables
-
-Environment variables are mapped using the `figment` provider.
-
-  * **Prefix**: `MBV_`
-  * **Separator**: Use a double underscore `__` to denote hierarchy (nesting).
-  * **Field Names**: Use `UPPER_SNAKE_CASE` for the actual field names.
-
-### Examples
-
-| Struct Field | Config Section | Environment Variable |
-| :--- | :--- | :--- |
-| `validator.basefee` | `[validator]` | `MBV_VALIDATOR__BASEFEE` |
-| `ledger.block_time` | `[ledger]` | `MBV_LEDGER__BLOCK_TIME` |
-| `chain_operation.country_code` | `[chain-operation]` | `MBV_CHAIN_OPERATION__COUNTRY_CODE` |
-
-## Configuration File
-
-The validator supports a comprehensive TOML configuration file. You can find a fully documented example in the root of this crate.
-
-🔗 **[View Example Configuration (magicblock.example.toml)](../config.example.toml)**
-
-### Example Snippet
+The optional `[admin]` section controls periodic administrative work:
 
 ```toml
-# magicblock.toml
-
-lifecycle = "offline"
-storage = "/data/ledger"
-
-[validator]
-basefee = 500
-keypair = "9Vo7Tb..."
-
-[accounts-db]
-database-size = 104857600 # 100MB
-block-size = "block256"
+[admin]
+claim-fees-frequency = 300
 ```
 
-## Modules
+Magic Domain Program registration is intentionally not a lifecycle setting.
+Use the `mbv domain` commands to register, synchronize, or unregister a leader.
 
-The configuration is split into domain-specific structs available in `src/config/`:
+## Verifier
 
-  * **`ValidatorConfig`**: Identity keypair, base fees.
-  * **`LedgerConfig`**: Block production timing, verification settings.
-  * **`AccountsDbConfig`**: Snapshotting, indexing, and storage size tuning.
-  * **`ChainOperationConfig`**: On-chain registration details (Country code, FQDN).
-  * **`ChainLinkConfig`**: Account cloning settings.
-  * **`CommitStrategy`**: Compute unit pricing for base chain commits.
-  * **`TaskSchedulerConfig`**: Task scheduling settings.
+`VerifierParams::try_new` loads the required positional TOML path and overlays
+`MBV_VERIFIER_` environment variables. The verifier accepts only follower
+engine settings and derives the engine's remote authority from the configured
+replication upstream.
 
-## Testing
+See
+[`config.verifier.example.toml`](../config.verifier.example.toml) for the
+minimal follower configuration.
 
-This crate includes a comprehensive test suite verifying the precedence logic, overlay behavior, and failure modes.
+## Shared engine configuration
+
+`EngineConfig<R>` owns identity, AccountsDB, ledger, block production, and
+role-specific replication configuration:
+
+- `EngineConfig<LeaderReplication>` is embedded by `LeaderParams`;
+- `EngineConfig<FollowerReplication>` is embedded by `VerifierParams`.
+
+Both process roles use the same `magicblock-runtime` image builder, so builtins,
+loadable programs, and genesis accounts stay identical.
+
+## Validation
 
 ```bash
 cargo test -p magicblock-config
 ```
-

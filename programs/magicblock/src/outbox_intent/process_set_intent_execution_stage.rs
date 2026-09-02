@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::outbox_intent_pda;
+use magicblock_core::intent::outbox::verify_outbox_intent_pda;
 use magicblock_magic_program_api::outbox::ExecutionStage;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
@@ -13,7 +13,7 @@ use crate::{
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
-    validator::effective_validator_authority_id,
+    validator::authority,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
@@ -25,10 +25,11 @@ pub fn process_set_intent_execution_stage(
     intent_id: u64,
     stage: ExecutionStage,
 ) -> Result<(), InstructionError> {
-    let validator_auth = effective_validator_authority_id();
-    validate(&signers, invoke_context, &validator_auth, intent_id)?;
+    let validator_auth = authority();
+    let bundle =
+        validate(&signers, invoke_context, &validator_auth, intent_id)?;
 
-    set_new_execution_stage(invoke_context, intent_id, stage)
+    set_new_execution_stage(invoke_context, intent_id, stage, bundle)
 }
 
 fn validate(
@@ -36,7 +37,7 @@ fn validate(
     invoke_context: &InvokeContext,
     validator_auth: &Pubkey,
     intent_id: u64,
-) -> Result<(), InstructionError> {
+) -> Result<OutboxIntentBundle, InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
 
     // Check that validator authority signed the tx
@@ -62,44 +63,46 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
+    // Deserialize first so the PDA can be validated cheaply against its
+    // own stored bump, instead of re-deriving via find_program_address.
+    let intent_acc =
+        get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data())
+        .map_err(|_| {
+            ic_msg!(
+                invoke_context,
+                "SetIntentExecutionStage ERR: failed to deserialize outbox intent {}",
+                intent_id
+            );
+            InstructionError::InvalidAccountData
+        })?;
+
     // Validate pda we about to apply transition to
     let provided_pda =
         get_instruction_pubkey_with_idx(transaction_context, INTENT_PDA_IDX)?;
-    let expected_pda = outbox_intent_pda(intent_id);
-    if *provided_pda != expected_pda {
+    if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
-            "SetIntentExecutionStage ERR: account at idx {} is {}, expected PDA {} for intent {}",
+            "SetIntentExecutionStage ERR: account at idx {} is {}, invalid PDA for intent {}",
             INTENT_PDA_IDX,
             provided_pda,
-            expected_pda,
             intent_id
         );
         return Err(InstructionError::InvalidArgument);
     }
 
-    Ok(())
+    Ok(bundle)
 }
 
 fn set_new_execution_stage(
     invoke_context: &InvokeContext,
     intent_id: u64,
     stage: ExecutionStage,
+    mut bundle: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let intent_acc =
         get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
-
-    let mut bundle =
-        OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data())
-            .map_err(|_| {
-                ic_msg!(
-                    invoke_context,
-                    "SetIntentExecutionStage ERR: failed to deserialize outbox intent {}",
-                    intent_id
-                );
-                InstructionError::InvalidAccountData
-            })?;
 
     bundle.apply_stage_transition(stage).map_err(|reason| {
         ic_msg!(

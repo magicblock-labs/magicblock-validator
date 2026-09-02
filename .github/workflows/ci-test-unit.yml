@@ -14,14 +14,12 @@ on:
       - '**/build.rs'
       - '**/*.proto'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
       - '.github/workflows/ci-test-unit.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -29,9 +27,7 @@ on:
       - '**/build.rs'
       - '**/*.proto'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
       - '.github/workflows/ci-test-unit.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
@@ -48,7 +44,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
-          rust_toolchain_release: "1.94.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana

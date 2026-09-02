@@ -8,24 +8,24 @@ use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
+        ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
             single_stage::SingleStageStrategyExecutor,
             two_stage,
             two_stage::TwoStageStrategyExecutor,
             utils::{
-                execute_with_timeout, handle_cpi_limit_error, CommitStage,
-                FinalizeStage, SingleStage,
+                CommitStage, FinalizeStage, SingleStage, execute_with_timeout,
+                handle_cpi_limit_error,
             },
         },
-        ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
+        BaseTaskImpl,
         task_builder::{TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::TaskInfoFetcher,
         task_strategist::TransactionStrategy,
-        BaseTaskImpl,
     },
     transaction_preparator::TransactionPreparator,
 };

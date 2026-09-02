@@ -1,20 +1,24 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use magicblock_core::intent::{
+    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    outbox::outbox_intent_pda_with_bump,
+};
 use magicblock_magic_program_api::{
+    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
     },
     instruction::MagicBlockInstruction,
-    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
 };
 use solana_account::{
-    create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
+    AccountBuilder, AccountMode, AccountSharedData, ReadableAccount,
+    create_account_shared_data_for_test,
 };
 use solana_clock::Clock;
 use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
-use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
+use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{system_program, sysvar::clock};
@@ -27,14 +31,24 @@ use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
-        ensure_started_validator, process_instruction,
-        process_instruction_with_logs, StubNonces,
+        StubNonces, ensure_started_validator, process_instruction,
+        process_instruction_with_logs,
     },
     utils::DELEGATION_PROGRAM_ID,
 };
 
 // For the scheduling itself and the debit to fund the scheduled transaction
 const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
+
+/// Delegation is a mode rather than a flag, so `false` here means the account
+/// is simply not delegated: an ordinary readonly account.
+fn mode_for(delegated: bool) -> AccountMode {
+    if delegated {
+        AccountMode::Delegated
+    } else {
+        AccountMode::ReadOnly
+    }
+}
 
 fn get_clock() -> Clock {
     Clock {
@@ -67,10 +81,12 @@ fn prepare_transaction_with_single_committee(
             AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
         );
 
-        let mut committee_account = AccountSharedData::new(0, 0, &program);
-        committee_account.set_delegated(true);
-
-        map.insert(committee, committee_account);
+        map.insert(
+            committee,
+            AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                .mode(AccountMode::Delegated)
+                .build(),
+        );
         map
     };
     ensure_started_validator(&mut account_data, None);
@@ -115,21 +131,24 @@ fn prepare_transaction_with_three_committees(
             MAGIC_CONTEXT_PUBKEY,
             AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id()),
         );
-        {
-            let mut acc = AccountSharedData::new(0, 0, &program);
-            acc.set_delegated(is_delegated.0);
-            map.insert(committee_uno, acc);
-        }
-        {
-            let mut acc = AccountSharedData::new(0, 0, &program);
-            acc.set_delegated(is_delegated.1);
-            map.insert(committee_dos, acc);
-        }
-        {
-            let mut acc = AccountSharedData::new(0, 0, &program);
-            acc.set_delegated(is_delegated.2);
-            map.insert(committee_tres, acc);
-        }
+        map.insert(
+            committee_uno,
+            AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                .mode(mode_for(is_delegated.0))
+                .build(),
+        );
+        map.insert(
+            committee_dos,
+            AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                .mode(mode_for(is_delegated.1))
+                .build(),
+        );
+        map.insert(
+            committee_tres,
+            AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                .mode(mode_for(is_delegated.2))
+                .build(),
+        );
         map
     };
     ensure_started_validator(&mut accounts_data, None);
@@ -157,6 +176,18 @@ fn find_magic_context_account(
         .find(|acc| acc.owner() == &crate::id() && acc.lamports() == u64::MAX)
 }
 
+fn remove_magic_context_account(
+    accounts: &mut Vec<AccountSharedData>,
+) -> AccountSharedData {
+    let index = accounts
+        .iter()
+        .position(|acc| {
+            acc.owner() == &crate::id() && acc.lamports() == u64::MAX
+        })
+        .expect("magic context account not found");
+    accounts.remove(index)
+}
+
 fn assert_non_accepted_actions(
     processed_scheduled: &[AccountSharedData],
     expected_non_accepted_commits: usize,
@@ -164,7 +195,7 @@ fn assert_non_accepted_actions(
     let magic_context_acc = find_magic_context_account(processed_scheduled)
         .expect("magic context account not found");
     let magic_context =
-        bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
+        MagicContext::deserialize(magic_context_acc.data()).unwrap();
 
     assert_eq!(
         magic_context.scheduled_base_intents.len(),
@@ -182,22 +213,22 @@ fn assert_accepted_actions(
     let post_magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
     let post_magic_context =
-        bincode::deserialize::<MagicContext>(post_magic_context_acc.data())
-            .unwrap();
+        MagicContext::deserialize(post_magic_context_acc.data()).unwrap();
     assert_eq!(post_magic_context.scheduled_base_intents.len(), 0);
 
     let pre_magic_context =
-        bincode::deserialize::<MagicContext>(pre_accept_magic_context.data())
-            .unwrap();
+        MagicContext::deserialize(pre_accept_magic_context.data()).unwrap();
     let accepted_intents = pre_magic_context.scheduled_base_intents;
     assert_eq!(accepted_intents.len(), expected_accepted_count);
 
     for intent in &accepted_intents {
-        let expected = OutboxIntentBundle::accepted(intent.clone());
+        let bump = outbox_intent_pda_with_bump(intent.id).1;
+        let expected = OutboxIntentBundle::accepted(intent.clone(), bump);
         let actual = processed_accepted
             .iter()
             .filter(|acc| {
-                acc.owner() == &OUTBOX_INTENT_PROGRAM_ID && acc.ephemeral()
+                acc.owner() == &OUTBOX_INTENT_PROGRAM_ID
+                    && acc.is(AccountMode::Ephemeral)
             })
             .filter_map(|acc| {
                 OutboxIntentBundle::try_from_bytes(acc.data()).ok()
@@ -218,14 +249,14 @@ fn assert_accepted_actions(
 /// Pre-populates uninitialized outbox intent PDA accounts into `account_data`.
 /// The accept instruction creates these accounts via CPI (`CreateOutboxIntent`),
 /// which requires them to be present in the transaction context as uninitialized
-/// system-owned entries — exactly what `validate_new_ephemeral` expects.
-/// The first 5 accounts (validator, outbox program, magic_context, vault,
-/// ephemeral system program) are already in `account_data`, so we skip them.
+/// system-owned entries — exactly what `validate_new_pda` expects.
+/// The first 3 accounts (validator, outbox program, magic_context) are
+/// already in `account_data`, so we skip them.
 fn ensure_outbox_pda_accounts_exist(
     account_data: &mut HashMap<Pubkey, AccountSharedData>,
     accept_ix: &Instruction,
 ) {
-    for acc_meta in accept_ix.accounts.iter().skip(5) {
+    for acc_meta in accept_ix.accounts.iter().skip(3) {
         account_data.entry(acc_meta.pubkey).or_insert_with(|| {
             AccountSharedData::new(0, 0, &system_program::id())
         });
@@ -277,8 +308,8 @@ fn assert_first_commit(
             slot,
             payer: actual_payer,
             blockhash: _,
-            sent_transaction: _,
             intent_bundle,
+            ..
         } => {
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
@@ -313,12 +344,11 @@ mod tests {
         create_ata_account, create_token_2022_ata_account,
     };
     use magicblock_core::token_programs::{
-        derive_ata, derive_ata_with_token_program, derive_eata,
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derive_ata,
+        derive_ata_with_token_program, derive_eata,
     };
     use serial_test::serial;
     use solana_seed_derivable::SeedDerivable;
-    use test_kit::init_logger;
 
     use super::*;
     use crate::{utils::instruction_utils::InstructionUtils, validator};
@@ -327,26 +357,23 @@ mod tests {
         owner: &Pubkey,
         mint: &Pubkey,
     ) -> AccountSharedData {
-        let ata_account = create_ata_account(owner, mint);
-        let mut acc = AccountSharedData::from(ata_account);
-        acc.set_delegated(true);
-        acc
+        AccountBuilder::from(create_ata_account(owner, mint))
+            .mode(AccountMode::Delegated)
+            .build()
     }
 
     fn make_delegated_token_2022_ata_account(
         owner: &Pubkey,
         mint: &Pubkey,
     ) -> AccountSharedData {
-        let ata_account = create_token_2022_ata_account(owner, mint);
-        let mut acc = AccountSharedData::from(ata_account);
-        acc.set_delegated(true);
-        acc
+        AccountBuilder::from(create_token_2022_ata_account(owner, mint))
+            .mode(AccountMode::Delegated)
+            .build()
     }
 
     #[test]
     #[serial]
     fn test_schedule_commit_single_account_success() {
-        init_logger!();
         let payer =
             Keypair::from_seed(b"schedule_commit_single_account_success")
                 .unwrap();
@@ -371,19 +398,20 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
-                transaction_accounts.clone(),
+                transaction_accounts,
                 ix.accounts,
                 Ok(()),
             );
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
+            assert_non_accepted_actions(&processed_scheduled, 1);
             let magic_context_acc =
-                assert_non_accepted_actions(&processed_scheduled, 1);
+                remove_magic_context_account(&mut processed_scheduled);
 
-            (processed_scheduled.clone(), magic_context_acc.clone())
+            (processed_scheduled, magic_context_acc)
         };
 
         // 2. We run the transaction that accepts the scheduled commit
@@ -394,7 +422,7 @@ mod tests {
                 );
 
             let intent_ids =
-                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                MagicContext::deserialize(magic_context_acc.data())
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
@@ -438,9 +466,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_intent_bundle_action_only_with_two_accounts() {
-        init_logger!();
-
+    fn test_schedule_intent_bundle_action_only_rejects_missing_caller() {
         let payer = Keypair::from_seed(
             b"schedule_intent_bundle_action_only_two_accounts",
         )
@@ -492,7 +518,7 @@ mod tests {
                 }],
             }],
         };
-        let ix = Instruction::new_with_bincode(
+        let ix = Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleIntentBundle(args),
             vec![
@@ -507,37 +533,17 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        let processed_scheduled = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Ok(()),
+            Err(InstructionError::UnsupportedProgramId),
         );
-
-        let magic_context_acc =
-            assert_non_accepted_actions(&processed_scheduled, 1);
-        let magic_context =
-            bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap();
-        let scheduled = &magic_context.scheduled_base_intents[0];
-        let actions = scheduled.standalone_actions();
-
-        assert!(scheduled.get_all_committed_pubkeys().is_empty());
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].escrow_authority, payer.pubkey());
-        assert_eq!(actions[0].destination_program, destination_program);
-        assert_eq!(actions[0].account_metas_per_program.len(), 1);
-        assert_eq!(
-            actions[0].account_metas_per_program[0].pubkey,
-            action_account
-        );
-        assert!(actions[0].source_program.is_some());
     }
 
     #[test]
     #[serial]
     fn test_schedule_commit_single_account_and_request_undelegate_success() {
-        init_logger!();
         let payer =
             Keypair::from_seed(b"single_account_with_undelegate_success")
                 .unwrap();
@@ -563,19 +569,20 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
-                transaction_accounts.clone(),
+                transaction_accounts,
                 ix.accounts,
                 Ok(()),
             );
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
+            assert_non_accepted_actions(&processed_scheduled, 1);
             let magic_context_acc =
-                assert_non_accepted_actions(&processed_scheduled, 1);
+                remove_magic_context_account(&mut processed_scheduled);
 
-            (processed_scheduled.clone(), magic_context_acc.clone())
+            (processed_scheduled, magic_context_acc)
         };
 
         // 2. We run the transaction that accepts the scheduled commit
@@ -586,7 +593,7 @@ mod tests {
                 );
 
             let intent_ids =
-                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                MagicContext::deserialize(magic_context_acc.data())
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
@@ -631,8 +638,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_remaps_delegated_ata_to_eata() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_remap_ata_to_eata").unwrap();
         let wallet_owner = Pubkey::new_unique();
@@ -677,13 +682,12 @@ mod tests {
         let magic_context_acc =
             assert_non_accepted_actions(&processed_scheduled, 1);
 
-        let intent_ids =
-            bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+        let intent_ids = MagicContext::deserialize(magic_context_acc.data())
+            .unwrap()
+            .scheduled_base_intents
+            .into_iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>();
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             intent_ids.into_iter(),
         );
@@ -718,9 +722,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_allows_token_2022_ata_from_eata_parent() {
-        init_logger!();
-
+    fn test_schedule_commit_rejects_token_2022_ata_without_eata_caller() {
         let payer =
             Keypair::from_seed(b"schedule_commit_token_2022_ata_eata_parent")
                 .unwrap();
@@ -732,8 +734,6 @@ mod tests {
             &mint,
             &TOKEN_2022_PROGRAM_ID,
         );
-        let eata_pubkey = derive_eata(&wallet_owner, &mint);
-
         let (mut account_data, mut transaction_accounts) =
             prepare_transaction_with_single_committee(
                 &payer,
@@ -757,30 +757,17 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        let processed_scheduled = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Ok(()),
-        );
-        let magic_context_acc =
-            assert_non_accepted_actions(&processed_scheduled, 1);
-        let magic_context =
-            bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap();
-        let scheduled = &magic_context.scheduled_base_intents[0];
-
-        assert_eq!(
-            scheduled.get_all_committed_pubkeys(),
-            vec![eata_parent_owned_committee, eata_pubkey]
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 
     #[test]
     #[serial]
     fn test_schedule_commit_and_undelegate_remaps_delegated_ata_to_eata() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_undelegate_remap_ata_eata")
                 .unwrap();
@@ -826,13 +813,12 @@ mod tests {
         let magic_context_acc =
             assert_non_accepted_actions(&processed_scheduled, 1);
 
-        let intent_ids =
-            bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                .unwrap()
-                .scheduled_base_intents
-                .into_iter()
-                .map(|i| i.id)
-                .collect::<Vec<_>>();
+        let intent_ids = MagicContext::deserialize(magic_context_acc.data())
+            .unwrap()
+            .scheduled_base_intents
+            .into_iter()
+            .map(|i| i.id)
+            .collect::<Vec<_>>();
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             intent_ids.into_iter(),
         );
@@ -870,8 +856,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_three_accounts_success() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_three_accounts_success")
                 .unwrap();
@@ -909,7 +893,7 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
@@ -918,12 +902,13 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
+            assert_non_accepted_actions(&processed_scheduled, 1);
             let magic_context_acc =
-                assert_non_accepted_actions(&processed_scheduled, 1);
+                remove_magic_context_account(&mut processed_scheduled);
 
             (
-                processed_scheduled.clone(),
-                magic_context_acc.clone(),
+                processed_scheduled,
+                magic_context_acc,
                 program,
                 committee_uno,
                 committee_dos,
@@ -944,7 +929,7 @@ mod tests {
             );
 
             let intent_ids =
-                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                MagicContext::deserialize(magic_context_acc.data())
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
@@ -1031,7 +1016,7 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let processed_scheduled = process_instruction(
+            let mut processed_scheduled = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
@@ -1040,12 +1025,13 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
+            assert_non_accepted_actions(&processed_scheduled, 1);
             let magic_context_acc =
-                assert_non_accepted_actions(&processed_scheduled, 1);
+                remove_magic_context_account(&mut processed_scheduled);
 
             (
-                processed_scheduled.clone(),
-                magic_context_acc.clone(),
+                processed_scheduled,
+                magic_context_acc,
                 program,
                 committee_uno,
                 committee_dos,
@@ -1066,7 +1052,7 @@ mod tests {
             );
 
             let intent_ids =
-                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                MagicContext::deserialize(magic_context_acc.data())
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
@@ -1141,7 +1127,7 @@ mod tests {
     fn instruction_from_account_metas(
         account_metas: Vec<AccountMeta>,
     ) -> solana_instruction::Instruction {
-        Instruction::new_with_bincode(
+        Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::ScheduleCommit,
             account_metas,
@@ -1151,8 +1137,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_no_pdas_provided_to_ix() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
                 .unwrap();
@@ -1187,8 +1171,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_undelegate_with_readonly() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_undelegate_with_readonly")
                 .unwrap();
@@ -1207,7 +1189,7 @@ mod tests {
                 AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
             ];
             account_metas.push(AccountMeta::new_readonly(committee, true));
-            Instruction::new_with_bincode(
+            Instruction::new_with_wincode(
                 crate::id(),
                 &MagicBlockInstruction::ScheduleCommitAndUndelegate,
                 account_metas,
@@ -1222,7 +1204,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::ReadonlyDataModified),
         );
@@ -1231,8 +1213,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_with_non_delegated_account() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_with_non_delegated_account")
                 .unwrap();
@@ -1244,10 +1224,13 @@ mod tests {
             prepare_transaction_with_single_committee(
                 &payer, program, committee,
             );
-        account_data
-            .get_mut(&committee)
-            .unwrap()
-            .set_delegated(false);
+        let committee_account = account_data.remove(&committee).unwrap();
+        account_data.insert(
+            committee,
+            AccountBuilder::from(committee_account)
+                .mode(AccountMode::ReadOnly)
+                .build(),
+        );
 
         // Create ScheduleCommit instruction with non-delegated committee
         let ix = InstructionUtils::schedule_commit_instruction(
@@ -1262,7 +1245,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::IllegalOwner),
         );
@@ -1270,10 +1253,8 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
-    ) {
-        init_logger!();
-
+    fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer()
+     {
         let payer =
             Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
                 .unwrap();
@@ -1291,10 +1272,16 @@ mod tests {
             (true, true, true),
         );
 
-        let mut dos_shared =
-            AccountSharedData::new(0, 0, &Pubkey::new_unique());
-        dos_shared.set_delegated(true);
-        accounts_data.insert(committee_dos, dos_shared);
+        accounts_data.insert(
+            committee_dos,
+            AccountBuilder::from(AccountSharedData::new(
+                0,
+                0,
+                &Pubkey::new_unique(),
+            ))
+            .mode(AccountMode::Delegated)
+            .build(),
+        );
 
         let ix = instruction_from_account_metas(
             account_metas_last_committee_not_signer(
@@ -1313,15 +1300,13 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::InvalidAccountOwner),
+            Err(InstructionError::InvalidInstructionData),
         );
     }
 
     #[test]
     #[serial]
     fn test_schedule_commit_with_confined_account() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_with_confined_account")
                 .unwrap();
@@ -1333,14 +1318,16 @@ mod tests {
             prepare_transaction_with_single_committee(
                 &payer, program, committee,
             );
-        account_data.get_mut(&committee).unwrap().set_confined(true);
+        let committee_account = account_data.remove(&committee).unwrap();
+        account_data.insert(
+            committee,
+            AccountBuilder::from(committee_account)
+                .mode(AccountMode::Ephemeral)
+                .build(),
+        );
 
         let committee_account = account_data.get(&committee).unwrap();
-        assert!(committee_account.confined());
-        assert!(
-            committee_account.delegated(),
-            "Confined account should remain delegated"
-        );
+        assert!(committee_account.is(AccountMode::Ephemeral));
 
         // Create ScheduleCommit instruction with confined committee
         let ix = InstructionUtils::schedule_commit_instruction(
@@ -1355,7 +1342,7 @@ mod tests {
 
         process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Err(InstructionError::InvalidAccountData),
         );
@@ -1364,8 +1351,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_fails_when_commit_limit_exceeded() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_limit_exceeded____").unwrap();
         let program = Pubkey::new_unique();
@@ -1403,8 +1388,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_logs_commit_limit_resolution() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"schedule_commit_limit_log_msg___").unwrap();
         let program = Pubkey::new_unique();
@@ -1452,8 +1435,6 @@ mod tests {
     #[serial]
     fn test_schedule_commit_and_undelegate_succeeds_when_commit_limit_exceeded()
     {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"undelegate_succeeds_limit_exceeded").unwrap();
         let program = Pubkey::new_unique();
@@ -1491,8 +1472,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_three_accounts_one_confined() {
-        init_logger!();
-
         let payer =
             Keypair::from_seed(b"three_accounts_one_confined_______").unwrap();
 
@@ -1510,19 +1489,17 @@ mod tests {
         );
 
         // Make the second committee confined
-        accounts_data
-            .get_mut(&committee_dos)
-            .unwrap()
-            .set_confined(true);
-        // Assert that the confined account remains delegated
+        let committee_account = accounts_data.remove(&committee_dos).unwrap();
+        accounts_data.insert(
+            committee_dos,
+            AccountBuilder::from(committee_account)
+                .mode(AccountMode::Ephemeral)
+                .build(),
+        );
         let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
         assert!(
-            committee_dos_account.confined(),
+            committee_dos_account.is(AccountMode::Ephemeral),
             "Confined account should remain confined"
-        );
-        assert!(
-            committee_dos_account.delegated(),
-            "Confined account should remain delegated"
         );
 
         let ix = InstructionUtils::schedule_commit_instruction(
@@ -1560,10 +1537,16 @@ mod tests {
         let mut account_data = {
             let mut map = HashMap::new();
 
-            let mut payer_acc =
-                AccountSharedData::new(1_000_000, 0, &system_program::id());
-            payer_acc.set_delegated(true);
-            map.insert(payer.pubkey(), payer_acc);
+            map.insert(
+                payer.pubkey(),
+                AccountBuilder::from(AccountSharedData::new(
+                    1_000_000,
+                    0,
+                    &system_program::id(),
+                ))
+                .mode(AccountMode::Delegated)
+                .build(),
+            );
 
             map.insert(
                 MAGIC_CONTEXT_PUBKEY,
@@ -1574,15 +1557,26 @@ mod tests {
                 ),
             );
 
-            let mut vault_acc =
-                AccountSharedData::new(0, 0, &system_program::id());
-            vault_acc.set_delegated(true);
-            map.insert(fee_vault_pubkey, vault_acc);
+            map.insert(
+                fee_vault_pubkey,
+                AccountBuilder::from(AccountSharedData::new(
+                    0,
+                    0,
+                    &system_program::id(),
+                ))
+                .mode(AccountMode::Delegated)
+                .build(),
+            );
 
             for committee in committees {
-                let mut acc = AccountSharedData::new(0, 0, &program);
-                acc.set_delegated(true);
-                map.insert(*committee, acc);
+                map.insert(
+                    *committee,
+                    AccountBuilder::from(AccountSharedData::new(
+                        0, 0, &program,
+                    ))
+                    .mode(AccountMode::Delegated)
+                    .build(),
+                );
             }
 
             map
@@ -1601,7 +1595,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_delegated_payer_charges_fee_vault() {
-        init_logger!();
         let payer =
             Keypair::from_seed(b"delegated_payer_charges_fee_vault").unwrap();
         let program = Pubkey::new_unique();
@@ -1644,7 +1637,8 @@ mod tests {
         accounts
             .iter()
             .find(|a| {
-                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
+                    && a.is(AccountMode::Delegated)
             })
             .expect("payer should have been debited");
     }
@@ -1652,7 +1646,6 @@ mod tests {
     #[test]
     #[serial]
     fn test_schedule_commit_delegated_payer_only_charges_above_limit() {
-        init_logger!();
         let payer =
             Keypair::from_seed(b"delegated_payer_only_above_limit_").unwrap();
         let program = Pubkey::new_unique();
@@ -1697,16 +1690,17 @@ mod tests {
         assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
 
         // Payer debited by exactly one fee
-        assert!(accounts
-            .iter()
-            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
-                && a.delegated()));
+        assert!(
+            accounts
+                .iter()
+                .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
+                    && a.is(AccountMode::Delegated))
+        );
     }
 
     #[test]
     #[serial]
     fn test_schedule_commit_delegated_payer_without_vault_errors() {
-        init_logger!();
         let payer =
             Keypair::from_seed(b"delegated_payer_no_vault_________").unwrap();
         let program = Pubkey::new_unique();
@@ -1715,10 +1709,16 @@ mod tests {
         // Build account map with a delegated payer but NO fee vault entry
         let mut account_data = {
             let mut map = HashMap::new();
-            let mut payer_acc =
-                AccountSharedData::new(1_000_000, 0, &system_program::id());
-            payer_acc.set_delegated(true);
-            map.insert(payer.pubkey(), payer_acc);
+            map.insert(
+                payer.pubkey(),
+                AccountBuilder::from(AccountSharedData::new(
+                    1_000_000,
+                    0,
+                    &system_program::id(),
+                ))
+                .mode(AccountMode::Delegated)
+                .build(),
+            );
             map.insert(
                 MAGIC_CONTEXT_PUBKEY,
                 AccountSharedData::new(
@@ -1727,9 +1727,12 @@ mod tests {
                     &crate::id(),
                 ),
             );
-            let mut acc = AccountSharedData::new(0, 0, &program);
-            acc.set_delegated(true);
-            map.insert(committee, acc);
+            map.insert(
+                committee,
+                AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                    .mode(AccountMode::Delegated)
+                    .build(),
+            );
             map
         };
         ensure_started_validator(

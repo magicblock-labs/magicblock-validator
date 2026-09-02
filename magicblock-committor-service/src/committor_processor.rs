@@ -1,6 +1,6 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{atomic::AtomicU64, Arc, Mutex},
+    collections::{HashMap, hash_map::Entry},
+    sync::{Arc, Mutex, atomic::AtomicU64},
 };
 
 use futures_util::future::join_all;
@@ -18,7 +18,7 @@ use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_engine::{
-        db::BacklogDB, BroadcastedIntentExecutionResult, IntentEngineHandle,
+        BroadcastedIntentExecutionResult, IntentEngineHandle, db::BacklogDB,
     },
     intent_executor::{
         error::IntentExecutorError, intent_executor_factory::ExecutorConfig,
@@ -92,6 +92,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
         let commits_scheduler = IntentEngineHandle::new(
+            authority.insecure_clone(),
             magic_block_rpc_client.clone(),
             db,
             task_info_fetcher.clone(),
@@ -184,7 +185,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             return Err(err);
         }
 
-        let results = join_all(receivers.into_iter())
+        let results = join_all(receivers)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, RecvError>>()?;

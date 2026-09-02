@@ -13,20 +13,20 @@ on:
       - '**/Cargo.lock'
       - 'clippy.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
       - '**/Cargo.lock'
       - 'clippy.toml'
       - 'Makefile'
-      - 'test-integration/Makefile'
       - '.github/workflows/**'
       - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 jobs:
   run_make_ci_lint:
@@ -40,16 +40,10 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-lint-v002"
-          rust_toolchain_release: "1.94.1"
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      - run: make ci-lint
-        shell: bash
-        working-directory: magicblock-validator
+      - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Run ci-lint in test-integration
-        run: |
-          cd test-integration
-          make ci-lint
+      - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator

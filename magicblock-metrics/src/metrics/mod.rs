@@ -1,14 +1,12 @@
 use std::sync::Once;
 
-pub use prometheus::HistogramTimer;
 use prometheus::{
-    Histogram, HistogramOpts, HistogramVec, IntCounter, IntCounterVec,
-    IntGauge, IntGaugeVec, Opts, Registry,
+    Histogram, HistogramOpts, HistogramTimer, HistogramVec, IntCounter,
+    IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountClone, AccountCommit, AccountFetchContext, AccountFetchEntrypoint,
-    AccountFetchReason, BankPrecheckOutcome, BankPrecheckReason,
-    ChainlinkCloneIntent, ChainlinkCloneMaterializationOutcome,
+    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
+    BankPrecheckOutcome, BankPrecheckReason, ChainlinkCloneIntent,
     ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
@@ -43,125 +41,11 @@ const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 lazy_static::lazy_static! {
     pub (crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
 
-    static ref SLOT_GAUGE: IntGauge = IntGauge::new(
-        "slot_gauge", "Validator slot"
-    ).unwrap();
-
     // Needs to be a gauge so we can set it directly
     // (instead of having to calcuate by which to inc it)
     static ref CHAIN_SLOT_GAUGE: IntGauge = IntGauge::new(
         "chain_slot_gauge", "Chain Slot Gauge",
     ).unwrap();
-
-    // The replica's view of a slot differed from the leader's: it missed a
-    // message, or applied one the leader did not. Reseeding from the leader's
-    // hash each slot makes this self-heal, leaving one log line as its trace.
-    static ref REPLICA_BLOCKHASH_DIVERGENCE_COUNTER: IntCounter = IntCounter::new(
-        "replica_blockhash_divergence_count",
-        "Replica blocks whose local blockhash diverged from the leader's",
-    ).unwrap();
-
-    static ref REPLICA_STREAM_GAP_COUNTER: IntCounter = IntCounter::new(
-        "replica_stream_gap_count",
-        "Holes detected in the replicated message sequence",
-    ).unwrap();
-
-    // Legitimate only for a transaction that had not reached the ledger as a
-    // mode switch rebuilt the accumulator. More than rare means the rebuild is
-    // wrong, and that the allowance is masking real divergence.
-    static ref REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER: IntCounter = IntCounter::new(
-        "replica_initial_blockhash_mismatch_count",
-        "First-block-after-mode-switch blockhash mismatches on a replica",
-    ).unwrap();
-
-    // -----------------
-    // Ledger
-    // -----------------
-    static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "ledger_size_gauge", "Ledger size in Bytes",
-    ).unwrap();
-    static ref LEDGER_BLOCK_TIMES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_blocktimes_gauge", "Ledger Blocktimes Gauge",
-    ).unwrap();
-    static ref LEDGER_BLOCKHASHES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_blockhashes_gauge", "Ledger Blockhashes Gauge",
-    ).unwrap();
-    static ref LEDGER_SLOT_SIGNATURES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_slot_signatures_gauge", "Ledger Slot Signatures Gauge",
-    ).unwrap();
-    static ref LEDGER_ADDRESS_SIGNATURES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_address_signatures_gauge", "Ledger Address Signatures Gauge",
-    ).unwrap();
-    static ref LEDGER_TRANSACTION_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_status_gauge", "Ledger Transaction Status Gauge",
-    ).unwrap();
-    static ref LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_successful_status_gauge", "Ledger Successful Transaction Status Gauge",
-    ).unwrap();
-    static ref LEDGER_TRANSACTION_FAILED_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_failed_status_gauge", "Ledger Failed Transaction Status Gauge",
-    ).unwrap();
-    static ref LEDGER_TRANSACTIONS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transactions_gauge", "Ledger Transactions Gauge",
-    ).unwrap();
-    static ref LEDGER_TRANSACTION_MEMOS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_memos_gauge", "Ledger Transaction Memos Gauge",
-    ).unwrap();
-    static ref LEDGER_PERF_SAMPLES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_perf_samples_gauge", "Ledger Perf Samples Gauge",
-    ).unwrap();
-    pub static ref LEDGER_COLUMNS_COUNT_DURATION_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "ledger_columns_count_duration_seconds",
-            "Time taken to compute ledger columns counts"
-        )
-        .buckets(
-            MICROS_10_90.iter().chain(
-            MICROS_100_900.iter()).chain(
-            MILLIS_1_9.iter()).chain(
-            MILLIS_10_90.iter()).chain(
-            MILLIS_100_900.iter()).chain(
-            SECONDS_1_9.iter()).cloned().collect()
-        ),
-    ).unwrap();
-    pub static ref LEDGER_TRUNCATOR_COMPACTION_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "ledger_truncator_compaction_seconds",
-            "Time taken to compact rocksdb columns"
-        )
-        .buckets(
-            vec![10.0, 30.0, (30 * 60) as f64, (60 * 60) as f64, (3 * 60 * 60) as f64 ]
-        ),
-    ).unwrap();
-    pub static ref LEDGER_TRUNCATOR_DELETE_SECONDS: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "ledger_truncator_delete_seconds",
-            "Time taken to delete rocksdb slot ranges"
-        )
-        .buckets(
-            vec![0.1, 1.0, 5.0, 10.0, 30.0]
-        ),
-    ).unwrap();
-
-    static ref LEDGER_DISABLE_COMPACTIONS_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "ledger_disable_compactions_time",
-            "Time in seconds spent on disabling manual compaction"
-        )
-        .buckets(
-            vec![0.1, 3.0, 10.0, 60.0, (10 * 60) as f64, (30 * 60) as f64]
-        ),
-        ).unwrap();
-
-    static ref LEDGER_SHUTDOWN_TIME: Histogram = Histogram::with_opts(
-        HistogramOpts::new(
-            "ledger_shutdown_time",
-            "Time taken for ledger to shutdown"
-        )
-        .buckets(
-            vec![0.1, 1.0, 2.0, 3.0, 10.0, 60.0]
-        ),
-        ).unwrap();
 }
 
 lazy_static::lazy_static! {
@@ -169,14 +53,6 @@ lazy_static::lazy_static! {
     // -----------------
     // Accounts
     // -----------------
-    static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "accounts_size_gauge", "Size of persisted accounts (in bytes) currently on disk",
-    ).unwrap();
-
-    static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
-        "accounts_count_gauge", "Number of accounts currently in the database",
-    ).unwrap();
-
     static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
         "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
     ).unwrap();
@@ -186,10 +62,6 @@ lazy_static::lazy_static! {
     ).unwrap_or_else(|err| {
         panic!("failed to create inflight_subscription_updates_gauge: {err}")
     });
-
-    static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
-        "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
-    ).unwrap();
 
     static ref CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
@@ -248,16 +120,6 @@ lazy_static::lazy_static! {
             Opts::new(
                 "account_subscription_account_updates_count",
                 "Number of account updates received via account subscription",
-            ),
-            &["client_id"],
-        )
-        .unwrap();
-
-    static ref ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT: IntCounterVec =
-        IntCounterVec::new(
-            Opts::new(
-                "account_subscription_activations_count",
-                "Number of account subscription activations when subscriptions did not match existing subscriptions",
             ),
             &["client_id"],
         )
@@ -385,13 +247,8 @@ lazy_static::lazy_static! {
         &["name"],
     ).unwrap();
 
-    pub static ref RPC_WS_SUBSCRIPTIONS_COUNT: IntGaugeVec = IntGaugeVec::new(
-        Opts::new("rpc_ws_subscriptions_count", "Count of active rpc websocket subscriptions"),
-        &["name"],
-    ).unwrap();
-
     // Account fetch results from network (RPC)
-    pub static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
+    static ref ACCOUNT_FETCHES_SUCCESS_COUNT: IntCounter =
         IntCounter::new(
             "account_fetches_success_count",
             "Total number of successful network \
@@ -399,7 +256,7 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
+    static ref ACCOUNT_FETCHES_FAILED_COUNT: IntCounter =
         IntCounter::new(
             "account_fetches_failed_count",
             "Total number of failed network account fetches \
@@ -407,7 +264,7 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref ACCOUNT_FETCHES_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new(
             "account_fetches_found_count",
             "Total number of network account fetches that found an account",
@@ -416,7 +273,7 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
-    pub static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref ACCOUNT_FETCHES_NOT_FOUND_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new(
             "account_fetches_not_found_count",
             "Total number of network account fetches where account was not found",
@@ -425,7 +282,7 @@ lazy_static::lazy_static! {
     )
     .unwrap();
 
-    pub static ref CHAINLINK_CLONE_ACCOUNTS_TOTAL: IntCounterVec =
+    static ref CHAINLINK_CLONE_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
                 "chainlink_clone_accounts_total",
@@ -435,17 +292,7 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL: IntCounterVec =
-        IntCounterVec::new(
-            Opts::new(
-                "chainlink_clone_materialization_accounts_total",
-                "Total number of post-clone bank materialization checks",
-            ),
-            &["entrypoint", "fetch_reason", "remote_result", "outcome"],
-        )
-        .unwrap();
-
-    pub static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
+    static ref CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
                 "chainlink_empty_placeholder_accounts_total",
@@ -460,7 +307,7 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
+    static ref PER_PROGRAM_ACCOUNT_UPDATES_COUNT: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
                 "per_program_account_updates_count",
@@ -470,46 +317,26 @@ lazy_static::lazy_static! {
         )
         .unwrap();
 
-    pub static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
+    static ref UNDELEGATION_REQUESTED_COUNT: IntCounter =
         IntCounter::new(
             "undelegation_requested_count",
             "Total number of undelegation requests received",
         )
         .unwrap();
 
-    pub static ref UNDELEGATION_COMPLETED_COUNT: IntCounter =
+    static ref UNDELEGATION_COMPLETED_COUNT: IntCounter =
         IntCounter::new(
             "undelegation_completed_count",
             "Total number of completed undelegations detected",
         )
         .unwrap();
 
-    pub static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
+    static ref UNSTUCK_UNDELEGATION_COUNT: IntCounter =
         IntCounter::new(
             "unstuck_undelegation_count",
             "Total number of undelegating accounts found to be already undelegated on chain",
         )
         .unwrap();
-
-
-    // -----------------
-    // Transaction Execution
-    // -----------------
-    pub static ref TRANSACTION_COUNT: IntCounter = IntCounter::new(
-        "transaction_count", "Total number of executed transactions"
-    ).unwrap();
-
-    pub static ref FAILED_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
-        "failed_transactions_count", "Total number of failed transactions"
-    ).unwrap();
-    pub static ref MAX_LOCK_CONTENTION_QUEUE_SIZE: IntGauge = IntGauge::new(
-        "max_lock_contention_queue_size",
-        "Maximum observed queue size for an account lock contention"
-    ).unwrap();
-
-
-
-
 
     // -----------------
     // CommittorService
@@ -766,32 +593,9 @@ pub(crate) fn register() {
                     .expect("collector can't be registered");
             };
         }
-        register!(SLOT_GAUGE);
         register!(CHAIN_SLOT_GAUGE);
-        register!(REPLICA_BLOCKHASH_DIVERGENCE_COUNTER);
-        register!(REPLICA_STREAM_GAP_COUNTER);
-        register!(REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER);
-        register!(LEDGER_SIZE_GAUGE);
-        register!(LEDGER_BLOCK_TIMES_GAUGE);
-        register!(LEDGER_BLOCKHASHES_GAUGE);
-        register!(LEDGER_SLOT_SIGNATURES_GAUGE);
-        register!(LEDGER_ADDRESS_SIGNATURES_GAUGE);
-        register!(LEDGER_TRANSACTION_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTION_FAILED_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTIONS_GAUGE);
-        register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
-        register!(LEDGER_PERF_SAMPLES_GAUGE);
-        register!(LEDGER_COLUMNS_COUNT_DURATION_SECONDS);
-        register!(LEDGER_TRUNCATOR_COMPACTION_SECONDS);
-        register!(LEDGER_TRUNCATOR_DELETE_SECONDS);
-        register!(LEDGER_DISABLE_COMPACTIONS_TIME);
-        register!(LEDGER_SHUTDOWN_TIME);
-        register!(ACCOUNTS_SIZE_GAUGE);
-        register!(ACCOUNTS_COUNT_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
-        register!(EVICTED_ACCOUNTS_COUNT);
         register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
@@ -799,7 +603,6 @@ pub(crate) fn register() {
         register!(PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT);
         register!(PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
         register!(ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT);
-        register!(ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT);
         register!(CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL);
         register!(CHAINLINK_PENDING_FETCH_WAITERS_TOTAL);
         register!(CHAINLINK_PENDING_FETCH_WAITERS_GAUGE);
@@ -821,21 +624,16 @@ pub(crate) fn register() {
         register!(TRANSACTION_PROCESSING_TIME);
         register!(TRANSACTION_SKIP_PREFLIGHT);
         register!(RPC_REQUESTS_COUNT);
-        register!(RPC_WS_SUBSCRIPTIONS_COUNT);
         register!(ACCOUNT_FETCHES_SUCCESS_COUNT);
         register!(ACCOUNT_FETCHES_FAILED_COUNT);
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
-        register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
         register!(UNDELEGATION_REQUESTED_COUNT);
         register!(UNDELEGATION_COMPLETED_COUNT);
         register!(UNSTUCK_UNDELEGATION_COUNT);
-        register!(TRANSACTION_COUNT);
-        register!(FAILED_TRANSACTIONS_COUNT);
-        register!(MAX_LOCK_CONTENTION_QUEUE_SIZE);
         register!(REMOTE_ACCOUNT_PROVIDER_A_COUNT);
         register!(TASK_INFO_FETCHER_A_COUNT);
         register!(TASK_INFO_FETCHER_RETIRING_GAUGE);
@@ -863,99 +661,8 @@ pub(crate) fn register() {
     });
 }
 
-pub fn set_slot(slot: u64) {
-    SLOT_GAUGE.set(slot as i64);
-}
-
 pub fn set_chain_slot(value: u64) {
     CHAIN_SLOT_GAUGE.set(value as i64);
-}
-
-pub fn inc_replica_blockhash_divergence() {
-    REPLICA_BLOCKHASH_DIVERGENCE_COUNTER.inc();
-}
-
-pub fn inc_replica_stream_gap() {
-    REPLICA_STREAM_GAP_COUNTER.inc();
-}
-
-pub fn inc_replica_initial_blockhash_mismatch() {
-    REPLICA_INITIAL_BLOCKHASH_MISMATCH_COUNTER.inc();
-}
-
-pub fn set_ledger_size(size: u64) {
-    LEDGER_SIZE_GAUGE.set(size as i64);
-}
-
-pub fn set_ledger_block_times_count(count: i64) {
-    LEDGER_BLOCK_TIMES_GAUGE.set(count);
-}
-
-pub fn set_ledger_blockhashes_count(count: i64) {
-    LEDGER_BLOCKHASHES_GAUGE.set(count);
-}
-
-pub fn set_ledger_slot_signatures_count(count: i64) {
-    LEDGER_SLOT_SIGNATURES_GAUGE.set(count);
-}
-
-pub fn set_ledger_address_signatures_count(count: i64) {
-    LEDGER_ADDRESS_SIGNATURES_GAUGE.set(count);
-}
-
-pub fn set_ledger_transaction_status_count(count: i64) {
-    LEDGER_TRANSACTION_STATUS_GAUGE.set(count);
-}
-
-pub fn set_ledger_transaction_successful_status_count(count: i64) {
-    LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE.set(count);
-}
-
-pub fn set_ledger_transaction_failed_status_count(count: i64) {
-    LEDGER_TRANSACTION_FAILED_STATUS_GAUGE.set(count);
-}
-
-pub fn set_ledger_transactions_count(count: i64) {
-    LEDGER_TRANSACTIONS_GAUGE.set(count);
-}
-
-pub fn set_ledger_transaction_memos_count(count: i64) {
-    LEDGER_TRANSACTION_MEMOS_GAUGE.set(count);
-}
-
-pub fn set_ledger_perf_samples_count(count: i64) {
-    LEDGER_PERF_SAMPLES_GAUGE.set(count);
-}
-
-pub fn observe_columns_count_duration<F, T>(f: F) -> T
-where
-    F: FnOnce() -> T,
-{
-    LEDGER_COLUMNS_COUNT_DURATION_SECONDS.observe_closure_duration(f)
-}
-
-pub fn start_ledger_truncator_compaction_timer() -> HistogramTimer {
-    LEDGER_TRUNCATOR_COMPACTION_SECONDS.start_timer()
-}
-
-pub fn observe_ledger_truncator_delete<T, F: FnOnce() -> T>(f: F) -> T {
-    LEDGER_TRUNCATOR_DELETE_SECONDS.observe_closure_duration(f)
-}
-
-pub fn start_ledger_disable_compactions_timer() -> HistogramTimer {
-    LEDGER_DISABLE_COMPACTIONS_TIME.start_timer()
-}
-
-pub fn start_ledger_shutdown_timer() -> HistogramTimer {
-    LEDGER_SHUTDOWN_TIME.start_timer()
-}
-
-pub fn set_accounts_size(value: i64) {
-    ACCOUNTS_SIZE_GAUGE.set(value)
-}
-
-pub fn set_accounts_count(value: i64) {
-    ACCOUNTS_COUNT_GAUGE.set(value)
 }
 
 pub fn inc_inflight_subscription_updates() {
@@ -966,10 +673,6 @@ pub fn dec_inflight_subscription_updates() {
     INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE.dec()
 }
 
-pub fn ensure_accounts_end(timer: HistogramTimer) {
-    timer.stop_and_record();
-}
-
 /// Sets the absolute number of monitored accounts.
 ///
 /// This metric reflects the current total count of accounts being monitored.
@@ -977,10 +680,6 @@ pub fn ensure_accounts_end(timer: HistogramTimer) {
 pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
-pub fn inc_evicted_accounts_count() {
-    EVICTED_ACCOUNTS_COUNT.inc();
-}
-
 pub fn inc_chainlink_bank_precheck_accounts_with_context(
     context: AccountFetchContext,
     outcome: BankPrecheckOutcome,
@@ -1077,10 +776,6 @@ pub fn chainlink_subscription_cleanup_accounts_value(
 
 pub fn inc_discovered_dlp_update_delegated_elsewhere() {
     PROGRAM_SUBSCRIPTION_DISCOVERED_DLP_UPDATE_DELEGATED_ELSEWHERE_COUNT.inc();
-}
-
-pub fn inc_committor_intents_count() {
-    COMMITTOR_INTENTS_COUNT.inc()
 }
 
 pub fn inc_committor_intents_count_by(by: u64) {
@@ -1189,21 +884,6 @@ pub fn inc_chainlink_clone_accounts_total_with_context(
         .inc();
 }
 
-pub fn inc_chainlink_clone_materialization_accounts_total_with_context(
-    context: AccountFetchContext,
-    remote_result: ChainlinkCloneRemoteResult,
-    outcome: ChainlinkCloneMaterializationOutcome,
-) {
-    CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            remote_result.value(),
-            outcome.value(),
-        ])
-        .inc();
-}
-
 pub fn inc_chainlink_empty_placeholder_accounts_total_with_context(
     context: AccountFetchContext,
     stage: ChainlinkEmptyPlaceholderStage,
@@ -1231,12 +911,6 @@ pub fn inc_account_subscription_account_updates_count(
     client_id: &impl LabelValue,
 ) {
     ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT
-        .with_label_values(&[client_id.value()])
-        .inc();
-}
-
-pub fn inc_account_subscription_activations_count(client_id: &impl LabelValue) {
-    ACCOUNT_SUBSCRIPTION_ACTIVATIONS_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
 }
@@ -1333,78 +1007,6 @@ pub fn observe_chainlink_companion_fetch_duration_seconds(
             outcome.value(),
         ])
         .observe(seconds);
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_companion_fetch_attempts_sample_count(
-    context: impl Into<AccountFetchContext>,
-    kind: ChainlinkCompanionFetchKind,
-    outcome: ChainlinkCompanionFetchOutcome,
-) -> u64 {
-    let context = context.into();
-    CHAINLINK_COMPANION_FETCH_ATTEMPTS
-        .get_metric_with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            kind.value(),
-            outcome.value(),
-        ])
-        .map(|m| m.get_sample_count())
-        .unwrap_or(0)
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_companion_fetch_attempts_sample_sum(
-    context: impl Into<AccountFetchContext>,
-    kind: ChainlinkCompanionFetchKind,
-    outcome: ChainlinkCompanionFetchOutcome,
-) -> f64 {
-    let context = context.into();
-    CHAINLINK_COMPANION_FETCH_ATTEMPTS
-        .get_metric_with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            kind.value(),
-            outcome.value(),
-        ])
-        .map(|m| m.get_sample_sum())
-        .unwrap_or(0.0)
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_companion_fetch_duration_sample_count(
-    context: impl Into<AccountFetchContext>,
-    kind: ChainlinkCompanionFetchKind,
-    outcome: ChainlinkCompanionFetchOutcome,
-) -> u64 {
-    let context = context.into();
-    CHAINLINK_COMPANION_FETCH_DURATION_SECONDS
-        .get_metric_with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            kind.value(),
-            outcome.value(),
-        ])
-        .map(|m| m.get_sample_count())
-        .unwrap_or(0)
-}
-
-#[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_companion_fetch_duration_sample_sum(
-    context: impl Into<AccountFetchContext>,
-    kind: ChainlinkCompanionFetchKind,
-    outcome: ChainlinkCompanionFetchOutcome,
-) -> f64 {
-    let context = context.into();
-    CHAINLINK_COMPANION_FETCH_DURATION_SECONDS
-        .get_metric_with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            kind.value(),
-            outcome.value(),
-        ])
-        .map(|m| m.get_sample_sum())
-        .unwrap_or(0.0)
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -1700,7 +1302,7 @@ mod fetch_context_metric_tests {
             "subscription_update",
             "delegation_record",
             "direct_account",
-            "added_below_capacity",
+            "added",
         ];
         let before_record = counter_value(
             &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
@@ -1709,7 +1311,7 @@ mod fetch_context_metric_tests {
         inc_chainlink_subscription_registration_accounts(
             SubscriptionRegistrationOrigin::Fetch(record_context),
             SubscriptionReasonLabel::DirectAccount,
-            SubscriptionRegistrationOutcome::AddedBelowCapacity,
+            SubscriptionRegistrationOutcome::Added,
         );
         assert_eq!(
             counter_value(
@@ -1745,7 +1347,7 @@ mod fetch_context_metric_tests {
         let simulation_labels = &[
             "simulate_transaction",
             "requested_account",
-            "fetch_cloner",
+            "remote_account_provider",
             "owned",
         ];
         let before_simulation = counter_value(
@@ -1754,7 +1356,7 @@ mod fetch_context_metric_tests {
         );
         inc_chainlink_pending_fetch_accounts_with_context(
             simulation_context,
-            ChainlinkPendingFetchLayer::FetchCloner,
+            ChainlinkPendingFetchLayer::RemoteAccountProvider,
             ChainlinkPendingFetchOutcome::Owned,
             1,
         );

@@ -1,19 +1,17 @@
 #![cfg(any(test, feature = "dev-context"))]
 #![allow(dead_code)]
-use std::{num::NonZeroUsize, sync::Arc};
+use std::sync::Arc;
 
 use magicblock_config::config::LifecycleMode;
+use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 
-use crate::{
-    accounts_bank::mock::AccountsBankStub,
-    remote_account_provider::{
-        config::RemoteAccountProviderConfig, AccountsLruCache, RemoteAccount,
-        RemoteAccountUpdateSource,
-    },
+use crate::remote_account_provider::{
+    RemoteAccount, RemoteAccountUpdateSource, ResolvedAccount,
+    SubscribedAccounts, config::RemoteAccountProviderConfig,
 };
 
 pub const PUBSUB_URL: &str = "ws://localhost:7800";
@@ -49,9 +47,13 @@ pub async fn sleep_ms(millis: u64) {
 }
 
 pub fn remote_account_lamports(acc: &RemoteAccount) -> u64 {
-    acc.account(&AccountsBankStub::default())
-        .map(|a| a.lamports())
-        .unwrap_or(0)
+    match acc {
+        RemoteAccount::Found(state) => match &state.account {
+            ResolvedAccount::Fresh(account) => account.lamports(),
+            ResolvedAccount::Bank(_) => 0,
+        },
+        RemoteAccount::NotFound(_) => 0,
+    }
 }
 
 pub fn init_logger() {
@@ -97,22 +99,19 @@ pub fn dump_remote_account_update_source(
     }
 }
 
-pub fn create_test_lru_cache(
-    capacity: usize,
-) -> (Arc<AccountsLruCache>, RemoteAccountProviderConfig) {
+pub fn create_test_subscribed_accounts()
+-> (Arc<SubscribedAccounts>, RemoteAccountProviderConfig) {
     let config = RemoteAccountProviderConfig::try_new_with_metrics(
-        capacity,
         LifecycleMode::Ephemeral,
         false,
     )
     .unwrap();
-    (create_test_lru_cache_with_config(&config), config)
+    (create_test_subscribed_accounts_with_config(&config), config)
 }
 
-pub fn create_test_lru_cache_with_config(
+pub fn create_test_subscribed_accounts_with_config(
     config: &RemoteAccountProviderConfig,
-) -> Arc<AccountsLruCache> {
-    Arc::new(AccountsLruCache::new(
-        NonZeroUsize::new(config.subscribed_accounts_lru_capacity()).unwrap(),
-    ))
+) -> Arc<SubscribedAccounts> {
+    let _ = config;
+    Arc::new(SubscribedAccounts::default())
 }
