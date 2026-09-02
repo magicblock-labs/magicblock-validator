@@ -6,8 +6,7 @@ use prometheus::{
 };
 pub use types::{
     AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
-    BankPrecheckOutcome, BankPrecheckReason, ChainlinkCloneIntent,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
+    ChainlinkCloneIntent, ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
     ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
     ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
     ChainlinkPendingFetchOutcome, LabelValue, Outcome,
@@ -63,15 +62,6 @@ lazy_static::lazy_static! {
         panic!("failed to create inflight_subscription_updates_gauge: {err}")
     });
 
-    static ref CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL: IntCounterVec =
-        IntCounterVec::new(
-            Opts::new(
-                "chainlink_bank_precheck_accounts_total",
-                "Account entries by FetchCloner bank precheck outcome before remote fetch",
-            ),
-            &["entrypoint", "fetch_reason", "outcome", "bank_reason"],
-        )
-        .unwrap();
     static ref CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL: IntCounterVec =
         IntCounterVec::new(
             Opts::new(
@@ -596,7 +586,6 @@ pub(crate) fn register() {
         register!(CHAIN_SLOT_GAUGE);
         register!(MONITORED_ACCOUNTS_GAUGE);
         register!(INFLIGHT_SUBSCRIPTION_UPDATES_GAUGE);
-        register!(CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_RELEASE_ACCOUNTS_TOTAL);
         register!(CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL);
@@ -680,25 +669,6 @@ pub fn dec_inflight_subscription_updates() {
 pub fn set_monitored_accounts_count(count: usize) {
     MONITORED_ACCOUNTS_GAUGE.set(count as i64);
 }
-pub fn inc_chainlink_bank_precheck_accounts_with_context(
-    context: AccountFetchContext,
-    outcome: BankPrecheckOutcome,
-    bank_reason: BankPrecheckReason,
-    count: u64,
-) {
-    if count == 0 {
-        return;
-    }
-    CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            outcome.value(),
-            bank_reason.value(),
-        ])
-        .inc_by(count);
-}
-
 pub fn inc_chainlink_subscription_registration_accounts(
     origin: SubscriptionRegistrationOrigin,
     subscription_reason: SubscriptionReasonLabel,
@@ -1213,8 +1183,6 @@ mod fetch_context_metric_tests {
     fn fetch_context_metrics_keep_entrypoint_and_reason_separate() {
         let action_context = AccountFetchContext::rpc_get_account()
             .with_reason(AccountFetchReason::ActionDependencyMissing);
-        let forced_context = AccountFetchContext::rpc_get_account()
-            .with_reason(AccountFetchReason::ActionDependencyForcedRefresh);
         let sub_context = AccountFetchContext::subscription_update(
             AccountFetchReason::SubscriptionUpdateClone,
         );
@@ -1252,30 +1220,6 @@ mod fetch_context_metric_tests {
                 action_labels
             ),
             before_action + 1
-        );
-
-        let forced_labels = &[
-            "rpc_get_account",
-            "action_dependency_forced_refresh",
-            "forced_refresh_remote_required",
-            "forced_refresh",
-        ];
-        let before_forced = counter_value(
-            &CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL,
-            forced_labels,
-        );
-        inc_chainlink_bank_precheck_accounts_with_context(
-            forced_context,
-            BankPrecheckOutcome::ForcedRefreshRemoteRequired,
-            BankPrecheckReason::ForcedRefresh,
-            1,
-        );
-        assert_eq!(
-            counter_value(
-                &CHAINLINK_BANK_PRECHECK_ACCOUNTS_TOTAL,
-                forced_labels
-            ),
-            before_forced + 1
         );
 
         let sub_labels = &[

@@ -159,7 +159,7 @@ mod tests {
         EPHEMERAL_VAULT_PUBKEY,
         outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
     };
-    use solana_account::{AccountMode, AccountSharedData};
+    use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_hash::Hash;
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
@@ -215,16 +215,25 @@ mod tests {
     ) -> std::collections::HashMap<Pubkey, AccountSharedData> {
         let (pda, bump) = outbox_intent_pda_with_bump(intent_id);
         let data = outbox_bundle_bytes(intent_id, bump, stage);
-        let mut pda_account =
-            AccountSharedData::new(0, data.len(), &crate::id());
+        let mut pda_account = AccountBuilder::from(AccountSharedData::new(
+            0,
+            data.len(),
+            &crate::id(),
+        ))
+        .mode(AccountMode::Ephemeral)
+        .build::<AccountSharedData>();
         pda_account.set_data_from_slice(&data);
-        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut map = std::collections::HashMap::new();
         // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor -
         // refund is rent-exempt-minimum for the PDA's actual data length
-        let mut vault = AccountSharedData::new(1_000_000, 0, &crate::id());
-        vault.set_mode(AccountMode::Ephemeral).unwrap();
+        let vault = AccountBuilder::from(AccountSharedData::new(
+            1_000_000,
+            0,
+            &crate::id(),
+        ))
+        .mode(AccountMode::Ephemeral)
+        .build::<AccountSharedData>();
         map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
         // Add outbox PDA as existing ephemeral account (created by accept)
         map.insert(pda, pda_account);

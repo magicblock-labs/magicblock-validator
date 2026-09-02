@@ -13,7 +13,7 @@ pub(crate) fn set_account_mode(
     acc: &mut AccountSharedData,
     mode: AccountMode,
 ) -> Result<(), InstructionError> {
-    acc.set_mode(mode).map_err(|err| {
+    acc.set_lifecycle(mode, acc.slot()).map_err(|err| {
         ic_msg!(invoke_context, "Account mode transition rejected: {}", err);
         InstructionError::InvalidArgument
     })

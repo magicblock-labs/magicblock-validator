@@ -1,4 +1,7 @@
-use std::{collections::HashSet, sync::atomic::Ordering};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::atomic::Ordering,
+};
 
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_core::token_programs::is_ata;
@@ -18,16 +21,13 @@ use super::{
     FetchCloner,
     subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, MaterializedAccount,
-        PartitionedNotFound, ResolvedDelegatedAccounts, ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
+        ResolvedDelegatedAccounts, ResolvedPrograms,
     },
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::{
-        AccountCloneRequest, AccountMaterialization, ClonePostDelegationMode,
-        errors::ClonerResult,
-    },
+    cloner::{AccountCloneRequest, ClonePostDelegationMode},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccount, SubscriptionReason,
@@ -41,15 +41,12 @@ use crate::{
 
 pub(crate) fn collect_delegation_action_dependencies(
     accounts_to_clone: &[AccountCloneRequest],
-) -> HashSet<Pubkey> {
-    let mut dependencies = HashSet::new();
+) -> HashMap<Pubkey, bool> {
+    let mut dependencies = HashMap::new();
     for request in accounts_to_clone {
-        if let Some(actions) = request.post_delegation_mode.actions() {
-            for instruction in actions.iter() {
-                dependencies.insert(instruction.program_id);
-                for account_meta in &instruction.accounts {
-                    dependencies.insert(account_meta.pubkey);
-                }
+        if let Some(delegation) = request.post_delegation_mode.delegation() {
+            for (pubkey, writable) in delegation.dependencies(request.pubkey) {
+                *dependencies.entry(pubkey).or_default() |= writable;
             }
         }
     }
@@ -625,36 +622,41 @@ where
     })
 }
 
-pub(crate) fn compute_subscription_releases(
+pub(crate) fn compute_subscription_releases<'a>(
     all_requested_pubkeys: &[Pubkey],
-    accounts_to_clone: &[AccountCloneRequest],
+    accounts_to_clone: impl IntoIterator<Item = &'a AccountCloneRequest>,
     loaded_programs: &[crate::remote_account_provider::program_account::LoadedProgram],
-    record_subs: Vec<Pubkey>,
-    program_data_subs: HashSet<Pubkey>,
+    record_subs: impl IntoIterator<Item = Pubkey>,
+    program_data_subs: &HashSet<Pubkey>,
 ) -> Vec<SubscriptionRelease> {
+    let record_subs = record_subs.into_iter().collect::<Vec<_>>();
     let cloned_accounts = accounts_to_clone
-        .iter()
-        .map(|request| request.pubkey)
-        .collect::<HashSet<_>>();
+        .into_iter()
+        .map(|request| {
+            (
+                request.pubkey,
+                request.account.read().is(AccountMode::Delegated),
+            )
+        })
+        .collect::<HashMap<_, _>>();
     let loaded_program_ids = loaded_programs
         .iter()
         .map(|program| program.program_id)
-        .collect::<HashSet<_>>();
-    let delegated_cloned_accounts = accounts_to_clone
-        .iter()
-        .filter(|request| request.account.read().is(AccountMode::Delegated))
-        .map(|request| request.pubkey)
         .collect::<HashSet<_>>();
 
     let mut direct_releases = all_requested_pubkeys
         .iter()
         .copied()
         .filter(|pubkey| {
-            !cloned_accounts.contains(pubkey)
+            !cloned_accounts.contains_key(pubkey)
                 && !loaded_program_ids.contains(pubkey)
         })
         .collect::<HashSet<_>>();
-    direct_releases.extend(delegated_cloned_accounts);
+    direct_releases.extend(
+        cloned_accounts
+            .into_iter()
+            .filter_map(|(pubkey, delegated)| delegated.then_some(pubkey)),
+    );
     direct_releases.extend(record_subs.iter().copied());
     direct_releases.extend(program_data_subs.iter().copied());
 
@@ -671,13 +673,52 @@ pub(crate) fn compute_subscription_releases(
             reason: SubscriptionReason::DelegationRecord,
         }
     }));
-    releases.extend(program_data_subs.into_iter().map(|pubkey| {
+    releases.extend(program_data_subs.iter().copied().map(|pubkey| {
         SubscriptionRelease::Pubkey {
             pubkey,
             reason: SubscriptionReason::ProgramData,
         }
     }));
     releases
+}
+
+async fn materialize_accounts<T, U>(
+    this: &FetchCloner<T, U>,
+    requests: Vec<AccountCloneRequest>,
+    fetch_context: &AccountFetchContext,
+) -> ChainlinkResult<()>
+where
+    T: ChainRpcClient,
+    U: ChainPubsubClient,
+{
+    let mut pending = JoinSet::new();
+    for request in requests {
+        if tracing::enabled!(tracing::Level::TRACE) {
+            let account = request.account.read();
+            trace!(
+                pubkey = %request.pubkey,
+                slot = account.slot(),
+                owner = %account.owner(),
+                actions = request.post_delegation_mode.has_actions(),
+                "Cloning account"
+            );
+        }
+        let this = this.clone();
+        let fetch_context = fetch_context.clone();
+        pending.spawn(async move {
+            this.clone_account_with_post_delegation_action_invariants(
+                request,
+                fetch_context,
+            )
+            .await
+        });
+    }
+    pending
+        .join_all()
+        .await
+        .into_iter()
+        .collect::<ChainlinkResult<Vec<_>>>()?;
+    Ok(())
 }
 
 /// Clones accounts and programs into the bank
@@ -689,7 +730,7 @@ pub(crate) async fn clone_accounts_and_programs<T, U>(
         crate::remote_account_provider::program_account::LoadedProgram,
     >,
     fetch_context: AccountFetchContext,
-) -> ChainlinkResult<Vec<MaterializedAccount>>
+) -> ChainlinkResult<()>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -711,23 +752,14 @@ where
         let this_clone = this.clone();
         let fetch_context = fetch_context.clone();
         program_join_set.spawn(async move {
-            this_clone
-                .clone_program(
-                    acc,
-                    fetch_context,
-                    AccountMaterialization::Create,
-                )
-                .await
+            this_clone.clone_program(acc, fetch_context).await
         });
     }
-    let mut materialized = program_join_set
+    program_join_set
         .join_all()
         .await
         .into_iter()
-        .collect::<ClonerResult<Vec<_>>>()?
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
+        .collect::<ChainlinkResult<Vec<_>>>()?;
 
     // 2) Clone accounts without post-delegation actions first so common action
     // dependencies are materialized before action-bearing clone instructions.
@@ -736,74 +768,11 @@ where
             .into_iter()
             .partition(|request| request.post_delegation_mode.has_actions());
 
-    let mut accounts_join_set = JoinSet::new();
-    for request in accounts_without_actions {
-        if tracing::enabled!(tracing::Level::TRACE) {
-            let account = request.account.read();
-            trace!(
-                pubkey = %request.pubkey,
-                slot = account.slot(),
-                owner = %account.owner(),
-                "Cloning account"
-            );
-        };
-
-        let this_clone = this.clone();
-        let fetch_context = fetch_context.clone();
-        accounts_join_set.spawn(async move {
-            this_clone
-                .clone_account_with_post_delegation_action_invariants(
-                    request,
-                    fetch_context,
-                    AccountMaterialization::Create,
-                )
-                .await
-        });
-    }
-    materialized.extend(
-        accounts_join_set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<ChainlinkResult<Vec<_>>>()?
-            .into_iter()
-            .flatten(),
-    );
+    materialize_accounts(this, accounts_without_actions, &fetch_context)
+        .await?;
 
     // 3) Finally clone accounts that carry embedded post-delegation actions.
-    let mut action_accounts_join_set = JoinSet::new();
-    for request in accounts_with_actions {
-        if tracing::enabled!(tracing::Level::TRACE) {
-            let account = request.account.read();
-            trace!(
-                pubkey = %request.pubkey,
-                slot = account.slot(),
-                owner = %account.owner(),
-                "Cloning account with delegation actions"
-            );
-        };
+    materialize_accounts(this, accounts_with_actions, &fetch_context).await?;
 
-        let this_clone = this.clone();
-        let fetch_context = fetch_context.clone();
-        action_accounts_join_set.spawn(async move {
-            this_clone
-                .clone_account_with_post_delegation_action_invariants(
-                    request,
-                    fetch_context,
-                    AccountMaterialization::Create,
-                )
-                .await
-        });
-    }
-    materialized.extend(
-        action_accounts_join_set
-            .join_all()
-            .await
-            .into_iter()
-            .collect::<ChainlinkResult<Vec<_>>>()?
-            .into_iter()
-            .flatten(),
-    );
-
-    Ok(materialized)
+    Ok(())
 }

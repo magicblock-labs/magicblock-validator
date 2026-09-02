@@ -25,6 +25,9 @@ size-limit = 536_870_912
 upstream-address = "127.0.0.1:10000"
 # Replace with the leader's public authority.
 upstream-authority = "BPFLoaderUpgradeab1e11111111111111111111111"
+# A non-empty allowlist enables relaying for shared-authority verifiers.
+bind-address = "127.0.0.1:10001"
+allowed-followers = []
 
 # Programs must match the leader configuration.
 # [[programs]]

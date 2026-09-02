@@ -1,4 +1,6 @@
-use engine::{Engine, PostFinalize};
+use std::{iter, mem};
+
+use engine::{AccountAccessor, Engine, PostFinalize};
 use errors::ClonerResult;
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
@@ -8,7 +10,9 @@ use magicblock_magic_program_api::{
     },
     instruction::MagicBlockInstruction,
 };
-use solana_account::{AccountBuilder, AccountMode};
+use solana_account::{
+    AccountBuilder, AccountMode, AccountSharedData, OwnedAccount,
+};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
@@ -19,12 +23,6 @@ use crate::remote_account_provider::program_account::{
 };
 
 pub mod errors;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum AccountMaterialization {
-    Create,
-    Update,
-}
 
 /// Non-empty post-delegation actions paired with their slot-matched owner.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,6 +53,23 @@ impl DelegationActions {
         &self.actions
     }
 
+    /// Yields non-target program and account dependencies with their writability.
+    pub(crate) fn dependencies(
+        &self,
+        target: Pubkey,
+    ) -> impl Iterator<Item = (Pubkey, bool)> + '_ {
+        self.actions
+            .iter()
+            .flat_map(|ix| {
+                iter::once((ix.program_id, false)).chain(
+                    ix.accounts
+                        .iter()
+                        .map(|meta| (meta.pubkey, meta.is_writable)),
+                )
+            })
+            .filter(move |(pubkey, _)| *pubkey != target)
+    }
+
     fn into_post_finalize(self) -> PostFinalize {
         PostFinalize {
             source_program: self.source_program,
@@ -79,53 +94,16 @@ pub(crate) enum ClonePostDelegationMode {
 }
 
 impl ClonePostDelegationMode {
-    pub(crate) fn actions(&self) -> Option<&[Instruction]> {
+    /// Returns the action bundle when this request activates a delegation.
+    pub(crate) fn delegation(&self) -> Option<&DelegationActions> {
         match self {
-            Self::ExecuteActions(actions) => Some(actions.actions()),
+            Self::ExecuteActions(actions) => Some(actions),
             Self::None | Self::RescueUndelegate(_) => None,
         }
     }
 
     pub(crate) fn has_actions(&self) -> bool {
-        self.actions().is_some()
-    }
-
-    pub(crate) fn is_rescue_undelegate(&self) -> bool {
-        matches!(self, Self::RescueUndelegate(_))
-    }
-
-    pub(crate) fn rescue_undelegate(self) -> Option<Self> {
-        match self {
-            Self::ExecuteActions(actions) => {
-                Some(Self::RescueUndelegate(actions.source_program()))
-            }
-            Self::None | Self::RescueUndelegate(_) => None,
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Proves rescue fallback retains the delegation record owner from the
-    /// failed normal post-delegation action path.
-    #[test]
-    fn rescue_undelegation_preserves_source_program() {
-        let source_program = Pubkey::new_unique();
-        let mode = ClonePostDelegationMode::from(DelegationActions::new(
-            source_program,
-            vec![Instruction::new_with_bytes(
-                Pubkey::new_unique(),
-                &[],
-                vec![],
-            )],
-        ));
-
-        assert_eq!(
-            mode.rescue_undelegate(),
-            Some(ClonePostDelegationMode::RescueUndelegate(source_program))
-        );
+        self.delegation().is_some()
     }
 }
 
@@ -135,7 +113,6 @@ impl From<Option<DelegationActions>> for ClonePostDelegationMode {
     }
 }
 
-#[derive(Clone)]
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountBuilder,
@@ -149,8 +126,87 @@ pub struct AccountCloneRequest {
     pub delegated_to_other: Option<Pubkey>,
 }
 
-fn engine_err(err: impl ToString) -> errors::ClonerError {
-    errors::ClonerError::Engine(err.to_string())
+enum Materialization {
+    Apply,
+    ApplyReadOnly,
+    Satisfied(AccountMode),
+}
+
+fn classify_materialization(
+    pubkey: Pubkey,
+    local: &AccountSharedData,
+    desired: &OwnedAccount,
+) -> ClonerResult<Materialization> {
+    let invalid = |reason| {
+        errors::ClonerError::InvalidAccountMaterialization(pubkey, reason)
+    };
+    let mode = local.mode();
+    let active_delegation = mode == AccountMode::Delegated
+        && desired.mode() == AccountMode::Delegated;
+    if mode == AccountMode::Ephemeral
+        || active_delegation
+        || local.slot() > desired.slot()
+    {
+        return Ok(Materialization::Satisfied(mode));
+    }
+    if local == desired {
+        return Ok(Materialization::Satisfied(mode));
+    }
+
+    let desired_mode = desired.mode();
+    if mode == AccountMode::Transient
+        && desired_mode == AccountMode::Placeholder
+    {
+        // Engine completes undelegation through Transient -> ReadOnly. A
+        // zero-lamport remote image is still immutable, but cannot return
+        // directly to Placeholder through the lifecycle state machine.
+        return Ok(Materialization::ApplyReadOnly);
+    }
+    if local.slot() == desired.slot() {
+        if mode == desired_mode {
+            return Err(invalid("conflicting images at the same slot".into()));
+        }
+        if !mode.allows_transition(desired_mode, local.slot(), desired.slot()) {
+            return Err(invalid(format!(
+                "invalid same-slot mode transition {mode:?} -> {desired_mode:?}"
+            )));
+        }
+        return Ok(Materialization::Apply);
+    }
+
+    if mode != desired_mode
+        && !mode.allows_transition(desired_mode, local.slot(), desired.slot())
+    {
+        return Err(invalid(format!(
+            "invalid mode transition {mode:?} -> {desired_mode:?}"
+        )));
+    }
+    Ok(Materialization::Apply)
+}
+
+pub(crate) async fn claim_materialization<'a>(
+    engine: &'a Engine,
+    request: &mut AccountCloneRequest,
+) -> ClonerResult<Option<AccountAccessor<'a>>> {
+    let accessor = engine.account(request.pubkey).await;
+    let desired = request.account.read();
+    let materialization = accessor
+        .read(|local| classify_materialization(request.pubkey, local, desired))
+        .map_err(errors::ClonerError::from)?
+        .transpose()?
+        .unwrap_or(Materialization::Apply);
+    match materialization {
+        Materialization::Apply => Ok(Some(accessor)),
+        Materialization::ApplyReadOnly => {
+            request.account =
+                mem::take(&mut request.account).mode(AccountMode::ReadOnly);
+            Ok(Some(accessor))
+        }
+        Materialization::Satisfied(mode) => {
+            accessor.satisfy(mode).await;
+            Ok(None)
+        }
+    }
 }
 
 fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
@@ -178,9 +234,9 @@ fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
 
 pub(crate) async fn clone_account(
     engine: &Engine,
+    accessor: &mut AccountAccessor<'_>,
     request: AccountCloneRequest,
-    materialization: AccountMaterialization,
-) -> ClonerResult<AccountMode> {
+) -> ClonerResult<()> {
     if let Some(authority) = request.delegated_to_other {
         warn!(
             pubkey = %request.pubkey,
@@ -188,15 +244,6 @@ pub(crate) async fn clone_account(
             "Cloning account delegated to another validator"
         );
     }
-    if request.post_delegation_mode.is_rescue_undelegate()
-        && materialization == AccountMaterialization::Update
-    {
-        return Err(errors::ClonerError::UndelegationSchedulingUnavailable(
-            request.pubkey,
-        ));
-    }
-
-    let mode = request.account.read().mode();
     let actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
         ClonePostDelegationMode::ExecuteActions(actions) => {
@@ -210,35 +257,21 @@ pub(crate) async fn clone_account(
         }
     };
     let account = request.account;
-    let result = match materialization {
-        AccountMaterialization::Create => {
-            engine
-                .account(request.pubkey)
-                .create(account, actions)
-                .await
-        }
-        AccountMaterialization::Update => {
-            engine.account(request.pubkey).update(account).await
-        }
-    };
-    result.map_err(|err| {
+    accessor.materialize(account, actions).await.map_err(|err| {
         errors::ClonerError::FailedToCloneRegularAccount(
             request.pubkey,
-            Box::new(engine_err(err)),
+            Box::new(err.into()),
         )
-    })?;
-    Ok(mode)
+    })
 }
 
-pub(crate) async fn clone_program(
-    engine: &Engine,
+pub(crate) fn resolve_program(
     program: LoadedProgram,
-    materialization: AccountMaterialization,
-) -> ClonerResult<Option<AccountMode>> {
+) -> Option<AccountCloneRequest> {
     let program_id = program.program_id;
     if matches!(program.loader_status, LoaderV4Status::Retracted) {
         debug!(%program_id, "Program is retracted on chain");
-        return Ok(None);
+        return None;
     }
 
     let owner = match program.loader {
@@ -255,31 +288,163 @@ pub(crate) async fn clone_program(
         .executable(true)
         .slot(program.remote_slot);
 
-    let result = match materialization {
-        AccountMaterialization::Create => {
-            engine.account(program_id).create(account, None).await
-        }
-        AccountMaterialization::Update => {
-            engine.account(program_id).update(account).await
-        }
-    };
-    result.map_err(|err| {
-        errors::ClonerError::FailedToCloneProgram(
-            program_id,
-            Box::new(engine_err(err)),
-        )
-    })?;
-    Ok(Some(AccountMode::ReadOnly))
+    Some(AccountCloneRequest {
+        pubkey: program_id,
+        account,
+        commit_frequency_ms: None,
+        post_delegation_mode: ClonePostDelegationMode::None,
+        delegated_to_other: None,
+    })
+}
+
+pub(crate) async fn clone_program(
+    accessor: &mut AccountAccessor<'_>,
+    request: AccountCloneRequest,
+) -> ClonerResult<()> {
+    let program_id = request.pubkey;
+    accessor
+        .materialize(request.account, None)
+        .await
+        .map_err(|err| {
+            errors::ClonerError::FailedToCloneProgram(
+                program_id,
+                Box::new(err.into()),
+            )
+        })
 }
 
 pub(crate) async fn evict_account(
     engine: &Engine,
     pubkey: Pubkey,
 ) -> ClonerResult<()> {
-    engine.account(pubkey).delete().await.map_err(|err| {
-        errors::ClonerError::FailedToEvictAccount(
-            pubkey,
-            Box::new(engine_err(err)),
-        )
+    let Some(mut accessor) = claim_account_eviction(engine, pubkey).await?
+    else {
+        return Ok(());
+    };
+    delete_claimed_account(&mut accessor, pubkey).await
+}
+
+pub(crate) async fn delete_claimed_account(
+    accessor: &mut AccountAccessor<'_>,
+    pubkey: Pubkey,
+) -> ClonerResult<()> {
+    accessor.delete().await.map_err(|err| {
+        errors::ClonerError::FailedToEvictAccount(pubkey, Box::new(err.into()))
     })
+}
+
+/// Claims an account displaced from Engine recency, unless a later completion
+/// retained it again or changed it to an authoritative lifecycle mode. The
+/// returned value is projected from the same protected account read.
+pub(crate) async fn claim_cached_account_eviction<R>(
+    engine: &Engine,
+    pubkey: Pubkey,
+    inspect: impl Fn(&AccountSharedData) -> R,
+) -> ClonerResult<Option<(AccountAccessor<'_>, R)>> {
+    let Some((accessor, mode, value)) =
+        claim_account_eviction_inner(engine, pubkey, inspect).await?
+    else {
+        return Ok(None);
+    };
+    Ok(accessor
+        .into_cached_eviction(mode)
+        .map(|accessor| (accessor, value)))
+}
+
+/// Claims a requested account eviction unless the current state is absent or
+/// authoritative.
+pub(crate) async fn claim_account_eviction(
+    engine: &Engine,
+    pubkey: Pubkey,
+) -> ClonerResult<Option<AccountAccessor<'_>>> {
+    let Some((accessor, mode, ())) =
+        claim_account_eviction_inner(engine, pubkey, |_| ()).await?
+    else {
+        return Ok(None);
+    };
+    Ok((!mode.authoritative()).then_some(accessor))
+}
+
+async fn claim_account_eviction_inner<R>(
+    engine: &Engine,
+    pubkey: Pubkey,
+    inspect: impl Fn(&AccountSharedData) -> R,
+) -> ClonerResult<Option<(AccountAccessor<'_>, AccountMode, R)>> {
+    let accessor = engine.account(pubkey).await;
+    let state = accessor
+        .read(|account| (account.mode(), inspect(account)))
+        .map_err(|err| {
+            errors::ClonerError::FailedToEvictAccount(
+                pubkey,
+                Box::new(err.into()),
+            )
+        })?;
+    let Some((mode, value)) = state else {
+        return Ok(None);
+    };
+    Ok(Some((accessor, mode, value)))
+}
+
+#[cfg(test)]
+mod tests {
+    use engine::testkit::TestEngine;
+
+    use super::*;
+
+    /// Proves a queued cache eviction cannot claim an account after a later
+    /// materialization retained it in recency or made it authoritative.
+    #[tokio::test]
+    async fn stale_cache_eviction_does_not_claim_current_account() {
+        let engine = TestEngine::new().await;
+        let pubkey = Pubkey::new_unique();
+        engine
+            .account(pubkey)
+            .await
+            .materialize(
+                AccountBuilder::default()
+                    .lamports(1_000_000)
+                    .mode(AccountMode::ReadOnly),
+                None,
+            )
+            .await
+            .expect("read-only account is materialized");
+
+        assert!(
+            claim_cached_account_eviction(&engine, pubkey, |_| ())
+                .await
+                .expect("eviction classification succeeds")
+                .is_none(),
+            "re-admission invalidates the queued eviction"
+        );
+        assert!(
+            engine.get_account(pubkey).is_some(),
+            "stale eviction leaves the re-admitted account intact"
+        );
+
+        let authoritative = Pubkey::new_unique();
+        engine
+            .account(authoritative)
+            .await
+            .materialize(
+                AccountBuilder::default()
+                    .lamports(1_000_000)
+                    .mode(AccountMode::Ephemeral),
+                None,
+            )
+            .await
+            .expect("ephemeral account is materialized");
+        assert!(
+            claim_cached_account_eviction(&engine, authoritative, |_| ())
+                .await
+                .expect("eviction classification succeeds")
+                .is_none(),
+            "authoritative state invalidates the queued eviction"
+        );
+        assert!(
+            engine.get_account(authoritative).is_some(),
+            "stale eviction leaves the authoritative account intact"
+        );
+
+        engine.close().await;
+    }
 }

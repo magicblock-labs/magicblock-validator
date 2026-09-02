@@ -1,5 +1,5 @@
 use magicblock_chainlink::{
-    AccountFetchContext, assert_cloned_as_delegated,
+    AccountFetchEntrypoint, assert_cloned_as_delegated,
     assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
     assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
@@ -49,7 +49,7 @@ async fn test_deleg_after_subscribe_case2() {
         chainlink
             .ensure_accounts(
                 &[pubkey],
-                AccountFetchContext::rpc_get_multiple_accounts(),
+                AccountFetchEntrypoint::RpcGetMultipleAccounts,
             )
             .await
             .unwrap();
