@@ -309,7 +309,7 @@ mod tests {
         MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
     };
     use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
-    use solana_account::{AccountMode, AccountSharedData};
+    use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::system_program;
@@ -445,10 +445,14 @@ mod tests {
             bump,
         );
         let data = bundle.try_to_bytes().unwrap();
-        let mut pda_account =
-            AccountSharedData::new(0, data.len(), &OUTBOX_INTENT_PROGRAM_ID);
+        let mut pda_account = AccountBuilder::from(AccountSharedData::new(
+            0,
+            data.len(),
+            &OUTBOX_INTENT_PROGRAM_ID,
+        ))
+        .mode(AccountMode::Ephemeral)
+        .build::<AccountSharedData>();
         pda_account.set_data_from_slice(&data);
-        pda_account.set_mode(AccountMode::Ephemeral).unwrap();
 
         let mut account_data = {
             let mut map = HashMap::new();

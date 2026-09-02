@@ -1,4 +1,4 @@
-use magicblock_metrics::metrics::AccountFetchContext;
+use magicblock_metrics::metrics::AccountFetchEntrypoint;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 
@@ -23,7 +23,7 @@ impl HttpDispatcher {
             let (account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &pubkey,
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchEntrypoint::RpcGetAccount,
                     |account| account.lamports(),
                 )
                 .await;

@@ -239,7 +239,8 @@ mod tests {
             .owner(magicblock_program::OUTBOX_INTENT_PROGRAM_ID)
             .mode(AccountMode::Ephemeral);
         te.account(pubkey)
-            .create(account, None)
+            .await
+            .materialize(account, None)
             .await
             .expect("insert outbox account");
     }

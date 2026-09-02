@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use solana_account::{AccountBuilder, AccountMode};
+use solana_account::AccountBuilder;
 use solana_pubkey::Pubkey;
 
 use crate::{
@@ -50,15 +50,9 @@ pub(crate) struct PartitionedNotFound {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
 }
 
-pub(crate) struct MaterializedAccount {
-    pub(crate) pubkey: Pubkey,
-    pub(crate) mode: AccountMode,
-}
-
 #[derive(Default)]
 pub(crate) struct FetchAndCloneBatchResult {
     pub(crate) result: FetchAndCloneResult,
-    pub(crate) materialized: Vec<MaterializedAccount>,
 }
 
 #[derive(Debug, Default, Clone)]

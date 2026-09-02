@@ -5,7 +5,9 @@ use engine::Engine;
 use magicblock_chainlink::{
     AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink,
 };
-use magicblock_metrics::metrics::AccountFetchContext;
+use magicblock_metrics::metrics::{
+    AccountFetchContext, AccountFetchEntrypoint,
+};
 use magicblock_program::instruction_utils::InstructionUtils;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_transaction_error::TransactionError;
@@ -271,7 +273,7 @@ impl UndelegationRequestService {
             if let Err(err) = chainlink
                 .ensure_accounts(
                     &[request.delegated_account],
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchEntrypoint::RpcGetAccount,
                 )
                 .await
             {

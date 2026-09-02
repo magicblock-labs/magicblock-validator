@@ -1,5 +1,5 @@
 use magicblock_chainlink::{
-    AccountFetchContext,
+    AccountFetchEntrypoint,
     testing::{
         context::TestContext,
         deleg::add_delegation_record_for,
@@ -54,7 +54,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];
     ctx.chainlink
-        .ensure_accounts(&pubkeys, AccountFetchContext::rpc_get_account())
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetAccount)
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", ());
@@ -106,7 +106,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated() {
     // Note: No delegation record added here
     let pubkeys = [ata_pubkey];
     ctx.chainlink
-        .ensure_accounts(&pubkeys, AccountFetchContext::rpc_get_account())
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetAccount)
         .await
         .expect("ensure_accounts ok");
 
@@ -160,7 +160,7 @@ async fn ixtest_ata_eata_no_replace_when_not_delegated_to_us() {
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];
     ctx.chainlink
-        .ensure_accounts(&pubkeys, AccountFetchContext::rpc_get_account())
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetAccount)
         .await
         .expect("ensure_accounts ok");
     debug!("res: {:?}", ());

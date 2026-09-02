@@ -1,5 +1,5 @@
 use magicblock_chainlink::{
-    AccountFetchContext, assert_cloned_as_delegated,
+    AccountFetchEntrypoint, assert_cloned_as_delegated,
     assert_cloned_as_undelegated,
     testing::{
         accounts::account_shared_with_owner_and_slot, context::TestContext,
@@ -41,7 +41,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     chainlink
         .ensure_accounts(
             &[pubkey],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -52,7 +52,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     chainlink
         .ensure_accounts(
             &[pubkey],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -94,7 +94,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     chainlink
         .ensure_accounts(
             &[pubkey],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();
@@ -108,7 +108,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     chainlink
         .ensure_accounts(
             &[pubkey],
-            AccountFetchContext::rpc_get_multiple_accounts(),
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
         .unwrap();

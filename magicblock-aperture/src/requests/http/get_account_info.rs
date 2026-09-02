@@ -1,4 +1,6 @@
-use magicblock_metrics::metrics::{AccountFetchContext, ENSURE_ACCOUNTS_TIME};
+use magicblock_metrics::metrics::{
+    AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME,
+};
 use solana_account::{AccountMode, AccountSharedData};
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -22,7 +24,7 @@ impl HttpDispatcher {
     pub(super) async fn read_account_with_ensure<R>(
         &self,
         pubkey: &Pubkey,
-        fetch_context: AccountFetchContext,
+        fetch_origin: AccountFetchEntrypoint,
         reader: impl Fn(&AccountSharedData) -> R,
     ) -> (Option<R>, u64) {
         let _timer = ENSURE_ACCOUNTS_TIME
@@ -30,7 +32,7 @@ impl HttpDispatcher {
             .start_timer();
         let claims = self
             .chainlink
-            .ensure_accounts(&[*pubkey], fetch_context)
+            .ensure_accounts(&[*pubkey], fetch_origin)
             .await
             .unwrap_or_default();
         let account = self
@@ -46,7 +48,7 @@ impl HttpDispatcher {
     pub(super) async fn read_accounts_with_ensure<R>(
         &self,
         pubkeys: &[Pubkey],
-        fetch_context: AccountFetchContext,
+        fetch_origin: AccountFetchEntrypoint,
         reader: impl Fn(&Pubkey, &AccountSharedData) -> R,
     ) -> (Vec<Option<R>>, u64) {
         let _timer = ENSURE_ACCOUNTS_TIME
@@ -54,7 +56,7 @@ impl HttpDispatcher {
             .start_timer();
         let claims = self
             .chainlink
-            .ensure_accounts(pubkeys, fetch_context)
+            .ensure_accounts(pubkeys, fetch_origin)
             .await
             .inspect_err(|error| warn!(?error, "failed to ensure accounts"))
             .unwrap_or_default();
@@ -95,7 +97,7 @@ impl HttpDispatcher {
             let (account, remote_account_claims) = self
                 .read_account_with_ensure(
                     &pubkey,
-                    AccountFetchContext::rpc_get_account(),
+                    AccountFetchEntrypoint::RpcGetAccount,
                     reader,
                 )
                 .await;
