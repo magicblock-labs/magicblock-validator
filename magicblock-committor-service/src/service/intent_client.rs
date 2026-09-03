@@ -1,4 +1,7 @@
-use std::mem;
+use std::{
+    mem,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use async_trait::async_trait;
 use engine::{Engine, IntoTransactionView};
@@ -14,7 +17,7 @@ use solana_message::Message;
 use solana_pubkey::Pubkey;
 use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use crate::{
     intent_execution_manager::BroadcastedIntentExecutionResult,
@@ -63,7 +66,11 @@ pub trait ERIntentClient: Send + Sync + 'static {
         &self,
     ) -> Result<Vec<ScheduledIntentBundle>, Self::Error>;
 
-    /// Processes intent results, submitting them on chain(ER)
+    /// Registers the result payload and submits its notification on the ER.
+    ///
+    /// Fresh intents preserve their scheduling-time signature. Recovered
+    /// intents, and fresh intents whose blockhash expired before execution,
+    /// are signed against the engine's current blockhash.
     async fn notify_commit_sent(
         &self,
         meta: ScheduledBaseIntentMeta,
@@ -79,6 +86,8 @@ pub trait ERIntentClient: Send + Sync + 'static {
 pub struct InternalIntentRpcClient {
     engine: Engine,
 }
+
+static ACCEPT_NONCE: AtomicU64 = AtomicU64::new(0);
 
 impl InternalIntentRpcClient {
     pub fn new(engine: Engine) -> Self {
@@ -109,13 +118,33 @@ impl InternalIntentRpcClient {
     /// Sends transaction to move the scheduled commits from the `MagicContext`
     /// to the global ScheduledCommit store
     async fn send_accept_tx(&self) -> Result<(), InternalIntentClientError> {
+        // Consecutive accepts can share a blockhash on an otherwise idle ER.
+        // Varying a noop keeps their signatures distinct for replay protection.
         let authority = self.engine.authority();
-        let ix =
+        let accept_ix =
             InstructionUtils::accept_scheduled_commits_instruction(&authority);
-        let message = Message::new(&[ix], Some(&authority));
+        let noop_ix = InstructionUtils::noop_instruction(
+            ACCEPT_NONCE.fetch_add(1, Ordering::Relaxed),
+        );
+        let message = Message::new(&[accept_ix, noop_ix], Some(&authority));
         self.execute(message).await.inspect_err(|err| {
             error!(error = ?err, "Failed to accept scheduled commits");
         })
+    }
+
+    /// Builds and executes a notification using the engine's current blockhash.
+    async fn send_fresh_commit_sent_tx(
+        &self,
+        intent_id: u64,
+    ) -> Result<(), InternalIntentClientError> {
+        let authority = self.engine.authority();
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            &id(),
+            &authority,
+            intent_id,
+        );
+        let message = Message::new(&[ix], Some(&authority));
+        self.execute(message).await
     }
 }
 
@@ -157,27 +186,32 @@ impl ERIntentClient for InternalIntentRpcClient {
         let intent_id = result.id;
         let transaction = mem::take(&mut meta.sent_transaction);
         let sent_commit = build_sent_commit(meta, &result);
+        // Register once before submission. Only BlockhashNotFound permits a
+        // fallback because it occurs before the processor can consume this payload.
         register_scheduled_commit_sent(sent_commit);
-        let result = match transaction {
+        match transaction {
             IntentSentTransaction::Known(transaction) => {
-                self.execute(transaction).await
+                let signature = transaction.signatures[0];
+                match self.execute(transaction).await {
+                    Err(InternalIntentClientError::TransactionError(
+                        TransactionError::BlockhashNotFound,
+                    )) => {
+                        warn!(
+                            %signature,
+                            intent_id,
+                            "Pre-signed commit notification expired; its logged signature is best-effort"
+                        );
+                        self.send_fresh_commit_sent_tx(intent_id).await
+                    }
+                    result => result,
+                }
             }
             IntentSentTransaction::Recovered => {
-                let authority = self.engine.authority();
-                let ix = InstructionUtils::scheduled_commit_sent_instruction(
-                    &id(),
-                    &authority,
-                    intent_id,
-                );
-                let message = Message::new(&[ix], Some(&authority));
-                self.execute(message).await
+                self.send_fresh_commit_sent_tx(intent_id).await
             }
-        };
-        result
-            .inspect(|_| debug!("Sent commit signaled"))
-            .inspect_err(
-                |err| error!(error = ?err, "Failed to signal sent commit"),
-            )?;
+        }
+        .inspect(|_| debug!("Sent commit signaled"))
+        .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))?;
 
         Ok(())
     }
