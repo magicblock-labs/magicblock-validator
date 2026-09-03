@@ -116,7 +116,9 @@ impl MagicBlockRpcClientError {
     /// errors are deterministic and excluded.
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::LookupTableDeserialize(_) => false,
+            Self::LookupTableDeserialize(_)
+            | Self::CannotGetTransactionSignatureStatus(..)
+            | Self::CannotConfirmTransactionSignatureStatus(..) => false,
             Self::SentTransactionError(tx_err, _) => {
                 !matches!(tx_err, TransactionError::InstructionError(..))
             }
