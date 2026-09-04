@@ -132,8 +132,8 @@ impl IntentExecutorError {
 
     /// True when re-executing the whole intent from scratch may succeed:
     /// the failure was transport/RPC-side rather than deterministic.
-    /// Once a commit landed (two-stage finalize failures) re-execution would
-    /// commit the same state again, so those are never transient.
+    /// Once either stage exposes a submitted signature, re-execution could
+    /// duplicate work whose base-layer outcome is still ambiguous.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::EmptyIntentError
@@ -144,7 +144,7 @@ impl IntentExecutorError {
             Self::FailedToFinalizeError {
                 err,
                 commit_signature: None,
-                ..
+                finalize_signature: None,
             } => err.is_transient(),
             Self::FailedToFinalizeError { .. }
             | Self::FailedFinalizePreparationError(_) => false,

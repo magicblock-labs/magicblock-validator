@@ -199,9 +199,9 @@ pub fn decide_rpc_error_flow(
         | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
             ..,
         ) => {
-            // if there's still time left we can retry sending tx
-            // Since [`DEFAULT_MAX_TIME_TO_PROCESSED`] is large we skip sleep as well
-            ControlFlow::Continue(Duration::ZERO)
+            // The transaction was submitted. Retrying would re-sign and send
+            // it again with a fresh blockhash.
+            ControlFlow::Break(())
         }
         MagicBlockRpcClientError::GetLatestBlockhash(err) => {
             trace!(error = ?err, "Failed to get latest blockhash during sending tx");
