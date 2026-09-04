@@ -1730,11 +1730,20 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
 
         if errors.is_empty() {
-            assert_eq!(
-                resolved_accounts.len(),
-                pubkeys.len(),
-                "BUG: resolved accounts and pubkeys length mismatch"
-            );
+            // Waiters are awaited 1:1 with `pubkeys`, so lengths should match.
+            // Prefer Err over assert_eq! so a mismatch fails the fetch like the
+            // cardinality check in `fetch_multi_rpc_only` instead of panicking.
+            if resolved_accounts.len() != pubkeys.len() {
+                return Err(
+                    RemoteAccountProviderError::AccountResolutionsFailed(
+                        format!(
+                            "Resolved {} accounts for {} requested accounts",
+                            resolved_accounts.len(),
+                            pubkeys.len(),
+                        ),
+                    ),
+                );
+            }
             Ok(resolved_accounts)
         } else {
             Err(RemoteAccountProviderError::AccountResolutionsFailed(
