@@ -135,10 +135,10 @@ jobs:
           rustup toolchain install
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
             cargo build --release --locked -p redsuite
-          cargo xtask programs
+          env -u REDSUITE_ROOT cargo xtask programs
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/
-          cp target/deploy/*.so ../redsuite-dist/deploy/
+          cp target/deploy/*.so target/deploy/fixtures.json ../redsuite-dist/deploy/
         shell: bash
         working-directory: redsuite
 
@@ -152,7 +152,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p runroot/target/deploy runroot/target/redsuite-stack
-          cp redsuite-dist/deploy/*.so runroot/target/deploy/
+          cp redsuite-dist/deploy/* runroot/target/deploy/
           chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN"
         shell: bash
 
