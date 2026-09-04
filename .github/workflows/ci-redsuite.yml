@@ -19,7 +19,7 @@ on:
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
   pull_request:
-    branches: [master, main, dev]
+    branches: [master, dev]
     types: [opened, reopened, synchronize, ready_for_review]
     paths:
       - '**/*.rs'
