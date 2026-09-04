@@ -37,6 +37,7 @@ solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signer = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true }
 solana-transaction-error = { workspace = true }
 thiserror = { workspace = true }

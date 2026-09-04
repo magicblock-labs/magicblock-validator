@@ -1,20 +1,18 @@
+use solana_transaction::InstructionError;
 use thiserror::Error;
 
 pub type TaskSchedulerResult<T> = Result<T, TaskSchedulerError>;
 
 #[derive(Error, Debug)]
 pub enum TaskSchedulerError {
+    #[error(transparent)]
+    Instruction(#[from] InstructionError),
+
     #[error("Invalid configuration: {0}")]
     InvalidConfiguration(String),
 
     #[error(transparent)]
-    DatabaseConnection(#[from] rusqlite::Error),
-
-    #[error(transparent)]
     Wincode(#[from] wincode::WriteError),
-
-    #[error(transparent)]
-    Rpc(#[from] Box<solana_rpc_client_api::client_error::Error>),
 
     #[error("Transaction execution failed: {0}")]
     TransactionExecution(String),
@@ -33,4 +31,7 @@ pub enum TaskSchedulerError {
 
     #[error("Batch size mismatch: expected {0}, got {1}")]
     SizeMismatch(usize, usize),
+
+    #[error(transparent)]
+    RpcClient(#[from] solana_rpc_client::api::client_error::Error),
 }

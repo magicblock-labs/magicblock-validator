@@ -23,7 +23,7 @@ use magicblock_services::{
     actions_callback_service::ActionsCallbackService,
     undelegation_request_service::UndelegationRequestService,
 };
-use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
+use magicblock_task_scheduler::TaskSchedulerService;
 use magicblock_validator_admin::claim_fees::{claim_fees, run_claim_fees_loop};
 use nucleus::{
     metrics::EventTimer,
@@ -166,12 +166,10 @@ impl Leader {
             rpc_shutdown.terminate(reason);
         });
 
-        let task_scheduler_db_path = SchedulerDatabase::path(&engine_ledger);
-        debug!(path = %task_scheduler_db_path.display(), "Initializing task scheduler");
+        debug!("Initializing task scheduler");
         let task_scheduler = Some(TaskSchedulerService::new(
-            &task_scheduler_db_path,
-            &config.task_scheduler,
             engine.clone(),
+            config.aperture.listen.http(),
             config.engine.blockstore.blocktime,
         )?);
         timer.record("Task scheduler initialized");
