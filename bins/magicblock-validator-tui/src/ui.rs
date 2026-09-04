@@ -346,10 +346,6 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
             Span::styled("Block Time:        ", Style::default().fg(DARK_GRAY)),
             Span::styled(&config.block_time, Style::default().fg(GREEN)),
         ]),
-        Line::from(vec![
-            Span::styled("Lifecycle Mode:    ", Style::default().fg(DARK_GRAY)),
-            Span::styled(&config.lifecycle_mode, Style::default().fg(GREEN)),
-        ]),
     ];
 
     let paragraph = Paragraph::new(config_lines)

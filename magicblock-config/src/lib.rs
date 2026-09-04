@@ -6,7 +6,7 @@ use std::{
 
 use clap::{Error as CliError, Parser};
 use config::{
-    EngineConfig, FollowerReplication, LeaderReplication, LifecycleMode,
+    EngineConfig, FollowerReplication, LeaderReplication,
     aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
     metrics::MetricsConfig,
 };
@@ -55,9 +55,6 @@ pub struct LeaderParams {
     /// Remote endpoints for syncing with the base chain.
     /// Can include HTTP (for JSON-RPC), WebSocket (for PubSub), and gRPC (for streaming) connections.
     pub remotes: Vec<Remote>,
-
-    /// The application's operational mode.
-    pub lifecycle: LifecycleMode,
 
     /// Listen address for the metrics endpoint.
     pub metrics: MetricsConfig,
@@ -281,7 +278,6 @@ impl fmt::Display for LeaderParams {
                     self.engine.replication.allowed_followers.len(),
                 ),
             ),
-            ("Lifecycle", format!("{:?}", self.lifecycle)),
             (
                 "RPC",
                 format!(

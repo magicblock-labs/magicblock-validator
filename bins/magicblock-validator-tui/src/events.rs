@@ -309,7 +309,6 @@ mod tests {
             validator_identity: "validator".to_string(),
             ledger_path: "/tmp/ledger".to_string(),
             block_time_ms: 400,
-            lifecycle_mode: "ephemeral".to_string(),
             help_url: "https://example.com/help".to_string(),
             version: "1.0.0".to_string(),
             git_version: "abc123".to_string(),
