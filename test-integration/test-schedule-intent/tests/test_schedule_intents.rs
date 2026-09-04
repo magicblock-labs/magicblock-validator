@@ -662,6 +662,7 @@ fn schedule_intent(
     let commit_result = ctx
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
+    assert_eq!(commit_result.commit_sent_result, Ok(()));
     commit_result
         .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
@@ -725,6 +726,7 @@ fn schedule_intent_bundle(
     let commit_result = ctx
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
+    assert_eq!(commit_result.commit_sent_result, Ok(()));
     commit_result
         .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
@@ -777,6 +779,7 @@ fn schedule_transfer_intent(
     let commit_result = ctx
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
+    assert_eq!(commit_result.commit_sent_result, Ok(()));
     commit_result
         .confirm_commit_transactions_on_chain(ctx)
         .unwrap();
@@ -820,6 +823,7 @@ fn schedule_intent_bundle_commit_and_finalize(
     let commit_result = ctx
         .fetch_schedule_commit_result::<FlexiCounter>(sig)
         .unwrap();
+    assert_eq!(commit_result.commit_sent_result, Ok(()));
     commit_result
         .confirm_commit_transactions_on_chain(ctx)
         .unwrap();

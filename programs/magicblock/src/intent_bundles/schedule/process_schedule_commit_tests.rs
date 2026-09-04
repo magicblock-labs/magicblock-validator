@@ -6,7 +6,7 @@ use magicblock_core::intent::{
     outbox::outbox_intent_pda_with_bump,
 };
 use magicblock_magic_program_api::{
-    MAGIC_CONTEXT_PUBKEY,
+    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::{
         ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
     },
@@ -25,10 +25,10 @@ use solana_sdk_ids::{system_program, sysvar::clock};
 use solana_signer::Signer;
 
 use crate::{
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     magic_sys::COMMIT_LIMIT,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
         StubNonces, ensure_started_validator, process_instruction,
@@ -227,8 +227,8 @@ fn assert_accepted_actions(
         let actual = processed_accepted
             .iter()
             .filter(|acc| {
-                acc.owner() == &crate::id()
-                    && acc.mode() == AccountMode::Ephemeral
+                acc.owner() == &OUTBOX_INTENT_PROGRAM_ID
+                    && acc.is(AccountMode::Ephemeral)
             })
             .filter_map(|acc| {
                 OutboxIntentBundle::try_from_bytes(acc.data()).ok()
@@ -247,9 +247,10 @@ fn assert_accepted_actions(
 }
 
 /// Pre-populates uninitialized outbox intent PDA accounts into `account_data`.
-/// The accept instruction materializes these accounts directly, which requires
-/// them to be present in the transaction context as uninitialized system-owned
-/// entries. The first 3 accounts (validator, program, magic_context) are
+/// The accept instruction creates these accounts via CPI (`CreateOutboxIntent`),
+/// which requires them to be present in the transaction context as uninitialized
+/// system-owned entries — exactly what `validate_new_pda` expects.
+/// The first 3 accounts (validator, outbox program, magic_context) are
 /// already in `account_data`, so we skip them.
 fn ensure_outbox_pda_accounts_exist(
     account_data: &mut HashMap<Pubkey, AccountSharedData>,

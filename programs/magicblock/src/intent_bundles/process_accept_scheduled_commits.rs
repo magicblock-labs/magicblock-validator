@@ -1,32 +1,29 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
-use solana_account::{AccountMode, ReadableAccount, WritableAccount};
-use solana_instruction::error::InstructionError;
+use magicblock_magic_program_api::{
+    OUTBOX_INTENT_PROGRAM_ID, instruction::OutboxIntentInstruction,
+};
+use solana_account::{ReadableAccount, WritableAccount};
+use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::system_program;
-use solana_transaction_context::transaction::TransactionContext;
 
 use crate::{
     MagicContext,
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
     magic_scheduled_base_intent::ScheduledIntentBundle,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions,
-    utils::{
-        account_actions::set_account_mode,
-        accounts::{
-            InstructionAccount, get_instruction_account_with_idx,
-            get_instruction_pubkey_with_idx,
-        },
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
     validator::authority,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
-const MAGIC_PROGRAM_ID: u16 = VALIDATOR_AUTHORITY_IDX + 1;
-const MAGIC_CONTEXT_IDX: u16 = MAGIC_PROGRAM_ID + 1;
+const OUTBOX_PROGRAM_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
+const MAGIC_CONTEXT_IDX: u16 = OUTBOX_PROGRAM_IDX + 1;
 const INTENT_PDAS_OFFSET: u16 = MAGIC_CONTEXT_IDX + 1;
 
 pub fn process_accept_scheduled_commits(
@@ -51,12 +48,14 @@ pub fn process_accept_scheduled_commits(
 
     for (i, intent) in intents.into_iter().enumerate() {
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
-        let bump = verify_intent_pda(invoke_context, intent.id, pda_idx)?;
+        let (pda, bump) =
+            verify_intent_pda(invoke_context, intent.id, pda_idx)?;
 
         // Create outbox ephemeral account
-        create_outbox_ephemeral_account(
+        create_outbox_intent_cpi(
             invoke_context,
-            pda_idx,
+            validator_auth,
+            pda,
             OutboxIntentBundle::accepted(intent, bump),
         )?;
     }
@@ -77,16 +76,18 @@ fn validate(
 
     let transaction_context = &*invoke_context.transaction_context;
 
-    // Assert magic program account
-    let magic_program_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, MAGIC_PROGRAM_ID)?;
-    if *magic_program_pubkey != crate::id() {
+    // Assert outbox intent program account (CPI target)
+    let outbox_program_pubkey = get_instruction_pubkey_with_idx(
+        transaction_context,
+        OUTBOX_PROGRAM_IDX,
+    )?;
+    if *outbox_program_pubkey != OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "AcceptScheduledCommits ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_ID,
-            magic_program_pubkey,
-            crate::id()
+            "AcceptScheduledCommits ERR: account at idx {} is {}, expected outbox intent program {}",
+            OUTBOX_PROGRAM_IDX,
+            outbox_program_pubkey,
+            OUTBOX_INTENT_PROGRAM_ID
         );
         return Err(InstructionError::IncorrectProgramId);
     }
@@ -123,7 +124,7 @@ fn verify_intent_pda(
     invoke_context: &InvokeContext,
     intent_id: u64,
     pda_idx: u16,
-) -> Result<u8, InstructionError> {
+) -> Result<(Pubkey, u8), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let provided =
         get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
@@ -139,7 +140,7 @@ fn verify_intent_pda(
         );
         return Err(InstructionError::InvalidArgument);
     }
-    Ok(bump)
+    Ok((expected, bump))
 }
 
 fn pop_scheduled_intents(
@@ -206,9 +207,10 @@ fn pop_scheduled_intents(
     Ok(intents)
 }
 
-fn create_outbox_ephemeral_account(
-    invoke_context: &InvokeContext,
-    pda_idx: u16,
+fn create_outbox_intent_cpi(
+    invoke_context: &mut InvokeContext,
+    validator_auth: Pubkey,
+    pda: Pubkey,
     outbox_account: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let intent_id = outbox_account.inner.id;
@@ -221,30 +223,18 @@ fn create_outbox_ephemeral_account(
         InstructionError::InvalidAccountData
     })?;
 
-    let transaction_context = &*invoke_context.transaction_context;
-    let ephemeral = validate_new_ephemeral(transaction_context, pda_idx)?;
-
-    let mut acc = ephemeral.borrow_mut()?;
-    acc.set_owner(crate::id());
-    acc.resize(data.len(), 0);
-    acc.data_as_mut_slice().copy_from_slice(&data);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)?;
-
-    Ok(())
-}
-
-/// Validates that the account at [`EPHEMERAL_IDX`] is an empty system-owned
-/// account (0 lamports, system program owner). Returns the account for
-/// initialization.
-fn validate_new_ephemeral<'a, 'ix_data>(
-    tc: &'a TransactionContext<'ix_data>,
-    idx: u16,
-) -> Result<InstructionAccount<'a, 'ix_data>, InstructionError> {
-    let ephemeral = get_instruction_account_with_idx(tc, idx)?;
-    let acc = ephemeral.borrow()?;
-    if acc.lamports() != 0 || *acc.owner() != system_program::ID {
-        return Err(InstructionError::InvalidAccountData);
-    }
-    drop(acc);
-    Ok(ephemeral)
+    invoke_context.native_invoke_as(
+        crate::id(),
+        Instruction {
+            program_id: OUTBOX_INTENT_PROGRAM_ID,
+            accounts: vec![
+                AccountMeta::new_readonly(validator_auth, true),
+                AccountMeta::new(pda, false),
+            ],
+            data: OutboxIntentInstruction::CreateOutboxIntent { data }
+                .try_to_vec()
+                .map_err(|_| InstructionError::InvalidInstructionData)?,
+        },
+        &[],
+    )
 }

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::outbox::verify_outbox_intent_pda;
+use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -9,7 +10,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 
 use crate::{
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
         accounts::{
@@ -20,8 +21,7 @@ use crate::{
 };
 
 const VALIDATOR_IDX: u16 = 0;
-const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-const CLOSING_PDA_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
+const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
 /// Closes the outbox intent PDA
 /// Validates intent execution stage to see if it can be closed
@@ -38,15 +38,15 @@ fn validate(
     signers: &HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     intent_id: u64,
-) -> Result<(Pubkey, Pubkey), InstructionError> {
+) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
-    // Assert MagicBlock program
-    if ix_ctx.get_program_key()? != &crate::id() {
+    // Assert outbox intent program
+    if ix_ctx.get_program_key()? != &OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
-            "CloseOutboxIntent ERR: Magic program account not found"
+            "CloseOutboxIntent ERR: outbox intent program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
     }
@@ -63,22 +63,6 @@ fn validate(
             validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
-    }
-
-    // Assert magic program account
-    let magic_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        MAGIC_PROGRAM_IDX,
-    )?;
-    if *magic_program_pubkey != crate::id() {
-        ic_msg!(
-            invoke_context,
-            "CloseOutboxIntent ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_IDX,
-            magic_program_pubkey,
-            crate::id()
-        );
-        return Err(InstructionError::IncorrectProgramId);
     }
 
     // Assert signers
@@ -131,7 +115,7 @@ fn validate(
         return Err(InstructionError::InvalidAccountData);
     }
 
-    Ok((validator_authority_id, *provided_pda))
+    Ok(())
 }
 
 fn close_outbox_ephemeral_account(
@@ -155,15 +139,14 @@ mod tests {
     use magicblock_core::intent::{
         MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
     };
-    use magicblock_magic_program_api::{
-        EPHEMERAL_VAULT_PUBKEY,
-        outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
+    use magicblock_magic_program_api::outbox::{
+        ExecutionStage, PendingTransaction, TwoStageProgress,
     };
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_hash::Hash;
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
-    use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
+    use solana_sdk_ids::system_program;
     use solana_signature::Signature;
     use solana_signer::Signer;
     use solana_transaction::Transaction;
@@ -172,7 +155,9 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{ensure_started_validator, process_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn transaction_accounts_from_map(
@@ -209,7 +194,7 @@ mod tests {
         bundle.try_to_bytes().unwrap()
     }
 
-    fn setup_outbox_pda_and_vault(
+    fn setup_outbox_pda(
         intent_id: u64,
         stage: Option<ExecutionStage>,
     ) -> std::collections::HashMap<Pubkey, AccountSharedData> {
@@ -218,23 +203,13 @@ mod tests {
         let mut pda_account = AccountBuilder::from(AccountSharedData::new(
             0,
             data.len(),
-            &crate::id(),
+            &OUTBOX_INTENT_PROGRAM_ID,
         ))
         .mode(AccountMode::Ephemeral)
         .build::<AccountSharedData>();
         pda_account.set_data_from_slice(&data);
 
         let mut map = std::collections::HashMap::new();
-        // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor -
-        // refund is rent-exempt-minimum for the PDA's actual data length
-        let vault = AccountBuilder::from(AccountSharedData::new(
-            1_000_000,
-            0,
-            &crate::id(),
-        ))
-        .mode(AccountMode::Ephemeral)
-        .build::<AccountSharedData>();
-        map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
         // Add outbox PDA as existing ephemeral account (created by accept)
         map.insert(pda, pda_account);
         map
@@ -250,8 +225,7 @@ mod tests {
     #[test]
     fn test_missing_validator_auth_signer() {
         let intent_id: u64 = rand::random();
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(final_stage()));
+        let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         ensure_started_validator(&mut account_data, None);
 
         let mut ix =
@@ -260,7 +234,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -272,8 +246,7 @@ mod tests {
     fn test_invalid_validator_auth() {
         let intent_id: u64 = rand::random();
         let fake_validator = Keypair::new();
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(final_stage()));
+        let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         account_data.insert(
             fake_validator.pubkey(),
             AccountSharedData::new(1_000_000, 0, &system_program::id()),
@@ -285,7 +258,7 @@ mod tests {
         ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -294,41 +267,15 @@ mod tests {
     }
 
     #[test]
-    fn test_invalid_program() {
+    fn test_closes_outbox_pda() {
         let intent_id: u64 = rand::random();
-        let fake_program = Keypair::new();
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(final_stage()));
-        account_data.insert(
-            fake_program.pubkey(),
-            AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
-        );
-        ensure_started_validator(&mut account_data, None);
-
-        let mut ix =
-            InstructionUtils::close_outbox_intent_instruction(intent_id);
-        ix.accounts[1].pubkey = fake_program.pubkey();
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::IncorrectProgramId),
-        );
-    }
-
-    #[test]
-    fn test_closes_outbox_pda_and_refunds_sponsor() {
-        let intent_id: u64 = rand::random();
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(final_stage()));
+        let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -340,13 +287,13 @@ mod tests {
     fn test_rejects_close_when_not_final_stage() {
         let intent_id: u64 = rand::random();
         // Still `Accepted` - execution never even started
-        let mut account_data = setup_outbox_pda_and_vault(intent_id, None);
+        let mut account_data = setup_outbox_pda(intent_id, None);
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -363,14 +310,13 @@ mod tests {
                 blockhash: Hash::default(),
             }),
         );
-        let mut account_data =
-            setup_outbox_pda_and_vault(intent_id, Some(committing));
+        let mut account_data = setup_outbox_pda(intent_id, Some(committing));
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
