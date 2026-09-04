@@ -73,7 +73,8 @@ pub(crate) fn process_add_action_callback(
         transaction_context,
         invoke_context,
         PAYER_IDX,
-        MAGIC_FEE_VAULT_IDX
+        MAGIC_FEE_VAULT_IDX,
+        false,
     )?.ok_or(InstructionError::MissingAccount)
     .inspect_err(|_| {
         ic_msg!(

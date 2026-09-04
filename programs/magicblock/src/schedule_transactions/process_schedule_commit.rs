@@ -34,6 +34,10 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    /// The account after the magic context is declared to be the fee vault by
+    /// the instruction itself, rather than inferred from the payer's
+    /// delegation status.
+    pub explicit_fee_vault: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -82,7 +86,10 @@ pub(crate) fn process_schedule_commit(
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
+        opts.explicit_fee_vault,
     )?;
+    // With an explicit fee vault a non-fee-paying payer errored above, so
+    // `Some` exactly matches "the vault slot is occupied".
     let committees_start = if magic_fee_vault.is_some() {
         COMMITTEES_START + 1
     } else {
