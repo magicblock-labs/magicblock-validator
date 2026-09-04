@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "programs/flexi-counter",
     "programs/schedulecommit",
     "programs/schedulecommit-security",
     "schedulecommit/client",
@@ -62,6 +63,7 @@ magicblock-program = { path = "../programs/magicblock" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
 paste = "1.0"
+program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rand = "0.8.5"
@@ -69,6 +71,7 @@ rayon = "1.10.0"
 rkyv = "0.7.45"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
+serde_json = "1.0"
 serial_test = "3.2.0"
 shlex = "1.3.0"
 solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.4.1" }

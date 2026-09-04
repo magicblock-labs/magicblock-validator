@@ -632,6 +632,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "backoff"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b62ddb9cb1ec0a098ad4bbf9344d0713fa193ae1a80af55febcff2627b6a00c1"
+dependencies = [
+ "futures-core",
+ "getrandom 0.2.17",
+ "instant",
+ "pin-project-lite",
+ "rand 0.8.7",
+ "tokio",
+]
+
+[[package]]
 name = "backtrace"
 version = "0.3.76"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3009,6 +3023,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "instant"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0242819d153cba4b4b05a5a8f2a7e9bbf97b6055b2a002b395c96b5ff3c0222"
+dependencies = [
+ "cfg-if",
+]
+
+[[package]]
 name = "integration-solana-sdk"
 version = "0.0.0"
 dependencies = [
@@ -3657,9 +3680,11 @@ name = "magicblock-committor-service"
 version = "0.14.11"
 dependencies = [
  "async-trait",
+ "backoff",
  "borsh 1.8.0",
  "futures-util",
  "lru",
+ "magicblock-accountsdb",
  "magicblock-chainlink",
  "magicblock-committor-program",
  "magicblock-core",
@@ -3670,6 +3695,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "pin-project",
  "rusqlite",
  "solana-account 4.3.1",
  "solana-account-decoder",
@@ -3691,6 +3717,7 @@ dependencies = [
  "solana-transaction-status-client-types",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
@@ -3800,7 +3827,7 @@ dependencies = [
  "solana-system-interface 2.0.0",
  "static_assertions",
  "strum",
- "thiserror 2.0.20",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -3952,6 +3979,7 @@ version = "0.14.11"
 dependencies = [
  "const-crypto",
  "serde",
+ "solana-hash 4.4.0",
  "solana-instruction 3.4.0",
  "solana-program 4.0.0",
  "solana-signature",
@@ -4804,6 +4832,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "program-flexi-counter"
+version = "0.0.0"
+dependencies = [
+ "bincode",
+ "borsh 1.8.0",
+ "ephemeral-rollups-sdk",
+ "magicblock-magic-program-api 0.14.11",
+ "serde",
+ "solana-program 3.0.0",
+ "solana-system-interface 3.2.0",
+]
+
+[[package]]
 name = "program-schedulecommit"
 version = "0.0.0"
 dependencies = [
@@ -5653,6 +5694,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "program-flexi-counter",
  "program-schedulecommit",
  "rand 0.8.7",
  "solana-account 4.3.1",
@@ -5661,6 +5703,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk-ids 3.1.0",
+ "solana-signature",
  "solana-system-interface 3.2.0",
  "tokio",
  "tracing",
@@ -9495,15 +9538,27 @@ dependencies = [
 name = "test-schedule-intent"
 version = "0.0.0"
 dependencies = [
+ "anyhow",
+ "async-trait",
+ "ephemeral-rollups-sdk",
  "integration-solana-sdk",
  "integration-test-tools",
  "log",
+ "magicblock-committor-service",
+ "magicblock-core",
+ "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
  "magicblock-magic-program-api 0.14.11",
- "program-schedulecommit",
- "schedulecommit-client",
+ "magicblock-program",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "program-flexi-counter",
+ "serde_json",
  "serial_test",
+ "solana-commitment-config",
  "solana-rpc-client",
  "solana-rpc-client-api",
+ "solana-signature",
+ "tokio",
  "tracing",
 ]
 

@@ -11,9 +11,10 @@ use magicblock_chainlink::{
 };
 use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
-    committor_processor::CommittorProcessor,
-    config::ChainConfig,
-    service::{IntentExecutionService, intent_client::InternalIntentRpcClient},
+    committor_processor::CommittorProcessor, config::ChainConfig,
+    intent_engine::db::AccountsDbIntentBacklog,
+    outbox::outbox_client::InternalOutboxClient,
+    service::IntentExecutionService,
 };
 use magicblock_config::{LeaderParams, config::LifecycleMode};
 use magicblock_metrics::MetricsService;
@@ -45,8 +46,10 @@ use crate::{
 
 type ChainlinkImpl = ProdChainlink;
 
+type CommittorProcessorImpl = CommittorProcessor<AccountsDbIntentBacklog>;
+
 type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalIntentRpcClient>;
+    IntentExecutionService<InternalOutboxClient, AccountsDbIntentBacklog>;
 
 // -----------------
 // Leader
@@ -111,17 +114,20 @@ impl Leader {
         );
         timer.record("Chainlink initialized");
 
+        let outbox_client =
+            Arc::new(Self::init_outbox_client(&config, &engine));
         let committor_processor = {
             let processor = Self::init_committor_processor(
                 &config,
                 &engine,
+                &outbox_client,
                 &Some(shared_chain_slot),
-            )?;
+            );
             Arc::new(processor)
         };
         let intent_execution_service = Self::init_intent_execution_service(
             &chainlink,
-            &engine,
+            &outbox_client,
             &committor_processor,
             config.engine.blockstore.blocktime,
         );
@@ -187,17 +193,22 @@ impl Leader {
         })
     }
 
+    fn init_outbox_client(
+        config: &LeaderParams,
+        engine: &Engine,
+    ) -> InternalOutboxClient {
+        let rpc_client =
+            Arc::new(RpcClient::new(config.aperture.listen.http()));
+        InternalOutboxClient::new(engine.clone(), rpc_client)
+    }
+
     pub fn init_committor_processor(
         config: &LeaderParams,
         engine: &Engine,
+        outbox_client: &Arc<InternalOutboxClient>,
         shared_chain_slot: &Option<Arc<AtomicU64>>,
-    ) -> ApiResult<CommittorProcessor> {
+    ) -> CommittorProcessorImpl {
         let authority = config.engine.authority.local.insecure_clone();
-        let committor_persist_path = config
-            .engine
-            .ledger
-            .directory
-            .join("committor_service.sqlite");
         let base_chain_config = ChainConfig {
             rpc_uri: config.rpc_url().to_owned(),
             commitment: CommitmentConfig::confirmed(),
@@ -217,26 +228,25 @@ impl Leader {
             config.engine.authority.local.insecure_clone(),
             engine.clone(),
         );
-        Ok(CommittorProcessor::try_new(
+        CommittorProcessor::new(
             authority,
-            committor_persist_path,
             base_chain_config,
             shared_chain_slot.clone(),
+            AccountsDbIntentBacklog::new(engine.clone()),
+            outbox_client.clone(),
             actions_callback_executor,
-        )?)
+        )
     }
 
     fn init_intent_execution_service(
         chainlink: &Arc<ChainlinkImpl>,
-        engine: &Engine,
-        committor_processor: &Arc<CommittorProcessor>,
+        outbox_client: &Arc<InternalOutboxClient>,
+        committor_processor: &Arc<CommittorProcessorImpl>,
         slot_interval: Duration,
     ) -> IntentExecutionServiceImpl {
-        let intent_client = InternalIntentRpcClient::new(engine.clone());
-
         IntentExecutionServiceImpl::new(
             chainlink.clone(),
-            intent_client,
+            outbox_client.clone(),
             committor_processor.clone(),
             slot_interval,
         )

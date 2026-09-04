@@ -13,20 +13,23 @@ use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
     intent_executor::{
-        error::{IntentExecutorError, TransactionStrategyExecutionError},
+        accepted_intent_executor::AcceptedIntentExecutor,
+        error::IntentExecutorError,
         intent_execution_client::IntentExecutionClient,
+        strategy_executor::{
+            error::TransactionStrategyExecutionError,
+            two_stage::{Initialized, TwoStageStrategyExecutor},
+            utils::prepare_and_execute_strategy,
+        },
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
+        IntentExecutor, IntentExecutorCtx,
+    },
+    tasks::{
+        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::{
             CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
             TaskInfoFetcherError,
         },
-        two_stage_executor::{Initialized, TwoStageExecutor},
-        utils::prepare_and_execute_strategy,
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorImpl,
-    },
-    persist::IntentPersisterImpl,
-    tasks::{
-        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::{
@@ -47,6 +50,7 @@ use magicblock_program::{
 };
 use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
+use program_flexi_counter::state::{FlexiCounter, FAIL_UNDELEGATION_LABEL};
 use program_schedulecommit::{
     BookUpdate, MainAccount, OrderLevel, ScheduleCommitInstruction,
 };
@@ -63,13 +67,14 @@ use solana_sdk::{
 };
 
 use crate::{
-    common::{MockActionsCallbackExecutor, TestFixture},
+    common::{MockActionsCallbackExecutor, MockOutboxClient, TestFixture},
     utils::{
         ensure_validator_authority, get_validator_auth,
         instructions::account_pda,
         transactions::{
             fund_validator_auth_and_ensure_validator_fees_vault,
             init_and_delegate_account_on_chain,
+            init_and_delegate_flexi_counter_on_chain,
         },
     },
 };
@@ -82,10 +87,11 @@ const ACTOR_ESCROW_INDEX: u8 = 1;
 struct TestEnv {
     fixture: TestFixture,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    intent_executor: IntentExecutorImpl<
+    intent_executor: AcceptedIntentExecutor<
         TransactionPreparatorImpl,
         RpcTaskInfoFetcher,
         MockActionsCallbackExecutor,
+        MockOutboxClient,
     >,
     callback_executor: MockActionsCallbackExecutor,
     pre_test_tablemania_state: HashMap<Pubkey, usize>,
@@ -111,12 +117,17 @@ impl TestEnv {
         }
 
         let callback_executor = MockActionsCallbackExecutor::default();
-        let intent_executor = IntentExecutorImpl::new(
-            fixture.authority.insecure_clone(),
-            fixture.rpc_client.clone(),
-            transaction_preparator,
-            task_info_fetcher.clone(),
-            callback_executor.clone(),
+        let intent_executor = AcceptedIntentExecutor::new(
+            IntentExecutorCtx {
+                authority: fixture.authority.insecure_clone(),
+                intent_client: IntentExecutionClient::new(
+                    fixture.rpc_client.clone(),
+                ),
+                transaction_preparator,
+                task_info_fetcher: task_info_fetcher.clone(),
+                outbox_client: Arc::new(MockOutboxClient),
+                actions_callback_executor: callback_executor.clone(),
+            },
             DEFAULT_ACTIONS_TIMEOUT,
         );
 
@@ -175,7 +186,6 @@ async fn test_commit_id_error_parsing() {
         &fixture.authority,
         &transaction_preparator,
         &mut transaction_strategy,
-        &None::<IntentPersisterImpl>,
     )
     .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -199,6 +209,69 @@ async fn test_commit_id_error_parsing() {
     assert!(err
         .to_string()
         .contains("Accounts committed with an invalid Commit id"));
+}
+
+#[tokio::test]
+async fn test_undelegation_error_parsing() {
+    const COUNTER_SIZE: u64 = 70;
+
+    let TestEnv {
+        fixture,
+        intent_executor: _,
+        task_info_fetcher,
+        callback_executor: _,
+        pre_test_tablemania_state: _,
+    } = TestEnv::setup().await;
+
+    // Create counter that will force undelegation to fail
+    let (counter_auth, account) = setup_flexi_counter(
+        COUNTER_SIZE,
+        Some(FAIL_UNDELEGATION_LABEL.to_string()),
+    )
+    .await;
+    let intent = create_intent(
+        vec![CommittedAccount {
+            pubkey: FlexiCounter::pda(&counter_auth.pubkey()).0,
+            account,
+            remote_slot: Default::default(),
+        }],
+        true,
+    );
+
+    let mut transaction_strategy = single_flow_transaction_strategy(
+        &fixture.authority.pubkey(),
+        &task_info_fetcher,
+        &intent,
+    )
+    .await;
+    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let execution_result = prepare_and_execute_strategy(
+        &intent_client,
+        &fixture.authority,
+        &transaction_preparator,
+        &mut transaction_strategy,
+    )
+    .await;
+    assert!(execution_result.is_ok(), "Preparation is expected to pass!");
+
+    // Verify that we got UndelegationError
+    let execution_result = execution_result.unwrap();
+    assert!(execution_result.is_err());
+    let err = execution_result.unwrap_err();
+    assert!(matches!(
+        err,
+        TransactionStrategyExecutionError::UndelegationError(
+            TransactionError::InstructionError(
+                _,
+                InstructionError::Custom(
+                    0x7a, // flexi-counter ProgramError::Custom(122): forced undelegation failure (FAIL_UNDELEGATION_CODE)
+                )
+            ),
+            _
+        )
+    ));
+    assert!(err.to_string().contains("Invalid undelegation"));
 }
 
 #[tokio::test]
@@ -249,7 +322,6 @@ async fn test_action_error_parsing() {
         &fixture.authority,
         &transaction_preparator,
         &mut transaction_strategy,
-        &None::<IntentPersisterImpl>,
     )
     .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -318,7 +390,6 @@ async fn test_cpi_limits_error_parsing() {
         &fixture.authority,
         &transaction_preparator,
         &mut transaction_strategy,
-        &None::<IntentPersisterImpl>,
     )
     .await;
     assert!(execution_result.is_ok(), "Preparation is expected to pass!");
@@ -352,7 +423,7 @@ async fn test_min_context_slot_not_reached_error_parsing() {
 
     let TestEnv {
         fixture: _,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher: _,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -368,9 +439,7 @@ async fn test_min_context_slot_not_reached_error_parsing() {
         true,
     );
 
-    let execution_result = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
+    let (execution_result, _) = Box::new(intent_executor).execute(intent).await;
 
     // Verify that we got MinContextSlotNotReachedError
     assert!(execution_result.inner.is_err());
@@ -399,7 +468,7 @@ async fn test_commit_id_error_recovery() {
 
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state,
@@ -427,13 +496,12 @@ async fn test_commit_id_error_recovery() {
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
 
     // Now execute intent
-    let res = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
+    let (res, cleanup_handle) = Box::new(intent_executor).execute(intent).await;
     let IntentExecutionResult {
         inner: res,
         patched_errors,
         callbacks_report,
+        ..
     } = res;
 
     assert!(
@@ -453,7 +521,7 @@ async fn test_commit_id_error_recovery() {
     ));
 
     // Cleanup succeeds
-    assert!(intent_executor.cleanup().await.is_ok());
+    assert!(cleanup_handle.clean().await.is_ok());
     let mut commit_ids_by_pk = HashMap::new();
     for el in [&committed_account].iter() {
         let nonce = task_info_fetcher
@@ -474,12 +542,73 @@ async fn test_commit_id_error_recovery() {
 }
 
 #[tokio::test]
+async fn test_undelegation_error_recovery() {
+    const COUNTER_SIZE: u64 = 70;
+
+    let TestEnv {
+        fixture,
+        intent_executor,
+        task_info_fetcher: _,
+        callback_executor: _,
+        pre_test_tablemania_state,
+    } = TestEnv::setup().await;
+
+    let counter_auth = Keypair::new();
+    let (pubkey, mut account) = init_and_delegate_flexi_counter_on_chain(
+        &counter_auth,
+        COUNTER_SIZE,
+        Some(FAIL_UNDELEGATION_LABEL.to_string()),
+    )
+    .await;
+
+    account.owner = program_flexi_counter::id();
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: Default::default(),
+    };
+    let intent = create_intent(vec![committed_account.clone()], true);
+
+    // Execute intent
+    let (res, cleanup_handle) = Box::new(intent_executor).execute(intent).await;
+    let IntentExecutionResult {
+        inner: res,
+        patched_errors,
+        callbacks_report,
+        ..
+    } = res;
+
+    assert!(res.is_ok());
+    assert!(matches!(res.unwrap(), ExecutionOutput::SingleStage(_)));
+    assert!(callbacks_report.is_empty());
+    assert_eq!(patched_errors.len(), 1, "Only 1 patch expected");
+
+    // Assert errors patched
+    let undelegation_error = patched_errors.into_iter().next().unwrap();
+    assert!(matches!(
+        undelegation_error,
+        TransactionStrategyExecutionError::UndelegationError(_, _)
+    ));
+
+    // Cleanup succeeds
+    assert!(cleanup_handle.clean().await.is_ok());
+    verify(
+        &fixture.table_mania,
+        fixture.rpc_client.get_inner(),
+        &HashMap::new(),
+        &pre_test_tablemania_state,
+        &[committed_account],
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_action_error_recovery() {
     const COUNTER_SIZE: u64 = 100;
 
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher: _,
         callback_executor: _,
         pre_test_tablemania_state,
@@ -507,13 +636,12 @@ async fn test_action_error_recovery() {
         });
 
     let scheduled_intent = create_scheduled_intent(base_intent);
-    let res = intent_executor
-        .execute(scheduled_intent, None::<IntentPersisterImpl>)
-        .await;
+    let (res, _) = Box::new(intent_executor).execute(scheduled_intent).await;
     let IntentExecutionResult {
         inner: res,
         patched_errors,
         callbacks_report,
+        ..
     } = res;
 
     assert!(res.is_ok());
@@ -549,7 +677,7 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher,
         callback_executor: _,
         pre_test_tablemania_state,
@@ -586,13 +714,13 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     let scheduled_intent = create_scheduled_intent(base_intent);
     // Execute intent
-    let res = intent_executor
-        .execute(scheduled_intent, None::<IntentPersisterImpl>)
-        .await;
+    let (res, cleanup_handle) =
+        Box::new(intent_executor).execute(scheduled_intent).await;
     let IntentExecutionResult {
         inner: res,
         patched_errors,
         callbacks_report,
+        ..
     } = res;
 
     assert!(res.is_ok());
@@ -615,7 +743,7 @@ async fn test_commit_id_and_action_errors_recovery() {
     ));
 
     // Cleanup succeeds
-    assert!(intent_executor.cleanup().await.is_ok());
+    assert!(cleanup_handle.clean().await.is_ok());
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
@@ -687,7 +815,6 @@ async fn test_cpi_limits_error_recovery() {
             scheduled_intent,
             strategy,
             &mut execution_report,
-            &None::<IntentPersisterImpl>,
         )
         .await;
     assert!(execution_result.is_ok(), "Intent expected to recover");
@@ -808,7 +935,6 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
             scheduled_intent,
             strategy,
             &mut execution_report,
-            &None::<IntentPersisterImpl>,
         )
         .await;
 
@@ -886,7 +1012,7 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
 async fn test_commit_unfinalized_account_recovery() {
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher: _,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -946,9 +1072,7 @@ async fn test_commit_unfinalized_account_recovery() {
         remote_slot: Default::default(),
     };
     let intent = create_intent(vec![committed_account], false);
-    let result = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
+    let (result, _) = Box::new(intent_executor).execute(intent).await;
     assert!(result.inner.is_ok());
     assert!(matches!(
         result.inner.unwrap(),
@@ -970,7 +1094,7 @@ async fn test_commit_unfinalized_account_recovery() {
 async fn test_commit_unfinalized_account_recovery_two_stage() {
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher: _,
         callback_executor: _,
         pre_test_tablemania_state: _,
@@ -1038,9 +1162,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
         .collect();
     let intent = create_intent(committed_accounts, true);
 
-    let result = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
+    let (result, _) = Box::new(intent_executor).execute(intent).await;
     assert!(result.inner.is_ok());
     assert!(matches!(
         result.inner.unwrap(),
@@ -1067,7 +1189,7 @@ async fn test_action_callback_fired_on_failure() {
 
     let TestEnv {
         fixture,
-        mut intent_executor,
+        intent_executor,
         task_info_fetcher: _,
         callback_executor,
         pre_test_tablemania_state: _,
@@ -1099,9 +1221,7 @@ async fn test_action_callback_fired_on_failure() {
         });
 
     let scheduled_intent = create_scheduled_intent(base_intent);
-    let res = intent_executor
-        .execute(scheduled_intent, None::<IntentPersisterImpl>)
-        .await;
+    let (res, _) = Box::new(intent_executor).execute(scheduled_intent).await;
 
     assert!(res.inner.is_ok());
     assert_eq!(res.callbacks_report.len(), 1, "1 callback scheduled");
@@ -1157,22 +1277,26 @@ async fn test_action_callback_fired_on_timeout() {
     let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
         RpcTaskInfoFetcher::new(fixture.rpc_client.clone()),
     ));
-    let mut intent_executor = IntentExecutorImpl::new(
-        fixture.authority.insecure_clone(),
-        fixture.rpc_client.clone(),
-        fixture.create_transaction_preparator(),
-        task_info_fetcher,
-        callback_executor.clone(),
+    let intent_executor = AcceptedIntentExecutor::new(
+        IntentExecutorCtx {
+            authority: fixture.authority.insecure_clone(),
+            intent_client: IntentExecutionClient::new(
+                fixture.rpc_client.clone(),
+            ),
+            transaction_preparator: fixture.create_transaction_preparator(),
+            task_info_fetcher,
+            outbox_client: Arc::new(MockOutboxClient),
+            actions_callback_executor: callback_executor.clone(),
+        },
         Duration::ZERO,
     );
 
     let scheduled_intent = create_scheduled_intent(base_intent);
-    let res = intent_executor
-        .execute(scheduled_intent, None::<IntentPersisterImpl>)
-        .await;
+    let (res, cleanup_handle) =
+        Box::new(intent_executor).execute(scheduled_intent).await;
 
     assert!(res.inner.is_ok());
-    assert!(res.patched_errors.is_empty());
+    assert_eq!(res.patched_errors.len(), 1, "Action was supposed to fail");
     assert_eq!(res.callbacks_report.len(), 1, "1 callback scheduled");
     assert!(res.callbacks_report[0].is_ok(), "mock returns Ok(sig)");
 
@@ -1183,7 +1307,7 @@ async fn test_action_callback_fired_on_timeout() {
     assert_eq!(callbacks[0], expected_callback);
     assert!(matches!(result, Err(ActionError::TimeoutError)));
 
-    assert!(intent_executor.cleanup().await.is_ok());
+    assert!(cleanup_handle.clean().await.is_ok());
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
         &[committed_account],
@@ -1284,7 +1408,6 @@ async fn test_callbacks_fired_in_two_stage() {
             &committed_pubkeys,
             &transaction_preparator,
             &task_info_fetcher,
-            &None::<IntentPersisterImpl>,
         )
         .await
         .expect("commit must succeed");
@@ -1302,7 +1425,7 @@ async fn test_callbacks_fired_in_two_stage() {
     // Execute finalize stage
     let mut finalize_executor = executor.done(commit_sig);
     finalize_executor
-        .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
+        .finalize(&transaction_preparator)
         .await
         .expect("finalize must succeed");
 
@@ -1317,7 +1440,7 @@ async fn test_callbacks_fired_in_two_stage() {
     assert!(calls[1].1.is_ok());
 }
 
-/// Builds a [`TwoStageExecutor`] directly from an intent by constructing the
+/// Builds a [`TwoStageStrategyExecutor`] directly from an intent by constructing the
 /// commit and finalize strategies independently, without going through
 /// `execute_inner` or any CPI-limit recovery path.
 async fn create_two_stage_executor<'a>(
@@ -1326,41 +1449,34 @@ async fn create_two_stage_executor<'a>(
     intent: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     execution_report: &'a mut IntentExecutionReport,
-) -> TwoStageExecutor<'a, MockActionsCallbackExecutor, Initialized> {
+) -> TwoStageStrategyExecutor<
+    'a,
+    MockActionsCallbackExecutor,
+    MockOutboxClient,
+    Initialized,
+> {
     let authority = &fixture.authority.pubkey();
-    let commit_tasks = TaskBuilderImpl::commit_tasks(
-        task_info_fetcher,
-        intent,
-        &None::<IntentPersisterImpl>,
-    )
-    .await
-    .unwrap();
+    let commit_tasks = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent)
+        .await
+        .unwrap();
     let finalize_tasks =
         TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
             .unwrap();
-    let commit_strategy = TaskStrategist::build_strategy(
-        commit_tasks,
-        authority,
-        &None::<IntentPersisterImpl>,
-        None,
-    )
-    .unwrap();
-    let finalize_strategy = TaskStrategist::build_strategy(
-        finalize_tasks,
-        authority,
-        &None::<IntentPersisterImpl>,
-        None,
-    )
-    .unwrap();
-    TwoStageExecutor::new(
+    let commit_strategy =
+        TaskStrategist::build_strategy(commit_tasks, authority, None).unwrap();
+    let finalize_strategy =
+        TaskStrategist::build_strategy(finalize_tasks, authority, None)
+            .unwrap();
+    let state = Initialized::new(commit_strategy, finalize_strategy);
+    TwoStageStrategyExecutor::new(
+        state,
         fixture.authority.insecure_clone(),
-        commit_strategy,
-        finalize_strategy,
+        intent.id,
         IntentExecutionClient::new(fixture.rpc_client.clone()),
+        Arc::new(MockOutboxClient),
         callback_executor.clone(),
         execution_report,
-        intent.id,
     )
 }
 
@@ -1524,6 +1640,26 @@ async fn setup_counter(
     (counter_auth, account)
 }
 
+/// Flexi-counter-specific variant of [`setup_counter`], used only by tests
+/// that need flexi-counter's own on-chain behavior (e.g. its
+/// `FAIL_UNDELEGATION_LABEL` forced-undelegation-failure hook), which
+/// `program_schedulecommit` does not implement.
+async fn setup_flexi_counter(
+    counter_bytes: u64,
+    label: Option<String>,
+) -> (Keypair, Account) {
+    let counter_auth = Keypair::new();
+    let (_, mut account) = init_and_delegate_flexi_counter_on_chain(
+        &counter_auth,
+        counter_bytes,
+        label,
+    )
+    .await;
+
+    account.owner = program_flexi_counter::id();
+    (counter_auth, account)
+}
+
 fn create_intent(
     committed_accounts: Vec<CommittedAccount>,
     is_undelegate: bool,
@@ -1566,26 +1702,16 @@ async fn single_flow_transaction_strategy(
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     intent: &ScheduledIntentBundle,
 ) -> TransactionStrategy {
-    let mut tasks = TaskBuilderImpl::commit_tasks(
-        task_info_fetcher,
-        intent,
-        &None::<IntentPersisterImpl>,
-    )
-    .await
-    .unwrap();
+    let mut tasks = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent)
+        .await
+        .unwrap();
     let finalize_tasks =
         TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent)
             .await
             .unwrap();
     tasks.extend(finalize_tasks);
 
-    TaskStrategist::build_strategy(
-        tasks,
-        authority,
-        &None::<IntentPersisterImpl>,
-        None,
-    )
-    .unwrap()
+    TaskStrategist::build_strategy(tasks, authority, None).unwrap()
 }
 
 async fn verify_committed_accounts_state(

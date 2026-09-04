@@ -39,6 +39,10 @@ path = "../../target/deploy/magicblock_committor_program.so"
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../target/deploy/program_schedulecommit.so"
 
+[[programs]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
+
 [geyser-grpc]
 port = 10001
 

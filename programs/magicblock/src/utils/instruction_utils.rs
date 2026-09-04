@@ -1,8 +1,7 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
+use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
-    instruction::MagicBlockInstruction, pda::crank_signer_pda,
+    instruction::MagicBlockInstruction, outbox, pda::crank_signer_pda,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -24,7 +23,16 @@ impl InstructionUtils {
     // Schedule Commit
     // -----------------
     #[cfg(test)]
-    pub(crate) fn schedule_commit_instruction(
+    pub fn schedule_commit(
+        payer: &Keypair,
+        pubkeys: Vec<Pubkey>,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::schedule_commit_instruction(&payer.pubkey(), pubkeys);
+        Self::into_transaction(payer, ix, recent_blockhash)
+    }
+
+    pub fn schedule_commit_instruction(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
@@ -124,30 +132,47 @@ impl InstructionUtils {
         scheduled_commit_id: u64,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::scheduled_commit_sent_instruction(
-            &crate::id(),
-            &validator_authority_id(),
-            scheduled_commit_id,
-        );
+        let ix = Self::scheduled_commit_sent_instruction(scheduled_commit_id);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub fn scheduled_commit_sent_instruction(
-        magic_block_program: &Pubkey,
-        validator_authority: &Pubkey,
+    pub(crate) fn scheduled_commit_sent_instruction(
         scheduled_commit_id: u64,
     ) -> Instruction {
-        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
-            AccountMeta::new_readonly(*magic_block_program, false),
-            AccountMeta::new_readonly(*validator_authority, true),
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
         ];
         Instruction::new_with_wincode(
-            *magic_block_program,
-            &MagicBlockInstruction::ScheduledCommitSent((
-                scheduled_commit_id,
-                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
-            )),
+            crate::id(),
+            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Close Outbox Intent
+    // -----------------
+    pub fn close_outbox_intent(
+        intent_id: u64,
+        recent_blockhash: Hash,
+    ) -> Transaction {
+        let ix = Self::close_outbox_intent_instruction(intent_id);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
+    pub(crate) fn close_outbox_intent_instruction(
+        intent_id: u64,
+    ) -> Instruction {
+        let account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
+        ];
+        Instruction::new_with_wincode(
+            crate::id(),
+            &MagicBlockInstruction::CloseOutboxIntent(intent_id),
             account_metas,
         )
     }
@@ -155,13 +180,30 @@ impl InstructionUtils {
     // -----------------
     // Accept Scheduled Commits
     // -----------------
+    pub fn accept_scheduled_commits(
+        recent_blockhash: Hash,
+        intent_ids: impl IntoIterator<Item = u64>,
+    ) -> Transaction {
+        let ix = Self::accept_scheduled_commits_instruction(intent_ids);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
     pub fn accept_scheduled_commits_instruction(
-        validator_authority: &Pubkey,
+        intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
-        let account_metas = vec![
-            AccountMeta::new_readonly(*validator_authority, true),
+        let mut account_metas = vec![
+            AccountMeta::new(validator_authority_id(), true),
+            AccountMeta::new_readonly(crate::id(), false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
         ];
+
+        // Add outbox intent accounts
+        let outbox_intent_metas = intent_ids
+            .into_iter()
+            .map(outbox_intent_pda)
+            .map(|intent_pda| AccountMeta::new(intent_pda, false));
+        account_metas.extend(outbox_intent_metas);
+
         Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::AcceptScheduleCommits,
@@ -169,15 +211,50 @@ impl InstructionUtils {
         )
     }
 
-    fn into_transaction(
-        payer: &Keypair,
+    // -----------------
+    // SetIntentExecutionStage
+    // -----------------
+
+    pub fn set_intent_execution_stage(
+        recent_blockhash: Hash,
+        intent_id: u64,
+        stage: outbox::ExecutionStage,
+    ) -> Transaction {
+        let ix = Self::set_intent_execution_stage_instruction(intent_id, stage);
+        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
+    }
+
+    pub(crate) fn set_intent_execution_stage_instruction(
+        intent_id: u64,
+        stage: outbox::ExecutionStage,
+    ) -> Instruction {
+        let account_metas = vec![
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
+        ];
+        Instruction::new_with_wincode(
+            crate::id(),
+            &MagicBlockInstruction::SetIntentExecutionStage {
+                intent_id,
+                stage,
+            },
+            account_metas,
+        )
+    }
+
+    // -----------------
+    // Utils
+    // -----------------
+    pub(crate) fn into_transaction(
+        signer: &Keypair,
         instruction: Instruction,
         recent_blockhash: Hash,
     ) -> Transaction {
+        let signers = &[signer];
         Transaction::new_signed_with_payer(
             &[instruction],
-            Some(&payer.pubkey()),
-            &[payer],
+            Some(&signer.pubkey()),
+            signers,
             recent_blockhash,
         )
     }

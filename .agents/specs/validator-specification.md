@@ -336,7 +336,7 @@ The documented commit pipeline is:
 5. Task strategy packs tasks into valid transactions.
 6. Delivery preparation handles address lookup tables and commit buffers.
 7. RPC client sends and confirms transactions.
-8. SQLite persister preserves state across restarts.
+8. Each intent's on-chain outbox intent PDA preserves state across restarts; recovery reconstructs pending intents by scanning outbox intent accounts.
 
 ### Task strategy
 

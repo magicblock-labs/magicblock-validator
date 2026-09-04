@@ -1,67 +1,60 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    path::Path,
     sync::{Arc, Mutex, atomic::AtomicU64},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures_util::future::join_all;
-use magicblock_core::{Slot, traits::ActionsCallbackScheduler};
-use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use magicblock_core::traits::ActionsCallbackScheduler;
+use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_signer::Signer;
 use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
 use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
-    intent_execution_manager::{
-        BroadcastedIntentExecutionResult, IntentExecutionManager, db::DummyDB,
+    intent_engine::{
+        BroadcastedIntentExecutionResult, IntentEngineHandle, db::BacklogDB,
     },
     intent_executor::{
-        intent_executor_factory::ExecutorConfig,
-        task_info_fetcher::{
-            CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherResult,
-        },
+        error::IntentExecutorError, intent_executor_factory::ExecutorConfig,
     },
-    persist::{
-        CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures, RecoveredIntent,
+    outbox::OutboxClient,
+    tasks::task_info_fetcher::{
+        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+        TaskInfoFetcherResult,
     },
 };
+
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
-pub(crate) const RECOVERY_MAX_AGE_SECS: u64 = 14 * 24 * 60 * 60;
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
-pub struct CommittorProcessor {
-    authority: Keypair,
+pub struct CommittorProcessor<D> {
     _table_mania: TableMania,
-    magic_rpc_client: MagicblockRpcClient,
-    persister: IntentPersisterImpl,
-    commits_scheduler: IntentExecutionManager<DummyDB>,
+    commits_scheduler: IntentEngineHandle<D>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
-impl CommittorProcessor {
-    pub fn try_new<P, A>(
+impl<D: BacklogDB> CommittorProcessor<D> {
+    pub fn new<A, O>(
         authority: Keypair,
-        persist_file: P,
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
+        db: D,
+        outbox_client: Arc<O>,
         actions_callback_executor: A,
-    ) -> CommittorServiceResult<Self>
+    ) -> Self
     where
-        P: AsRef<Path>,
         A: ActionsCallbackScheduler,
+        O: OutboxClient,
+        O::Error: Into<IntentExecutorError>,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
@@ -94,19 +87,16 @@ impl CommittorProcessor {
             Some(gc_config),
         );
 
-        // Create commit persister
-        let persister = IntentPersisterImpl::try_new(persist_file)?;
-
         // Create commit scheduler
         let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
-        let commits_scheduler = IntentExecutionManager::new(
+        let commits_scheduler = IntentEngineHandle::new(
             authority.insecure_clone(),
             magic_block_rpc_client.clone(),
-            DummyDB::new(),
+            db,
             task_info_fetcher.clone(),
-            Some(persister.clone()),
+            outbox_client,
             table_mania.clone(),
             ExecutorConfig {
                 compute_budget_config: chain_config
@@ -124,141 +114,19 @@ impl CommittorProcessor {
             pending_result_listeners.clone(),
         ));
 
-        Ok(Self {
-            authority,
+        Self {
             _table_mania: table_mania,
-            magic_rpc_client: magic_block_rpc_client,
             commits_scheduler,
-            persister,
             task_info_fetcher,
             pending_result_listeners,
-        })
-    }
-
-    pub fn get_commit_statuses(
-        &self,
-        message_id: u64,
-    ) -> CommittorServiceResult<Vec<CommitStatusRow>> {
-        let commit_statuses =
-            self.persister.get_commit_statuses_by_message(message_id)?;
-        Ok(commit_statuses)
-    }
-
-    pub fn get_commit_signature(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> CommittorServiceResult<Option<MessageSignatures>> {
-        let signatures = self
-            .persister
-            .get_signatures_by_commit(commit_id, &pubkey)?;
-        Ok(signatures)
-    }
-
-    fn recovery_min_created_at() -> u64 {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            .saturating_sub(RECOVERY_MAX_AGE_SECS)
-    }
-
-    /// Fetches pending bundles from DB for recovery. No filtering - these
-    /// are the most recent ones, still in-flight, not yet confirmed failed.
-    pub async fn load_pending_intent_bundles(
-        &self,
-    ) -> CommittorServiceResult<Vec<ScheduledIntentBundle>> {
-        let bundles = self
-            .persister
-            .pending_intent_bundles(Self::recovery_min_created_at())?;
-
-        if !bundles.is_empty() {
-            info!(
-                intent_count = bundles.len(),
-                "Loaded pending commit intents from persistence for recovery"
-            );
         }
-
-        Ok(bundles)
-    }
-
-    /// Fetches failed bundles from DB for recovery, for the caller to filter
-    /// for nonce/delegation-session staleness before replaying.
-    pub async fn load_recovery_intent_bundles(
-        &self,
-    ) -> CommittorServiceResult<Vec<RecoveredIntent>> {
-        let recovered = self
-            .persister
-            .recoverable_intents(Self::recovery_min_created_at())?;
-
-        if !recovered.is_empty() {
-            let accounts_count: usize = recovered
-                .iter()
-                .map(|r| r.bundle.get_all_committed_pubkeys().len())
-                .sum();
-            info!(
-                intent_count = recovered.len(),
-                accounts_count,
-                "Loaded failed commit intents from persistence for recovery"
-            );
-        }
-
-        Ok(recovered)
-    }
-
-    pub(crate) async fn get_slot(&self) -> CommittorServiceResult<Slot> {
-        Ok(self.magic_rpc_client.get_slot().await?)
-    }
-
-    /// Stamps `payer` and `remote_slot` on recovered bundles with current
-    /// values so execution (fetching nonces/base accounts) uses a fresh
-    /// `min_context_slot`. Must run only on bundles that already survived
-    /// the caller's nonce and delegation-session recovery filters, since it
-    /// destroys the original scheduling-time `remote_slot` those filters
-    /// depend on.
-    pub(crate) async fn refresh_intent_bundles(
-        &self,
-        intent_bundles: &mut [ScheduledIntentBundle],
-        slot: u64,
-    ) -> CommittorServiceResult<()> {
-        let payer = self.authority.pubkey();
-
-        macro_rules! set_remote_slot {
-            ($field:expr, $slot:expr) => {
-                if let Some(ref mut v) = $field {
-                    v.get_committed_accounts_mut()
-                        .iter_mut()
-                        .for_each(|a| a.remote_slot = slot);
-                }
-            };
-        }
-
-        intent_bundles.iter_mut().for_each(|b| {
-            b.payer = payer;
-            set_remote_slot!(b.intent_bundle.commit, slot);
-            set_remote_slot!(b.intent_bundle.commit_finalize, slot);
-            set_remote_slot!(b.intent_bundle.commit_and_undelegate, slot);
-            set_remote_slot!(
-                b.intent_bundle.commit_finalize_and_undelegate,
-                slot
-            );
-        });
-
-        Ok(())
     }
 
     #[instrument(skip(self, intent_bundles))]
     pub async fn schedule_intent_bundles(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        if let Err(err) = self.persister.start_base_intents(&intent_bundles) {
-            // We will still try to perform the commits, but the fact that we cannot
-            // persist the intent is very serious and we should probably restart the
-            // valiator
-            error!(error = ?err, "DB EXCEPTION: Failed to persist changeset");
-        };
-
         self.commits_scheduler
             .schedule(intent_bundles)
             .await
@@ -271,7 +139,7 @@ impl CommittorProcessor {
 
     pub async fn execute_intent_bundles(
         &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
+        intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
         // Critical section
         let (receivers, inserted_ids) = {
@@ -323,21 +191,6 @@ impl CommittorProcessor {
             .collect::<Result<Vec<_>, RecvError>>()?;
 
         Ok(results)
-    }
-
-    #[instrument(skip(self, intent_bundles))]
-    pub async fn schedule_recovered_intent_bundles(
-        &self,
-        intent_bundles: Vec<ScheduledIntentBundle>,
-    ) -> CommittorServiceResult<()> {
-        self.commits_scheduler
-            .schedule(intent_bundles)
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to schedule recovered intent");
-            })?;
-
-        Ok(())
     }
 
     /// Creates a subscription for results of BaseIntent execution
