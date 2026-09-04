@@ -30,7 +30,7 @@ pub struct ExecutorConfig {
     pub actions_timeout: Duration,
 }
 
-/// Dummy struct to simplify signature of CommitSchedulerWorker
+/// Dummy struct to simplify signature of IntentExecutionEngine
 pub struct IntentExecutorBuilderImpl<A, O> {
     /// Base-layer signing identity — the engine's authority keypair.
     pub authority: Keypair,
