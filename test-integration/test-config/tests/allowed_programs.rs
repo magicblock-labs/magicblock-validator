@@ -7,7 +7,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{AllowedProgram, ChainLinkConfig, LifecycleMode},
+    config::{AllowedProgram, ChainLinkConfig},
     types::network::Remote,
     LeaderParams,
 };
@@ -43,7 +43,6 @@ fn run_allowed_programs(allow_committor_program: bool) {
 
     let config = LeaderParams {
         programs: vec![],
-        lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
