@@ -199,15 +199,24 @@ fn schedule_commit_finalize(ctx: &IntegrationTestContext, counters: &[Pubkey]) {
     println!("schedule_commit_finalize sig: {}", sig);
 }
 
+/// Schedules a transfer intent with a callback and returns the payer balance
+/// taken right before scheduling, alongside the destination it pays out to.
+///
+/// Both belong to this attempt alone: scheduling charges the payer immediately,
+/// so an intent lost to the validator's accept loop is still paid for and still
+/// delivered, and its baseline and destination are discarded along with it.
 fn schedule_intent_with_callback(
     ctx: &IntegrationTestContext,
     payer: &Keypair,
-    destination: Pubkey,
     amount: u64,
-) {
+) -> (u64, Keypair) {
+    let destination = Keypair::new();
+    let payer_balance_before =
+        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+
     let schedule_ix = create_transfer_intent_ix(
         payer.pubkey(),
-        destination,
+        destination.pubkey(),
         ctx.ephem_validator_identity.unwrap(),
         amount,
         false,
@@ -218,6 +227,8 @@ fn schedule_intent_with_callback(
     let sig = ctx.send_transaction_ephem(&mut tx, &[payer]).unwrap();
 
     println!("schedule_intent_with_callback sig: {}", sig);
+
+    (payer_balance_before, destination)
 }
 
 /// Tries to accept intent
@@ -245,19 +256,25 @@ fn steal_accept_intent(
     }
 }
 
-fn steal_schedule_accept_intent(
+/// Schedules an intent and races the validator's own accept loop for it.
+///
+/// A lost race leaves the just-scheduled intent to the validator, which charges
+/// the payer and executes it independently of this test. `schedule` therefore
+/// returns whatever the caller needs to assert on, and only the value from the
+/// attempt we actually accepted is handed back.
+fn steal_schedule_accept_intent<T>(
     ctx: &IntegrationTestContext,
-    schedule: impl Fn(&IntegrationTestContext),
-) -> u64 {
+    schedule: impl Fn(&IntegrationTestContext) -> T,
+) -> (u64, T) {
     const MAX_ATTEMPTS: u8 = 5;
 
     let mut attempt = 0;
     loop {
         let intent_id = read_next_intent_id(ctx);
-        schedule(ctx);
+        let scheduled = schedule(ctx);
         let result = steal_accept_intent(ctx, intent_id);
         match result {
-            Ok(()) => return intent_id,
+            Ok(()) => return (intent_id, scheduled),
             Err(err) => {
                 println!("Failed to steal");
 
@@ -270,16 +287,19 @@ fn steal_schedule_accept_intent(
     }
 }
 
-fn schedule_and_accept(
+fn schedule_and_accept<T>(
     ctx: &IntegrationTestContext,
-    schedule: impl Fn(&IntegrationTestContext),
-) -> OutboxIntentBundle {
+    schedule: impl Fn(&IntegrationTestContext) -> T,
+) -> (OutboxIntentBundle, T) {
     ctx.wait_for_next_slot_ephem().unwrap();
 
-    let intent_id = steal_schedule_accept_intent(ctx, schedule);
+    let (intent_id, scheduled) = steal_schedule_accept_intent(ctx, schedule);
     let pda = outbox_intent_pda(intent_id);
     let data = ctx.fetch_ephem_account_data(pda).unwrap();
-    OutboxIntentBundle::try_from_bytes(&data).unwrap()
+    (
+        OutboxIntentBundle::try_from_bytes(&data).unwrap(),
+        scheduled,
+    )
 }
 
 /// AcceptedIntentExecutor drives the full commit flow using TestOutboxClient.
@@ -297,7 +317,7 @@ async fn test_pickup_executed_intent() {
     delegate_counter(&test_env.ctx, &payer);
     add_to_counter(&test_env.ctx, &payer, 42);
 
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
+    let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda])
     });
     let intent_id = outbox_bundle.inner.id;
@@ -398,7 +418,7 @@ async fn test_pickup_failed_intent() {
     init_counter(&test_env.ctx, &payer);
     delegate_counter(&test_env.ctx, &payer);
     add_to_counter(&test_env.ctx, &payer, 42);
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
+    let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda]);
     });
     let intent_id = outbox_bundle.id;
@@ -494,19 +514,10 @@ async fn test_pickup_after_timeout() {
     add_to_counter(&test_env.ctx, &payer, 42);
     test_env.ctx.delegate_account(&chain_payer, &payer).unwrap();
 
-    let destination = Keypair::new();
-    let payer_balance_before = test_env
-        .ctx
-        .fetch_ephem_account_balance(&payer.pubkey())
-        .unwrap();
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_intent_with_callback(
-            ctx,
-            &payer,
-            destination.pubkey(),
-            TRANSFER_AMOUNT,
-        );
-    });
+    let (outbox_bundle, (payer_balance_before, destination)) =
+        schedule_and_accept(&test_env.ctx, |ctx| {
+            schedule_intent_with_callback(ctx, &payer, TRANSFER_AMOUNT)
+        });
 
     let mut slow_outbox_client = test_env.outbox_client();
     slow_outbox_client
@@ -592,19 +603,10 @@ async fn test_pick_up_after_tx_submission() {
     add_to_counter(&test_env.ctx, &payer, 42);
     test_env.ctx.delegate_account(&chain_payer, &payer).unwrap();
 
-    let destination = Keypair::new();
-    let payer_balance_before = test_env
-        .ctx
-        .fetch_ephem_account_balance(&payer.pubkey())
-        .unwrap();
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_intent_with_callback(
-            ctx,
-            &payer,
-            destination.pubkey(),
-            TRANSFER_AMOUNT,
-        );
-    });
+    let (outbox_bundle, (payer_balance_before, destination)) =
+        schedule_and_accept(&test_env.ctx, |ctx| {
+            schedule_intent_with_callback(ctx, &payer, TRANSFER_AMOUNT)
+        });
 
     let slow_intent_client = test_env.intent_client_with_send_sleep(SEND_SLEEP);
     let executor_ctx = test_env
@@ -675,7 +677,7 @@ async fn test_pickup_after_committing() {
     let counter_pdas: Vec<Pubkey> =
         counters.iter().map(|(_, pda)| *pda).collect();
 
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
+    let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas);
     });
 
@@ -799,7 +801,7 @@ async fn test_pickup_after_finalizing() {
     let counter_pdas: Vec<Pubkey> =
         counters.iter().map(|(_, pda)| *pda).collect();
 
-    let outbox_bundle = schedule_and_accept(&test_env.ctx, |ctx| {
+    let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas);
     });
     let intent_id = outbox_bundle.inner.id;
