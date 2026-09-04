@@ -98,7 +98,6 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: write
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
