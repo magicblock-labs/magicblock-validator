@@ -1833,57 +1833,64 @@ mod tests {
     #[serial]
     fn test_schedule_commit_with_fee_vault_rejects_non_vault_account() {
         init_logger!();
-        for request_undelegation in [false, true] {
-            let payer =
-                Keypair::from_seed(b"with_fee_vault_rejects_non_vault_")
-                    .unwrap();
-            let program = Pubkey::new_unique();
-            let committee = Pubkey::new_unique();
+        // A non-delegated payer fails the payer check before the slot is even
+        // read; a delegated payer fails the vault pubkey check.
+        for (payer_delegated, expected_err) in [
+            (false, InstructionError::InvalidInstructionData),
+            (true, InstructionError::MissingAccount),
+        ] {
+            for request_undelegation in [false, true] {
+                let payer =
+                    Keypair::from_seed(b"with_fee_vault_rejects_non_vault_")
+                        .unwrap();
+                let program = Pubkey::new_unique();
+                let committee = Pubkey::new_unique();
 
-            // A delegated SPL token account of another user, placed in the
-            // vault slot in an attempt to have it committed and undelegated
-            let victim_pubkey = Pubkey::new_unique();
-            let victim_account = make_delegated_spl_ata_account(
-                &Pubkey::new_unique(),
-                &Pubkey::new_unique(),
-            );
-
-            let (mut account_data, mut transaction_accounts) =
-                prepare_explicit_fee_vault_transaction(
-                    &payer,
-                    false,
-                    (victim_pubkey, victim_account),
-                    program,
-                    committee,
+                // A delegated SPL token account of another user, placed in the
+                // vault slot in an attempt to have it committed and undelegated
+                let victim_pubkey = Pubkey::new_unique();
+                let victim_account = make_delegated_spl_ata_account(
+                    &Pubkey::new_unique(),
+                    &Pubkey::new_unique(),
                 );
 
-            let ix =
-                InstructionUtils::schedule_commit_with_fee_vault_instruction(
-                    &payer.pubkey(),
-                    &victim_pubkey,
-                    vec![committee],
-                    request_undelegation,
-                );
-            extend_transaction_accounts_from_ix(
-                &ix,
-                &mut account_data,
-                &mut transaction_accounts,
-            );
+                let (mut account_data, mut transaction_accounts) =
+                    prepare_explicit_fee_vault_transaction(
+                        &payer,
+                        payer_delegated,
+                        (victim_pubkey, victim_account),
+                        program,
+                        committee,
+                    );
 
-            process_instruction(
-                ix.data.as_slice(),
-                transaction_accounts,
-                ix.accounts,
-                Err(InstructionError::MissingAccount),
-            );
+                let ix =
+                    InstructionUtils::schedule_commit_with_fee_vault_instruction(
+                        &payer.pubkey(),
+                        &victim_pubkey,
+                        vec![committee],
+                        request_undelegation,
+                    );
+                extend_transaction_accounts_from_ix(
+                    &ix,
+                    &mut account_data,
+                    &mut transaction_accounts,
+                );
+
+                process_instruction(
+                    ix.data.as_slice(),
+                    transaction_accounts,
+                    ix.accounts,
+                    Err(expected_err.clone()),
+                );
+            }
         }
     }
 
-    /// A non-delegated payer may pass the correct vault with the explicit
-    /// variants: the vault is validated, not charged, and never committed.
+    /// Only fee-paying (delegated) payers may pass a vault, so even
+    /// the correct vault is rejected when the payer pays no fees.
     #[test]
     #[serial]
-    fn test_schedule_commit_with_fee_vault_non_delegated_payer_not_charged() {
+    fn test_schedule_commit_with_fee_vault_rejects_non_delegated_payer() {
         init_logger!();
         for request_undelegation in [false, true] {
             let payer =
@@ -1920,36 +1927,12 @@ mod tests {
                 &mut transaction_accounts,
             );
 
-            let accounts = process_instruction(
+            process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
-                Ok(()),
+                Err(InstructionError::InvalidInstructionData),
             );
-
-            // Exactly the committee was scheduled — the vault stayed out of
-            // the committee list
-            let magic_context_acc =
-                assert_non_accepted_actions(&accounts, &payer.pubkey(), 1);
-            let magic_context =
-                bincode::deserialize::<MagicContext>(magic_context_acc.data())
-                    .unwrap();
-            let intent_bundle =
-                &magic_context.scheduled_base_intents[0].intent_bundle;
-            assert_eq!(
-                intent_bundle.get_all_committed_pubkeys(),
-                vec![committee]
-            );
-            assert_eq!(
-                intent_bundle.has_undelegate_intent(),
-                request_undelegation
-            );
-
-            // Nobody was charged
-            assert!(accounts.iter().any(|a| a.lamports() == 1_000_000));
-            assert!(accounts
-                .iter()
-                .all(|a| a.lamports() != COMMIT_FEE_LAMPORTS));
         }
     }
 

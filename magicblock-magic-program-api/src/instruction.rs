@@ -314,9 +314,10 @@ pub enum MagicBlockInstruction {
 
     /// Same as [MagicBlockInstruction::ScheduleCommit], except that account 2
     /// is explicitly the executing validator's magic fee vault instead of
-    /// being inferred from the payer's delegation status. Its pubkey is
-    /// always validated, so it can never be reinterpreted as an account to
-    /// commit; the payer is charged only when delegated.
+    /// being inferred from the payer's delegation status, so it can never be
+    /// reinterpreted as an account to commit. The payer must be delegated
+    /// (it is charged from); passing a fee vault with a non-delegated payer
+    /// is rejected.
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled

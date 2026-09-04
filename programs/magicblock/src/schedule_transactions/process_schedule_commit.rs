@@ -88,12 +88,13 @@ pub(crate) fn process_schedule_commit(
         MAGIC_CONTEXT_IDX + 1,
         opts.explicit_fee_vault,
     )?;
-    let committees_start =
-        if opts.explicit_fee_vault || magic_fee_vault.is_some() {
-            COMMITTEES_START + 1
-        } else {
-            COMMITTEES_START
-        };
+    // With an explicit fee vault a non-fee-paying payer errored above, so
+    // `Some` exactly matches "the vault slot is occupied".
+    let committees_start = if magic_fee_vault.is_some() {
+        COMMITTEES_START + 1
+    } else {
+        COMMITTEES_START
+    };
 
     // Assert enough accounts
     if ix_accs_len <= committees_start {
