@@ -1789,10 +1789,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 return Err(
                     RemoteAccountProviderError::AccountResolutionsFailed(
                         format!(
-                            "Resolved {} accounts for {} requested accounts: {}",
+                            "Resolved {} accounts for {} requested accounts",
                             resolved_accounts.len(),
                             pubkeys.len(),
-                            pubkeys_str(pubkeys)
                         ),
                     ),
                 );
