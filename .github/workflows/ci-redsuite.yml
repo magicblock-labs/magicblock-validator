@@ -4,17 +4,40 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
-# Temporarily manual-only while RedSuite migrates to the leader's structured
-# Engine configuration. Restore the push and pull_request triggers once its
-# topology no longer invokes the removed legacy CLI options.
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
+  pull_request:
+    branches: [master, dev]
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 permissions:
   contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: v0.1
+  REDSUITE_REV: 0.2.0
 
 jobs:
   build_er:
@@ -69,13 +92,12 @@ jobs:
 
   run_redsuite:
     needs: build_er
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     name: RedSuite lite
     timeout-minutes: 45
     permissions:
       contents: read
       actions: read
-      pull-requests: write
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
@@ -112,10 +134,11 @@ jobs:
           rustup toolchain install
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
             cargo build --release --locked -p redsuite
-          cargo xtask programs
+          env -u REDSUITE_ROOT cargo xtask programs
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/
-          cp target/deploy/*.so ../redsuite-dist/deploy/
+          cp target/deploy/*.so target/deploy/fixtures.json ../redsuite-dist/deploy/
+          rm -rf target
         shell: bash
         working-directory: redsuite
 
@@ -129,7 +152,7 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p runroot/target/deploy runroot/target/redsuite-stack
-          cp redsuite-dist/deploy/*.so runroot/target/deploy/
+          cp redsuite-dist/deploy/* runroot/target/deploy/
           chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN"
         shell: bash
 
