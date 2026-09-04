@@ -41,7 +41,11 @@ pub trait OutboxClient: Send + Sync + 'static {
         stage: ExecutionStage,
     ) -> Result<(), Self::Error>;
 
-    /// Processes intent results, submitting them on chain(ER)
+    /// Registers the result payload and submits its notification on the ER.
+    ///
+    /// Fresh intents preserve their scheduling-time signature. Recovered
+    /// intents, and fresh intents whose blockhash expired before execution,
+    /// are signed against the engine's current blockhash.
     async fn notify_commit_sent(
         &self,
         meta: ScheduledBaseIntentMeta,
