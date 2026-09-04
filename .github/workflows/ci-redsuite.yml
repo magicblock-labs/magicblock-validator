@@ -92,7 +92,7 @@ jobs:
 
   run_redsuite:
     needs: build_er
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     name: RedSuite lite
     timeout-minutes: 45
     permissions:
@@ -138,6 +138,7 @@ jobs:
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/
           cp target/deploy/*.so target/deploy/fixtures.json ../redsuite-dist/deploy/
+          rm -rf target
         shell: bash
         working-directory: redsuite
 
