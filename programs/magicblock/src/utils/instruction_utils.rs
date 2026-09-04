@@ -143,6 +143,31 @@ impl InstructionUtils {
         )
     }
 
+    /// Builds the explicit-fee-vault variants. Takes the vault pubkey so
+    /// tests can also exercise the rejection of wrong accounts in that slot.
+    #[cfg(test)]
+    pub(crate) fn schedule_commit_with_fee_vault_instruction(
+        payer: &Pubkey,
+        fee_vault: &Pubkey,
+        pdas: Vec<Pubkey>,
+        request_undelegation: bool,
+    ) -> Instruction {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(*fee_vault, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new(*pubkey, true));
+        }
+        let instruction = if request_undelegation {
+            MagicBlockInstruction::ScheduleCommitAndUndelegateWithFeeVault
+        } else {
+            MagicBlockInstruction::ScheduleCommitWithFeeVault
+        };
+        Instruction::new_with_bincode(crate::id(), &instruction, account_metas)
+    }
+
     // -----------------
     // Scheduled Commit Sent
     // -----------------

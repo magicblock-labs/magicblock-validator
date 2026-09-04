@@ -311,6 +311,24 @@ pub enum MagicBlockInstruction {
         authority: Pubkey,
         instructions: Vec<Instruction>,
     },
+
+    /// Same as [MagicBlockInstruction::ScheduleCommit], except that account 2
+    /// is explicitly the executing validator's magic fee vault instead of
+    /// being inferred from the payer's delegation status. Its pubkey is
+    /// always validated, so it can never be reinterpreted as an account to
+    /// commit; the payer is charged only when delegated.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`         Magic Context Account
+    /// - **2.**   `[WRITE]`         Magic fee vault of the executing validator
+    /// - **3..n** `[]`              Accounts to be committed
+    ScheduleCommitWithFeeVault,
+
+    /// Same as [MagicBlockInstruction::ScheduleCommitAndUndelegate], with the
+    /// explicit fee vault semantics (and account layout) of
+    /// [MagicBlockInstruction::ScheduleCommitWithFeeVault].
+    ScheduleCommitAndUndelegateWithFeeVault,
 }
 
 impl MagicBlockInstruction {
@@ -345,6 +363,30 @@ pub struct AccountCloneFields {
     pub delegated: bool,
     pub confined: bool,
     pub remote_slot: u64,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The wire discriminant is the bincode declaration index: appending
+    /// variants is the only compatible change to [MagicBlockInstruction].
+    /// This pins the tags that deployed callers rely on.
+    #[test]
+    fn test_wire_discriminants_are_stable() {
+        for (instruction, tag) in [
+            (MagicBlockInstruction::ScheduleCommit, 1u32),
+            (MagicBlockInstruction::ScheduleCommitAndUndelegate, 2),
+            (MagicBlockInstruction::AcceptScheduleCommits, 3),
+            (MagicBlockInstruction::ScheduleCommitWithFeeVault, 26),
+            (
+                MagicBlockInstruction::ScheduleCommitAndUndelegateWithFeeVault,
+                27,
+            ),
+        ] {
+            assert_eq!(instruction.try_to_vec().unwrap(), tag.to_le_bytes());
+        }
+    }
 }
 
 /// Instruction(s) for Callback Executor builtin-program

@@ -155,7 +155,9 @@ pub(crate) fn check_commit_limits(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
-    let validator_authority = crate::validator::validator_authority_id();
+    // Effective authority so replicas (which run with an authority override)
+    // accept the primary's fee vault on replay.
+    let validator_authority = effective_validator_authority_id();
     Pubkey::find_program_address(
         &[b"magic-fee-vault", validator_authority.as_ref()],
         &crate::utils::DELEGATION_PROGRAM_ID,
@@ -167,6 +169,12 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
 /// fee-vault path, validating that the account at `fee_vault_idx` is the
 /// expected vault, delegated, and writable. Returns `None` otherwise.
 ///
+/// With `explicit_fee_vault` the account at `fee_vault_idx` is validated to
+/// have the expected vault pubkey even when the payer is not on the
+/// fee-charging path, so it can never be reinterpreted as an account to
+/// commit. The delegated/writable checks still apply only when a fee is
+/// actually charged.
+///
 /// Writability is checked eagerly: a payer on the fee-charging path would
 /// otherwise fail later with a less clear error.
 pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
@@ -174,6 +182,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
+    explicit_fee_vault: bool,
 ) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
@@ -181,7 +190,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
         let payer = payer_account.to_account_shared_data()?;
         payer.delegated() && !payer.confined()
     };
-    if !payer_requires_fee_vault {
+    if !explicit_fee_vault && !payer_requires_fee_vault {
         return Ok(None);
     }
 
@@ -194,6 +203,12 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
             vault_pubkey
         );
         return Err(InstructionError::MissingAccount);
+    }
+
+    if !payer_requires_fee_vault {
+        // Explicitly provided vault with a payer that pays no fees:
+        // validated above, but nothing to charge.
+        return Ok(None);
     }
 
     let vault_account =

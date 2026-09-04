@@ -1778,4 +1778,228 @@ mod tests {
             Err(InstructionError::MissingAccount),
         );
     }
+
+    /// Builds transaction accounts for the explicit-fee-vault variants:
+    /// a payer that may or may not be delegated, an arbitrary delegated
+    /// account occupying the vault slot, and one delegated committee.
+    fn prepare_explicit_fee_vault_transaction(
+        payer: &Keypair,
+        payer_delegated: bool,
+        vault_slot_account: (Pubkey, AccountSharedData),
+        program: Pubkey,
+        committee: Pubkey,
+    ) -> (
+        HashMap<Pubkey, AccountSharedData>,
+        Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        validator::generate_validator_authority_if_needed();
+        let mut account_data = {
+            let mut map = HashMap::new();
+            let mut payer_acc =
+                AccountSharedData::new(1_000_000, 0, &system_program::id());
+            payer_acc.set_delegated(payer_delegated);
+            map.insert(payer.pubkey(), payer_acc);
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
+            );
+            map.insert(vault_slot_account.0, vault_slot_account.1);
+            let mut acc = AccountSharedData::new(0, 0, &program);
+            acc.set_delegated(true);
+            map.insert(committee, acc);
+            map
+        };
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(0)),
+        );
+
+        let transaction_accounts = vec![(
+            clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        (account_data, transaction_accounts)
+    }
+
+    /// With the explicit variants an arbitrary delegated account in the vault
+    /// slot must be rejected even when the payer is not delegated — with the
+    /// implicit variants it would silently become the first committee.
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_fee_vault_rejects_non_vault_account() {
+        init_logger!();
+        for request_undelegation in [false, true] {
+            let payer =
+                Keypair::from_seed(b"with_fee_vault_rejects_non_vault_")
+                    .unwrap();
+            let program = Pubkey::new_unique();
+            let committee = Pubkey::new_unique();
+
+            // A delegated SPL token account of another user, placed in the
+            // vault slot in an attempt to have it committed and undelegated
+            let victim_pubkey = Pubkey::new_unique();
+            let victim_account = make_delegated_spl_ata_account(
+                &Pubkey::new_unique(),
+                &Pubkey::new_unique(),
+            );
+
+            let (mut account_data, mut transaction_accounts) =
+                prepare_explicit_fee_vault_transaction(
+                    &payer,
+                    false,
+                    (victim_pubkey, victim_account),
+                    program,
+                    committee,
+                );
+
+            let ix =
+                InstructionUtils::schedule_commit_with_fee_vault_instruction(
+                    &payer.pubkey(),
+                    &victim_pubkey,
+                    vec![committee],
+                    request_undelegation,
+                );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Err(InstructionError::MissingAccount),
+            );
+        }
+    }
+
+    /// A non-delegated payer may pass the correct vault with the explicit
+    /// variants: the vault is validated, not charged, and never committed.
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_fee_vault_non_delegated_payer_not_charged() {
+        init_logger!();
+        for request_undelegation in [false, true] {
+            let payer =
+                Keypair::from_seed(b"with_fee_vault_non_delegated_pay_")
+                    .unwrap();
+            let program = Pubkey::new_unique();
+            let committee = Pubkey::new_unique();
+
+            validator::generate_validator_authority_if_needed();
+            let fee_vault_pubkey = magic_fee_vault_pubkey();
+            let mut vault_acc =
+                AccountSharedData::new(0, 0, &system_program::id());
+            vault_acc.set_delegated(true);
+
+            let (mut account_data, mut transaction_accounts) =
+                prepare_explicit_fee_vault_transaction(
+                    &payer,
+                    false,
+                    (fee_vault_pubkey, vault_acc),
+                    program,
+                    committee,
+                );
+
+            let ix =
+                InstructionUtils::schedule_commit_with_fee_vault_instruction(
+                    &payer.pubkey(),
+                    &fee_vault_pubkey,
+                    vec![committee],
+                    request_undelegation,
+                );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let accounts = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // Exactly the committee was scheduled — the vault stayed out of
+            // the committee list
+            let magic_context_acc =
+                assert_non_accepted_actions(&accounts, &payer.pubkey(), 1);
+            let magic_context =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap();
+            let intent_bundle =
+                &magic_context.scheduled_base_intents[0].intent_bundle;
+            assert_eq!(
+                intent_bundle.get_all_committed_pubkeys(),
+                vec![committee]
+            );
+            assert_eq!(
+                intent_bundle.has_undelegate_intent(),
+                request_undelegation
+            );
+
+            // Nobody was charged
+            assert!(accounts.iter().any(|a| a.lamports() == 1_000_000));
+            assert!(accounts
+                .iter()
+                .all(|a| a.lamports() != COMMIT_FEE_LAMPORTS));
+        }
+    }
+
+    /// A delegated payer is charged through the explicit variant exactly as
+    /// through the implicit one.
+    #[test]
+    #[serial]
+    fn test_schedule_commit_with_fee_vault_delegated_payer_charges() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"with_fee_vault_delegated_charges_").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_delegated_payer_transaction(
+                &payer,
+                program,
+                &[committee],
+                StubNonces::Global(ACTUAL_COMMIT_LIMIT),
+            );
+
+        let ix = InstructionUtils::schedule_commit_with_fee_vault_instruction(
+            &payer.pubkey(),
+            &magic_fee_vault_pubkey(),
+            vec![committee],
+            false,
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        accounts
+            .iter()
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+        accounts
+            .iter()
+            .find(|a| {
+                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+            })
+            .expect("payer should have been debited");
+    }
 }

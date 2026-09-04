@@ -77,6 +77,7 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
+                    explicit_fee_vault: false,
                 },
             ),
             ScheduleCommitAndUndelegate => process_schedule_commit(
@@ -84,6 +85,23 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: true,
+                    explicit_fee_vault: false,
+                },
+            ),
+            ScheduleCommitWithFeeVault => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                    explicit_fee_vault: true,
+                },
+            ),
+            ScheduleCommitAndUndelegateWithFeeVault => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: true,
+                    explicit_fee_vault: true,
                 },
             ),
             Unused => {

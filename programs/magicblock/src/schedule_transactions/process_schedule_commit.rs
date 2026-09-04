@@ -34,6 +34,10 @@ use crate::{
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
     pub request_undelegation: bool,
+    /// The account after the magic context is declared to be the fee vault by
+    /// the instruction itself, rather than inferred from the payer's
+    /// delegation status.
+    pub explicit_fee_vault: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -82,12 +86,14 @@ pub(crate) fn process_schedule_commit(
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
+        opts.explicit_fee_vault,
     )?;
-    let committees_start = if magic_fee_vault.is_some() {
-        COMMITTEES_START + 1
-    } else {
-        COMMITTEES_START
-    };
+    let committees_start =
+        if opts.explicit_fee_vault || magic_fee_vault.is_some() {
+            COMMITTEES_START + 1
+        } else {
+            COMMITTEES_START
+        };
 
     // Assert enough accounts
     if ix_accs_len <= committees_start {

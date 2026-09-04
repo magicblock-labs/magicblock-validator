@@ -142,6 +142,7 @@ pub(crate) fn process_schedule_intent_bundle(
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
+        false,
     )?;
     if let Some(magic_fee_vault) = magic_fee_vault {
         let chargable_accounts = scheduled_intent.get_all_committed_accounts();
