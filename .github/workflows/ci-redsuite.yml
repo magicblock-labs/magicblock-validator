@@ -4,17 +4,40 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
-# Temporarily manual-only while RedSuite migrates to the leader's structured
-# Engine configuration. Restore the push and pull_request triggers once its
-# topology no longer invokes the removed legacy CLI options.
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
+  pull_request:
+    branches: [master, main, dev]
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 permissions:
   contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: v0.1
+  REDSUITE_REV: 0.2.0
 
 jobs:
   build_er:
