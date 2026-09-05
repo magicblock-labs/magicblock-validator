@@ -301,9 +301,9 @@ impl TaskStrategist {
             &dummy_lookup_tables,
             uniqueness_nonce,
         ) {
-            Ok(tx) => {
-                serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
-            }
+            Ok(tx) => serialized_transaction_size(&tx)
+                .map(|size| size <= MAX_TRANSACTION_WIRE_SIZE)
+                .unwrap_or(false),
             // Transaction doesn't fit, see CompileError
             Err(_) => false,
         }
@@ -424,7 +424,8 @@ impl TaskStrategist {
                 &[],
                 uniqueness_nonce,
             ) {
-                Ok(tx) => Ok(serialized_transaction_size(&tx)),
+                Ok(tx) => Ok(serialized_transaction_size(&tx)
+                    .unwrap_or(usize::MAX)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
