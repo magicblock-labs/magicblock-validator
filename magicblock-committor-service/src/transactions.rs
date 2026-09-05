@@ -5,6 +5,7 @@ use wincode::{SchemaWrite, config::DefaultConfig, error::WriteError};
 /// Maximum serialized transaction size that can be sent over the wire.
 pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
 
+/// Error returned when a transaction's serialized wire size cannot be computed.
 #[derive(Debug, Error)]
 pub enum SerializedTransactionSizeError {
     #[error("Failed to compute serialized transaction size: {0}")]
@@ -13,6 +14,15 @@ pub enum SerializedTransactionSizeError {
     SizeOverflow,
 }
 
+/// Returns the serialized wire size of `transaction`.
+///
+/// # Errors
+/// Returns [`SerializedTransactionSizeError`] if serialization fails or the size
+/// does not fit in `usize`.
+///
+/// # Compatibility
+/// This previously returned `usize` and panicking on failure. The `Result` return
+/// type is an intentional public API change; callers must handle the error.
 pub fn serialized_transaction_size<T>(
     transaction: &T,
 ) -> Result<usize, SerializedTransactionSizeError>

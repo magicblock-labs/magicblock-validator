@@ -409,6 +409,8 @@ impl TaskStrategist {
     /// Returns Ok(size of tx after optimizations) else Err(SignerError).
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the limit MAX_TRANSACTION_WIRE_SIZE. The caller needs to check and make decision accordingly.
+    /// Size-calculation failures (including serialization errors) return `Ok(usize::MAX)`,
+    /// matching the existing failed-to-fit sentinel.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
