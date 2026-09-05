@@ -210,6 +210,10 @@ impl GeyserPluginManager {
         }
     }
 
+    /// Delivers rooted slot status and block metadata for a sealed engine block.
+    ///
+    /// `parent_blockhash` is taken from [`Block::parent`]. Transaction and entry
+    /// counts remain placeholders until the engine retains those fields.
     fn notify_block(&self, block: Block) {
         let parent = block.slot.checked_sub(1);
         for plugin in &self.plugins {
@@ -227,6 +231,7 @@ impl GeyserPluginManager {
         }
 
         let blockhash = block.hash.to_string();
+        let parent_blockhash = block.parent.to_string();
         let rewards = solana_transaction_status::RewardsAndNumPartitions {
             rewards: Vec::new(),
             num_partitions: None,
@@ -238,8 +243,8 @@ impl GeyserPluginManager {
             block_height: Some(block.slot),
             rewards: &rewards,
             block_time: Some(block.time),
+            parent_blockhash: &parent_blockhash,
             // The engine does not yet retain these block metadata fields.
-            parent_blockhash: "11111111111111111111111111111111",
             executed_transaction_count: 0,
             entry_count: 0,
         };
@@ -358,7 +363,9 @@ mod tests {
     };
     use engine::testkit::TestEngine;
     use keeper::testkit::store_v42;
+    use ledger::schema::Block;
     use solana_account::AccountMode;
+    use solana_hash::Hash;
     use tokio_util::sync::CancellationToken;
     use v42_calculator_interface::builder::Expr as E;
 
@@ -466,6 +473,35 @@ mod tests {
         }
     }
 
+    /// Ensures `notify_block` emits `Block.parent`, not the all-zero placeholder.
+    #[test]
+    fn notify_block_forwards_parent_blockhash() {
+        let events = Arc::new(StdMutex::new(Events::default()));
+        let manager = GeyserPluginManager::from_plugins(vec![Box::new(
+            FakePlugin(events.clone()),
+        )]);
+        let parent = Hash::new_from_array([7; 32]);
+        let block = Block {
+            slot: 9,
+            hash: Hash::new_from_array([9; 32]),
+            time: 1,
+            parent,
+        };
+
+        manager.notify_block(block);
+
+        let events = events.lock().unwrap();
+        let recorded = events.blocks.first().expect("block update delivered");
+        assert_eq!(recorded.0, block.slot);
+        assert_eq!((recorded.1, recorded.2), (0, 0));
+        assert_eq!(recorded.3, parent.to_string());
+        assert_ne!(
+            recorded.3,
+            Hash::default().to_string(),
+            "must not emit the old all-zero placeholder when parent is set"
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread")]
     async fn fake_plugin_receives_engine_metadata_and_monotonic_writes() {
         let mut te = TestEngine::new().await;
@@ -536,7 +572,11 @@ mod tests {
             assert_eq!(events.slots.len(), 1, "slot update is delivered");
             let block = events.blocks.first().expect("block update delivered");
             assert_eq!((block.1, block.2), (0, 0));
-            assert_eq!(block.3, "11111111111111111111111111111111");
+            assert_eq!(
+                block.3,
+                te.blocks().latest().parent.to_string(),
+                "parent_blockhash matches engine Block.parent"
+            );
         }
         cancel.cancel();
         for task in tasks {
