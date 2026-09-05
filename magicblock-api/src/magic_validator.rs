@@ -46,7 +46,10 @@ use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     LatestBlock, Ledger,
 };
-use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
+use magicblock_metrics::{
+    metrics::{AccountFetchContext, AccountFetchReason, TRANSACTION_COUNT},
+    MetricsService,
+};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
@@ -1021,6 +1024,47 @@ impl MagicValidator {
         }
     }
 
+    /// Re-checks accounts left in the undelegating state against the chain in
+    /// the background: ones whose undelegation already completed — or can no
+    /// longer settle — are refreshed instead of staying locked forever, since
+    /// nothing else revisits them after a restart. Genuinely in-flight
+    /// undelegations are kept untouched by the fetch-path checks.
+    fn spawn_undelegating_accounts_recovery(&self) {
+        let chainlink = self.chainlink.clone();
+        let accountsdb = self.accountsdb.clone();
+        tokio::spawn(async move {
+            let undelegating = accountsdb
+                .iter_all()
+                .filter_map(|(pubkey, account)| {
+                    account.undelegating().then_some(pubkey)
+                })
+                .collect::<Vec<_>>();
+            if undelegating.is_empty() {
+                return;
+            }
+            info!(
+                count = undelegating.len(),
+                "Verifying undelegating accounts against chain"
+            );
+            for chunk in undelegating.chunks(10) {
+                if let Err(err) = chainlink
+                    .fetch_accounts(
+                        chunk,
+                        AccountFetchContext::internal(
+                            AccountFetchReason::UndelegatingRefresh,
+                        ),
+                    )
+                    .await
+                {
+                    warn!(
+                        error = ?err,
+                        "Failed to verify undelegating accounts"
+                    );
+                }
+            }
+        });
+    }
+
     fn spawn_primary_onchain_setup(&self) {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.identity;
@@ -1234,6 +1278,7 @@ impl MagicValidator {
             if let Some(service) = self.undelegation_request_service.as_ref() {
                 service.start();
             }
+            self.spawn_undelegating_accounts_recovery();
         }
 
         // Now we are ready to start all services and are ready to accept transactions

@@ -3969,6 +3969,11 @@ where
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
                         && record.authority == self.validator_pubkey
+                        // A record created after our banked state belongs to a
+                        // newer delegation which the local undelegation can
+                        // never settle, so fall through and refresh instead
+                        // of pinning the stale undelegating mark forever.
+                        && record.delegation_slot <= in_bank.remote_slot()
                 }) {
                     debug!(
                         pubkey = %pubkey,
