@@ -352,7 +352,8 @@ mod tests {
             &[&authority],
         )
         .expect("sign write transaction");
-        let transaction_size = serialized_transaction_size(&transaction);
+        let transaction_size = serialized_transaction_size(&transaction)
+            .expect("serialized write transaction size");
         info!(transaction_size, "Buffer write transaction size");
         assert!(transaction_size <= MAX_TRANSACTION_WIRE_SIZE);
     }

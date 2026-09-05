@@ -301,9 +301,9 @@ impl TaskStrategist {
             &dummy_lookup_tables,
             uniqueness_nonce,
         ) {
-            Ok(tx) => {
-                serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
-            }
+            Ok(tx) => serialized_transaction_size(&tx)
+                .map(|size| size <= MAX_TRANSACTION_WIRE_SIZE)
+                .unwrap_or(false),
             // Transaction doesn't fit, see CompileError
             Err(_) => false,
         }
@@ -409,6 +409,8 @@ impl TaskStrategist {
     /// Returns Ok(size of tx after optimizations) else Err(SignerError).
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the limit MAX_TRANSACTION_WIRE_SIZE. The caller needs to check and make decision accordingly.
+    /// Size-calculation failures (including serialization errors) return `Ok(usize::MAX)`,
+    /// matching the existing failed-to-fit sentinel.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
@@ -424,7 +426,8 @@ impl TaskStrategist {
                 &[],
                 uniqueness_nonce,
             ) {
-                Ok(tx) => Ok(serialized_transaction_size(&tx)),
+                Ok(tx) => Ok(serialized_transaction_size(&tx)
+                    .unwrap_or(usize::MAX)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
