@@ -1039,6 +1039,7 @@ impl MagicValidator {
 
         let chainlink = self.chainlink.clone();
         let accountsdb = self.accountsdb.clone();
+        let token = self.token.clone();
         tokio::spawn(async move {
             for attempt in 1..=ATTEMPTS {
                 let undelegating = accountsdb
@@ -1055,6 +1056,9 @@ impl MagicValidator {
                     attempt, "Verifying undelegating accounts against chain"
                 );
                 for chunk in undelegating.chunks(10) {
+                    if token.is_cancelled() {
+                        return;
+                    }
                     if let Err(err) = chainlink
                         .fetch_accounts(
                             chunk,
@@ -1071,7 +1075,10 @@ impl MagicValidator {
                     }
                 }
                 if attempt < ATTEMPTS {
-                    tokio::time::sleep(RETRY_DELAY).await;
+                    tokio::select! {
+                        _ = token.cancelled() => return,
+                        _ = tokio::time::sleep(RETRY_DELAY) => {}
+                    }
                 }
             }
             // Accounts still undelegating now are treated as legitimately in
