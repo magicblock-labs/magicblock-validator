@@ -174,7 +174,9 @@ where
             metrics::AccountFetchContext::project_ata(),
             companion_fetch_log_context,
         )
-        .await?;
+        .await
+        .ok()
+        .flatten()?;
     let delegation_actions = delegation_actions.unwrap_or_default();
 
     maybe_build_projected_ata_clone_request_from_eata(
@@ -406,7 +408,9 @@ where
         metrics::AccountFetchContext::project_ata(),
         companion_fetch_log_context,
     )
-    .await;
+    .await
+    .ok()
+    .flatten();
 
     let Some(deleg_record) = deleg_record else {
         return (ata_account, None);
@@ -647,6 +651,8 @@ where
                 &companion_fetch_log_context,
             )
             .await
+            .ok()
+            .flatten()
         })
     });
     let deleg_results: Vec<

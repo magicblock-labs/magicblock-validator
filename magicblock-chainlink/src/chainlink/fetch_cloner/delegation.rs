@@ -168,13 +168,17 @@ where
 }
 
 #[instrument(skip(this))]
+/// Fetches and parses the delegation record for `account_pubkey`.
+/// `Ok(None)` means the record is definitively absent or unparseable;
+/// `Err` means the lookup was inconclusive (e.g. a transport failure) and
+/// nothing can be concluded about the record's existence.
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_context: metrics::AccountFetchContext,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> Option<(DelegationRecord, Option<DelegationActions>)>
+) -> ChainlinkResult<Option<(DelegationRecord, Option<DelegationActions>)>>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -215,7 +219,7 @@ where
         )
         .await
     {
-        Ok(mut delegation_records) => {
+        Ok(mut delegation_records) => Ok(
             if let Some(delegation_record_remote) = delegation_records.pop() {
                 match delegation_record_remote.fresh_account() {
                     Some(delegation_record_account) => this
@@ -228,8 +232,8 @@ where
                 }
             } else {
                 None
-            }
-        }
+            },
+        ),
         Err(err) => {
             log_companion_fetch_failure(
                 companion_fetch_log_context,
@@ -237,7 +241,7 @@ where
                 ChainlinkCompanionFetchKind::DelegationRecord,
                 &err,
             );
-            None
+            Err(err.into())
         }
     };
 

@@ -1029,39 +1029,54 @@ impl MagicValidator {
     /// longer settle — are refreshed instead of staying locked forever, since
     /// nothing else revisits them after a restart. Genuinely in-flight
     /// undelegations are kept untouched by the fetch-path checks.
+    ///
+    /// Retried a few times: an inconclusive check (e.g. a transport failure
+    /// while chain connectivity warms up) keeps the account locked in the
+    /// bank, so it is picked up again by the next pass.
     fn spawn_undelegating_accounts_recovery(&self) {
+        const ATTEMPTS: u32 = 5;
+        const RETRY_DELAY: Duration = Duration::from_secs(60);
+
         let chainlink = self.chainlink.clone();
         let accountsdb = self.accountsdb.clone();
         tokio::spawn(async move {
-            let undelegating = accountsdb
-                .iter_all()
-                .filter_map(|(pubkey, account)| {
-                    account.undelegating().then_some(pubkey)
-                })
-                .collect::<Vec<_>>();
-            if undelegating.is_empty() {
-                return;
-            }
-            info!(
-                count = undelegating.len(),
-                "Verifying undelegating accounts against chain"
-            );
-            for chunk in undelegating.chunks(10) {
-                if let Err(err) = chainlink
-                    .fetch_accounts(
-                        chunk,
-                        AccountFetchContext::internal(
-                            AccountFetchReason::UndelegatingRefresh,
-                        ),
-                    )
-                    .await
-                {
-                    warn!(
-                        error = ?err,
-                        "Failed to verify undelegating accounts"
-                    );
+            for attempt in 1..=ATTEMPTS {
+                let undelegating = accountsdb
+                    .iter_all()
+                    .filter_map(|(pubkey, account)| {
+                        account.undelegating().then_some(pubkey)
+                    })
+                    .collect::<Vec<_>>();
+                if undelegating.is_empty() {
+                    return;
+                }
+                info!(
+                    count = undelegating.len(),
+                    attempt, "Verifying undelegating accounts against chain"
+                );
+                for chunk in undelegating.chunks(10) {
+                    if let Err(err) = chainlink
+                        .fetch_accounts(
+                            chunk,
+                            AccountFetchContext::internal(
+                                AccountFetchReason::UndelegatingRefresh,
+                            ),
+                        )
+                        .await
+                    {
+                        warn!(
+                            error = ?err,
+                            "Failed to verify undelegating accounts"
+                        );
+                    }
+                }
+                if attempt < ATTEMPTS {
+                    tokio::time::sleep(RETRY_DELAY).await;
                 }
             }
+            // Accounts still undelegating now are treated as legitimately in
+            // flight; subscription updates and referencing transactions own
+            // them from here.
         });
     }
 

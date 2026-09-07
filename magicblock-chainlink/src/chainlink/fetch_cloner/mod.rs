@@ -3466,6 +3466,28 @@ where
         fetch_context: metrics::AccountFetchContext,
         companion_fetch_log_context: CompanionFetchLogContext,
     ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
+        self.try_fetch_and_parse_delegation_record(
+            account_pubkey,
+            min_context_slot,
+            fetch_context,
+            companion_fetch_log_context,
+        )
+        .await
+        .ok()
+        .flatten()
+    }
+
+    /// Like [Self::fetch_and_parse_delegation_record], but keeps an
+    /// inconclusive lookup (`Err`) distinguishable from a definitively
+    /// absent record (`Ok(None)`).
+    async fn try_fetch_and_parse_delegation_record(
+        &self,
+        account_pubkey: Pubkey,
+        min_context_slot: u64,
+        fetch_context: metrics::AccountFetchContext,
+        companion_fetch_log_context: CompanionFetchLogContext,
+    ) -> ChainlinkResult<Option<(DelegationRecord, Option<DelegationActions>)>>
+    {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
@@ -3958,14 +3980,28 @@ where
                     primary_pubkey: eata_pubkey,
                     context_slot: self.remote_account_provider.chain_slot(),
                 };
-                let projected_deleg_record = self
-                    .fetch_and_parse_delegation_record(
+                let projected_deleg_record = match self
+                    .try_fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
                         undelegating_refresh_context,
                         companion_fetch_log_context,
                     )
-                    .await;
+                    .await
+                {
+                    Ok(record) => record,
+                    Err(err) => {
+                        // Inconclusive lookup: nothing can be concluded about
+                        // the companion delegation, so keep the lock.
+                        warn!(
+                            pubkey = %pubkey,
+                            eata_pubkey = %eata_pubkey,
+                            error = ?err,
+                            "Keeping undelegating ATA after inconclusive eATA record lookup"
+                        );
+                        return RefreshDecision::No;
+                    }
+                };
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
                         && record.authority == self.validator_pubkey
@@ -3992,14 +4028,27 @@ where
                 primary_pubkey: *pubkey,
                 context_slot: self.remote_account_provider.chain_slot(),
             };
-            let deleg_record = self
-                .fetch_and_parse_delegation_record(
+            let deleg_record = match self
+                .try_fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
                     undelegating_refresh_context,
                     companion_fetch_log_context,
                 )
-                .await;
+                .await
+            {
+                Ok(record) => record,
+                Err(err) => {
+                    // Inconclusive lookup: keep the lock rather than treating
+                    // the record as absent and dissolving it.
+                    warn!(
+                        pubkey = %pubkey,
+                        error = ?err,
+                        "Keeping undelegating account after inconclusive record lookup"
+                    );
+                    return RefreshDecision::No;
+                }
+            };
 
             if deleg_record.is_none() {
                 // If there is no delegation record then it is possible that the account itself
