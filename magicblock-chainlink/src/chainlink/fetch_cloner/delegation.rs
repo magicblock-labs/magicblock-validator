@@ -23,7 +23,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
+        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccountSharedData, SubscriptionReason,
     },
 };
@@ -221,21 +221,31 @@ where
         .await
     {
         Ok(mut delegation_records) => {
-            if let Some(delegation_record_remote) = delegation_records.pop() {
-                match delegation_record_remote.fresh_account() {
-                    // A record that exists but does not parse proves nothing
-                    // about the delegation state, so it is inconclusive
-                    // rather than absent.
-                    Some(delegation_record_account) => this
-                        .parse_delegation_record(
-                            delegation_record_account.data(),
-                            delegation_record_pubkey,
-                        )
-                        .map(Some),
-                    None => Ok(None),
+            match delegation_records.pop() {
+                // Only `NotFound` proves absence.
+                Some(RemoteAccount::NotFound(_)) => Ok(None),
+                Some(delegation_record_remote) => {
+                    match delegation_record_remote.fresh_account() {
+                        // A record that exists but does not parse proves
+                        // nothing about the delegation state, so it is
+                        // inconclusive rather than absent.
+                        Some(delegation_record_account) => this
+                            .parse_delegation_record(
+                                delegation_record_account.data(),
+                                delegation_record_pubkey,
+                            )
+                            .map(Some),
+                        // A stale result is inconclusive as well.
+                        None => Err(
+                            ChainlinkError::DelegatedAccountResolutionsFailed(
+                                delegation_record_pubkey.to_string(),
+                            ),
+                        ),
+                    }
                 }
-            } else {
-                Ok(None)
+                None => Err(ChainlinkError::DelegatedAccountResolutionsFailed(
+                    delegation_record_pubkey.to_string(),
+                )),
             }
         }
         Err(err) => {

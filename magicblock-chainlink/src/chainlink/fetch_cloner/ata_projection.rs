@@ -20,6 +20,7 @@ use super::{
     CompanionFetchLogContext, FetchCloner,
 };
 use crate::{
+    chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
         AccountCloneRequest, ClonePostDelegationMode, Cloner, DelegationActions,
     },
@@ -311,15 +312,18 @@ where
     )
 }
 
+/// `Err` means the companion eATA (or its delegation record) could not be
+/// conclusively resolved: nothing may be inferred about the projection, and
+/// callers must not overwrite protected local state based on it.
 pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     ata_pubkey: Pubkey,
     ata_account: AccountSharedData,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> (
+) -> ChainlinkResult<(
     AccountSharedData,
     Option<(DelegationRecord, Option<DelegationActions>)>,
-)
+)>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -327,13 +331,13 @@ where
     C: Cloner,
 {
     let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
-        return (ata_account, None);
+        return Ok((ata_account, None));
     };
 
     let Some((eata_pubkey, _)) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
     else {
-        return (ata_account, None);
+        return Ok((ata_account, None));
     };
 
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
@@ -358,7 +362,7 @@ where
 
     // Known-empty eATAs skip the fetch only if the subscription was already live.
     if was_watching && subscribed && is_known_empty_eata(this, &eata_pubkey) {
-        return (ata_account, None);
+        return Ok((ata_account, None));
     }
 
     let (eata_account, definitively_not_found) = match this
@@ -377,9 +381,15 @@ where
     {
         Ok(mut accounts) => {
             let popped = accounts.pop();
-            // Only `NotFound` proves absence; stale, missing, or failed fetches retry later.
+            // Only `NotFound` proves absence; a stale or missing result is
+            // inconclusive.
             let nf = matches!(popped, Some(RemoteAccount::NotFound(_)));
             let fresh = popped.and_then(|a| a.fresh_account());
+            if fresh.is_none() && !nf {
+                return Err(ChainlinkError::DelegatedAccountResolutionsFailed(
+                    eata_pubkey.to_string(),
+                ));
+            }
             (fresh, nf)
         }
         Err(err) => {
@@ -389,7 +399,7 @@ where
                 ChainlinkCompanionFetchKind::AtaProjection,
                 &err,
             );
-            (None, false)
+            return Err(err.into());
         }
     };
 
@@ -398,7 +408,7 @@ where
         if definitively_not_found && subscribed {
             mark_eata_empty(this, eata_pubkey);
         }
-        return (ata_account, None);
+        return Ok((ata_account, None));
     };
 
     let deleg_record = delegation::fetch_and_parse_delegation_record(
@@ -408,12 +418,10 @@ where
         metrics::AccountFetchContext::project_ata(),
         companion_fetch_log_context,
     )
-    .await
-    .ok()
-    .flatten();
+    .await?;
 
     let Some(deleg_record) = deleg_record else {
-        return (ata_account, None);
+        return Ok((ata_account, None));
     };
     let (deleg_record, delegation_actions) = deleg_record;
 
@@ -423,9 +431,9 @@ where
         &eata_account,
         &deleg_record,
     ) {
-        return (projected_ata, Some((deleg_record, delegation_actions)));
+        return Ok((projected_ata, Some((deleg_record, delegation_actions))));
     }
-    (ata_account, Some((deleg_record, delegation_actions)))
+    Ok((ata_account, Some((deleg_record, delegation_actions))))
 }
 
 pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(

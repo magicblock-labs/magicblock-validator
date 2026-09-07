@@ -3346,21 +3346,32 @@ where
                     }
                 }
             } else {
-                let (account, deleg_record) = self
+                match self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
                         account,
                         companion_fetch_log_context,
                     )
-                    .await;
-                if let Some((deleg_record, actions)) = deleg_record {
-                    (
+                    .await
+                {
+                    Ok((account, Some((deleg_record, actions)))) => (
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
-                    )
-                } else {
-                    (Some(account), None, DelegationActions::default())
+                    ),
+                    Ok((account, None)) => {
+                        (Some(account), None, DelegationActions::default())
+                    }
+                    // The companion projection state could not be resolved
+                    // conclusively: we cannot clone the account.
+                    Err(err) => {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Inconclusive ATA projection resolution for subscription update"
+                        );
+                        (None, None, DelegationActions::default())
+                    }
                 }
             }
         } else {
@@ -3402,10 +3413,10 @@ where
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
         companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> (
+    ) -> ChainlinkResult<(
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
-    ) {
+    )> {
         ata_projection::maybe_project_ata_from_subscription_update(
             self,
             ata_pubkey,
