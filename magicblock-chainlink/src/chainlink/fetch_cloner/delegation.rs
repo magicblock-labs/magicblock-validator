@@ -219,21 +219,24 @@ where
         )
         .await
     {
-        Ok(mut delegation_records) => Ok(
+        Ok(mut delegation_records) => {
             if let Some(delegation_record_remote) = delegation_records.pop() {
                 match delegation_record_remote.fresh_account() {
+                    // A record that exists but does not parse proves nothing
+                    // about the delegation state, so it is inconclusive
+                    // rather than absent.
                     Some(delegation_record_account) => this
                         .parse_delegation_record(
                             delegation_record_account.data(),
                             delegation_record_pubkey,
                         )
-                        .ok(),
-                    None => None,
+                        .map(Some),
+                    None => Ok(None),
                 }
             } else {
-                None
-            },
-        ),
+                Ok(None)
+            }
+        }
         Err(err) => {
             log_companion_fetch_failure(
                 companion_fetch_log_context,

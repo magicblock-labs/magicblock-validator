@@ -1030,18 +1030,22 @@ impl MagicValidator {
     /// nothing else revisits them after a restart. Genuinely in-flight
     /// undelegations are kept untouched by the fetch-path checks.
     ///
-    /// Retried a few times: an inconclusive check (e.g. a transport failure
-    /// while chain connectivity warms up) keeps the account locked in the
-    /// bank, so it is picked up again by the next pass.
+    /// Runs a few quick passes while chain connectivity warms up — an
+    /// inconclusive check keeps the account locked in the bank, so the next
+    /// pass picks it up again — then keeps polling at a slow interval until
+    /// shutdown, since the persistent undelegation-tracking subscriptions do
+    /// not survive a restart and a completion landing later would otherwise
+    /// go unobserved.
     fn spawn_undelegating_accounts_recovery(&self) {
-        const ATTEMPTS: u32 = 5;
+        const FAST_ATTEMPTS: u32 = 5;
         const RETRY_DELAY: Duration = Duration::from_secs(60);
+        const STEADY_DELAY: Duration = Duration::from_secs(600);
 
         let chainlink = self.chainlink.clone();
         let accountsdb = self.accountsdb.clone();
         let token = self.token.clone();
         tokio::spawn(async move {
-            for attempt in 1..=ATTEMPTS {
+            for attempt in 1u32.. {
                 let undelegating = accountsdb
                     .iter_all()
                     .filter_map(|(pubkey, account)| {
@@ -1074,16 +1078,16 @@ impl MagicValidator {
                         );
                     }
                 }
-                if attempt < ATTEMPTS {
-                    tokio::select! {
-                        _ = token.cancelled() => return,
-                        _ = tokio::time::sleep(RETRY_DELAY) => {}
-                    }
+                let delay = if attempt < FAST_ATTEMPTS {
+                    RETRY_DELAY
+                } else {
+                    STEADY_DELAY
+                };
+                tokio::select! {
+                    _ = token.cancelled() => return,
+                    _ = tokio::time::sleep(delay) => {}
                 }
             }
-            // Accounts still undelegating now are treated as legitimately in
-            // flight; subscription updates and referencing transactions own
-            // them from here.
         });
     }
 
