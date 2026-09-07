@@ -169,9 +169,10 @@ where
 
 #[instrument(skip(this))]
 /// Fetches and parses the delegation record for `account_pubkey`.
-/// `Ok(None)` means the record is definitively absent or unparseable;
-/// `Err` means the lookup was inconclusive (e.g. a transport failure) and
-/// nothing can be concluded about the record's existence.
+/// `Ok(None)` means the record is definitively absent; `Err` means the
+/// lookup was inconclusive — a transport failure, or a record that exists
+/// but does not parse — and nothing can be concluded about the delegation
+/// state.
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     account_pubkey: Pubkey,
