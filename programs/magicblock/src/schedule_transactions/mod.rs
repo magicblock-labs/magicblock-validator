@@ -169,12 +169,6 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
 /// fee-vault path, validating that the account at `fee_vault_idx` is the
 /// expected vault, delegated, and writable. Returns `None` otherwise.
 ///
-/// With `explicit_fee_vault` the account at `fee_vault_idx` is declared to be
-/// the fee vault by the instruction itself, so it can never be reinterpreted
-/// as an account to commit: a payer that pays no fees is rejected outright,
-/// and a fee-paying payer goes through the regular vault validation.
-/// `Ok(None)` therefore always means the instruction carries no fee vault.
-///
 /// Writability is checked eagerly: a payer on the fee-charging path would
 /// otherwise fail later with a less clear error.
 pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
@@ -182,7 +176,6 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
-    explicit_fee_vault: bool,
 ) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
@@ -191,13 +184,6 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
         payer.delegated() && !payer.confined()
     };
     if !payer_requires_fee_vault {
-        if explicit_fee_vault {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: fee vault provided but the payer pays no fees"
-            );
-            return Err(InstructionError::InvalidInstructionData);
-        }
         return Ok(None);
     }
 
