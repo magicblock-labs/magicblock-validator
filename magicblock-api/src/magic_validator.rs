@@ -1074,10 +1074,13 @@ impl MagicValidator {
                 if token.is_cancelled() {
                     return;
                 }
-                let accounts = tokio::select! {
+                let response = tokio::select! {
                     _ = token.cancelled() => return,
-                    res = rpc.get_multiple_accounts(records) => match res {
-                        Ok(accounts) => accounts,
+                    res = rpc.get_multiple_accounts_with_commitment(
+                        records,
+                        CommitmentConfig::finalized(),
+                    ) => match res {
+                        Ok(response) => response,
                         Err(err) => {
                             warn!(
                                 error = ?err,
@@ -1087,6 +1090,23 @@ impl MagicValidator {
                         }
                     },
                 };
+                // A response older than our own banked state proves nothing:
+                // a record could exist that this (lagging) endpoint does not
+                // see yet. Skip the chunk; the accounts stay locked.
+                let newest_remote_slot = pubkeys
+                    .iter()
+                    .map(|(_, remote_slot)| *remote_slot)
+                    .max()
+                    .unwrap_or_default();
+                if response.context.slot < newest_remote_slot {
+                    warn!(
+                        response_slot = response.context.slot,
+                        newest_remote_slot,
+                        "Chain response predates local state, skipping chunk"
+                    );
+                    continue;
+                }
+                let accounts = response.value;
                 for ((pubkey, remote_slot), record) in
                     pubkeys.iter().zip(accounts)
                 {
