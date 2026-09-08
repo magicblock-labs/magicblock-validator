@@ -155,7 +155,9 @@ pub(crate) fn check_commit_limits(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
-    let validator_authority = crate::validator::validator_authority_id();
+    // Effective authority so replicas (which run with an authority override)
+    // accept the primary's fee vault on replay.
+    let validator_authority = effective_validator_authority_id();
     Pubkey::find_program_address(
         &[b"magic-fee-vault", validator_authority.as_ref()],
         &crate::utils::DELEGATION_PROGRAM_ID,
