@@ -3346,6 +3346,7 @@ where
                     }
                 }
             } else {
+                let unprojected = account.clone();
                 match self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
@@ -3363,14 +3364,30 @@ where
                         (Some(account), None, DelegationActions::default())
                     }
                     // The companion projection state could not be resolved
-                    // conclusively: we cannot clone the account.
+                    // conclusively: protected local state must not be
+                    // overwritten based on it, but an unprotected ATA still
+                    // takes the raw base update so its balance is not left
+                    // stale until the next notification.
                     Err(err) => {
+                        let protected = self
+                            .accounts_bank
+                            .get_account(&pubkey)
+                            .is_some_and(|in_bank| in_bank.undelegating());
                         warn!(
                             pubkey = %pubkey,
                             error = ?err,
+                            protected,
                             "Inconclusive ATA projection resolution for subscription update"
                         );
-                        (None, None, DelegationActions::default())
+                        if protected {
+                            (None, None, DelegationActions::default())
+                        } else {
+                            (
+                                Some(unprojected),
+                                None,
+                                DelegationActions::default(),
+                            )
+                        }
                     }
                 }
             }
