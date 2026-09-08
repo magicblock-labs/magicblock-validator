@@ -1125,6 +1125,17 @@ impl MagicValidator {
                     if !completed {
                         continue;
                     }
+                    // The scan and RPC round-trip take time: skip if the
+                    // account was re-cloned or unlocked meanwhile — a changed
+                    // remote_slot means a newer delegation generation owns it.
+                    let still_locked =
+                        accountsdb.get_account(pubkey).is_some_and(|account| {
+                            account.undelegating()
+                                && account.remote_slot() == *remote_slot
+                        });
+                    if !still_locked {
+                        continue;
+                    }
                     // ModifyAccounts clears the undelegating flag, which
                     // EvictAccount requires; both in one atomic transaction.
                     let unlock = InstructionUtils::modify_accounts_instruction(
