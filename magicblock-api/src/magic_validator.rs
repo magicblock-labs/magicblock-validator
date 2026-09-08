@@ -46,10 +46,7 @@ use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     LatestBlock, Ledger,
 };
-use magicblock_metrics::{
-    metrics::{AccountFetchContext, AccountFetchReason, TRANSACTION_COUNT},
-    MetricsService,
-};
+use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
     loader::load_upgradeable_programs,
@@ -1024,70 +1021,61 @@ impl MagicValidator {
         }
     }
 
-    /// Re-checks accounts left in the undelegating state against the chain in
-    /// the background: ones whose undelegation already completed — or can no
-    /// longer settle — are refreshed instead of staying locked forever, since
-    /// nothing else revisits them after a restart. Genuinely in-flight
-    /// undelegations are kept untouched by the fetch-path checks.
-    ///
-    /// Runs a few quick passes while chain connectivity warms up — an
-    /// inconclusive check keeps the account locked in the bank, so the next
-    /// pass picks it up again — then keeps polling at a slow interval until
-    /// shutdown, since the persistent undelegation-tracking subscriptions do
-    /// not survive a restart and a completion landing later would otherwise
-    /// go unobserved.
+    /// Checks, in the background after startup, whether accounts left in the
+    /// undelegating state have completed their undelegation on the base chain
+    /// (their delegation record no longer exists) and removes them from the
+    /// bank if so; the next reference re-clones them fresh. Accounts whose
+    /// record still exists are settling and stay locked; lookups that fail
+    /// are skipped and simply stay locked as well.
     fn spawn_undelegating_accounts_recovery(&self) {
-        const FAST_ATTEMPTS: u32 = 5;
-        const RETRY_DELAY: Duration = Duration::from_secs(60);
-        const STEADY_DELAY: Duration = Duration::from_secs(600);
-
-        let chainlink = self.chainlink.clone();
         let accountsdb = self.accountsdb.clone();
+        let rpc_url = self.config.rpc_url().to_owned();
         let token = self.token.clone();
         tokio::spawn(async move {
-            for attempt in 1u32.. {
-                let undelegating = accountsdb
-                    .iter_all()
-                    .filter_map(|(pubkey, account)| {
-                        account.undelegating().then_some(pubkey)
-                    })
-                    .collect::<Vec<_>>();
-                if undelegating.is_empty() {
+            let undelegating = accountsdb
+                .iter_all()
+                .filter_map(|(pubkey, account)| {
+                    account.undelegating().then_some(pubkey)
+                })
+                .collect::<Vec<_>>();
+            if undelegating.is_empty() {
+                return;
+            }
+            info!(
+                count = undelegating.len(),
+                "Checking undelegating accounts against chain"
+            );
+            let records = undelegating
+                .iter()
+                .map(dlp_api::pda::delegation_record_pda_from_delegated_account)
+                .collect::<Vec<_>>();
+            let rpc = RpcClient::new(rpc_url);
+            let mut removed = 0usize;
+            for (pubkeys, records) in
+                undelegating.chunks(100).zip(records.chunks(100))
+            {
+                if token.is_cancelled() {
                     return;
                 }
-                info!(
-                    count = undelegating.len(),
-                    attempt, "Verifying undelegating accounts against chain"
-                );
-                for chunk in undelegating.chunks(10) {
-                    if token.is_cancelled() {
-                        return;
+                match rpc.get_multiple_accounts(records).await {
+                    Ok(accounts) => {
+                        for (pubkey, record) in pubkeys.iter().zip(accounts) {
+                            if record.is_none() {
+                                accountsdb.remove_account_conditionally(
+                                    pubkey,
+                                    |account| account.undelegating(),
+                                );
+                                removed += 1;
+                            }
+                        }
                     }
-                    if let Err(err) = chainlink
-                        .fetch_accounts(
-                            chunk,
-                            AccountFetchContext::internal(
-                                AccountFetchReason::UndelegatingRefresh,
-                            ),
-                        )
-                        .await
-                    {
-                        warn!(
-                            error = ?err,
-                            "Failed to verify undelegating accounts"
-                        );
-                    }
-                }
-                let delay = if attempt < FAST_ATTEMPTS {
-                    RETRY_DELAY
-                } else {
-                    STEADY_DELAY
-                };
-                tokio::select! {
-                    _ = token.cancelled() => return,
-                    _ = tokio::time::sleep(delay) => {}
+                    Err(err) => warn!(
+                        error = ?err,
+                        "Failed to check undelegating accounts against chain"
+                    ),
                 }
             }
+            info!(removed, "Removed undelegated accounts from the bank");
         });
     }
 

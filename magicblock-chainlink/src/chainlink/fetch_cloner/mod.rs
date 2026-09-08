@@ -3346,49 +3346,21 @@ where
                     }
                 }
             } else {
-                let unprojected = account.clone();
-                match self
+                let (account, deleg_record) = self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
                         account,
                         companion_fetch_log_context,
                     )
-                    .await
-                {
-                    Ok((account, Some((deleg_record, actions)))) => (
+                    .await;
+                if let Some((deleg_record, actions)) = deleg_record {
+                    (
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
-                    ),
-                    Ok((account, None)) => {
-                        (Some(account), None, DelegationActions::default())
-                    }
-                    // The companion projection state could not be resolved
-                    // conclusively: protected local state must not be
-                    // overwritten based on it, but an unprotected ATA still
-                    // takes the raw base update so its balance is not left
-                    // stale until the next notification.
-                    Err(err) => {
-                        let protected = self
-                            .accounts_bank
-                            .get_account(&pubkey)
-                            .is_some_and(|in_bank| in_bank.undelegating());
-                        warn!(
-                            pubkey = %pubkey,
-                            error = ?err,
-                            protected,
-                            "Inconclusive ATA projection resolution for subscription update"
-                        );
-                        if protected {
-                            (None, None, DelegationActions::default())
-                        } else {
-                            (
-                                Some(unprojected),
-                                None,
-                                DelegationActions::default(),
-                            )
-                        }
-                    }
+                    )
+                } else {
+                    (Some(account), None, DelegationActions::default())
                 }
             }
         } else {
@@ -3430,10 +3402,10 @@ where
         ata_pubkey: Pubkey,
         ata_account: AccountSharedData,
         companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> ChainlinkResult<(
+    ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
-    )> {
+    ) {
         ata_projection::maybe_project_ata_from_subscription_update(
             self,
             ata_pubkey,
@@ -3494,28 +3466,6 @@ where
         fetch_context: metrics::AccountFetchContext,
         companion_fetch_log_context: CompanionFetchLogContext,
     ) -> Option<(DelegationRecord, Option<DelegationActions>)> {
-        self.try_fetch_and_parse_delegation_record(
-            account_pubkey,
-            min_context_slot,
-            fetch_context,
-            companion_fetch_log_context,
-        )
-        .await
-        .ok()
-        .flatten()
-    }
-
-    /// Like [Self::fetch_and_parse_delegation_record], but keeps an
-    /// inconclusive lookup (`Err`) distinguishable from a definitively
-    /// absent record (`Ok(None)`).
-    async fn try_fetch_and_parse_delegation_record(
-        &self,
-        account_pubkey: Pubkey,
-        min_context_slot: u64,
-        fetch_context: metrics::AccountFetchContext,
-        companion_fetch_log_context: CompanionFetchLogContext,
-    ) -> ChainlinkResult<Option<(DelegationRecord, Option<DelegationActions>)>>
-    {
         delegation::fetch_and_parse_delegation_record(
             self,
             account_pubkey,
@@ -4008,36 +3958,17 @@ where
                     primary_pubkey: eata_pubkey,
                     context_slot: self.remote_account_provider.chain_slot(),
                 };
-                let projected_deleg_record = match self
-                    .try_fetch_and_parse_delegation_record(
+                let projected_deleg_record = self
+                    .fetch_and_parse_delegation_record(
                         eata_pubkey,
                         self.remote_account_provider.chain_slot(),
                         undelegating_refresh_context,
                         companion_fetch_log_context,
                     )
-                    .await
-                {
-                    Ok(record) => record,
-                    Err(err) => {
-                        // Inconclusive lookup: nothing can be concluded about
-                        // the companion delegation, so keep the lock.
-                        warn!(
-                            pubkey = %pubkey,
-                            eata_pubkey = %eata_pubkey,
-                            error = ?err,
-                            "Keeping undelegating ATA after inconclusive eATA record lookup"
-                        );
-                        return RefreshDecision::No;
-                    }
-                };
+                    .await;
                 if projected_deleg_record.as_ref().is_some_and(|(record, _)| {
                     record.owner == EATA_PROGRAM_ID
                         && record.authority == self.validator_pubkey
-                        // A record created after our banked state belongs to a
-                        // newer delegation which the local undelegation can
-                        // never settle, so fall through and refresh instead
-                        // of pinning the stale undelegating mark forever.
-                        && record.delegation_slot <= in_bank.remote_slot()
                 }) {
                     debug!(
                         pubkey = %pubkey,
@@ -4056,27 +3987,14 @@ where
                 primary_pubkey: *pubkey,
                 context_slot: self.remote_account_provider.chain_slot(),
             };
-            let deleg_record = match self
-                .try_fetch_and_parse_delegation_record(
+            let deleg_record = self
+                .fetch_and_parse_delegation_record(
                     *pubkey,
                     self.remote_account_provider.chain_slot(),
                     undelegating_refresh_context,
                     companion_fetch_log_context,
                 )
-                .await
-            {
-                Ok(record) => record,
-                Err(err) => {
-                    // Inconclusive lookup: keep the lock rather than treating
-                    // the record as absent and dissolving it.
-                    warn!(
-                        pubkey = %pubkey,
-                        error = ?err,
-                        "Keeping undelegating account after inconclusive record lookup"
-                    );
-                    return RefreshDecision::No;
-                }
-            };
+                .await;
 
             if deleg_record.is_none() {
                 // If there is no delegation record then it is possible that the account itself

@@ -10512,14 +10512,12 @@ async fn test_fetch_keeps_undelegating_projected_ata_in_bank() {
     )
     .await;
 
-    // The delegation predates the local undelegation lock, so the
-    // undelegation is legitimately in flight and the lock must be kept.
     add_delegation_record_with_slot_for(
         &rpc_client,
         eata_pubkey,
         validator_pubkey,
         EATA_PROGRAM_ID,
-        LOCAL_SLOT,
+        CURRENT_SLOT + 1,
     );
 
     let mut local_ata = create_ata_account(&wallet_owner, &mint);
@@ -12493,136 +12491,4 @@ async fn test_programdata_sweep_detects_upgrade_without_notification() {
     // Once the reload settled, further sweeps are no-ops again.
     fetch_cloner.sweep_programdata_watches().await;
     assert_eq!(cloner.program_clone_count(), 2);
-}
-
-#[tokio::test]
-async fn test_fetch_refreshes_undelegating_ata_when_eata_delegation_is_newer() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let validator_pubkey = validator_keypair.pubkey();
-    let wallet_owner = random_pubkey();
-    let mint = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-    const LOCAL_SLOT: u64 = 50;
-    const CHAIN_EATA_AMOUNT: u64 = 777;
-
-    let eata_pubkey = derive_eata(&wallet_owner, &mint);
-    let ata_pubkey = derive_ata(&wallet_owner, &mint);
-    let eata_account =
-        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
-    let base_ata = create_ata_account(&wallet_owner, &mint);
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        rpc_client,
-        ..
-    } = setup(
-        [(eata_pubkey, eata_account), (ata_pubkey, base_ata.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    // The companion eATA delegation record was created AFTER the local
-    // undelegation lock: that undelegation can never settle this delegation,
-    // so the lock is stale and must not be kept.
-    add_delegation_record_with_slot_for(
-        &rpc_client,
-        eata_pubkey,
-        validator_pubkey,
-        EATA_PROGRAM_ID,
-        LOCAL_SLOT + 1,
-    );
-
-    // The ATA as mark_account_as_undelegated leaves it in the bank
-    let mut locked_ata = AccountSharedData::from(base_ata);
-    locked_ata.set_owner(dlp_api::id());
-    locked_ata.set_remote_slot(LOCAL_SLOT);
-    locked_ata.set_undelegating(true);
-    accounts_bank.insert(ata_pubkey, locked_ata);
-
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[ata_pubkey],
-            None,
-            None,
-            AccountFetchContext::rpc_get_account(),
-        )
-        .await;
-    assert!(result.is_ok());
-
-    let ata_after = accounts_bank
-        .get_account(&ata_pubkey)
-        .expect("ATA should exist in bank");
-    assert!(
-        !ata_after.undelegating(),
-        "stale undelegation lock must be cleared"
-    );
-    assert_eq!(*ata_after.owner(), TOKEN_PROGRAM_ID);
-}
-
-#[tokio::test]
-async fn test_fetch_keeps_undelegating_ata_while_eata_delegation_settles() {
-    init_logger();
-    let validator_keypair = Keypair::new();
-    let validator_pubkey = validator_keypair.pubkey();
-    let wallet_owner = random_pubkey();
-    let mint = random_pubkey();
-    const CURRENT_SLOT: u64 = 100;
-    const LOCAL_SLOT: u64 = 50;
-    const CHAIN_EATA_AMOUNT: u64 = 777;
-
-    let eata_pubkey = derive_eata(&wallet_owner, &mint);
-    let ata_pubkey = derive_ata(&wallet_owner, &mint);
-    let eata_account =
-        create_eata_account(&wallet_owner, &mint, CHAIN_EATA_AMOUNT, true);
-    let base_ata = create_ata_account(&wallet_owner, &mint);
-
-    let FetcherTestCtx {
-        accounts_bank,
-        fetch_cloner,
-        rpc_client,
-        ..
-    } = setup(
-        [(eata_pubkey, eata_account), (ata_pubkey, base_ata.clone())],
-        CURRENT_SLOT,
-        validator_keypair.insecure_clone(),
-    )
-    .await;
-
-    // The delegation predates the local lock: the scheduled undelegation is
-    // legitimately in flight and the lock must be kept.
-    add_delegation_record_with_slot_for(
-        &rpc_client,
-        eata_pubkey,
-        validator_pubkey,
-        EATA_PROGRAM_ID,
-        LOCAL_SLOT,
-    );
-
-    let mut locked_ata = AccountSharedData::from(base_ata);
-    locked_ata.set_owner(dlp_api::id());
-    locked_ata.set_remote_slot(LOCAL_SLOT);
-    locked_ata.set_undelegating(true);
-    accounts_bank.insert(ata_pubkey, locked_ata);
-
-    let result = fetch_cloner
-        .fetch_and_clone_accounts_with_dedup(
-            &[ata_pubkey],
-            None,
-            None,
-            AccountFetchContext::rpc_get_account(),
-        )
-        .await;
-    assert!(result.is_ok());
-
-    let ata_after = accounts_bank
-        .get_account(&ata_pubkey)
-        .expect("ATA should exist in bank");
-    assert!(
-        ata_after.undelegating(),
-        "in-flight undelegation must stay locked"
-    );
-    assert_eq!(*ata_after.owner(), dlp_api::id());
 }

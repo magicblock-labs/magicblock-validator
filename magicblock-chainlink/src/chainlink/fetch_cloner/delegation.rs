@@ -23,7 +23,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{Cloner, DelegationActions},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
+        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig,
         ResolvedAccountSharedData, SubscriptionReason,
     },
 };
@@ -168,18 +168,13 @@ where
 }
 
 #[instrument(skip(this))]
-/// Fetches and parses the delegation record for `account_pubkey`.
-/// `Ok(None)` means the record is definitively absent; `Err` means the
-/// lookup was inconclusive — a transport failure, or a record that exists
-/// but does not parse — and nothing can be concluded about the delegation
-/// state.
 pub(crate) async fn fetch_and_parse_delegation_record<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     account_pubkey: Pubkey,
     min_context_slot: u64,
     fetch_context: metrics::AccountFetchContext,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> ChainlinkResult<Option<(DelegationRecord, Option<DelegationActions>)>>
+) -> Option<(DelegationRecord, Option<DelegationActions>)>
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -221,31 +216,18 @@ where
         .await
     {
         Ok(mut delegation_records) => {
-            match delegation_records.pop() {
-                // Only `NotFound` proves absence.
-                Some(RemoteAccount::NotFound(_)) => Ok(None),
-                Some(delegation_record_remote) => {
-                    match delegation_record_remote.fresh_account() {
-                        // A record that exists but does not parse proves
-                        // nothing about the delegation state, so it is
-                        // inconclusive rather than absent.
-                        Some(delegation_record_account) => this
-                            .parse_delegation_record(
-                                delegation_record_account.data(),
-                                delegation_record_pubkey,
-                            )
-                            .map(Some),
-                        // A stale result is inconclusive as well.
-                        None => Err(
-                            ChainlinkError::DelegatedAccountResolutionsFailed(
-                                delegation_record_pubkey.to_string(),
-                            ),
-                        ),
-                    }
+            if let Some(delegation_record_remote) = delegation_records.pop() {
+                match delegation_record_remote.fresh_account() {
+                    Some(delegation_record_account) => this
+                        .parse_delegation_record(
+                            delegation_record_account.data(),
+                            delegation_record_pubkey,
+                        )
+                        .ok(),
+                    None => None,
                 }
-                None => Err(ChainlinkError::DelegatedAccountResolutionsFailed(
-                    delegation_record_pubkey.to_string(),
-                )),
+            } else {
+                None
             }
         }
         Err(err) => {
@@ -255,7 +237,7 @@ where
                 ChainlinkCompanionFetchKind::DelegationRecord,
                 &err,
             );
-            Err(err.into())
+            None
         }
     };
 
