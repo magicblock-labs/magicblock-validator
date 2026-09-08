@@ -37,7 +37,9 @@ use magicblock_core::{
     link::{
         link,
         replication::Message,
-        transactions::{SchedulerMode, TransactionSchedulerHandle},
+        transactions::{
+            with_encoded, SchedulerMode, TransactionSchedulerHandle,
+        },
     },
     Slot,
 };
@@ -46,6 +48,7 @@ use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     LatestBlock, Ledger,
 };
+use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
@@ -54,6 +57,7 @@ use magicblock_processor::{
 };
 use magicblock_program::{
     init_magic_sys,
+    instruction_utils::InstructionUtils,
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
@@ -79,6 +83,7 @@ use solana_rent::Rent;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk_ids::sysvar;
 use solana_signer::Signer;
+use solana_transaction::Transaction as SolanaTransaction;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Sender},
@@ -1023,14 +1028,18 @@ impl MagicValidator {
 
     /// Checks, in the background after startup, whether accounts left in the
     /// undelegating state have completed their undelegation on the base chain
-    /// (their delegation record no longer exists) and removes them from the
-    /// bank if so; the next reference re-clones them fresh. Accounts whose
+    /// (their delegation record no longer exists) and evicts them if so; the
+    /// next reference re-clones them fresh. The unlock+evict runs as a
+    /// regular validator transaction so it is recorded in the ledger and
+    /// replicated to replicas like any other state change. Accounts whose
     /// record still exists are settling and stay locked; lookups that fail
     /// are skipped and simply stay locked as well.
     fn spawn_undelegating_accounts_recovery(&self) {
         let accountsdb = self.accountsdb.clone();
         let rpc_url = self.config.rpc_url().to_owned();
         let token = self.token.clone();
+        let scheduler = self.transaction_scheduler.clone();
+        let latest_block = self.ledger.latest_block().clone();
         tokio::spawn(async move {
             let undelegating = accountsdb
                 .iter_all()
@@ -1050,32 +1059,67 @@ impl MagicValidator {
                 .map(dlp_api::pda::delegation_record_pda_from_delegated_account)
                 .collect::<Vec<_>>();
             let rpc = RpcClient::new(rpc_url);
-            let mut removed = 0usize;
+            let mut evicted = 0usize;
             for (pubkeys, records) in
                 undelegating.chunks(100).zip(records.chunks(100))
             {
                 if token.is_cancelled() {
                     return;
                 }
-                match rpc.get_multiple_accounts(records).await {
-                    Ok(accounts) => {
-                        for (pubkey, record) in pubkeys.iter().zip(accounts) {
-                            if record.is_none() {
-                                accountsdb.remove_account_conditionally(
-                                    pubkey,
-                                    |account| account.undelegating(),
-                                );
-                                removed += 1;
-                            }
+                let accounts = tokio::select! {
+                    _ = token.cancelled() => return,
+                    res = rpc.get_multiple_accounts(records) => match res {
+                        Ok(accounts) => accounts,
+                        Err(err) => {
+                            warn!(
+                                error = ?err,
+                                "Failed to check undelegating accounts against chain"
+                            );
+                            continue;
                         }
+                    },
+                };
+                for (pubkey, record) in pubkeys.iter().zip(accounts) {
+                    if record.is_some() {
+                        continue;
                     }
-                    Err(err) => warn!(
-                        error = ?err,
-                        "Failed to check undelegating accounts against chain"
-                    ),
+                    // ModifyAccounts clears the undelegating flag, which
+                    // EvictAccount requires; both in one atomic transaction.
+                    let unlock = InstructionUtils::modify_accounts_instruction(
+                        vec![AccountModification {
+                            pubkey: *pubkey,
+                            ..Default::default()
+                        }],
+                        Some("undelegation completed on chain".to_string()),
+                    );
+                    let evict =
+                        InstructionUtils::evict_account_instruction(*pubkey);
+                    let authority = validator_authority();
+                    let tx = SolanaTransaction::new_signed_with_payer(
+                        &[unlock, evict],
+                        Some(&authority.pubkey()),
+                        &[&authority],
+                        latest_block.load().blockhash,
+                    );
+                    let tx = match with_encoded(tx) {
+                        Ok(tx) => tx,
+                        Err(err) => {
+                            warn!(pubkey = %pubkey, error = ?err, "Failed to encode eviction transaction");
+                            continue;
+                        }
+                    };
+                    if let Err(err) = scheduler.execute(tx).await {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Failed to evict undelegated account"
+                        );
+                    } else {
+                        evicted += 1;
+                    }
                 }
             }
-            info!(removed, "Removed undelegated accounts from the bank");
+            info!(evicted, "Evicted undelegated accounts");
         });
     }
 
