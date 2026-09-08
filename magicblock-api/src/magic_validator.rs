@@ -1028,12 +1028,14 @@ impl MagicValidator {
 
     /// Checks, in the background after startup, whether accounts left in the
     /// undelegating state have completed their undelegation on the base chain
-    /// (their delegation record no longer exists) and evicts them if so; the
-    /// next reference re-clones them fresh. The unlock+evict runs as a
-    /// regular validator transaction so it is recorded in the ledger and
-    /// replicated to replicas like any other state change. Accounts whose
-    /// record still exists are settling and stay locked; lookups that fail
-    /// are skipped and simply stay locked as well.
+    /// and evicts them if so; the next reference re-clones them fresh.
+    /// Completion means the delegation record no longer exists, or was
+    /// recreated by a later delegation (its slot is newer than our banked
+    /// state — only possible after the original undelegation settled). The
+    /// unlock+evict runs as a regular validator transaction so it is recorded
+    /// in the ledger and replicated to replicas like any other state change.
+    /// Accounts still settling stay locked; lookups that fail or records
+    /// that do not parse are skipped and simply stay locked as well.
     fn spawn_undelegating_accounts_recovery(&self) {
         let accountsdb = self.accountsdb.clone();
         let rpc_url = self.config.rpc_url().to_owned();
@@ -1044,7 +1046,9 @@ impl MagicValidator {
             let undelegating = accountsdb
                 .iter_all()
                 .filter_map(|(pubkey, account)| {
-                    account.undelegating().then_some(pubkey)
+                    account
+                        .undelegating()
+                        .then(|| (pubkey, account.remote_slot()))
                 })
                 .collect::<Vec<_>>();
             if undelegating.is_empty() {
@@ -1056,7 +1060,11 @@ impl MagicValidator {
             );
             let records = undelegating
                 .iter()
-                .map(dlp_api::pda::delegation_record_pda_from_delegated_account)
+                .map(|(pubkey, _)| {
+                    dlp_api::pda::delegation_record_pda_from_delegated_account(
+                        pubkey,
+                    )
+                })
                 .collect::<Vec<_>>();
             let rpc = RpcClient::new(rpc_url);
             let mut evicted = 0usize;
@@ -1079,8 +1087,22 @@ impl MagicValidator {
                         }
                     },
                 };
-                for (pubkey, record) in pubkeys.iter().zip(accounts) {
-                    if record.is_some() {
+                for ((pubkey, remote_slot), record) in
+                    pubkeys.iter().zip(accounts)
+                {
+                    let completed = match record {
+                        // No record: settled and nothing re-delegated.
+                        None => true,
+                        // A record newer than our banked state belongs to a
+                        // later delegation, which can only exist if the
+                        // original undelegation completed first.
+                        // Older-or-equal means still settling; an
+                        // unparseable record proves nothing — keep the lock
+                        // for both.
+                        Some(account) => parse_delegation_slot(&account.data)
+                            .is_some_and(|slot| slot > *remote_slot),
+                    };
+                    if !completed {
                         continue;
                     }
                     // ModifyAccounts clears the undelegating flag, which
@@ -1558,6 +1580,19 @@ impl MagicValidator {
         }
         log_timing("shutdown", "prepare_ledger_for_shutdown", step_start);
     }
+}
+
+/// Parses the delegation slot from raw delegation-record account data.
+fn parse_delegation_slot(data: &[u8]) -> Option<u64> {
+    let size = dlp_api::state::DelegationRecord::size_with_discriminator();
+    if data.len() < size {
+        return None;
+    }
+    dlp_api::state::DelegationRecord::try_from_bytes_with_discriminator(
+        &data[..size],
+    )
+    .ok()
+    .map(|record| record.delegation_slot)
 }
 
 fn log_timing(phase: &'static str, step: &'static str, start: Instant) {
