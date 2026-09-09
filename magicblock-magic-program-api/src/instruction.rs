@@ -34,10 +34,14 @@ pub enum MagicBlockInstruction {
     /// to finish scheduling the commit.
     ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///   the scheduled commits
-    /// - **2..n** `[]`              Accounts to be committed
+    /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`            Magic Context account storing scheduled commits
+    /// - **2.**   `[WRITE, OPTIONAL]`  Magic fee-vault. Required when the payer is delegated
+    ///                                 and not confined; otherwise it may be omitted. If present
+    ///                                 when not required, it is validated as usual but skipped
+    ///                                 for fee charging.
+    /// - **m..n** `[]`                 Accounts to be committed. `m` is `2` when the fee-vault
+    ///                                 is omitted and `3` when the fee-vault is present.
     ScheduleCommit,
 
     /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
@@ -51,10 +55,14 @@ pub enum MagicBlockInstruction {
     /// to finish scheduling the commit.
     ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///   the scheduled commits
-    /// - **2..n** `[]`              Accounts to be committed and undelegated
+    /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the commit to be scheduled
+    /// - **1.**   `[WRITE]`            Magic Context account storing scheduled commits
+    /// - **2.**   `[WRITE, OPTIONAL]`  Magic fee-vault. Required when the payer is delegated
+    ///                                 and not confined; otherwise it may be omitted. If present
+    ///                                 when not required, it is validated as usual but skipped
+    ///                                 for fee charging.
+    /// - **m..n** `[]`                 Accounts to be committed and undelegated. `m` is `2`
+    ///                                 when the fee-vault is omitted and `3` when present.
     ScheduleCommitAndUndelegate,
 
     /// Moves the scheduled commit from the MagicContext to the global scheduled commits
@@ -134,7 +142,7 @@ pub enum MagicBlockInstruction {
 
     /// Schedules execution of a *bundle* of intents in a single instruction.
     ///
-    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
+    /// An intent bundle is an atomic unit of work executed by the validator on the Base layer,
     /// such as:
     /// - standalone base actions
     /// - an optional `Commit`
@@ -144,13 +152,19 @@ pub enum MagicBlockInstruction {
     /// independent intents while paying account overhead only once.
     ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context account
-    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
+    /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the bundle to be scheduled
+    /// - **1.**   `[WRITE]`            Magic Context account
+    /// - **2.**   `[WRITE, OPTIONAL]`  Magic fee-vault. Required when the payer is delegated
+    ///                                 and not confined; otherwise it may be omitted. If present
+    ///                                 when not required, it is validated as usual but skipped
+    ///                                 for fee charging.
+    /// - **m..n** `[]`                 All accounts referenced by any intent in the bundle.
+    ///                                 `m` is `2` when the fee-vault is omitted and `3` when
+    ///                                 the fee-vault is present.
     ///
     /// # Data
-    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
-    /// accounts array.
+    /// The embedded [`MagicIntentBundleArgs`] encodes account references by their actual
+    /// indices in the accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
 
     /// Creates a new ephemeral account with rent paid by a sponsor.
