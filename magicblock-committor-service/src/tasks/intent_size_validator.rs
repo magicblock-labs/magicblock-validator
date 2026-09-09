@@ -243,11 +243,7 @@ impl IntentSizeValidator {
             &lookup_tables,
             uniqueness_nonce,
         )
-        .map(|tx| {
-            serialized_transaction_size(&tx)
-                .map(|size| size <= MAX_TRANSACTION_WIRE_SIZE)
-                .unwrap_or(false)
-        })
+        .map(|tx| serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE)
         .unwrap_or(false)
     }
 }
