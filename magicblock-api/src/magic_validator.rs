@@ -1378,7 +1378,6 @@ impl MagicValidator {
             if let Some(service) = self.undelegation_request_service.as_ref() {
                 service.start();
             }
-            self.spawn_undelegating_accounts_recovery();
         }
 
         // Now we are ready to start all services and are ready to accept transactions
@@ -1430,6 +1429,7 @@ impl MagicValidator {
             mode == CoordinationMode::Primary
         };
         if is_primary_mode {
+            self.spawn_undelegating_accounts_recovery();
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let join_handle = match task_scheduler.start().await {
