@@ -9,7 +9,7 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::sync::Arc;
+use std::{sync::Arc, usize};
 
 use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
@@ -176,43 +176,76 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
-) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
-    let payer_account =
-        get_instruction_account_with_idx(transaction_context, payer_idx)?;
+) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError>
+{
+    //
+    // 1. first and foremost, check if the account at `fee_vault_idx` is really a fee_vault.
+    //
+
+    let fee_vault = {
+        let vault_pubkey = get_instruction_pubkey_with_idx(
+            transaction_context,
+            fee_vault_idx,
+        )?;
+
+        if vault_pubkey == &magic_fee_vault_pubkey() {
+            let vault_account = get_instruction_account_with_idx(
+                transaction_context,
+                fee_vault_idx,
+            )?;
+            let is_vault_writable =
+                get_writable_with_idx(transaction_context, fee_vault_idx)?;
+            if !vault_account.to_account_shared_data()?.delegated()
+                || !is_vault_writable
+            {
+                ic_msg!(
+                 invoke_context,
+                 "ScheduleCommit ERR: magic fee vault must be writable and delegated"
+               );
+                return Err(InstructionError::IllegalOwner);
+            }
+
+            Some(vault_account)
+        } else {
+            None
+        }
+    };
+
+    //
+    // 2. at this point, we could simply return as:
+    //    return Ok(fee_vault);
+    //
+    // but probably that might break max-10-commits semantic (I'm not sure).
+    // if so, we could do this:
+    //
+
+    // If we compute the next index in this function itself, maybe we
+    // could name it `next_account_idx` if `committees_start` is misleading (as
+    // the function is called from different places). I chose
+    // `committees_start` to communicate the idea.
+    let committees_start =
+        fee_vault_idx as usize + fee_vault.is_some() as usize;
+
     let payer_requires_fee_vault = {
+        let payer_account =
+            get_instruction_account_with_idx(transaction_context, payer_idx)?;
+
         let payer = payer_account.to_account_shared_data()?;
         payer.delegated() && !payer.confined()
     };
-    if !payer_requires_fee_vault {
-        return Ok(None);
-    }
 
-    let vault_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, fee_vault_idx)?;
-    if vault_pubkey != &magic_fee_vault_pubkey() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: invalid magic fee vault account {}",
-            vault_pubkey
-        );
-        return Err(InstructionError::MissingAccount);
-    }
-
-    let vault_account =
-        get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
-    let is_vault_writable =
-        get_writable_with_idx(transaction_context, fee_vault_idx)?;
-    if !vault_account.to_account_shared_data()?.delegated()
-        || !is_vault_writable
-    {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: magic fee vault must be writable and delegated"
-        );
-        return Err(InstructionError::IllegalOwner);
-    }
-
-    Ok(Some(vault_account))
+    Ok(if payer_requires_fee_vault {
+        if fee_vault.is_none() {
+            //
+            return Err(InstructionError::MissingAccount);
+        }
+        (fee_vault, committees_start)
+    } else {
+        // the caller will SKIP the fee_vault, even if
+        // fee_vault is present because committees_start
+        // will point at the next account.
+        (None, committees_start)
+    })
 }
 
 /// Assert that the callback instructions do not have signers aside from the callback signer
