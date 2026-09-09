@@ -33,6 +33,7 @@ use nucleus::{
 use replicator::ReplicationDispatcher;
 use solana_commitment_config::CommitmentConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program::{rent::Rent, sysvar};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
@@ -53,6 +54,7 @@ type IntentExecutionServiceImpl =
 pub struct Leader {
     config: LeaderParams,
     engine: Engine,
+    chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
     intent_execution_service: Option<IntentExecutionServiceImpl>,
     undelegation_request_service: Option<UndelegationRequestService>,
@@ -76,7 +78,9 @@ impl Leader {
         timer.record("Deprecated ledger initialized");
 
         let mut shutdown = ShutdownManager::default();
-        let builder = keeper_builder(&config.engine, &config.programs)?;
+        let mut builder = keeper_builder(&config.engine, &config.programs)?;
+        builder.rent =
+            Self::fetch_rent_from_base_chain(config.rpc_url()).await?;
         timer.record("Keeper runtime configured");
         let engine = Engine::new(builder, None, &mut shutdown).await?;
         timer.record("Engine initialized");
@@ -178,6 +182,7 @@ impl Leader {
         Ok(Self {
             config,
             engine,
+            chainlink,
             shutdown,
             intent_execution_service: Some(intent_execution_service),
             undelegation_request_service: Some(undelegation_request_service),
@@ -270,6 +275,21 @@ impl Leader {
     // -----------------
     // Start/Stop
     // -----------------
+    async fn fetch_rent_from_base_chain(rpc_url: &str) -> ApiResult<Rent> {
+        let account = RpcClient::new_with_commitment(
+            rpc_url.to_owned(),
+            CommitmentConfig::confirmed(),
+        )
+        .get_account(&sysvar::rent::ID)
+        .await
+        .map_err(|err| ApiError::FailedToSyncBaseChainRent(err.to_string()))?;
+        let rent = bincode::deserialize(&account.data).map_err(|err| {
+            ApiError::FailedToSyncBaseChainRent(err.to_string())
+        })?;
+        info!(?rent, "Fetched rent parameters from base chain");
+        Ok(rent)
+    }
+
     async fn ensure_validator_funded_on_chain(
         rpc_url: String,
         identity: Pubkey,
@@ -563,6 +583,7 @@ impl Leader {
     #[instrument(skip(self))]
     pub async fn wait(&mut self) -> ShutdownReason {
         let reason = self.shutdown.wait().await;
+        self.chainlink.shutdown().await;
         reason.combine(self.shutdown.terminate().await)
     }
 }

@@ -452,6 +452,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
+    /// Stops chain subscriptions before the engine scheduler shuts down.
+    pub async fn shutdown(&self) {
+        if let Some(fetch_cloner) = self.fetch_cloner() {
+            fetch_cloner.shutdown().await;
+        }
+    }
+
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
     /// Otherwise materializes requested accounts locally, using placeholders
     /// for accounts missing on chain, and returns their state from the bank.

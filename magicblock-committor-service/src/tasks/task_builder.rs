@@ -58,13 +58,13 @@ impl TaskBuilderImpl {
         accounts: &[CommittedAccount],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        let committed_pubkeys = accounts
+        let committed_accounts = accounts
             .iter()
-            .map(|account| account.pubkey)
+            .map(|account| (account.pubkey, account.remote_slot))
             .collect::<Vec<_>>();
 
         task_info_fetcher
-            .fetch_next_commit_nonces(&committed_pubkeys, min_context_slot)
+            .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
             .await
     }
 
@@ -86,18 +86,19 @@ impl TaskBuilderImpl {
             .await
     }
 
-    fn get_finalize_stage_metadata_pubkeys(
+    fn get_finalize_stage_metadata_accounts(
         intent_bundle: &ScheduledIntentBundle,
-    ) -> Vec<Pubkey> {
+    ) -> Vec<(Pubkey, u64)> {
         [
-            intent_bundle.get_undelegate_intent_pubkeys(),
+            intent_bundle.get_undelegate_intent_accounts(),
             intent_bundle
                 .intent_bundle
-                .get_commit_finalize_and_undelegate_intent_pubkeys(),
+                .get_commit_finalize_and_undelegate_intent_accounts(),
         ]
         .into_iter()
         .flatten()
         .flatten()
+        .map(|account| (account.pubkey, account.remote_slot))
         .collect()
     }
 
@@ -298,8 +299,8 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         let mut tasks = Vec::new();
-        let finalize_metadata_pubkeys =
-            Self::get_finalize_stage_metadata_pubkeys(intent_bundle);
+        let finalize_metadata_accounts =
+            Self::get_finalize_stage_metadata_accounts(intent_bundle);
         let min_context_slot = intent_bundle
             .get_all_committed_accounts()
             .iter()
@@ -308,7 +309,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .unwrap_or(0);
         let delegation_metadata = info_fetcher
             .fetch_delegation_metadata(
-                &finalize_metadata_pubkeys,
+                &finalize_metadata_accounts,
                 min_context_slot,
             )
             .await
