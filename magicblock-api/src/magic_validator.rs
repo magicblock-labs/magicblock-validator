@@ -1026,16 +1026,10 @@ impl MagicValidator {
         }
     }
 
-    /// Checks, in the background after startup, whether accounts left in the
-    /// undelegating state have completed their undelegation on the base chain
-    /// and evicts them if so; the next reference re-clones them fresh.
-    /// Completion means the delegation record no longer exists, or was
-    /// recreated by a later delegation (its slot is newer than our banked
-    /// state — only possible after the original undelegation settled). The
-    /// unlock+evict runs as a regular validator transaction so it is recorded
-    /// in the ledger and replicated to replicas like any other state change.
-    /// Accounts still settling stay locked; lookups that fail or records
-    /// that do not parse are skipped and simply stay locked as well.
+    /// Evicts accounts left undelegating whose undelegation has settled on
+    /// chain: the delegation record is gone or belongs to a newer delegation.
+    /// Runs as a validator transaction so replicas see it; anything uncertain
+    /// stays locked.
     fn spawn_undelegating_accounts_recovery(&self) {
         let accountsdb = self.accountsdb.clone();
         let rpc_url = self.config.rpc_url().to_owned();
@@ -1043,14 +1037,19 @@ impl MagicValidator {
         let scheduler = self.transaction_scheduler.clone();
         let latest_block = self.ledger.latest_block().clone();
         tokio::spawn(async move {
-            let undelegating = accountsdb
-                .iter_all()
-                .filter_map(|(pubkey, account)| {
-                    account
-                        .undelegating()
-                        .then(|| (pubkey, account.remote_slot()))
-                })
-                .collect::<Vec<_>>();
+            // Undelegating accounts are owned by the delegation program.
+            let undelegating = match accountsdb
+                .get_program_accounts(&dlp_api::id(), |account| {
+                    account.undelegating()
+                }) {
+                Ok(scanner) => scanner
+                    .map(|(pubkey, account)| (pubkey, account.remote_slot()))
+                    .collect::<Vec<_>>(),
+                Err(err) => {
+                    warn!(error = ?err, "Failed to scan undelegating accounts");
+                    return;
+                }
+            };
             if undelegating.is_empty() {
                 return;
             }
@@ -1090,9 +1089,7 @@ impl MagicValidator {
                         }
                     },
                 };
-                // A response older than our own banked state proves nothing:
-                // a record could exist that this (lagging) endpoint does not
-                // see yet. Skip the chunk; the accounts stay locked.
+                // A response older than our banked state proves nothing.
                 let newest_remote_slot = pubkeys
                     .iter()
                     .map(|(_, remote_slot)| *remote_slot)
@@ -1110,24 +1107,17 @@ impl MagicValidator {
                 for ((pubkey, remote_slot), record) in
                     pubkeys.iter().zip(accounts)
                 {
+                    // No record, or one from a later delegation, means the
+                    // undelegation settled; anything else keeps the lock.
                     let completed = match record {
-                        // No record: settled and nothing re-delegated.
                         None => true,
-                        // A record newer than our banked state belongs to a
-                        // later delegation, which can only exist if the
-                        // original undelegation completed first.
-                        // Older-or-equal means still settling; an
-                        // unparseable record proves nothing — keep the lock
-                        // for both.
                         Some(account) => parse_delegation_slot(&account.data)
                             .is_some_and(|slot| slot > *remote_slot),
                     };
                     if !completed {
                         continue;
                     }
-                    // The scan and RPC round-trip take time: skip if the
-                    // account was re-cloned or unlocked meanwhile — a changed
-                    // remote_slot means a newer delegation generation owns it.
+                    // Skip if the account was re-cloned or unlocked meanwhile.
                     let still_locked =
                         accountsdb.get_account(pubkey).is_some_and(|account| {
                             account.undelegating()
@@ -1136,8 +1126,7 @@ impl MagicValidator {
                     if !still_locked {
                         continue;
                     }
-                    // ModifyAccounts clears the undelegating flag, which
-                    // EvictAccount requires; both in one atomic transaction.
+                    // Unlock first: EvictAccount rejects undelegating accounts.
                     let unlock = InstructionUtils::modify_accounts_instruction(
                         vec![AccountModification {
                             pubkey: *pubkey,
