@@ -165,12 +165,12 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
     .0
 }
 
-/// Returns the fee vault account if the payer at `payer_idx` uses the
-/// fee-vault path, validating that the account at `fee_vault_idx` is the
-/// expected vault, delegated, and writable. Returns `None` otherwise.
+/// Returns the fee vault account and the next instruction-account index.
 ///
-/// Writability is checked eagerly: a payer on the fee-charging path would
-/// otherwise fail later with a less clear error.
+/// The account at `fee_vault_idx` is optional unless the payer is delegated and
+/// not confined. When that optional account is present and is the expected magic
+/// fee vault, it is validated as writable and delegated even if fee charging is
+/// not needed, so callers can still skip over it deterministically.
 pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     transaction_context: &'a TransactionContext<'ix_data>,
     invoke_context: &InvokeContext,
@@ -178,17 +178,16 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     fee_vault_idx: u16,
 ) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError>
 {
-    //
-    // 1. first and foremost, check if the account at `fee_vault_idx` is really a fee_vault.
-    //
+    let payer_account =
+        get_instruction_account_with_idx(transaction_context, payer_idx)?;
+    let payer = payer_account.to_account_shared_data()?;
+    let payer_requires_fee_vault = payer.delegated() && !payer.confined();
 
-    let fee_vault = {
-        let vault_pubkey = get_instruction_pubkey_with_idx(
-            transaction_context,
-            fee_vault_idx,
-        )?;
-
-        if vault_pubkey == &magic_fee_vault_pubkey() {
+    let fee_vault = match get_instruction_pubkey_with_idx(
+        transaction_context,
+        fee_vault_idx,
+    ) {
+        Ok(vault_pubkey) if vault_pubkey == &magic_fee_vault_pubkey() => {
             let vault_account = get_instruction_account_with_idx(
                 transaction_context,
                 fee_vault_idx,
@@ -199,52 +198,27 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
                 || !is_vault_writable
             {
                 ic_msg!(
-                 invoke_context,
-                 "ScheduleCommit ERR: magic fee vault must be writable and delegated"
-               );
+                    invoke_context,
+                    "ScheduleTransaction ERR: magic fee vault must be writable and delegated"
+                );
                 return Err(InstructionError::IllegalOwner);
             }
-
             Some(vault_account)
-        } else {
-            None
         }
+        Ok(_) | Err(InstructionError::MissingAccount) => None,
+        Err(err) => return Err(err),
     };
 
-    //
-    // 2. at this point, we could simply return as:
-    //    return Ok(fee_vault);
-    //
-    // but probably that might break max-10-commits semantic (I'm not sure).
-    // if so, we could do this:
-    //
-
-    // If we compute the next index in this function itself, maybe we
-    // could name it `next_account_idx` if `committees_start` is misleading (as
-    // the function is called from different places). I chose
-    // `committees_start` to communicate the idea.
-    let committees_start =
-        fee_vault_idx as usize + fee_vault.is_some() as usize;
-
-    let payer_requires_fee_vault = {
-        let payer_account =
-            get_instruction_account_with_idx(transaction_context, payer_idx)?;
-
-        let payer = payer_account.to_account_shared_data()?;
-        payer.delegated() && !payer.confined()
-    };
+    let next_account_idx =
+        fee_vault_idx as usize + usize::from(fee_vault.is_some());
 
     Ok(if payer_requires_fee_vault {
         if fee_vault.is_none() {
-            //
             return Err(InstructionError::MissingAccount);
         }
-        (fee_vault, committees_start)
+        (fee_vault, next_account_idx)
     } else {
-        // the caller will SKIP the fee_vault, even if
-        // fee_vault is present because committees_start
-        // will point at the next account.
-        (None, committees_start)
+        (None, next_account_idx)
     })
 }
 
