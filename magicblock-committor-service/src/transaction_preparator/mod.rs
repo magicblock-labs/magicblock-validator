@@ -108,8 +108,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 self.compute_budget_config.compute_unit_price,
                 &lookup_tables,
                 tx_strategy.uniqueness_nonce,
-            )
-            .expect("Possibility to assemble checked above")
+            )?
             .message;
 
         Ok(message)
