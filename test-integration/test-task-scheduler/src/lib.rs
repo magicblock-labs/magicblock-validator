@@ -18,7 +18,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{LifecycleMode, LoadableProgram},
+    config::LoadableProgram,
     types::{network::Remote, SerdePubkey},
     LeaderParams,
 };
