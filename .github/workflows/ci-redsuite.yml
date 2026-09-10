@@ -37,7 +37,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: 0.2.0
+  REDSUITE_REV: 4bca329d27c8c07d2383ff79771ba8d64c544ff8
 
 jobs:
   build_er:
@@ -62,10 +62,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
-      - name: Build validator release binary
+      - name: Build validator and verifier release binaries
         run: |
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld -C target-cpu=native" \
-            cargo build --release --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+            cargo build --release --locked \
+              --bin magicblock-validator --bin magicblock-verifier \
+              -j "$HOST_CARGO_JOBS"
         shell: bash
         working-directory: magicblock-validator
 
@@ -79,12 +81,13 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
-      - name: Upload ER + committor artifact
+      - name: Upload ER + verifier + committor artifact
         uses: actions/upload-artifact@v4
         with:
           name: redsuite-er-bin
           path: |
             magicblock-validator/target/release/magicblock-validator
+            magicblock-validator/target/release/magicblock-verifier
             magicblock-validator/target/deploy/magicblock_committor_program.so
           retention-days: 1
           if-no-files-found: error
@@ -101,6 +104,7 @@ jobs:
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
+      MAGICBLOCK_VERIFIER_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-verifier
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -142,7 +146,7 @@ jobs:
         shell: bash
         working-directory: redsuite
 
-      - name: Download ER + committor artifact
+      - name: Download ER + verifier + committor artifact
         uses: actions/download-artifact@v4
         with:
           name: redsuite-er-bin
@@ -153,7 +157,8 @@ jobs:
           set -euxo pipefail
           mkdir -p runroot/target/deploy runroot/target/redsuite-stack
           cp redsuite-dist/deploy/* runroot/target/deploy/
-          chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN"
+          chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN" "$MAGICBLOCK_VERIFIER_BIN"
+          test -x "$MAGICBLOCK_VALIDATOR_BIN" -a -x "$MAGICBLOCK_VERIFIER_BIN"
         shell: bash
 
       - name: Run redsuite lite suite
