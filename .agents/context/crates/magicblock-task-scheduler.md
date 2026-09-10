@@ -226,9 +226,6 @@ no `ExecuteTask` transaction, no retry/backoff, no failed-record tables, and
 no cleanup ticker. Completions, remaining iterations, and slot cadence live
 in the Hydra crank account.
 
-`legacy_start_slot` in `crank.rs` is an unused leftover from the SQLite-to-
-Hydra migration and is not called by the service.
-
 ## Important internals and caveats
 
 ### Deterministic crank identity
@@ -253,13 +250,6 @@ confirmation.
 The engine stream carries every service message. Deserialization failure is
 treated as "not a `TaskRequest`" and ignored. Do not log or fail the loop on
 unrecognized payloads.
-
-### Leftover helpers and error variants
-
-`legacy_start_slot` and several `TaskSchedulerError` variants are unused by
-the live path. Do not revive SQLite persistence, optimistic `updated_at`
-tokens, or unauthorized-replacement DB checks unless the Hydra model itself
-changes.
 
 ## Important invariants
 
