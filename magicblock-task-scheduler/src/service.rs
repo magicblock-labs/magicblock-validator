@@ -41,10 +41,6 @@ pub struct TaskSchedulerService {
     slot_interval: tokio::time::Duration,
 }
 
-// SAFETY: TaskSchedulerService is moved into a single Tokio task in `run()`
-// and never cloned. It runs exclusively on that task. All fields are Send+Sync.
-unsafe impl Send for TaskSchedulerService {}
-unsafe impl Sync for TaskSchedulerService {}
 impl TaskSchedulerService {
     /// Creates a new `TaskSchedulerService`.
     pub fn new(
