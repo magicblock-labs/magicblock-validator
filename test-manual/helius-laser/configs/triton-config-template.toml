@@ -1,5 +1,3 @@
-lifecycle = "ephemeral"
-
 remotes = [
     "grpcs://magicblo-devd137-9da1.devnet.rpcpool.com/<triton-api-key>",
     "https://devnet.helius-rpc.com?api-key=<helius-api-key>",

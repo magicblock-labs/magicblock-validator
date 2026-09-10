@@ -120,6 +120,8 @@ pub(crate) fn check_commit_limits(
 }
 
 pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
+    // The engine publishes its effective authority through TLS, so replicas
+    // validate the primary's fee vault while replaying its transaction.
     let validator_authority = authority();
     Pubkey::find_program_address(
         &[b"magic-fee-vault", validator_authority.as_ref()],

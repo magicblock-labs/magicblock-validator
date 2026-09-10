@@ -23,10 +23,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{
-        AmlCheckStrategy, ChainLinkConfig, LifecycleMode, LoadableProgram,
-        RiskConfig,
-    },
+    config::{AmlCheckStrategy, ChainLinkConfig, LoadableProgram, RiskConfig},
     types::Remote,
     LeaderParams,
 };
@@ -181,7 +178,6 @@ pub fn setup_validator_with_local_remote(
 
     let mut config = LeaderParams {
         programs,
-        lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
