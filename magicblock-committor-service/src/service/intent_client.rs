@@ -164,11 +164,8 @@ impl ERIntentClient for InternalIntentRpcClient {
             .read(&MAGIC_CONTEXT_PUBKEY, |account| {
                 MagicContext::has_scheduled_commits(account.data())
             })
-            .ok()
-            .flatten()
-            .expect(
-                "Validator found to be running without MagicContext account!",
-            );
+            .map_err(|_| InternalIntentClientError::MagicContextMissing)?
+            .ok_or(InternalIntentClientError::MagicContextMissing)?;
         if !has_scheduled_commits {
             return Ok(vec![]);
         }
@@ -288,6 +285,8 @@ fn build_sent_commit(
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalIntentClientError {
+    #[error("MagicContext account is missing from AccountsDb")]
+    MagicContextMissing,
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
 }

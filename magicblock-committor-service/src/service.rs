@@ -477,7 +477,7 @@ where
             return false;
         }
 
-        self.is_valid_nonce(&pubkeys, recovered, min_context_slot)
+        self.is_valid_nonce(recovered, min_context_slot)
             .await
             .inspect_err(|err| {
                 error!(intent_id = recovered.bundle.id, error = ?err, "Failed to check commit nonce for recovery");
@@ -517,13 +517,18 @@ where
 
     async fn is_valid_nonce(
         &self,
-        pubkeys: &[Pubkey],
         recovered: &RecoveredIntent,
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<bool> {
+        let accounts: Vec<_> = recovered
+            .bundle
+            .get_all_committed_accounts()
+            .iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect();
         let current_nonces = self
             .processor
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .fetch_current_commit_nonces(&accounts, min_context_slot)
             .await?;
         Ok(recovered.commit_ids.iter().all(|(pubkey, commit_id)| {
             current_nonces
