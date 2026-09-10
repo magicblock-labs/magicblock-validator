@@ -33,6 +33,8 @@ pub enum MagicBlockInstruction {
     /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], committee_0, ... }`
+    ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the commit to be scheduled
     /// - **1.**   `[WRITE]`            Magic Context account storing scheduled commits
@@ -53,6 +55,8 @@ pub enum MagicBlockInstruction {
     /// This is the first part of scheduling a commit.
     /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
+    ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], committee_0, ... }`
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the commit to be scheduled
@@ -150,6 +154,8 @@ pub enum MagicBlockInstruction {
     ///
     /// This is the recommended scheduling path when the caller wants to submit multiple
     /// independent intents while paying account overhead only once.
+    ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], account_0, ... }`
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]`    Payer requesting the bundle to be scheduled
