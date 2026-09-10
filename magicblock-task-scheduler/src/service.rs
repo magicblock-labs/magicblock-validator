@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use engine::Engine;
 use hydra_api::{
     ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral,
@@ -30,12 +32,21 @@ pub struct TaskSchedulerService {
     /// Receives service messages the engine publishes once a transaction
     /// commits; task requests arrive on this stream.
     service_messages: mpsc::Receiver<Vec<u8>>,
+    /// Cloneable schedule/cancel worker; cloned into each spawned request
+    /// so the receive loop never awaits RPC.
+    processor: Processor,
+}
+
+/// Schedule/cancel worker. `Clone` so each request can run without holding
+/// the service-message loop.
+#[derive(Clone)]
+struct Processor {
     /// Reads account state and the latest blockhash/slot, and provides the
     /// validator identity that sponsors and signs crank transactions.
     engine: Engine,
     /// RPC client used to send transactions.
     /// Otherwise, accounts are not ensured.
-    rpc_client: RpcClient,
+    rpc_client: Arc<RpcClient>,
     /// Slot interval of the validator, used to convert millisecond intervals
     /// into the slot-based cadence hydra expects.
     slot_interval: tokio::time::Duration,
@@ -52,9 +63,11 @@ impl TaskSchedulerService {
             service_messages: engine
                 .transactions()
                 .subscribe_service_messages()?,
-            engine,
-            rpc_client: RpcClient::new(self_rpc_url),
-            slot_interval,
+            processor: Processor {
+                engine,
+                rpc_client: Arc::new(RpcClient::new(self_rpc_url)),
+                slot_interval,
+            },
         })
     }
 
@@ -91,7 +104,10 @@ impl TaskSchedulerService {
                     else {
                         continue;
                     };
-                    self.process_request(request).await;
+                    let processor = self.processor.clone();
+                    tokio::spawn(async move {
+                        processor.process_request(request).await;
+                    });
                 }
                 _ = shutdown.signalled() => {
                     break;
@@ -102,7 +118,9 @@ impl TaskSchedulerService {
         info!("TaskSchedulerService shutdown!");
         Ok(())
     }
+}
 
+impl Processor {
     /// Processes a [TaskRequest] from the transaction executor.
     async fn process_request(&self, request: TaskRequest) {
         let task_id = request.id();
@@ -283,9 +301,13 @@ mod tests {
                 .transactions()
                 .subscribe_service_messages()
                 .unwrap(),
-            engine: engine.clone(),
-            rpc_client: RpcClient::new("http://localhost:8899".to_string()),
-            slot_interval: tokio::time::Duration::from_millis(1000),
+            processor: Processor {
+                engine: engine.clone(),
+                rpc_client: Arc::new(RpcClient::new(
+                    "http://localhost:8899".to_string(),
+                )),
+                slot_interval: tokio::time::Duration::from_millis(1000),
+            },
         };
         (engine, service)
     }
