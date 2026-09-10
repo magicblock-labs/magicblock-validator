@@ -37,7 +37,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: 3a0f1f39ee4da5729f73bc99e3fcb02dcc07a919
+  REDSUITE_REV: ff8b712d96e79470066a01f4bc673d0671ef7578
 
 jobs:
   build_er:
