@@ -8,6 +8,7 @@ pub fn serialized_transaction_size<T>(transaction: &T) -> usize
 where
     T: SchemaWrite<DefaultConfig, Src = T> + ?Sized,
 {
-    // SAFETY: runs on transactions we already serialize before sending.
-    usize::try_from(wincode::serialized_size(transaction).unwrap()).unwrap()
+    wincode::serialized_size(transaction)
+        .map(|size| size as usize)
+        .unwrap_or(usize::MAX)
 }
