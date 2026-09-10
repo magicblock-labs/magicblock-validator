@@ -4,17 +4,18 @@ use hydra_api::instruction::{CreateArgs, SchedMeta, ScheduledIx, ephemeral};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-/// Derives the deterministic hydra crank account address for a task.
-///
+/// Magic Program cranks used a u64 ID, Hydra cranks use a 32-byte seed.
 /// The seed is `hash(authority, task_id)`, so each authority gets its own crank
 /// namespace: a different authority scheduling the same `task_id` gets an
 /// independent crank, and cancel/reschedule need no database lookup.
+fn crank_seed(authority: &Pubkey, task_id: i64) -> [u8; 32] {
+    solana_sha256_hasher::hashv(&[authority.as_ref(), &task_id.to_le_bytes()])
+        .to_bytes()
+}
+
+/// Derives the deterministic hydra crank account address for a task.
 pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
-    let seed = solana_sha256_hasher::hashv(&[
-        authority.as_ref(),
-        &task_id.to_le_bytes(),
-    ])
-    .to_bytes();
+    let seed = crank_seed(authority, task_id);
     ephemeral::find_crank_pda(&seed).0
 }
 
@@ -32,11 +33,7 @@ pub fn build_create_ix(
     iterations: u64,
     instructions: &[Instruction],
 ) -> Instruction {
-    let seed = solana_sha256_hasher::hashv(&[
-        authority.as_ref(),
-        &task_id.to_le_bytes(),
-    ])
-    .to_bytes();
+    let seed = crank_seed(authority, task_id);
 
     let metas_per_ix: Vec<Vec<SchedMeta>> = instructions
         .iter()
