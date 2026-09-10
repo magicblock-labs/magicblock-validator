@@ -156,7 +156,12 @@ async fn test_commit_id_error_parsing() {
     // Invalidate ids before execution
     task_info_fetcher
         .fetch_next_commit_nonces(
-            &intent.get_undelegate_intent_pubkeys().unwrap(),
+            &intent
+                .get_undelegate_intent_accounts()
+                .unwrap()
+                .iter()
+                .map(|account| (account.pubkey, account.remote_slot))
+                .collect::<Vec<_>>(),
             remote_slot,
         )
         .await
@@ -421,7 +426,10 @@ async fn test_commit_id_error_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(
+            &[(committed_account.pubkey, committed_account.remote_slot)],
+            remote_slot,
+        )
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -569,7 +577,10 @@ async fn test_commit_id_and_action_errors_recovery() {
 
     // Invalidate commit nonce cache
     let res = task_info_fetcher
-        .fetch_next_commit_nonces(&[committed_account.pubkey], remote_slot)
+        .fetch_next_commit_nonces(
+            &[(committed_account.pubkey, committed_account.remote_slot)],
+            remote_slot,
+        )
         .await;
     assert!(res.is_ok());
     assert!(res.unwrap().contains_key(&committed_account.pubkey));
@@ -786,9 +797,12 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     let scheduled_intent = create_scheduled_intent(base_intent);
 
     // Force CommitIDError by invalidating the commit-nonce cache before running
-    let pubkeys: Vec<_> = committed_accounts.iter().map(|c| c.pubkey).collect();
+    let accounts: Vec<_> = committed_accounts
+        .iter()
+        .map(|c| (c.pubkey, c.remote_slot))
+        .collect();
     let mut invalidated_keys = task_info_fetcher
-        .fetch_next_commit_nonces(&pubkeys, Default::default())
+        .fetch_next_commit_nonces(&accounts, Default::default())
         .await
         .unwrap();
 
