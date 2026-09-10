@@ -227,6 +227,7 @@ impl GeyserPluginManager {
         }
 
         let blockhash = block.hash.to_string();
+        let parent_blockhash = block.parent.to_string();
         let rewards = solana_transaction_status::RewardsAndNumPartitions {
             rewards: Vec::new(),
             num_partitions: None,
@@ -238,8 +239,8 @@ impl GeyserPluginManager {
             block_height: Some(block.slot),
             rewards: &rewards,
             block_time: Some(block.time),
-            // The engine does not yet retain these block metadata fields.
-            parent_blockhash: "11111111111111111111111111111111",
+            parent_blockhash: &parent_blockhash,
+            // Engine does not yet retain transaction/entry counts.
             executed_transaction_count: 0,
             entry_count: 0,
         };
@@ -536,7 +537,11 @@ mod tests {
             assert_eq!(events.slots.len(), 1, "slot update is delivered");
             let block = events.blocks.first().expect("block update delivered");
             assert_eq!((block.1, block.2), (0, 0));
-            assert_eq!(block.3, "11111111111111111111111111111111");
+            assert_eq!(
+                block.3,
+                te.blocks().latest().parent.to_string(),
+                "parent_blockhash matches engine Block.parent"
+            );
         }
         cancel.cancel();
         for task in tasks {
