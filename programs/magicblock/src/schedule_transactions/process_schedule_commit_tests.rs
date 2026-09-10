@@ -36,6 +36,11 @@ use crate::{
     utils::DELEGATION_PROGRAM_ID,
 };
 
+type AccountDataMap = HashMap<Pubkey, AccountSharedData>;
+type TransactionAccounts = Vec<(Pubkey, AccountSharedData)>;
+type PreparedScheduleAccounts =
+    (AccountDataMap, TransactionAccounts, Option<Pubkey>);
+
 // For the scheduling itself and the debit to fund the scheduled transaction
 const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
 
@@ -87,11 +92,7 @@ fn prepare_schedule_accounts(
     payer_delegated: bool,
     payer_confined: bool,
     fee_vault_delegated: Option<bool>,
-) -> (
-    HashMap<Pubkey, AccountSharedData>,
-    Vec<(Pubkey, AccountSharedData)>,
-    Option<Pubkey>,
-) {
+) -> PreparedScheduleAccounts {
     let mut accounts_data = HashMap::new();
     let mut payer_acc =
         AccountSharedData::new(REQUIRED_TX_COST, 0, &system_program::id());

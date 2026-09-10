@@ -9,7 +9,7 @@ mod process_schedule_intent_bundle;
 mod process_scheduled_commit_sent;
 pub(crate) mod transaction_scheduler;
 
-use std::{sync::Arc, usize};
+use std::sync::Arc;
 
 use magicblock_core::intent::types::CommittedAccount;
 use magicblock_magic_program_api::{
