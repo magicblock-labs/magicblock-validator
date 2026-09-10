@@ -77,29 +77,6 @@ pub fn is_valid_task_interval(interval: i64) -> bool {
     interval > 0 && interval < u32::MAX as i64
 }
 
-/// Computes the hydra start slot for a task migrated from the legacy scheduler.
-/// If the legacy task is overdue or has never run, it remains due immediately.
-pub fn legacy_start_slot(
-    last_execution_millis: i64,
-    interval_millis: i64,
-    current_millis: i64,
-    current_slot: u64,
-    slot_interval: StdDuration,
-) -> u64 {
-    if last_execution_millis <= 0 {
-        return current_slot;
-    }
-
-    let next_execution_millis =
-        last_execution_millis.saturating_add(interval_millis.max(0));
-    let remaining_millis = next_execution_millis.saturating_sub(current_millis);
-    if remaining_millis == 0 {
-        return current_slot;
-    }
-
-    current_slot.saturating_add(interval_slots(remaining_millis, slot_interval))
-}
-
 /// Converts a millisecond execution interval into a slot count (rounding up,
 /// with a one-slot minimum) for hydra's slot-based cadence.
 pub fn interval_slots(interval_millis: i64, slot_interval: StdDuration) -> u64 {
@@ -121,24 +98,6 @@ mod tests {
         assert_eq!(interval_slots(50, slot), 1);
         assert_eq!(interval_slots(51, slot), 2);
         assert_eq!(interval_slots(100, slot), 2);
-    }
-
-    #[test]
-    fn test_legacy_start_slot_preserves_remaining_delay() {
-        let slot_interval = StdDuration::from_millis(1_000);
-
-        assert_eq!(
-            legacy_start_slot(10_000, 30_000, 25_000, 100, slot_interval),
-            115
-        );
-        assert_eq!(
-            legacy_start_slot(10_000, 30_000, 40_000, 100, slot_interval),
-            100
-        );
-        assert_eq!(
-            legacy_start_slot(0, 30_000, 25_000, 100, slot_interval),
-            100
-        );
     }
 
     #[test]
