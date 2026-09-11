@@ -3,7 +3,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque},
     hash::{Hash, Hasher},
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc,
         atomic::{AtomicBool, AtomicU16, Ordering},
     },
     time::{Duration, Instant},
@@ -11,6 +11,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_metrics::metrics;
+use parking_lot::{Mutex, MutexGuard};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use tokio::sync::mpsc;
@@ -121,10 +122,9 @@ where
     /// Aggregated outgoing channel used by forwarder tasks to deliver
     /// subscription updates to the consumer of this SubMuxClient.
     out_tx: mpsc::Sender<SubscriptionUpdate>,
-    /// Receiver end for the aggregated updates. Taken exactly once via
-    /// take_updates(); wrapped in Arc<Mutex<Option<...>>> so the struct
-    /// remains Clone and the receiver can be moved out safely.
-    out_rx: Arc<Mutex<Option<mpsc::Receiver<SubscriptionUpdate>>>>,
+    /// Receiver end for the aggregated updates. Replaced with a closed
+    /// receiver when moved out by `take_updates()`.
+    out_rx: Arc<Mutex<mpsc::Receiver<SubscriptionUpdate>>>,
     /// Deduplication cache keyed by (pubkey, slot) storing the last time
     /// we forwarded such an update. Prevents forwarding identical updates
     /// seen from multiple inner clients within dedup_window.
@@ -277,7 +277,7 @@ where
         let me = Self {
             clients: Arc::new(Mutex::new(clients_only)),
             out_tx,
-            out_rx: Arc::new(Mutex::new(Some(out_rx))),
+            out_rx: Arc::new(Mutex::new(out_rx)),
             dedup_cache: dedup_cache.clone(),
             dedup_window,
             debounce_interval,
@@ -333,9 +333,7 @@ where
 
                     // Update connection related metrics
                     let was_connected = {
-                        let mut connected_ids = Self::connected_client_ids_lock(
-                            &connected_client_ids,
-                        );
+                        let mut connected_ids = connected_client_ids.lock();
                         connected_ids.remove(&Self::client_key(&client))
                     };
                     if was_connected {
@@ -385,19 +383,9 @@ where
         hasher.finish() as usize
     }
 
-    fn connected_client_ids_lock(
-        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
-    ) -> MutexGuard<'_, HashSet<usize>> {
-        match connected_client_ids.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
     fn connected_clients_snapshot(&self) -> Vec<Arc<T>> {
         let clients = self.clients_snapshot();
-        let connected_ids =
-            Self::connected_client_ids_lock(&self.connected_client_ids);
+        let connected_ids = self.connected_client_ids.lock();
         clients
             .into_iter()
             .filter(|client| connected_ids.contains(&Self::client_key(client)))
@@ -413,7 +401,8 @@ where
                 clients.swap_remove(pos);
             }
         }
-        Self::connected_client_ids_lock(&self.connected_client_ids)
+        self.connected_client_ids
+            .lock()
             .remove(&Self::client_key(target));
     }
 
@@ -455,7 +444,8 @@ where
             );
         }
 
-        Self::connected_client_ids_lock(&self.connected_client_ids)
+        self.connected_client_ids
+            .lock()
             .insert(Self::client_key(&client));
 
         let connected = self
@@ -522,17 +512,11 @@ where
     }
 
     fn clients_lock(&self) -> MutexGuard<'_, Vec<Arc<T>>> {
-        // Lock poisoning means a thread panicked while mutating mux state;
-        // treating that as unrecoverable is safer than continuing with it.
-        self.clients.lock().expect("clients lock poisoned")
+        self.clients.lock()
     }
 
     fn program_subs_lock(&self) -> MutexGuard<'_, HashSet<Pubkey>> {
-        // Lock poisoning means a thread panicked while mutating mux state;
-        // treating that as unrecoverable is safer than continuing with it.
-        self.program_subs
-            .lock()
-            .expect("program_subs lock poisoned")
+        self.program_subs.lock()
     }
 
     #[instrument(
@@ -669,8 +653,7 @@ where
         // subscriptions can use it while the existing set is replayed.
         let client_key = Self::client_key(&client);
         let was_disconnected = {
-            let mut connected_ids =
-                Self::connected_client_ids_lock(&connected_client_ids);
+            let mut connected_ids = connected_client_ids.lock();
             connected_ids.insert(client_key)
         };
         if was_disconnected {
@@ -690,8 +673,7 @@ where
 
         let rollback_visibility = || {
             let was_connected = {
-                let mut connected_ids =
-                    Self::connected_client_ids_lock(&connected_client_ids);
+                let mut connected_ids = connected_client_ids.lock();
                 connected_ids.remove(&client_key)
             };
             if was_connected {
@@ -712,7 +694,7 @@ where
 
         // Resubscribe all program subscriptions
         let programs: HashSet<Pubkey> =
-            program_subs.lock().unwrap().iter().copied().collect();
+            program_subs.lock().iter().copied().collect();
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 debug!(
@@ -731,13 +713,17 @@ where
         let account_subs = accounts_tracker.subscribed_accounts();
 
         if let Err(err) = client.resub_multiple(account_subs).await {
+            let transport_connected = client.transport_connected();
+            if transport_connected != Some(true) {
+                rollback_visibility();
+            }
             debug!(
                 client_id = %client.id(),
                 resub_delay_ms = ?client.current_resub_delay_ms(),
+                transport_connected = ?transport_connected,
                 error = ?err,
-                "Failed to resubscribe accounts after reconnect"
+                "Account subscription restoration incomplete after reconnect"
             );
-            rollback_visibility();
             return Err(err);
         }
 
@@ -753,7 +739,7 @@ where
                 tokio::select! {
                     _ = tokio::time::sleep(window) => {
                         let now = Instant::now();
-                        let mut map = cache.lock().unwrap();
+                        let mut map = cache.lock();
                         map.retain(|_, ts| now.duration_since(*ts) <= window);
                     }
                     _ = shutdown.cancelled() => break,
@@ -787,8 +773,7 @@ where
                         let now = Instant::now();
                         let mut to_forward = vec![];
                         {
-                            let mut map =
-                                states.lock().expect("debounce_states lock poisoned");
+                            let mut map = states.lock();
                             for debounce_state in map.values_mut() {
                                 if let DebounceState::Enabled {
                                     next_allowed_forward,
@@ -818,7 +803,6 @@ where
         let detection_window = self.debounce_detection_window;
         let allowed_count = self.allowed_in_debounce_window_count();
 
-        self.forwarders_started.store(true, Ordering::SeqCst);
         for client in self.clients_snapshot() {
             self.spawn_forwarder_for_client(
                 &client,
@@ -891,7 +875,7 @@ where
         now: Instant,
         window: Duration,
     ) -> bool {
-        let mut map = cache.lock().unwrap();
+        let mut map = cache.lock();
         match map.get_mut(&key) {
             Some(ts) => {
                 if now.duration_since(*ts) > window {
@@ -919,9 +903,7 @@ where
         let pubkey = update.pubkey;
         let mut maybe_forward_now = None;
         {
-            let mut states = debounce_states
-                .lock()
-                .expect("debounce_states lock poisoned");
+            let mut states = debounce_states.lock();
             let debounce_state = states.entry(pubkey).or_insert_with(|| {
                 DebounceState::Disabled {
                     pubkey,
@@ -1032,10 +1014,7 @@ where
 
     #[cfg(test)]
     fn get_debounce_state(&self, pubkey: Pubkey) -> Option<DebounceState> {
-        let states = self
-            .debounce_states
-            .lock()
-            .expect("debounce_states lock poisoned");
+        let states = self.debounce_states.lock();
         states.get(&pubkey).cloned()
     }
 }
@@ -1116,10 +1095,7 @@ where
         // after marking the client connected) is guaranteed to observe this
         // program id and resubscribe accordingly.
         {
-            let mut subs = self
-                .program_subs
-                .lock()
-                .expect("program_subs lock poisoned");
+            let mut subs = self.program_subs.lock();
             if !subs.insert(program_id) {
                 debug!(program_id = %program_id, "Program subscription already exists");
                 return Ok(());
@@ -1134,10 +1110,7 @@ where
         .await
         {
             // Roll back the tentative insertion so a future call can retry.
-            self.program_subs
-                .lock()
-                .expect("program_subs lock poisoned")
-                .remove(&program_id);
+            self.program_subs.lock().remove(&program_id);
             return Err(err);
         }
 
@@ -1160,16 +1133,11 @@ where
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
-        // Start forwarders on first take to ensure we have a consumer
-        let out_rx = {
-            let mut rx_lock = self.out_rx.lock().unwrap();
-            // SAFETY: This can only be None if take_updates() is called more than once,
-            // which indicates a logic bug by the caller. Panicking here surfaces the bug early.
-            rx_lock
-                .take()
-                .expect("SubMuxClient::take_updates called more than once")
-        };
-        self.start_forwarders();
+        let (_, replacement) = mpsc::channel(1);
+        let out_rx = std::mem::replace(&mut *self.out_rx.lock(), replacement);
+        if !self.forwarders_started.swap(true, Ordering::SeqCst) {
+            self.start_forwarders();
+        }
         out_rx
     }
 
@@ -1188,13 +1156,11 @@ where
             .iter()
             .map(|c| c.subscriptions_intersection())
             .collect();
-        if sets.is_empty() {
-            return HashSet::new();
-        }
         // Find the smallest set to iterate over, then check membership
         // in all others — no intermediate cloning/collecting.
-        // SAFETY: we return above if the set is empty, so unwrap is safe here.
-        let smallest = sets.iter().min_by_key(|s| s.len()).unwrap();
+        let Some(smallest) = sets.iter().min_by_key(|s| s.len()) else {
+            return HashSet::new();
+        };
         smallest
             .iter()
             .filter(|pk| {
@@ -1225,15 +1191,9 @@ where
             intersection_sets.push(snapshot.intersection);
         }
 
-        if intersection_sets.is_empty() {
-            return None;
-        }
-
         // Find the smallest set to iterate over, then check membership
         // in all others — no intermediate cloning/collecting.
-        // SAFETY: we return above if the set is empty, so unwrap is safe here.
-        let smallest =
-            intersection_sets.iter().min_by_key(|s| s.len()).unwrap();
+        let smallest = intersection_sets.iter().min_by_key(|s| s.len())?;
         let intersection = smallest
             .iter()
             .filter(|pk| {
@@ -2150,34 +2110,44 @@ mod tests {
         // Trigger reconnect; first attempt will fail resub; reconnector will retry after ~1s (fib(1)=1)
         aborts[0].send(()).await.expect("abort send");
 
-        // Send updates until one passes after reconnection and resubscribe succeed
-        // Keep unique slots to avoid dedupe
-        let mut slot: u64 = 100;
-        let deadline = Instant::now() + Duration::from_secs(3);
-        let mut got = None;
-        while Instant::now() < deadline {
-            client1
-                .send_account_update(
-                    pk,
-                    slot,
-                    &account_with_lamports(1_000 + slot),
-                )
-                .await;
-            if let Ok(Some(u)) = tokio::time::timeout(
-                std::time::Duration::from_millis(200),
-                mux_rx.recv(),
-            )
-            .await
-            {
-                got = Some(u);
-                break;
-            }
-            slot += 1;
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while client1.reconnect_calls() == 0 {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for reconnect attempt"
+            );
+            sleep_ms(10).await;
         }
 
-        let up = got.expect("should receive update after retry reconnect");
+        // The transport remains usable while the failed bulk restoration is
+        // waiting for its retry.
+        wait_for_connected_clients(&mux, 2).await;
+        assert!(!client1.subscriptions_union().contains(&pk));
+
+        let new_pk = Pubkey::new_unique();
+        mux.subscribe(new_pk, None).await.unwrap();
+        assert!(client1.subscriptions_union().contains(&new_pk));
+
+        let attempts_before_retry = client1.subscribe_attempts();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !client1.subscriptions_union().contains(&pk) {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for account restoration retry"
+            );
+            sleep_ms(10).await;
+        }
+        assert!(client1.subscribe_attempts() > attempts_before_retry);
+
+        client1
+            .send_account_update(pk, 100, &account_with_lamports(1_100))
+            .await;
+        let up = tokio::time::timeout(Duration::from_secs(1), mux_rx.recv())
+            .await
+            .expect("expect update after retry reconnect")
+            .expect("stream open");
         assert_eq!(up.pubkey, pk);
-        assert!(up.slot >= 100);
+        assert_eq!(up.slot, 100);
 
         mux.shutdown().await.unwrap();
     }
@@ -2324,27 +2294,6 @@ mod tests {
         assert_eq!(client1.subscribe_attempts(), client1_attempts);
         assert!(!client1.subscriptions_union().contains(&pk2));
         assert!(client2.subscriptions_union().contains(&pk2));
-
-        mux.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_connected_client_ids_lock_recovers_from_poison() {
-        init_logger();
-
-        let (tx, rx) = mpsc::channel(10_000);
-        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client(vec![client], Some(100));
-
-        let connected_client_ids = mux.connected_client_ids.clone();
-        let _ = std::thread::spawn(move || {
-            let _guard = connected_client_ids.lock().unwrap();
-            panic!("poison connected_client_ids");
-        })
-        .join();
-
-        assert_eq!(mux.connected_clients_snapshot().len(), 1);
 
         mux.shutdown().await.unwrap();
     }

@@ -44,6 +44,9 @@ pub enum ApiError {
         #[source] Box<RpcClientError>,
     ),
 
+    #[error("Failed to sync rent sysvar from base chain: {0}")]
+    FailedToSyncBaseChainRent(String),
+
     #[error(
         "Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)"
     )]

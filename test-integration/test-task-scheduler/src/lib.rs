@@ -17,7 +17,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    config::{LifecycleMode, LoadableProgram, TaskSchedulerConfig},
+    config::{LoadableProgram, TaskSchedulerConfig},
     types::{network::Remote, SerdePubkey},
     LeaderParams,
 };
@@ -30,7 +30,6 @@ pub const TASK_SCHEDULER_TICK_MILLIS: u64 = 50;
 pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
     let config = LeaderParams {
-        lifecycle: LifecycleMode::Ephemeral,
         remotes: vec![
             Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
             Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),

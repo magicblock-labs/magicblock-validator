@@ -151,9 +151,7 @@ impl OutboxClient for InternalOutboxClient {
                 MagicContext::deserialize(account.data())
             })
             .map_err(|err| (vec![], err.into()))?
-            .expect(
-                "Validator found to be running without MagicContext account!",
-            )
+            .ok_or((vec![], InternalOutboxClientError::MagicContextMissing))?
             .map_err(|err| (vec![], err.into()))?;
 
         self.send_accept_tx(magic_context.scheduled_base_intents)
@@ -249,6 +247,8 @@ impl OutboxClient for InternalOutboxClient {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalOutboxClientError {
+    #[error("MagicContext account is missing from AccountsDb")]
+    MagicContextMissing,
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
     #[error("RpcClientError: {0}")]
