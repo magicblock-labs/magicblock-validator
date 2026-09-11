@@ -161,12 +161,14 @@ impl HttpDispatcher {
 
     /// Handles the `getEpochInfo` RPC request.
     /// This is a **mocked implementation** that returns a default epoch info object.
-    pub(crate) fn get_epoch_info(
+    pub(crate) async fn get_epoch_info(
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
         let slot = self.blocks.block_height();
-        let transaction_count = self.ledger.count_transactions()?;
+        let transaction_count = self
+            .with_ledger(|ledger| ledger.count_transactions())
+            .await?;
         let info = json::json! {{
             "epoch": slot / SLOTS_IN_EPOCH,
             "slotIndex": slot % SLOTS_IN_EPOCH,

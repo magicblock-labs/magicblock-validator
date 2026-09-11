@@ -129,29 +129,18 @@ impl LedgerTrunctationWorker {
 
         // Estimating number of slot we need to truncating
         let num_slots = highest_slot - lowest_slot + 1;
-        let slot_size = current_ledger_size / num_slots;
-        let num_slots_to_truncate = excess / slot_size;
+        let slot_size = (current_ledger_size / num_slots).max(1);
+        let num_slots_to_truncate = (excess / slot_size).max(1);
 
         // Calculating up to which slot we're truncating
-        let truncate_to_slot = lowest_slot + num_slots_to_truncate - 1;
-
-        info!(truncate_to_slot, "Fat truncation complete");
-
-        self.ledger.set_lowest_cleanup_slot(truncate_to_slot);
-        Self::delete_slots(&self.ledger, 0, truncate_to_slot)?;
-
-        if let Err(err) = self.ledger.flush() {
-            // We will still compact
-            error!(error = ?err, "Flush failed");
-        }
-        Self::compact_slot_range(
+        let truncate_to_slot =
+            lowest_slot.saturating_add(num_slots_to_truncate - 1);
+        Self::truncate_slot_range(
             &self.ledger,
             0,
             truncate_to_slot,
             self.cancellation_token.clone(),
-        );
-
-        Ok(())
+        )
     }
 
     /// Inserts tombstones in slot-ordered columns for range [from; to] inclusive
@@ -239,29 +228,22 @@ impl LedgerTrunctationWorker {
             return Ok(None);
         }
 
-        let slot_size = current_ledger_size / num_slots as u64;
+        let slot_size = (current_ledger_size / num_slots as u64).max(1);
         let size_to_truncate =
             (current_ledger_size / 100) * PERCENTAGE_TO_TRUNCATE as u64;
         let num_slots_to_truncate = size_to_truncate / slot_size;
 
-        let to_slot = min(from_slot + num_slots_to_truncate, to_slot);
+        let to_slot =
+            min(from_slot.saturating_add(num_slots_to_truncate), to_slot);
         Ok(Some((from_slot, to_slot)))
     }
 
     /// Returns [from_slot, to_slot] range that's safe to truncate
     fn available_truncation_range(&self) -> Option<(u64, u64)> {
-        let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
-        let (highest_cleanup_slot, _) = self.ledger.get_max_blockhash().ok()?;
-
-        // Fresh start case
-        let next_from_slot = if lowest_cleanup_slot == 0 {
-            0
-        } else {
-            lowest_cleanup_slot + 1
-        };
-
-        // we don't clean latest final slot
-        Some((next_from_slot, highest_cleanup_slot))
+        let from = self.ledger.oldest_slot();
+        let (latest, _) = self.ledger.get_max_blockhash().ok()?;
+        let to = latest.checked_sub(1)?;
+        (from <= to).then_some((from, to))
     }
 
     /// Utility function for splitting truncation into smaller chunks
@@ -273,14 +255,23 @@ impl LedgerTrunctationWorker {
         to_slot: u64,
         cancellation_token: CancellationToken,
     ) -> LedgerResult<()> {
+        if cancellation_token.is_cancelled() {
+            return Ok(());
+        }
+        // Enforce this for both size policies at the mutation boundary, not
+        // just in their estimates. Concurrent slot advancement only adds headroom.
+        let (latest, _) = ledger.get_max_blockhash()?;
+        let Some(last_retirable) = latest.checked_sub(1) else {
+            return Ok(());
+        };
+        let to_slot = to_slot.min(last_retirable);
         if to_slot < from_slot {
-            warn!("Invalid slot range");
             return Ok(());
         }
 
         info!(from_slot, to_slot, "Truncating slot range");
 
-        ledger.set_lowest_cleanup_slot(to_slot);
+        ledger.set_oldest_slot(to_slot + 1);
         if let Err(err) = Self::delete_slots(ledger, from_slot, to_slot) {
             error!(error = ?err, "Delete failed");
         }

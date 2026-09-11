@@ -53,8 +53,9 @@ pub(crate) struct HttpDispatcher {
     pub(crate) context: NodeContext,
     /// A handle to the accounts database.
     pub(crate) accountsdb: Arc<AccountsDb>,
-    /// A handle to the blockchain ledger.
-    pub(crate) ledger: Arc<Ledger>,
+    /// Accessible to handlers only through `with_ledger`, which bounds and
+    /// isolates synchronous storage work from the RPC runtime.
+    ledger: Arc<Ledger>,
     /// Chainlink provides synchronization of on-chain accounts and
     /// fetches accounts used in a specific transaction as well as those
     /// required when getting account info, etc.
@@ -66,9 +67,9 @@ pub(crate) struct HttpDispatcher {
     /// A handle to the transaction scheduler for processing
     /// `sendTransaction` and `simulateTransaction`.
     pub(crate) transactions_scheduler: TransactionSchedulerHandle,
-    /// Bounds concurrent iterator-based ledger scans so a burst of degraded
-    /// (e.g. tombstone-scanning) queries cannot exhaust threads or the DB.
-    blocking_reads: Semaphore,
+    /// Bounds all RocksDB-backed requests, including point reads that can stall
+    /// during cleanup. Waiting requests do not occupy RPC runtime workers.
+    ledger_reads: Semaphore,
 }
 
 impl HttpDispatcher {
@@ -80,12 +81,7 @@ impl HttpDispatcher {
         state: SharedState,
         channels: &DispatchEndpoints,
     ) -> Arc<Self> {
-        // Mirror the runtime's worker count: the same ledger-scan concurrency
-        // the workers previously allowed implicitly, now without starving them.
-        let permits = std::thread::available_parallelism()
-            .map(|n| (n.get() / 2).saturating_sub(1))
-            .unwrap_or(1)
-            .max(2);
+        let permits = (num_cpus::get() / 4).max(1);
         Arc::new(Self {
             context: state.context,
             accountsdb: state.accountsdb.clone(),
@@ -94,7 +90,7 @@ impl HttpDispatcher {
             transactions: state.transactions.clone(),
             blocks: state.blocks.clone(),
             transactions_scheduler: channels.transaction_scheduler.clone(),
-            blocking_reads: Semaphore::new(permits),
+            ledger_reads: Semaphore::new(permits),
         })
     }
 
@@ -223,14 +219,14 @@ impl HttpDispatcher {
                 self.get_balance(request, remote_account_claims.clone())
                     .await
             }
-            GetBlock => self.run_blocking(|| self.get_block(request)).await,
+            GetBlock => self.get_block(request).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_block_height(request),
-            GetBlockTime => self.get_block_time(request),
+            GetBlockTime => self.get_block_time(request).await,
             GetBlocks => self.get_blocks(request),
             GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
-            GetEpochInfo => self.get_epoch_info(request),
+            GetEpochInfo => self.get_epoch_info(request).await,
             GetEpochSchedule => self.get_epoch_schedule(request),
             GetFeeForMessage => self.get_fee_for_message(request),
             GetFirstAvailableBlock => self.get_first_available_block(request),
@@ -251,10 +247,9 @@ impl HttpDispatcher {
             GetRecentPerformanceSamples => {
                 self.get_recent_performance_samples(request)
             }
-            GetSignatureStatuses => self.get_signature_statuses(request),
+            GetSignatureStatuses => self.get_signature_statuses(request).await,
             GetSignaturesForAddress => {
-                self.run_blocking(|| self.get_signatures_for_address(request))
-                    .await
+                self.get_signatures_for_address(request).await
             }
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
@@ -275,7 +270,7 @@ impl HttpDispatcher {
             }
             GetTokenLargestAccounts => self.get_token_largest_accounts(request),
             GetTokenSupply => self.get_token_supply(request),
-            GetTransaction => self.get_transaction(request),
+            GetTransaction => self.get_transaction(request).await,
             GetTransactionCount => self.get_transaction_count(request),
             GetVersion => self.get_version(request),
             GetVoteAccounts => self.get_vote_accounts(request),
@@ -360,30 +355,28 @@ impl HttpDispatcher {
 }
 
 impl HttpDispatcher {
-    /// Runs an iterator-based ledger scan (`getBlock`,
-    /// `getSignaturesForAddress`) via `block_in_place`: such scans crawl the
-    /// range tombstones left behind by the ledger truncator and must never
-    /// pin an RPC runtime worker and starve every other request. The
-    /// `blocking_reads` semaphore bounds how many run at once; waiters queue
-    /// in async land without occupying any thread.
-    ///
-    /// Single-key ledger gets stay inline: they remain cheap under tombstones
-    /// (signature-keyed columns are never range-deleted), and the per-call
-    /// `block_in_place` core handoff is too costly for hot point lookups.
+    /// Runs ledger work under the shared concurrency limit. Parse inputs and
+    /// check caches first so invalid requests and cache hits never wait on disk.
+    /// Include expensive response encoding in the closure to keep it off RPC
+    /// workers too. The permit is held until the blocking operation actually ends.
     ///
     /// Falls back to running inline on current-thread runtimes (tests), where
     /// `block_in_place` would panic.
-    async fn run_blocking<T>(&self, f: impl FnOnce() -> T) -> T {
+    pub(crate) async fn with_ledger<T>(
+        &self,
+        read: impl FnOnce(&Ledger) -> T,
+    ) -> T {
         use tokio::runtime::{Handle, RuntimeFlavor};
         // The semaphore is never closed, so acquisition cannot fail.
-        let _permit = self.blocking_reads.acquire().await.ok();
-        let multi_threaded = Handle::try_current()
-            .map(|h| h.runtime_flavor() == RuntimeFlavor::MultiThread)
-            .unwrap_or_default();
-        if multi_threaded {
-            tokio::task::block_in_place(f)
+        let _permit = self
+            .ledger_reads
+            .acquire()
+            .await
+            .expect("ledger semaphore is never closed");
+        if Handle::current().runtime_flavor() == RuntimeFlavor::MultiThread {
+            tokio::task::block_in_place(|| read(&self.ledger))
         } else {
-            f()
+            read(&self.ledger)
         }
     }
 }

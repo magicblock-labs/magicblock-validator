@@ -3646,6 +3646,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-version",
+ "num_cpus",
  "parking_lot",
  "rand 0.9.4",
  "reqwest",
