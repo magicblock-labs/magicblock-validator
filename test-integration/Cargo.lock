@@ -3651,6 +3651,7 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-metrics",
  "magicblock-version",
+ "num_cpus",
  "parking_lot",
  "scc",
  "serde",

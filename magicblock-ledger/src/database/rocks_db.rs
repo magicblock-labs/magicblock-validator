@@ -276,7 +276,11 @@ impl Rocks {
     /// Stores oldest maintained slot in db
     /// Used in CompactionFilter to decide if slot can be safely removed
     pub fn set_oldest_slot(&self, slot: Slot) {
-        self.oldest_slot.store(slot, Ordering::Relaxed);
+        self.oldest_slot.fetch_max(slot, Ordering::Release);
+    }
+
+    pub fn oldest_slot(&self) -> Slot {
+        self.oldest_slot.load(Ordering::Acquire)
     }
 }
 

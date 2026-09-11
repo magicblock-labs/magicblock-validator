@@ -134,7 +134,7 @@ async fn test_truncator_non_empty_ledger() {
         .collect::<Vec<_>>();
 
     ledger.flush().unwrap();
-    ledger.set_lowest_cleanup_slot(FINAL_SLOT);
+    ledger.set_oldest_slot(FINAL_SLOT + 1);
     let mut ledger_truncator =
         LedgerTruncator::new(ledger.clone(), TEST_TRUNCATION_TIME_INTERVAL, 0);
 
@@ -144,20 +144,11 @@ async fn test_truncator_non_empty_ledger() {
     ledger_truncator.stop();
     assert!(ledger_truncator.join().is_ok());
 
-    let cleanup_slot = ledger.get_lowest_cleanup_slot();
-    assert_ne!(ledger.get_lowest_cleanup_slot(), 0);
-    verify_transactions_state(
-        &ledger,
-        0,
-        &signatures[..(cleanup_slot + 1) as usize],
-        false,
-    );
-    verify_transactions_state(
-        &ledger,
-        cleanup_slot + 1,
-        &signatures[(cleanup_slot + 1) as usize..],
-        true,
-    );
+    let oldest_slot = ledger.oldest_slot();
+    assert_ne!(oldest_slot, 0);
+    let (purged, retained) = signatures.split_at(oldest_slot as usize);
+    verify_transactions_state(&ledger, 0, purged, false);
+    verify_transactions_state(&ledger, oldest_slot, retained, true);
 }
 
 async fn transaction_spammer(
@@ -212,7 +203,8 @@ async fn test_truncator_with_tx_spammer() {
     ledger_truncator.stop();
     assert!(ledger_truncator.join().is_ok());
 
-    assert!(ledger.get_lowest_cleanup_slot() >= last_signature_slot);
+    // All transactions are retired, but the final empty block must remain.
+    assert_eq!(ledger.oldest_slot(), last_signature_slot + 1);
     verify_transactions_state(&ledger, 0, &signatures, false);
 }
 

@@ -44,6 +44,7 @@ fn test_get_block_meta() {
     assert_eq!(slot_2_block.blockhash, slot_2_hash.to_string());
 }
 
+/// Blocks contain only their own transactions, in ascending transaction-index order.
 #[test]
 fn test_get_block_transactions() {
     init_logger!();
@@ -77,11 +78,11 @@ fn test_get_block_transactions() {
 
     let block_41 = get_block(&ledger, 41);
     assert_eq!(2, block_41.transactions.len());
-    assert_eq!(slot_41_tx2, get_block_transaction_hash(&block_41, 0));
-    assert_eq!(slot_41_tx1, get_block_transaction_hash(&block_41, 1));
+    assert_eq!(slot_41_tx1, get_block_transaction_hash(&block_41, 0));
+    assert_eq!(slot_41_tx2, get_block_transaction_hash(&block_41, 1));
 
     let block_42 = get_block(&ledger, 42);
     assert_eq!(2, block_42.transactions.len());
-    assert_eq!(slot_42_tx2, get_block_transaction_hash(&block_42, 0));
-    assert_eq!(slot_42_tx1, get_block_transaction_hash(&block_42, 1));
+    assert_eq!(slot_42_tx1, get_block_transaction_hash(&block_42, 0));
+    assert_eq!(slot_42_tx2, get_block_transaction_hash(&block_42, 1));
 }

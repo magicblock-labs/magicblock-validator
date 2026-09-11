@@ -11,7 +11,10 @@ impl HttpDispatcher {
     /// Fetches the full content of a block for a given slot number. The level of
     /// detail and transaction encoding can be customized via an optional configuration
     /// object. Returns `null` if the block is not found in the ledger.
-    pub(crate) fn get_block(&self, request: &mut JsonRequest) -> HandlerResult {
+    pub(crate) async fn get_block(
+        &self,
+        request: &mut JsonRequest,
+    ) -> HandlerResult {
         let (slot, config) =
             parse_params!(request.params()?, Slot, RpcBlockConfig);
         let slot = some_or_err!(slot);
@@ -25,17 +28,20 @@ impl HttpDispatcher {
                 .max_supported_transaction_version,
         };
 
-        // Fetch the raw block from the ledger.
-        let block = self.ledger.get_block(slot)?;
+        self.with_ledger(|ledger| {
+            // Fetch the raw block from the ledger.
+            let block = ledger.get_block(slot)?;
 
-        // If the block exists, encode it for the RPC response according to the specified options.
-        let encoded_block = block
-            .map(ConfirmedBlock::from)
-            .and_then(|b| b.encode_with_options(encoding, options).ok());
+            // If the block exists, encode it for the RPC response according to the specified options.
+            let encoded_block = block
+                .map(ConfirmedBlock::from)
+                .and_then(|b| b.encode_with_options(encoding, options).ok());
 
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            encoded_block,
-        ))
+            Ok(ResponsePayload::encode_no_context(
+                &request.id,
+                encoded_block,
+            ))
+        })
+        .await
     }
 }
