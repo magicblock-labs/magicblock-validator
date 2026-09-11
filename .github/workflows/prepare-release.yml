@@ -171,7 +171,7 @@ jobs:
             echo "No release changes were generated" >&2
             exit 1
           fi
-          git commit -m "release: v${VERSION}"
+          git commit -m "chore(release): prepare v${VERSION}"
           gh auth setup-git
           git push --set-upstream origin "$RELEASE_BRANCH"
 
@@ -184,5 +184,5 @@ jobs:
           gh pr create \
             --base "$RELEASE_BASE_BRANCH" \
             --head "$RELEASE_BRANCH" \
-            --title "release v${VERSION}" \
+            --title "chore(release): prepare v${VERSION}" \
             --body ""
