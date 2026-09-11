@@ -57,18 +57,14 @@ impl InternalOutboxClient {
             self.rpc_client
                 .send_and_confirm_transaction(tx)
                 .await
-                .map_err(|err| {
-                    match err.kind() {
-                        RpcClientErrorKind::TransactionError(_) => {
-                            backoff::Error::Permanent(err)
-                        }
-                        _ => {
-                            error!(signature = ?signature, error = ?err, "Transient error accepting intents, retrying");
-                            backoff::Error::transient(err)
-                        }
+                .map_err(|err| match err.kind() {
+                    RpcClientErrorKind::TransactionError(_) => {
+                        backoff::Error::Permanent(err)
                     }
+                    _ => backoff::Error::transient(err),
                 })
-        }).await?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -110,7 +106,15 @@ impl InternalOutboxClient {
             };
             match self.send_with_backoff(backoff_config, &tx).await {
                 Ok(_) => accepted.extend(remaining.drain(..chunk_size)),
-                Err(err) => return Err((accepted, err.into())),
+                Err(err) => {
+                    error!(
+                        signature = ?tx.get_signature(),
+                        intent_ids = ?remaining[..chunk_size].iter().map(|i| i.id).collect::<Vec<_>>(),
+                        error = ?err,
+                        "Failed to accept scheduled intents"
+                    );
+                    return Err((accepted, err.into()));
+                }
             }
         }
 
@@ -178,6 +182,14 @@ impl OutboxClient for InternalOutboxClient {
             &tx,
         )
         .await
+        .inspect_err(|err| {
+            error!(
+                intent_id,
+                signature = ?tx.get_signature(),
+                error = ?err,
+                "Failed to set intent execution stage"
+            )
+        })
         .map_err(Into::into)
     }
 
@@ -196,6 +208,14 @@ impl OutboxClient for InternalOutboxClient {
             &tx,
         )
         .await
+        .inspect_err(|err| {
+            error!(
+                intent_id,
+                signature = ?tx.get_signature(),
+                error = ?err,
+                "Failed to close intent"
+            )
+        })
         .map_err(Into::into)
     }
 

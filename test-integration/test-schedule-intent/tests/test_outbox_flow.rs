@@ -1059,7 +1059,13 @@ impl OutboxClient for TestOutboxClient {
         self.ephem_rpc
             .send_and_confirm_transaction(&tx)
             .await
-            .map_err(InternalOutboxClientError::RpcClientError)?;
+            .map_err(|err| {
+                println!(
+                    "set_intent_execution_stage failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
+                    tx.signatures[0]
+                );
+                InternalOutboxClientError::RpcClientError(err)
+            })?;
         Ok(())
     }
 
@@ -1097,7 +1103,13 @@ impl OutboxClient for TestOutboxClient {
         self.ephem_rpc
             .send_and_confirm_transaction(&tx)
             .await
-            .map_err(InternalOutboxClientError::RpcClientError)?;
+            .map_err(|err| {
+                println!(
+                    "close_intent failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
+                    tx.signatures[0]
+                );
+                InternalOutboxClientError::RpcClientError(err)
+            })?;
 
         self.close_calls.lock().unwrap().push(intent_id);
         Ok(())
