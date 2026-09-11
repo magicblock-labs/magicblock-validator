@@ -25,7 +25,7 @@ magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 nucleus = { workspace = true }
-rusqlite = { workspace = true }
+rusqlite = { workspace = true, features = ["fallible_uint"] }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-commitment-config = { workspace = true }
