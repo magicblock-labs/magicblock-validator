@@ -52,7 +52,6 @@ pub(crate) fn process_schedule_commit(
     let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
     if ix_ctx.get_program_key()? != &crate::id() {
@@ -77,17 +76,12 @@ pub(crate) fn process_schedule_commit(
 
     let payer_account =
         get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-    let magic_fee_vault = try_get_fee_vault(
+    let (magic_fee_vault, committees_start) = try_get_fee_vault(
         transaction_context,
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
     )?;
-    let committees_start = if magic_fee_vault.is_some() {
-        COMMITTEES_START + 1
-    } else {
-        COMMITTEES_START
-    };
 
     // Assert enough accounts
     if ix_accs_len <= committees_start {

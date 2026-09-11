@@ -165,54 +165,61 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
     .0
 }
 
-/// Returns the fee vault account if the payer at `payer_idx` uses the
-/// fee-vault path, validating that the account at `fee_vault_idx` is the
-/// expected vault, delegated, and writable. Returns `None` otherwise.
+/// Returns the fee vault account and the next instruction-account index.
 ///
-/// Writability is checked eagerly: a payer on the fee-charging path would
-/// otherwise fail later with a less clear error.
+/// The account at `fee_vault_idx` is optional unless the payer is delegated and
+/// not confined. When that optional account is present and is the expected magic
+/// fee vault, it is validated as writable and delegated even if fee charging is
+/// not needed, so callers can still skip over it deterministically.
 pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     transaction_context: &'a TransactionContext<'ix_data>,
     invoke_context: &InvokeContext,
     payer_idx: u16,
     fee_vault_idx: u16,
-) -> Result<Option<InstructionAccount<'a, 'ix_data>>, InstructionError> {
+) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError>
+{
     let payer_account =
         get_instruction_account_with_idx(transaction_context, payer_idx)?;
-    let payer_requires_fee_vault = {
-        let payer = payer_account.to_account_shared_data()?;
-        payer.delegated() && !payer.confined()
+    let payer = payer_account.to_account_shared_data()?;
+    let payer_requires_fee_vault = payer.delegated() && !payer.confined();
+
+    let fee_vault = match get_instruction_pubkey_with_idx(
+        transaction_context,
+        fee_vault_idx,
+    ) {
+        Ok(vault_pubkey) if vault_pubkey == &magic_fee_vault_pubkey() => {
+            let vault_account = get_instruction_account_with_idx(
+                transaction_context,
+                fee_vault_idx,
+            )?;
+            let is_vault_writable =
+                get_writable_with_idx(transaction_context, fee_vault_idx)?;
+            if !vault_account.to_account_shared_data()?.delegated()
+                || !is_vault_writable
+            {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleTransaction ERR: magic fee vault must be writable and delegated"
+                );
+                return Err(InstructionError::IllegalOwner);
+            }
+            Some(vault_account)
+        }
+        Ok(_) | Err(InstructionError::MissingAccount) => None,
+        Err(err) => return Err(err),
     };
-    if !payer_requires_fee_vault {
-        return Ok(None);
-    }
 
-    let vault_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, fee_vault_idx)?;
-    if vault_pubkey != &magic_fee_vault_pubkey() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: invalid magic fee vault account {}",
-            vault_pubkey
-        );
-        return Err(InstructionError::MissingAccount);
-    }
+    let next_account_idx =
+        fee_vault_idx as usize + usize::from(fee_vault.is_some());
 
-    let vault_account =
-        get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
-    let is_vault_writable =
-        get_writable_with_idx(transaction_context, fee_vault_idx)?;
-    if !vault_account.to_account_shared_data()?.delegated()
-        || !is_vault_writable
-    {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: magic fee vault must be writable and delegated"
-        );
-        return Err(InstructionError::IllegalOwner);
-    }
-
-    Ok(Some(vault_account))
+    Ok(if payer_requires_fee_vault {
+        if fee_vault.is_none() {
+            return Err(InstructionError::MissingAccount);
+        }
+        (fee_vault, next_account_idx)
+    } else {
+        (None, next_account_idx)
+    })
 }
 
 /// Assert that the callback instructions do not have signers aside from the callback signer

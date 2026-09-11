@@ -16,9 +16,11 @@ pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
-    ///  - **0.**    `[WRITE, SIGNER]` Validator Authority
-    ///  - **1..n.** `[WRITE]` Accounts to modify
-    ///  - **n+1**  `[SIGNER]` (Implicit NativeLoader)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes the modification. | WRITE, SIGNER |
+    /// | `1..n` | Modified accounts. Accounts to modify. | WRITE |
+    /// | `n+1` | NativeLoader. Implicit NativeLoader account. | SIGNER |
     ModifyAccounts {
         accounts: HashMap<Pubkey, AccountModificationForInstruction>,
         message: Option<String>,
@@ -33,11 +35,15 @@ pub enum MagicBlockInstruction {
     /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], committee_0, ... }`
+    ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///   the scheduled commits
-    /// - **2..n** `[]`              Accounts to be committed
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Requests the commit to be scheduled. | WRITE, SIGNER |
+    /// | `1` | Magic Context. Stores scheduled commits. | WRITE |
+    /// | `2` | Magic fee-vault. Required for delegated, non-confined payers; otherwise optional. If present when not required, it is validated as usual but skipped for fee charging. | WRITE, OPTIONAL |
+    /// | `m..n` | Commit accounts. `m` is `2` when the fee-vault is omitted and `3` when present. | - |
     ScheduleCommit,
 
     /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
@@ -50,11 +56,15 @@ pub enum MagicBlockInstruction {
     /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], committee_0, ... }`
+    ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
-    ///   the scheduled commits
-    /// - **2..n** `[]`              Accounts to be committed and undelegated
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Requests the commit to be scheduled. | WRITE, SIGNER |
+    /// | `1` | Magic Context. Stores scheduled commits. | WRITE |
+    /// | `2` | Magic fee-vault. Required for delegated, non-confined payers; otherwise optional. If present when not required, it is validated as usual but skipped for fee charging. | WRITE, OPTIONAL |
+    /// | `m..n` | Commit and undelegate accounts. `m` is `2` when the fee-vault is omitted and `3` when present. | - |
     ScheduleCommitAndUndelegate,
 
     /// Moves the scheduled commit from the MagicContext to the global scheduled commits
@@ -64,8 +74,10 @@ pub enum MagicBlockInstruction {
     /// in time for the validator to realize the commits right after.
     ///
     /// # Account references
-    /// - **0.**  `[SIGNER]` Validator Authority
-    /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes accepting scheduled commits. | SIGNER |
+    /// | `1` | Magic Context. Contains the initially scheduled commits. | WRITE |
     AcceptScheduleCommits,
 
     /// Records the attempt to realize a scheduled commit on chain.
@@ -77,6 +89,12 @@ pub enum MagicBlockInstruction {
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     /// Args: (intent_id, bump) - bump is needed in order to guarantee unique transactions
+    ///
+    /// # Account references
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | MagicBlock program. Must match the MagicBlock program ID. | - |
+    /// | `1` | Validator Authority. Must match the validator identity. | SIGNER |
     ScheduledCommitSent((u64, u64)),
 
     /// Schedules execution of a single *base intent*.
@@ -90,43 +108,53 @@ pub enum MagicBlockInstruction {
     /// This instruction is the legacy/single-intent variant of scheduling. For batching multiple
     /// independent intents into a single instruction, see [`MagicBlockInstruction::ScheduleIntentBundle`].
     ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], account_0, ... }`
+    ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the intent to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context account
-    /// - **2..n** `[]`              Accounts referenced by the intent (including action accounts)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Requests the intent to be scheduled. | WRITE, SIGNER |
+    /// | `1` | Magic Context. Stores scheduled intents. | WRITE |
+    /// | `2` | Magic fee-vault. Required for delegated, non-confined payers; otherwise optional. If present when not required, it is validated as usual but skipped for fee charging. | WRITE, OPTIONAL |
+    /// | `m..n` | Intent accounts. Accounts referenced by the intent, including action accounts. `m` is `2` when the fee-vault is omitted and `3` when present. | - |
     ///
     /// # Data
     /// The embedded [`MagicBaseIntentArgs`] encodes account references by indices into the
-    /// accounts array (compact representation).
+    /// accounts array.
     ScheduleBaseIntent(MagicBaseIntentArgs),
 
     /// Schedule a new task for execution
     ///
     /// # Account references
-    /// - **0.**    `[WRITE, SIGNER]` Payer (payer)
-    /// - **1.**    `[WRITE]`         Task context account
-    /// - **2..n**  `[]`              Accounts included in the task
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Requests task scheduling. | WRITE, SIGNER |
     ScheduleTask(ScheduleTaskArgs),
 
     /// Cancel a task
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Task authority
-    /// - **1.** `[WRITE]`         Task context account
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Task authority. Requests task cancellation. | WRITE, SIGNER |
     CancelTask { task_id: i64 },
 
     /// Disables the executable check, needed to modify the data of a program
     /// in preparation to deploying it via LoaderV4 and to modify its authority.
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]`         Validator authority
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes the executable-check change. | SIGNER |
     DisableExecutableCheck,
 
     /// Enables the executable check, and should run after
     /// a program is deployed with the LoaderV4 and we modified its authority
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]`         Validator authority
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes the executable-check change. | SIGNER |
     EnableExecutableCheck,
 
     /// Noop instruction
@@ -134,7 +162,7 @@ pub enum MagicBlockInstruction {
 
     /// Schedules execution of a *bundle* of intents in a single instruction.
     ///
-    /// A "intent bundle" is an atomic unit of work executed by the validator on the Base layer,
+    /// An intent bundle is an atomic unit of work executed by the validator on the Base layer,
     /// such as:
     /// - standalone base actions
     /// - an optional `Commit`
@@ -143,23 +171,30 @@ pub enum MagicBlockInstruction {
     /// This is the recommended scheduling path when the caller wants to submit multiple
     /// independent intents while paying account overhead only once.
     ///
+    /// Layout: `{ payer, magic_context, [magic_fee_vault], account_0, ... }`
+    ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the bundle to be scheduled
-    /// - **1.**   `[WRITE]`         Magic Context account
-    /// - **2..n** `[]`              All accounts referenced by any intent in the bundle
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Requests the bundle to be scheduled. | WRITE, SIGNER |
+    /// | `1` | Magic Context. Stores scheduled intents. | WRITE |
+    /// | `2` | Magic fee-vault. Required for delegated, non-confined payers; otherwise optional. If present when not required, it is validated as usual but skipped for fee charging. | WRITE, OPTIONAL |
+    /// | `m..n` | Intent accounts. All accounts referenced by any intent. `m` is `2` when the fee-vault is omitted and `3` when present. | - |
     ///
     /// # Data
-    /// The embedded [`MagicIntentBundleArgs`] encodes account references by indices into the
-    /// accounts array.
+    /// The embedded [`MagicIntentBundleArgs`] encodes account references by their actual
+    /// indices in the accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
 
     /// Creates a new ephemeral account with rent paid by a sponsor.
     /// The account is automatically owned by the calling program (CPI caller).
     ///
     /// # Account references
-    /// - **0.** `[WRITE]` Sponsor account (pays rent, can be PDA or oncurve)
-    /// - **1.** `[WRITE]` Ephemeral account to create (must have 0 lamports)
-    /// - **2.** `[WRITE]` Vault account (receives rent payment)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor. Pays rent; can be PDA or oncurve. | WRITE |
+    /// | `1` | Ephemeral account. Account to create; must have 0 lamports. | WRITE |
+    /// | `2` | Vault. Receives rent payment. | WRITE |
     CreateEphemeralAccount {
         /// Initial data length in bytes
         data_len: u32,
@@ -168,9 +203,11 @@ pub enum MagicBlockInstruction {
     /// Resizes an existing ephemeral account, adjusting rent accordingly.
     ///
     /// # Account references
-    /// - **0.** `[WRITE]` Sponsor account (pays/receives rent difference)
-    /// - **1.** `[WRITE]` Ephemeral account to resize
-    /// - **2.** `[WRITE]` Vault account (holds/receives lamports for rent transfer)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor. Pays or receives the rent difference. | WRITE |
+    /// | `1` | Ephemeral account. Account to resize. | WRITE |
+    /// | `2` | Vault. Holds lamports for rent transfer. | WRITE |
     ResizeEphemeralAccount {
         /// New data length in bytes
         new_data_len: u32,
@@ -179,9 +216,11 @@ pub enum MagicBlockInstruction {
     /// Closes an ephemeral account, refunding rent to the sponsor.
     ///
     /// # Account references
-    /// - **0.** `[WRITE]` Sponsor account (receives rent refund)
-    /// - **1.** `[WRITE]` Ephemeral account to close
-    /// - **2.** `[WRITE]` Vault account (source of rent refund)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor. Receives rent refund. | WRITE |
+    /// | `1` | Ephemeral account. Account to close. | WRITE |
+    /// | `2` | Vault. Source of rent refund. | WRITE |
     CloseEphemeralAccount,
 
     /// Unsed instruction slot.
@@ -194,8 +233,10 @@ pub enum MagicBlockInstruction {
     /// Clone a single account that fits in one transaction (<63KB data).
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Account to clone
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes cloning. | WRITE, SIGNER |
+    /// | `1` | Account. Account to clone. | WRITE |
     CloneAccount {
         pubkey: Pubkey,
         data: Vec<u8>,
@@ -208,8 +249,10 @@ pub enum MagicBlockInstruction {
     /// with is_last=true to complete.
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Account to clone
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes cloning. | WRITE, SIGNER |
+    /// | `1` | Account. Account to clone. | WRITE |
     CloneAccountInit {
         pubkey: Pubkey,
         total_data_len: u32,
@@ -221,8 +264,10 @@ pub enum MagicBlockInstruction {
     /// If is_last=true, removes the pubkey from PENDING_CLONES.
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Account being cloned
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes cloning. | WRITE, SIGNER |
+    /// | `1` | Account. Account being cloned. | WRITE |
     CloneAccountContinue {
         pubkey: Pubkey,
         offset: u32,
@@ -236,8 +281,10 @@ pub enum MagicBlockInstruction {
     /// and deletes the account.
     ///
     /// # Account references
-    /// - **0.** `[WRITE, SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Account to cleanup
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes cleanup. | WRITE, SIGNER |
+    /// | `1` | Account. Account to clean up. | WRITE |
     CleanupPartialClone { pubkey: Pubkey },
 
     /// Finalize program deployment from a buffer account.
@@ -249,9 +296,11 @@ pub enum MagicBlockInstruction {
     /// After this, LoaderV4::Deploy must be called, then SetProgramAuthority.
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Program account
-    /// - **2.** `[WRITE]` Buffer account (closed after)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes finalization. | SIGNER |
+    /// | `1` | Program account. Program account to finalize. | WRITE |
+    /// | `2` | Buffer account. Closed after finalization. | WRITE |
     FinalizeProgramFromBuffer { remote_slot: u64 },
 
     /// Finalize V1 program deployment from a buffer account.
@@ -262,18 +311,22 @@ pub enum MagicBlockInstruction {
     /// 3. Closes buffer account
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Program account
-    /// - **2.** `[WRITE]` Program data account
-    /// - **3.** `[WRITE]` Buffer account (closed after)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes finalization. | SIGNER |
+    /// | `1` | Program account. Program account to finalize. | WRITE |
+    /// | `2` | Program data account. Created with V3 ProgramData header and ELF data. | WRITE |
+    /// | `3` | Buffer account. Closed after finalization. | WRITE |
     FinalizeV1ProgramFromBuffer { remote_slot: u64, authority: Pubkey },
 
     /// Update the authority in a LoaderV4 program header.
     /// Used after Deploy to set the final chain authority.
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]` Validator Authority
-    /// - **1.** `[WRITE]` Program account
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes the authority update. | SIGNER |
+    /// | `1` | Program account. LoaderV4 program account to update. | WRITE |
     SetProgramAuthority { authority: Pubkey },
 
     /// Attaches a callback to a previously scheduled action in the latest intent.
@@ -282,11 +335,14 @@ pub enum MagicBlockInstruction {
     /// action. The caller's program ID is checked against the action's
     /// `source_program` field for authorization.
     ///
-    /// If the payer account is delegated, a callback fee is deducted from it.
+    /// A callback fee is deducted from the delegated payer into the magic fee-vault.
     ///
     /// # Account references
-    /// - **0.**   `[WRITE, SIGNER]` Payer
-    /// - **1.**   `[WRITE]`         Magic Context account
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Payer. Delegated payer charged for the callback. | WRITE, SIGNER |
+    /// | `1` | Magic Context. Contains the latest scheduled intent. | WRITE |
+    /// | `2` | Magic fee-vault. Required; receives the callback fee. | WRITE |
     AddActionCallback(AddActionCallbackArgs),
 
     /// Evict an account from the ephemeral validator.
@@ -297,16 +353,20 @@ pub enum MagicBlockInstruction {
     /// Rejects accounts that are delegated or undelegating.
     ///
     /// # Account references
-    /// - **0.** `[SIGNER]`  Validator Authority
-    /// - **1.** `[WRITE]`   Account to evict
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes eviction. | SIGNER |
+    /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
 
     /// Executes a crank
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Crank signer PDA
-    /// - **2..n** `[]`        Accounts required by the embedded instructions
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes crank execution. | SIGNER |
+    /// | `1` | Crank signer PDA. PDA signer used by embedded instructions. | - |
+    /// | `2..n` | Instruction accounts. Accounts required by the embedded instructions. | - |
     ExecuteCrank {
         authority: Pubkey,
         instructions: Vec<Instruction>,
@@ -353,9 +413,11 @@ pub enum CallbackInstruction {
     /// Executes a callback
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Callback signer PDA
-    /// - **2..n** `[]`        Accounts required by the embedded instructions
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator authority | SIGNER |
+    /// | `1` | Callback signer PDA | - |
+    /// | `2..n` | Accounts required by the embedded instructions | - |
     ExecuteCallback { instruction: Instruction },
 }
 
@@ -366,10 +428,12 @@ pub enum PostDelegationActionExecutorInstruction {
     /// clone instruction in the same transaction.
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Delegated clone target
-    /// - **2.**   `[]`        Instructions sysvar
-    /// - **3..n** `[]`        Accounts required by the embedded instructions
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator authority | SIGNER |
+    /// | `1` | Delegated clone target | - |
+    /// | `2` | Instructions sysvar | - |
+    /// | `3..n` | Accounts required by the embedded instructions | - |
     Execute {
         cloned_account_pubkey: Pubkey,
         actions: Vec<Instruction>,
@@ -379,10 +443,12 @@ pub enum PostDelegationActionExecutorInstruction {
     /// instruction in the same transaction.
     ///
     /// # Account references
-    /// - **0.**   `[SIGNER]`  Validator authority
-    /// - **1.**   `[]`        Delegated clone target
-    /// - **2.**   `[]`        Instructions sysvar
-    /// - **3.**   `[WRITE]`   Magic Context account
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator authority | SIGNER |
+    /// | `1` | Delegated clone target | - |
+    /// | `2` | Instructions sysvar | - |
+    /// | `3` | Magic Context account | WRITE |
     ScheduleUndelegation { cloned_account_pubkey: Pubkey },
 }
 
@@ -391,18 +457,26 @@ pub enum PostDelegationActionExecutorInstruction {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum EphemeralSystemInstruction {
     /// # Account references
-    /// - 0. [WRITE] Sponsor account (pays rent, can be PDA or oncurve)
-    /// - 1. [WRITE] Ephemeral account to create (must have 0 lamports)
-    /// - 2. [WRITE] Vault account (receives rent payment)
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor account (pays rent, can be PDA or oncurve) | WRITE |
+    /// | `1` | Ephemeral account to create (must have 0 lamports) | WRITE |
+    /// | `2` | Vault account (receives rent payment) | WRITE |
     CreateEphemeralAccount { data_len: u32 },
 
-    /// - 0. [WRITE] Sponsor account (pays/receives rent difference)
-    /// - 1. [WRITE] Ephemeral account to resize
-    /// - 2. [WRITE] Vault account (holds/receives lamports for rent transfer)
+    /// # Account references
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor account (pays/receives rent difference) | WRITE |
+    /// | `1` | Ephemeral account to resize | WRITE |
+    /// | `2` | Vault account (holds/receives lamports for rent transfer) | WRITE |
     ResizeEphemeralAccount { new_data_len: u32 },
 
-    /// - 0. [WRITE] Sponsor account (receives rent refund)
-    /// - 1. [WRITE] Ephemeral account to close
-    /// - 2. [WRITE] Vault account (source of rent refund)
+    /// # Account references
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Sponsor account (receives rent refund) | WRITE |
+    /// | `1` | Ephemeral account to close | WRITE |
+    /// | `2` | Vault account (source of rent refund) | WRITE |
     CloseEphemeralAccount,
 }

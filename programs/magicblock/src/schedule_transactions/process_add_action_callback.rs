@@ -73,13 +73,18 @@ pub(crate) fn process_add_action_callback(
         transaction_context,
         invoke_context,
         PAYER_IDX,
-        MAGIC_FEE_VAULT_IDX
-    )?.ok_or(InstructionError::MissingAccount)
-    .inspect_err(|_| {
-        ic_msg!(
-            invoke_context,
-            "AddActionCallback ERR: magic fee vault account required to be passed"
-        );
+        MAGIC_FEE_VAULT_IDX,
+    )?
+    .0
+    .ok_or(InstructionError::MissingAccount)
+    .map_err(|err| {
+        if matches!(err, InstructionError::MissingAccount) {
+            ic_msg!(
+                invoke_context,
+                "AddActionCallback ERR: magic fee vault account required to be passed"
+            );
+        }
+        err
     })?;
 
     // Charge User for callback
