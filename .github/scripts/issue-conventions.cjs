@@ -60,8 +60,10 @@ function readSections(body) {
 
 function hasAnswer(lines) {
   return lines.some((line) => {
-    const text = line.trim();
+    const text = line.replace(/<br\s*\/?\s*>/gi, '').trim()
+      .replace(/^(?:>[ \t]*)+/, '').trim();
     return text && !/^_No response_$/i.test(text)
+      && !/^(?:[-*_][ \t]*){3,}$/.test(text)
       && !/^(?:[-*+]|\d+[.)])(?:\s+\[[ xX]\])?$/.test(text);
   });
 }
