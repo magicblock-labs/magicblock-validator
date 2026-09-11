@@ -64,7 +64,7 @@ RPC fallback period.
 
 | Crate | Purpose | Depends on | Used by | Notes |
 |---|---|---|---|---|
-| `magicblock-task-scheduler` | Program-scheduled task/crank service. | engine, config, core, magic program | `mbv-leader` | SQLite-backed delay queue, retries/backoff, and engine transaction submission. See `.agents/context/crates/magicblock-task-scheduler.md` before changing this crate. |
+| `magicblock-task-scheduler` | Program-scheduled task/crank service. | engine, hydra-api, keeper, magic program, nucleus | `mbv-leader` | Stateless Hydra crank create/cancel from committed Magic Program `TaskRequest`s. See `.agents/context/crates/magicblock-task-scheduler.md` before changing this crate. |
 | `magicblock-services` | Shared validator services/adapters. | engine, chainlink, core, magic-program API, metrics, magic program | `mbv-leader` | Callback adapter and owner-program undelegation request observer. See `.agents/context/crates/magicblock-services.md` before changing this crate. |
 | `magicblock-metrics` | Metrics helpers and combined Prometheus endpoint. | none | leader, verifier, RPC, ledger, chainlink, committor, table-mania | Its endpoint combines the namespaced MBV registry with Engine collectors from the process-wide default registry. See `.agents/context/crates/magicblock-metrics.md` before changing this crate. |
 

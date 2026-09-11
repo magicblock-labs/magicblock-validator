@@ -1,5 +1,6 @@
 pub mod args;
 pub mod compat;
+pub mod ephemeral;
 pub mod instruction;
 pub mod pda;
 pub mod response;
@@ -35,3 +36,11 @@ pub const MAGIC_CONTEXT_SIZE: usize = 1024 * 1024 * 5; // 5 MB
 /// Rent rate for ephemeral accounts: 32 lamports per byte.
 /// This is ~109x cheaper than Solana's base rent (3,480 lamports/byte).
 pub const EPHEMERAL_RENT_PER_BYTE: u64 = 32;
+
+/// Fixed per-account storage overhead charged as rent on top of the data.
+///
+/// Rent is a policy of the magic program rather than of the account layout, so
+/// the value is pinned here: lamports (8) + owner (32) + slot (8) + flags (4) +
+/// data capacity (4) + data length (4). It previously came from the account
+/// crate, which no longer publishes its static size.
+pub const EPHEMERAL_ACCOUNT_STATIC_SIZE: u64 = 60;
