@@ -1,7 +1,6 @@
 use borsh::BorshDeserialize;
 use magicblock_committor_program::Chunks;
 use magicblock_committor_service::{
-    persist::IntentPersisterImpl,
     tasks::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -48,11 +47,7 @@ async fn test_prepare_commit_tx_with_single_account() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_strategy(
-            &fixture.authority,
-            &mut tx_strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
         .await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
@@ -113,11 +108,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
 
     // Test preparation
     let mut actual_message = preparator
-        .prepare_for_strategy(
-            &fixture.authority,
-            &mut tx_strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
         .await
         .unwrap();
 
@@ -207,11 +198,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
 
     // Test preparation
     let mut actual_message = preparator
-        .prepare_for_strategy(
-            &fixture.authority,
-            &mut tx_strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
         .await
         .unwrap();
 
@@ -288,11 +275,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
 
     // Test preparation
     let result = preparator
-        .prepare_for_strategy(
-            &fixture.authority,
-            &mut tx_strategy,
-            &None::<IntentPersisterImpl>,
-        )
+        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
         .await;
 
     assert!(result.is_ok());

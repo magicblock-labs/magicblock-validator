@@ -1,3 +1,4 @@
+use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use thiserror::Error;
@@ -13,6 +14,8 @@ pub enum TransactionPreparatorError {
     FailedToFitError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
+    #[error("Failed to get latest blockhash: {0}")]
+    GetLatestBlockhashError(#[source] MagicBlockRpcClientError),
     #[error("DeliveryPreparationError: {0}")]
     DeliveryPreparationError(Box<DeliveryPreparatorError>),
 }
@@ -34,6 +37,7 @@ impl TransactionPreparatorError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::FailedToFitError | Self::SignerError(_) => false,
+            Self::GetLatestBlockhashError(err) => err.is_transient(),
             Self::DeliveryPreparationError(err) => err.is_transient(),
         }
     }

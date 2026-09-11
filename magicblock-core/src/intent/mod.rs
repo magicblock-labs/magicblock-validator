@@ -6,6 +6,8 @@ use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
 use wincode::{SchemaRead, SchemaWrite};
+
+pub mod outbox;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs
