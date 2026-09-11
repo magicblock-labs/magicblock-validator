@@ -1,0 +1,31 @@
+name: Spike / question
+description: Ask a design question or request an investigation
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: state the decision or unknown concisely in sentence case,
+        without a category prefix or terminal punctuation.
+        Example: `Determine whether snapshots require versioned manifests`
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What needs to be decided or understood?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What led to this question, and what is already known?
+    validations:
+      required: true
+  - type: textarea
+    id: desired-output
+    attributes:
+      label: Desired output
+      description: What answer, recommendation, prototype, or other artifact would be useful?
+    validations:
+      required: true

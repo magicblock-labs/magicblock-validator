@@ -1,0 +1,58 @@
+name: Run CI - Conventions
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, edited]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  conventions:
+    name: PR title and commit subjects
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Validate title and commits
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs');
+          const { execFileSync } = require('node:child_process');
+          const { pull_request: pr } = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+          const format = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+\))?!?: [a-z][^\r\n]*$/;
+          const valid = (subject) => format.test(subject) && !/[\s.!?]$/.test(subject);
+
+          // Fetch the event's base explicitly: the branch may have moved since the event.
+          execFileSync('git', ['fetch', '--no-tags', 'origin', pr.base.sha], { stdio: 'inherit' });
+          const log = execFileSync('git', [
+            'log', '--no-merges', '-z', '--format=%H%x00%B', `${pr.base.sha}..${pr.head.sha}`, '--',
+          ], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+          const invalid = [];
+          if (!valid(pr.title)) invalid.push(`PR title: ${JSON.stringify(pr.title)}`);
+          const commits = log ? log.slice(0, -1).split('\0') : [];
+          // Read the raw first line: git's %s would normalize malformed whitespace.
+          for (let index = 0; index < commits.length; index += 2) {
+            const sha = commits[index];
+            const subject = commits[index + 1].split(/\r?\n/, 1)[0];
+            if (!valid(subject)) invalid.push(`${sha}: ${JSON.stringify(subject)}`);
+          }
+          if (invalid.length) {
+            console.error('Invalid PR title or commit subjects:\n' + invalid.join('\n'));
+            console.error('Expected type(scope)!: description; scope and ! are optional.');
+            console.error('Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert.');
+            console.error('Use a lowercase initial and no trailing whitespace or terminal . ! ?');
+            console.error('Example: fix(runtime): preserve account ownership');
+            process.exitCode = 1;
+          } else {
+            console.log('PR title and all non-merge commit subjects conform.');
+          }
+          NODE

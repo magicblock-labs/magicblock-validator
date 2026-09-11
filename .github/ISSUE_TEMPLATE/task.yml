@@ -1,0 +1,33 @@
+name: Task
+description: Track a concrete, scoped unit of work
+type: Task
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: start with an imperative verb and describe the completed outcome
+        in sentence case, without a category prefix or terminal punctuation.
+        Example: `Configure full Rust CI workflow`
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: What should be true when this task is complete?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What work is included, and what should remain unchanged?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance criteria
+      description: List the observable conditions that define completion.
+      placeholder: '- [ ] Describe an observable condition'
+    validations:
+      required: true

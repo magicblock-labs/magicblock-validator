@@ -1,0 +1,34 @@
+name: Check issue conventions
+
+on:
+  issues:
+    types: [opened, edited, reopened, transferred]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  conventions:
+    name: Issue title and required sections
+    runs-on: ubuntu-latest
+    steps:
+      # Issue events run trusted default-branch code, never code supplied by an issue.
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Install validator dependency
+        working-directory: .github/scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Validate issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const validate = require('./.github/scripts/issue-conventions.cjs');
+            await validate({ github, context, core });
