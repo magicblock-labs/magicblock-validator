@@ -426,8 +426,8 @@ impl Ledger {
             let transactions = self
                 .slot_signatures_cf
                 .iter_current_index_filtered(IteratorMode::From(
-                    (slot, u32::MAX),
-                    IteratorDirection::Reverse,
+                    (slot, 0),
+                    IteratorDirection::Forward,
                 ))
                 .take_while(|((tx_slot, _), _)| *tx_slot == slot)
                 .map(|(_, bytes)| {
@@ -482,6 +482,8 @@ impl Ledger {
             .fetch_add(1, Ordering::Relaxed);
 
         self.read_range(|oldest_slot, lowest| {
+            // Preserve the history API's genesis exclusion for rows and cursors.
+            let oldest_slot = oldest_slot.max(1);
             let before = before
                 .map(|signature| {
                     self.signature_position(signature, oldest_slot, lowest)
@@ -501,8 +503,6 @@ impl Ledger {
             };
             let highest = (highest_slot, u32::MAX);
             let start = before.unwrap_or(highest).min(highest);
-            // Preserve the history API's exclusion of genesis-slot transactions.
-            let oldest_slot = oldest_slot.max(1);
             if limit == 0
                 || start.0 < oldest_slot
                 || until.is_some_and(|end| start <= end)
@@ -612,7 +612,7 @@ impl Ledger {
                     let mut iterator = self
                         .transaction_cf
                         .iter_current_index_filtered(IteratorMode::From(
-                            (signature, highest_confirmed_slot),
+                            (signature, oldest),
                             IteratorDirection::Forward,
                         ));
                     let Some(((found, slot), _)) = iterator.next() else {
@@ -622,9 +622,6 @@ impl Ledger {
                         return Ok(None);
                     }
                     *lowest = slot;
-                    if slot < oldest {
-                        return Err(LedgerError::SlotCleanedUp);
-                    }
                     (slot, None)
                 }
             };
@@ -801,7 +798,7 @@ impl Ledger {
         let mut iterator = self
             .transaction_status_cf
             .iter_current_index_filtered(IteratorMode::From(
-                (signature, oldest_slot.max(1)),
+                (signature, oldest_slot),
                 IteratorDirection::Forward,
             ));
         let ((found, slot), bytes) = iterator.next()?;
