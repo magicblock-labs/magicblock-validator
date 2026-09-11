@@ -1,7 +1,10 @@
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
-    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
-    instruction::MagicBlockInstruction, outbox, pda::crank_signer_pda,
+    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    args::ScheduleTaskArgs,
+    instruction::{MagicBlockInstruction, OutboxIntentInstruction},
+    outbox,
+    pda::crank_signer_pda,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -140,13 +143,12 @@ impl InstructionUtils {
         scheduled_commit_id: u64,
     ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
         ];
         Instruction::new_with_wincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            OUTBOX_INTENT_PROGRAM_ID,
+            &OutboxIntentInstruction::ScheduledCommitSent(scheduled_commit_id),
             account_metas,
         )
     }
@@ -166,13 +168,12 @@ impl InstructionUtils {
         intent_id: u64,
     ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_wincode(
-            crate::id(),
-            &MagicBlockInstruction::CloseOutboxIntent(intent_id),
+            OUTBOX_INTENT_PROGRAM_ID,
+            &OutboxIntentInstruction::CloseOutboxIntent(intent_id),
             account_metas,
         )
     }
@@ -192,8 +193,8 @@ impl InstructionUtils {
         intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
         let mut account_metas = vec![
-            AccountMeta::new(validator_authority_id(), true),
-            AccountMeta::new_readonly(crate::id(), false),
+            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(OUTBOX_INTENT_PROGRAM_ID, false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
         ];
 
@@ -233,8 +234,8 @@ impl InstructionUtils {
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_wincode(
-            crate::id(),
-            &MagicBlockInstruction::SetIntentExecutionStage {
+            OUTBOX_INTENT_PROGRAM_ID,
+            &OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,
                 stage,
             },

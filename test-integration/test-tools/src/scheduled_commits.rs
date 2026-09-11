@@ -6,7 +6,9 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use borsh::BorshDeserialize;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    pubkey::Pubkey, signature::Signature, transaction::TransactionError,
+};
 
 use crate::IntegrationTestContext;
 
@@ -140,6 +142,7 @@ where
     pub excluded: Vec<Pubkey>,
     pub feepayers: HashSet<(Pubkey, Pubkey)>,
     pub sigs: Vec<Signature>,
+    pub commit_sent_result: Result<(), TransactionError>,
 }
 
 impl<T> ScheduledCommitResult<T>
@@ -204,6 +207,15 @@ impl IntegrationTestContext {
                     ephem_logs_l1, scheduled_commmit_sent_sig
                 )
             })?;
+        let commit_sent_result = self
+            .try_ephem_client()?
+            .get_signature_status(&scheduled_commmit_sent_sig)?
+            .with_context(|| {
+                format!(
+                    "Signature status not found for ScheduledCommitSent sig {:?}",
+                    scheduled_commmit_sent_sig
+                )
+            })?;
 
         let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&ephem_logs_l2);
@@ -235,6 +247,7 @@ impl IntegrationTestContext {
             excluded,
             feepayers,
             sigs,
+            commit_sent_result,
         })
     }
 }
