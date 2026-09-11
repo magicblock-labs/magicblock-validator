@@ -25,8 +25,8 @@ use crate::{
     },
     outbox::OutboxClient,
     tasks::task_info_fetcher::{
-        CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
-        TaskInfoFetcherResult,
+        AccountSnapshot, CacheTaskInfoFetcher, RpcTaskInfoFetcher,
+        TaskInfoFetcher, TaskInfoFetcherResult,
     },
 };
 
@@ -203,11 +203,11 @@ impl<D: BacklogDB> CommittorProcessor<D> {
     /// Fetches current commit nonces
     pub async fn fetch_current_commit_nonces(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
         self.task_info_fetcher
-            .fetch_current_commit_nonces(pubkeys, min_context_slot)
+            .fetch_current_commit_nonces(accounts, min_context_slot)
             .await
     }
 

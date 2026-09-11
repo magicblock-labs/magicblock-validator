@@ -712,11 +712,8 @@ mod tests {
         // Send several messages that will fail
         const NUM_FAILURES: usize = 10;
         for i in 0..NUM_FAILURES {
-            let msg = create_test_intent(
-                i as u64,
-                &[pubkey!("1111111111111111111111111111111111111111111")],
-                false,
-            );
+            let msg =
+                create_test_intent(i as u64, &[Pubkey::new_unique()], false);
             sender.schedule(vec![msg]).unwrap();
         }
 
