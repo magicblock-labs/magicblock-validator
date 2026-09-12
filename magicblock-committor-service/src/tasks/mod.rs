@@ -44,7 +44,10 @@ pub enum BaseTaskImpl {
 
 impl BaseTask for BaseTaskImpl {
     fn program_id(&self) -> Pubkey {
-        dlp_api::id()
+        match self {
+            Self::BaseAction(_) => dlp_api::consts::ACTION_EXECUTOR_PROGRAM_ID,
+            _ => dlp_api::id(),
+        }
     }
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
@@ -270,13 +273,13 @@ impl BaseActionTask {
 
         match self {
             Self::V1(_) => {
-                dlp_api::instruction_builder::call_handler_size_budget(
+                dlp_api::instruction_builder::execute_action_size_budget(
                     AccountSizeClass::Medium,
                     other_accounts_budget,
                 )
             }
             Self::V2(_) => {
-                dlp_api::instruction_builder::call_handler_v2_size_budget(
+                dlp_api::instruction_builder::execute_action_v2_size_budget(
                     AccountSizeClass::Medium,
                     AccountSizeClass::Medium,
                     other_accounts_budget,
@@ -305,7 +308,7 @@ impl BaseActionTaskV1 {
             .collect();
 
         #[allow(deprecated)]
-        dlp_api::instruction_builder::call_handler(
+        dlp_api::instruction_builder::execute_action(
             *validator,
             action.destination_program,
             action.escrow_authority,
@@ -366,7 +369,7 @@ pub struct BaseActionTaskV2 {
 impl BaseActionTaskV2 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
-        dlp_api::instruction_builder::call_handler_v2(
+        dlp_api::instruction_builder::execute_action_v2(
             *validator,
             action.destination_program,
             self.source_program,
