@@ -18,6 +18,7 @@ use magicblock_ledger_deprecated::Ledger;
 use magicblock_metrics::metrics::{
     RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT,
 };
+use tokio::sync::Semaphore;
 
 use crate::{
     error::RpcError,
@@ -99,8 +100,10 @@ pub(crate) struct HttpDispatcher {
     pub(crate) blocktime_ms: u64,
     /// The engine: account/block/transaction reads and transaction submission.
     pub(crate) engine: Engine,
-    /// Read-only deprecated ledger, used as a fallback for historical reads.
-    pub(crate) ledger: Arc<Ledger>,
+    /// Read-only historical fallback, accessed only through `with_ledger`.
+    ledger: Arc<Ledger>,
+    /// Bounds synchronous RocksDB reads without occupying RPC workers while waiting.
+    ledger_reads: Semaphore,
     /// Chainlink provides synchronization of on-chain accounts and
     /// fetches accounts used in a specific transaction as well as those
     /// required when getting account info, etc.
@@ -113,6 +116,7 @@ impl HttpDispatcher {
             blocktime_ms: state.blocktime_ms,
             engine: state.engine,
             ledger: state.ledger,
+            ledger_reads: Semaphore::new((num_cpus::get() / 4).max(1)),
             chainlink: state.chainlink,
         })
     }
@@ -258,6 +262,29 @@ impl HttpDispatcher {
             MethodNotFound => Err(RpcError::method_not_found()),
         };
         (result, 0)
+    }
+
+    /// Bounds legacy disk work and keeps it off RPC workers. Engine reads and
+    /// request validation must happen before admission. The permit remains held
+    /// until the synchronous read and any enclosed encoding finish.
+    ///
+    /// Current-thread runtimes run inline because `block_in_place` is unsupported.
+    pub(crate) async fn with_ledger<T>(
+        &self,
+        read: impl FnOnce(&Ledger) -> T,
+    ) -> T {
+        use tokio::runtime::{Handle, RuntimeFlavor};
+
+        let _permit = self
+            .ledger_reads
+            .acquire()
+            .await
+            .expect("ledger semaphore is never closed");
+        if Handle::current().runtime_flavor() == RuntimeFlavor::MultiThread {
+            tokio::task::block_in_place(|| read(&self.ledger))
+        } else {
+            read(&self.ledger)
+        }
     }
 
     /// Set CORS/Access control related headers (required by explorers/web apps)

@@ -3629,7 +3629,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3641,7 +3641,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3658,7 +3658,7 @@ dependencies = [
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-keeper",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "magicblock-metrics",
  "parking_lot",
  "scc",
@@ -3700,7 +3700,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "borsh 1.8.1",
  "paste",
@@ -3715,7 +3715,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "async-trait",
  "borsh 1.8.1",
@@ -3760,7 +3760,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "clap",
  "derive_more",
@@ -3778,9 +3778,9 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "serde",
  "solana-account 4.3.1",
  "solana-clock 3.1.1",
@@ -4009,7 +4009,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "const-crypto",
  "serde",
@@ -4021,7 +4021,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -4068,13 +4068,13 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "lazy_static",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
  "magicblock-engine-nucleus",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "num-derive",
  "num-traits",
  "parking_lot",
@@ -4105,7 +4105,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "futures-util",
  "magicblock-metrics",
@@ -4131,7 +4131,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "ed25519-dalek 1.0.1",
  "magicblock-metrics",
@@ -4158,7 +4158,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "chrono",
  "futures-util",
@@ -4184,7 +4184,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-admin"
-version = "0.15.1"
+version = "0.15.3"
 dependencies = [
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
  "magicblock-engine",
@@ -4872,7 +4872,7 @@ dependencies = [
  "borsh 1.8.1",
  "ephemeral-rollups-sdk",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "rkyv",
  "solana-program 3.0.0",
  "solana-system-interface 3.2.0",
@@ -5749,7 +5749,7 @@ dependencies = [
  "integration-test-tools",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "magicblock-program",
  "program-schedulecommit",
  "rand 0.8.7",
@@ -5769,7 +5769,7 @@ dependencies = [
  "integration-solana-sdk",
  "integration-test-tools",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=dcd46dc)",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
@@ -9760,7 +9760,7 @@ dependencies = [
  "integration-solana-sdk",
  "integration-test-tools",
  "log",
- "magicblock-magic-program-api 0.15.1",
+ "magicblock-magic-program-api 0.15.3",
  "program-schedulecommit",
  "schedulecommit-client",
  "serial_test",

@@ -350,8 +350,8 @@ impl Ledger {
             let index_iterator = self
                 .slot_signatures_cf
                 .iter_current_index_filtered(IteratorMode::From(
-                    (slot, u32::MAX),
-                    IteratorDirection::Reverse,
+                    (slot, 0),
+                    IteratorDirection::Forward,
                 ));
 
             let mut signatures = vec![];
