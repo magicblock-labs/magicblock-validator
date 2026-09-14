@@ -1,0 +1,32 @@
+name: Change request
+description: Request a product, API, storage, or behavior change
+type: Feature
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: start with an imperative verb and describe the requested outcome
+        in sentence case, without a category prefix or terminal punctuation.
+        Example: `Add durable engine state replication`
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome should this change produce?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What problem or limitation does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What should change, and what should remain unchanged?
+    validations:
+      required: true
