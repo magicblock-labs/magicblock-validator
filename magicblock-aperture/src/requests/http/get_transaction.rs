@@ -9,7 +9,7 @@ impl HttpDispatcher {
     ///
     /// Fetches the details of a confirmed transaction from the ledger by its
     /// signature. Returns `null` if the transaction is not found.
-    pub(crate) fn get_transaction(
+    pub(crate) async fn get_transaction(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -21,32 +21,40 @@ impl HttpDispatcher {
         let signature = some_or_err!(signature);
         let config = config.unwrap_or_default();
 
-        // Fetch the complete transaction details from the persistent ledger.
-        let transaction =
-            self.ledger.get_complete_transaction(signature, u64::MAX)?;
+        self.with_ledger(|ledger| {
+            // Fetch the complete transaction details from the persistent ledger.
+            let transaction =
+                ledger.get_complete_transaction(signature, u64::MAX)?;
 
-        let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
-        // This implementation supports all transaction versions, so we pass a max version number.
-        let max_version = Some(u8::MAX);
+            let encoding =
+                config.encoding.unwrap_or(UiTransactionEncoding::Json);
+            // This implementation supports all transaction versions, so we pass a max version number.
+            let max_version = Some(u8::MAX);
 
-        // If the transaction was found, encode it for the RPC response.
-        let encoded_transaction =
-            transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
+            // If the transaction was found, encode it for the RPC response.
+            let encoded_transaction = transaction
+                .and_then(|tx| tx.encode(encoding, max_version).ok());
 
-        let mut encoded_value = value_from_serializable(&encoded_transaction)
+            let mut encoded_value = value_from_serializable(
+                &encoded_transaction,
+            )
             .ok_or_else(|| {
-            RpcError::internal("failed to serialize getTransaction response")
-        })?;
-        normalize_failed_transaction_balance_arrays(&mut encoded_value);
+                RpcError::internal(
+                    "failed to serialize getTransaction response",
+                )
+            })?;
+            normalize_failed_transaction_balance_arrays(&mut encoded_value);
 
-        if encoding == UiTransactionEncoding::JsonParsed {
-            sanitize_nan_strings(&mut encoded_value);
-        }
+            if encoding == UiTransactionEncoding::JsonParsed {
+                sanitize_nan_strings(&mut encoded_value);
+            }
 
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            encoded_value,
-        ))
+            Ok(ResponsePayload::encode_no_context(
+                &request.id,
+                encoded_value,
+            ))
+        })
+        .await
     }
 }
 
