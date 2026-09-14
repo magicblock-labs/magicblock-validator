@@ -6,7 +6,7 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 
 use crate::{
-    Pubkey, schedule_transactions::validate_callback_accounts,
+    Pubkey, schedule_transactions::validate_callback,
     utils::accounts::get_instruction_pubkey_with_idx, validator::authority,
 };
 
@@ -20,8 +20,9 @@ pub(crate) fn process_execute_callback(
     instruction: Instruction,
 ) -> Result<(), InstructionError> {
     validate(signers, invoke_context)?;
-    validate_callback_accounts(
-        &invoke_context,
+    validate_callback(
+        invoke_context,
+        &instruction.program_id,
         &instruction.accounts,
         "ExecuteCallback ERR",
     )?;
@@ -200,7 +201,7 @@ mod tests {
         );
     }
 
-    // validate_callback_accounts() failures
+    // validate_callback() failures
 
     #[test]
     #[serial]

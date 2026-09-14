@@ -15,7 +15,7 @@ use crate::{
     MagicContext,
     schedule_transactions::{
         MAGIC_CONTEXT_IDX, PAYER_IDX, check_magic_context_id, get_clock,
-        get_parent_program_id, try_get_fee_vault, validate_callback_accounts,
+        get_parent_program_id, try_get_fee_vault, validate_callback,
     },
     utils::{
         account_actions::charge_delegated_payer,
@@ -167,7 +167,7 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Validate account metas
+    // Validate the destination and account metas.
     let accounts_meta: Vec<_> = args
         .accounts
         .iter()
@@ -184,8 +184,9 @@ pub(crate) fn process_add_action_callback(
             },
         )
         .collect();
-    validate_callback_accounts(
-        &invoke_context,
+    validate_callback(
+        invoke_context,
+        &args.destination_program,
         &accounts_meta,
         "AddActionCallback ERR",
     )?;

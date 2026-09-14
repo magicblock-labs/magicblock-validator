@@ -4423,6 +4423,7 @@ version = "0.15.3"
 dependencies = [
  "assert_matches",
  "lazy_static",
+ "magic-root-interface",
  "magicblock-chainlink",
  "magicblock-core",
  "magicblock-delegation-program-api",

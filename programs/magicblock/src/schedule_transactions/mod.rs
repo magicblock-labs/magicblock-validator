@@ -188,13 +188,24 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     })
 }
 
-/// Assert that the callback instructions do not have signers aside from the callback signer
-/// Assert they don't use the validator either
-pub(crate) fn validate_callback_accounts(
-    invoke_context: &&mut InvokeContext,
+/// Keeps user-defined callbacks outside validator-authorized operations.
+pub(crate) fn validate_callback(
+    invoke_context: &InvokeContext,
+    destination_program: &Pubkey,
     accounts_meta: &[AccountMeta],
     err_prefix: &str,
 ) -> Result<(), InstructionError> {
+    // MagicRoot trusts builtin callers in validator-signed transactions, so
+    // excluding the authority from callback account metas is not sufficient.
+    if destination_program == &magic_root_interface::ID {
+        ic_msg!(
+            invoke_context,
+            "{}: illegal program is used as a callback destination",
+            err_prefix,
+        );
+        return Err(InstructionError::UnsupportedProgramId);
+    }
+
     for AccountMeta {
         pubkey,
         is_signer,
