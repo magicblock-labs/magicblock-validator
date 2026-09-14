@@ -27,7 +27,7 @@ on:
       - '.github/actions/setup-solana/**'
   pull_request:
     branches: [master, dev]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -53,8 +53,6 @@ jobs:
     runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build ER Release Artifact
     timeout-minutes: 90
-    env:
-      HOST_CARGO_JOBS: "8"
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -74,9 +72,7 @@ jobs:
       - name: Build validator and verifier release binaries
         run: |
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld -C target-cpu=native" \
-            cargo build --release --locked \
-              --bin magicblock-validator --bin magicblock-verifier \
-              -j "$HOST_CARGO_JOBS"
+            cargo build --release --locked --bin magicblock-validator --bin magicblock-verifier
         shell: bash
         working-directory: magicblock-validator
 

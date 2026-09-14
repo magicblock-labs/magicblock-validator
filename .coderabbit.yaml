@@ -3,12 +3,13 @@
 language: "en-US"
 
 reviews:
-  profile: "chill"
+  profile: "assertive"
   high_level_summary: false
   review_status: false
   review_details: false
   poem: false
   request_changes_workflow: true
+  auto_approve: false
 
   
   
