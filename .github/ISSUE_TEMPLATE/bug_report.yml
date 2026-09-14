@@ -1,0 +1,39 @@
+name: Bug report
+description: Report something broken, surprising, or regressed
+type: Bug
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: describe the observable failure or regression in sentence case,
+        without a category prefix or terminal punctuation.
+        Example: `Duplicate submissions can strand callers until deadline`
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What happened? Include the relevant error or diagnostic evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Give the smallest steps or input that reproduces it. If it is intermittent, say so.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What should happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Include the revision and crate or path. Add environment details only when relevant.
+    validations:
+      required: true
