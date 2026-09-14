@@ -18,6 +18,7 @@ on:
       - 'rust-toolchain.toml'
       - 'test-integration/rust-toolchain.toml'
       - '.github/workflows/ci-test-integration.yml'
+      - '.github/workflows/build-er.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
   pull_request:
@@ -33,6 +34,7 @@ on:
       - 'rust-toolchain.toml'
       - 'test-integration/rust-toolchain.toml'
       - '.github/workflows/ci-test-integration.yml'
+      - '.github/workflows/build-er.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
 
@@ -41,43 +43,9 @@ jobs:
   # shards never invoke `cargo build` / `cargo build-sbf`. Keep the two host
   # Rust builds on extra-large runners because the slowest producer gates the
   # whole matrix.
-  build_leader:
-    runs-on: blacksmith-32vcpu-ubuntu-2404
-    name: Build Leader Artifact
-    env:
-      HOST_CARGO_JOBS: "8"
-    steps:
-      - name: Checkout this magicblock-validator
-        uses: actions/checkout@v5
-        with:
-          path: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
-      # lld typically halves the link step on large rust workspaces.
-      - name: Install lld linker
-        run: sudo apt-get update && sudo apt-get install -y lld
-        shell: bash
-
-      - name: Build leader binary
-        run: |
-          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            cargo build --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
-          strip target/debug/magicblock-validator || true
-        shell: bash
-        working-directory: magicblock-validator
-
-      - name: Upload leader binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: magicblock-validator-bin
-          path: magicblock-validator/target/debug/magicblock-validator
-          retention-days: 1
-          if-no-files-found: error
-          compression-level: 0
+  build_er:
+    name: Build ER
+    uses: ./.github/workflows/build-er.yml
 
   build_sbf:
     runs-on: blacksmith-4vcpu-ubuntu-2404
@@ -343,7 +311,7 @@ jobs:
           compression-level: 0
 
   run_integration_tests:
-    needs: [build_leader, build_sbf, build_integration_tests]
+    needs: [build_er, build_sbf, build_integration_tests]
     runs-on: ${{ matrix.runner || 'blacksmith-8vcpu-ubuntu-2404' }}
     strategy:
       matrix:
@@ -421,11 +389,11 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Download prebuilt leader binary
+      - name: Download prebuilt ER binaries
         uses: actions/download-artifact@v4
         with:
-          name: magicblock-validator-bin
-          path: magicblock-validator/target/debug
+          name: er-debug-bin
+          path: magicblock-validator/target
 
       - name: Download prebuilt test runner binary
         uses: actions/download-artifact@v4

@@ -1,0 +1,116 @@
+name: Build ER
+
+on:
+  workflow_call:
+    outputs:
+      cache_hit:
+        description: Whether the ER debug binaries were restored instead of built
+        value: ${{ jobs.probe.outputs.cache_hit }}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    name: Restore ER Debug Binaries
+    outputs:
+      cache_hit: ${{ steps.restore.outputs.cache-hit }}
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - name: Derive the source key
+        id: key
+        run: echo "key=$KEY" >> "$GITHUB_OUTPUT"
+        shell: bash
+        env:
+          KEY: er-debug-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/.github/workflows/build-er.yml', 'magicblock-validator/.github/actions/setup-build-env/**', 'magicblock-validator/.github/actions/setup-solana/**', 'magicblock-validator/Cargo.lock', 'magicblock-validator/**/Cargo.toml', 'magicblock-validator/**/*.rs', 'magicblock-validator/**/build.rs', 'magicblock-validator/**/*.proto', '!magicblock-validator/test-integration/**', '!magicblock-validator/target/**') }}
+
+      - name: Restore prebuilt ER binaries
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            magicblock-validator/target/debug/magicblock-validator
+            magicblock-validator/target/debug/magicblock-verifier
+            magicblock-validator/target/deploy/magicblock_committor_program.so
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Upload prebuilt ER binaries
+        if: steps.restore.outputs.cache-hit == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: er-debug-bin
+          path: |
+            magicblock-validator/target/debug/magicblock-validator
+            magicblock-validator/target/debug/magicblock-verifier
+            magicblock-validator/target/deploy/magicblock_committor_program.so
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
+
+  build:
+    needs: probe
+    if: needs.probe.outputs.cache_hit != 'true'
+    runs-on: blacksmith-32vcpu-ubuntu-2404
+    name: Build ER Debug Binaries
+    timeout-minutes: 90
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-build-er-debug-v001"
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install lld linker
+        run: sudo apt-get update && sudo apt-get install -y lld
+        shell: bash
+
+      - name: Build validator and verifier debug binaries
+        run: |
+          CARGO_PROFILE_DEV_DEBUG=line-tables-only \
+          RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
+            cargo build --locked --bin magicblock-validator --bin magicblock-verifier
+        shell: bash
+        working-directory: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Build committor program
+        run: |
+          cargo build-sbf --manifest-path magicblock-committor-program/Cargo.toml \
+            --sbf-out-dir target/deploy/ --quiet
+          test -f target/deploy/magicblock_committor_program.so
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Save prebuilt ER binaries
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            magicblock-validator/target/debug/magicblock-validator
+            magicblock-validator/target/debug/magicblock-verifier
+            magicblock-validator/target/deploy/magicblock_committor_program.so
+          key: ${{ needs.probe.outputs.key }}
+
+      - name: Upload prebuilt ER binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: er-debug-bin
+          path: |
+            magicblock-validator/target/debug/magicblock-validator
+            magicblock-validator/target/debug/magicblock-verifier
+            magicblock-validator/target/deploy/magicblock_committor_program.so
+          retention-days: 1
+          if-no-files-found: error
+          compression-level: 0
