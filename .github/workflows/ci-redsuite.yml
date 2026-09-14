@@ -28,7 +28,7 @@ on:
       - '.github/actions/setup-solana/**'
   pull_request:
     branches: [master, dev]
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'

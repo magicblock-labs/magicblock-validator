@@ -60,8 +60,6 @@ jobs:
     runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build ER Debug Binaries
     timeout-minutes: 90
-    env:
-      HOST_CARGO_JOBS: "8"
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -82,9 +80,7 @@ jobs:
         run: |
           CARGO_PROFILE_DEV_DEBUG=line-tables-only \
           RUSTFLAGS="-C link-arg=-fuse-ld=lld" \
-            cargo build --locked \
-              --bin magicblock-validator --bin magicblock-verifier \
-              -j "$HOST_CARGO_JOBS"
+            cargo build --locked --bin magicblock-validator --bin magicblock-verifier
         shell: bash
         working-directory: magicblock-validator
 
