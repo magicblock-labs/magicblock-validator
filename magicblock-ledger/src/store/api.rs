@@ -347,12 +347,10 @@ impl Ledger {
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
         let transactions = {
-            let index_iterator = self
-                .slot_signatures_cf
-                .iter_current_index_filtered(IteratorMode::From(
-                    (slot, 0),
-                    IteratorDirection::Forward,
-                ));
+            let index_iterator =
+                self.slot_signatures_cf.iter_current_index_filtered(
+                    IteratorMode::From((slot, 0), IteratorDirection::Forward),
+                );
 
             let mut signatures = vec![];
             for ((tx_slot, _tx_idx), tx_signature) in index_iterator {

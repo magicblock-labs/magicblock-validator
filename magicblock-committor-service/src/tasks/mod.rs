@@ -248,17 +248,31 @@ impl BaseActionTask {
     }
 
     pub fn extract_callback(&mut self) -> Option<BaseActionCallback> {
-        match self {
-            BaseActionTask::V1(value) => value.action.callback.take(),
-            BaseActionTask::V2(value) => value.action.callback.take(),
+        let action = match self {
+            BaseActionTask::V1(value) => &mut value.action,
+            BaseActionTask::V2(value) => &mut value.action,
+        };
+        let callback = action.callback.take()?;
+        // Recheck persisted actions before discarding their authenticated source
+        // and handing the response to the validator's signing service. The V2
+        // task's separate source_program is not callback authorization.
+        if action
+            .validate_callback_destination(&callback.destination_program)
+            .is_err()
+        {
+            tracing::warn!(
+                action_id = action.id,
+                source_program = ?action.source_program,
+                destination_program = %callback.destination_program,
+                "Rejected callback destination outside its scheduling source"
+            );
+            return None;
         }
+        Some(callback)
     }
 
     pub fn has_callback(&self) -> bool {
-        match self {
-            BaseActionTask::V1(value) => value.action.callback.is_some(),
-            BaseActionTask::V2(value) => value.action.callback.is_some(),
-        }
+        self.action().callback.is_some()
     }
 
     pub fn accounts_size_budget(&self) -> u32 {
@@ -388,6 +402,76 @@ impl BaseActionTaskV2 {
 impl From<BaseActionTaskV2> for BaseActionTask {
     fn from(value: BaseActionTaskV2) -> Self {
         Self::V2(value)
+    }
+}
+
+#[cfg(test)]
+mod callback_tests {
+    use magicblock_core::intent::ProgramArgs;
+
+    use super::*;
+    use crate::tasks::task_strategist::TransactionStrategy;
+
+    /// Only A-to-A responses reach the signing scheduler, even for persisted
+    /// mismatches, missing provenance, or a separately supplied V2 source B.
+    #[test]
+    fn test_callback_destination_bound_to_recorded_source() {
+        let source = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        for (recorded_source, destination, accepted) in [
+            (Some(source), source, true),
+            (Some(source), other, false),
+            (None, other, false),
+        ] {
+            let callback = BaseActionCallback {
+                destination_program: destination,
+                discriminator: vec![1],
+                payload: vec![2],
+                compute_units: 10_000,
+                account_metas_per_program: vec![],
+            };
+            let action = BaseAction {
+                id: 0,
+                compute_units: 10_000,
+                // The base action may still target B.
+                destination_program: other,
+                source_program: recorded_source,
+                escrow_authority: Pubkey::new_unique(),
+                data_per_program: ProgramArgs {
+                    data: vec![],
+                    escrow_index: 0,
+                },
+                account_metas_per_program: vec![],
+                callback: Some(callback.clone()),
+            };
+            for task in [
+                BaseActionTask::V1(BaseActionTaskV1 {
+                    action: action.clone(),
+                }),
+                BaseActionTask::V2(BaseActionTaskV2 {
+                    action,
+                    source_program: other,
+                }),
+            ] {
+                let mut strategy = TransactionStrategy {
+                    optimized_tasks: vec![BaseTaskImpl::BaseAction(task)],
+                    ..Default::default()
+                };
+                let callbacks = strategy.extract_action_callbacks();
+                // An empty extraction prevents any response transaction to B
+                // from reaching the validator's callback signing service.
+                assert_eq!(
+                    callbacks,
+                    if accepted {
+                        vec![callback.clone()]
+                    } else {
+                        vec![]
+                    }
+                );
+                assert!(!strategy.has_actions_callbacks());
+                assert!(strategy.extract_action_callbacks().is_empty());
+            }
+        }
     }
 }
 

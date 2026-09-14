@@ -167,6 +167,17 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidInstructionData);
     }
 
+    action
+        .validate_callback_destination(&args.destination_program)
+        .inspect_err(|_| {
+            ic_msg!(
+                invoke_context,
+                "AddActionCallback ERR: callback destination {} does not match action source_program {}",
+                args.destination_program,
+                source_program
+            );
+        })?;
+
     // Validate the destination and account metas.
     let accounts_meta: Vec<_> = args
         .accounts

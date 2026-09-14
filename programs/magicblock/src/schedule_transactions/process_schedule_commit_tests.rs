@@ -168,6 +168,7 @@ fn schedule_action_only_bundle_instruction(
 fn add_action_callback_instruction(
     payer: &Pubkey,
     fee_vault: Option<Pubkey>,
+    destination_program: Pubkey,
 ) -> Instruction {
     let mut account_metas = vec![
         AccountMeta::new(*payer, true),
@@ -181,7 +182,7 @@ fn add_action_callback_instruction(
         crate::id(),
         &MagicBlockInstruction::AddActionCallback(AddActionCallbackArgs {
             action_index: 0,
-            destination_program: Pubkey::new_unique(),
+            destination_program,
             discriminator: vec![],
             payload: vec![],
             compute_units: 0,
@@ -189,6 +190,112 @@ fn add_action_callback_instruction(
         }),
         account_metas,
     )
+}
+
+#[cfg(test)]
+mod callback_source_tests {
+    use std::sync::Arc;
+
+    use solana_program_runtime::{
+        declare_process_instruction, invoke_context::mock_process_instruction,
+        loaded_programs::ProgramCacheEntry,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
+
+    use super::*;
+    use crate::magicblock_processor::Entrypoint;
+
+    declare_process_instruction!(SchedulingProgram, 0, |invoke_context| {
+        let instructions: Vec<Instruction> = {
+            let context = invoke_context
+                .transaction_context
+                .get_current_instruction_context()?;
+            wincode::deserialize(context.get_instruction_data())
+                .map_err(|_| InstructionError::InvalidInstructionData)?
+        };
+        for instruction in instructions {
+            invoke_context.native_invoke_signed(instruction, &[])?;
+        }
+        Ok(())
+    });
+
+    /// Real CPI provenance permits A-to-A registration but rejects A-to-B,
+    /// while the original base action remains free to target B.
+    #[test]
+    #[serial_test::serial]
+    fn test_callback_destination_bound_to_recorded_source() {
+        let source = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        for destination in [source, other] {
+            let payer = Keypair::new();
+            let (mut accounts, mut transaction_accounts, fee_vault) =
+                prepare_schedule_accounts(&payer, true, false, Some(true));
+            let schedule = schedule_action_only_bundle_instruction(
+                &payer.pubkey(),
+                Pubkey::new_unique(),
+                other,
+                fee_vault,
+            );
+            let callback = add_action_callback_instruction(
+                &payer.pubkey(),
+                fee_vault,
+                destination,
+            );
+            let mut outer_accounts = schedule.accounts.clone();
+            outer_accounts.push(AccountMeta::new_readonly(crate::id(), false));
+            accounts.insert(
+                crate::id(),
+                AccountSharedData::new(
+                    0,
+                    0,
+                    &solana_sdk_ids::native_loader::id(),
+                ),
+            );
+            for meta in &outer_accounts {
+                transaction_accounts.push((
+                    meta.pubkey,
+                    accounts.remove(&meta.pubkey).unwrap(),
+                ));
+            }
+            let accepted = destination == source;
+            let result = mock_process_instruction(
+                &source,
+                None,
+                &wincode::serialize(&vec![schedule, callback]).unwrap(),
+                transaction_accounts,
+                outer_accounts,
+                if accepted {
+                    Ok(())
+                } else {
+                    Err(InstructionError::InvalidInstructionData)
+                },
+                (SchedulingProgram::vm, SchedulingProgram::codegen),
+                |context| {
+                    context.program_cache_for_tx_batch.replenish(
+                        crate::id(),
+                        Arc::new(ProgramCacheEntry::new_builtin((
+                            Entrypoint::vm,
+                            Entrypoint::codegen,
+                        ))),
+                    );
+                },
+                |_| {},
+            );
+            let account = find_magic_context_account(&result).unwrap();
+            let mut context =
+                MagicContext::deserialize(account.data()).unwrap();
+            let action = context.scheduled_base_intents[0]
+                .intent_bundle
+                .get_action_mut(0)
+                .unwrap();
+            assert_eq!(action.source_program, Some(source));
+            assert_eq!(action.destination_program, other);
+            assert_eq!(
+                action.callback.as_ref().map(|c| c.destination_program),
+                accepted.then_some(source)
+            );
+        }
+    }
 }
 
 fn prepare_transaction_with_single_committee(
@@ -628,7 +735,11 @@ mod tests {
 
         let (mut accounts_data, mut transaction_accounts, _) =
             prepare_schedule_accounts(&payer, true, false, None);
-        let ix = add_action_callback_instruction(&payer.pubkey(), None);
+        let ix = add_action_callback_instruction(
+            &payer.pubkey(),
+            None,
+            Pubkey::new_unique(),
+        );
 
         extend_transaction_accounts_from_ix(
             &ix,
@@ -651,7 +762,11 @@ mod tests {
         let payer = Keypair::from_seed(&[35u8; 32]).unwrap();
         let (mut accounts_data, mut transaction_accounts, fee_vault) =
             prepare_schedule_accounts(&payer, true, true, Some(true));
-        let ix = add_action_callback_instruction(&payer.pubkey(), fee_vault);
+        let ix = add_action_callback_instruction(
+            &payer.pubkey(),
+            fee_vault,
+            Pubkey::new_unique(),
+        );
 
         extend_transaction_accounts_from_ix(
             &ix,

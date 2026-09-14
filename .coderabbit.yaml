@@ -8,7 +8,7 @@ reviews:
   review_status: false
   review_details: false
   poem: false
-  request_changes_workflow: true
+  request_changes_workflow: false
   auto_approve: false
 
   
