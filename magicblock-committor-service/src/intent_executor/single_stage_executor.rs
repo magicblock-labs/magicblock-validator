@@ -10,8 +10,8 @@ use tracing::{error, instrument};
 use crate::{
     intent_executor::{
         error::{
-            IntentExecutorError, IntentExecutorResult,
-            TransactionStrategyExecutionError,
+            single_stage_finalize_execution_error, IntentExecutorError,
+            IntentExecutorResult, TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
@@ -133,13 +133,7 @@ where
             }
         };
 
-        result.map_err(|err| {
-            IntentExecutorError::from_finalize_execution_error(
-                err,
-                // TODO(edwin): shall one stage have same signature for commit & finalize
-                None,
-            )
-        })
+        result.map_err(single_stage_finalize_execution_error)
     }
 
     pub fn has_callbacks(&self) -> bool {
