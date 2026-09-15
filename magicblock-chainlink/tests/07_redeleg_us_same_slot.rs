@@ -1,104 +1,159 @@
-// Implements the following flow:
-//
-// ## Redelegate an Account that was delegated to us to us - Same Slot
-// Materialization rules: ../README.md#materialization-and-ordering
-
+use dlp_api::{
+    args::{
+        EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
+        PostDelegationActions,
+    },
+    pda::delegation_record_pda_from_delegated_account,
+    state::DelegationRecord,
+};
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed,
-    assert_remain_undelegating,
-    testing::{
-        accounts::account_shared_with_owner_and_slot, context::TestContext,
-        deleg::add_delegation_record_for,
-    },
+    assert_remain_undelegating, assert_subscribed_without_delegation_record,
+    testing::{context::TestContext, deleg::delegation_record_to_vec},
 };
-use solana_account::Account;
+use solana_account::{Account, ReadableAccount};
 use solana_pubkey::Pubkey;
-use tracing::*;
 
-// NOTE: disabled for now since we detect redelegation as follows:
-// - if `account.remote_slot >= undelegation_slot` assume it is the first delegation, i.e. it was
-//   not re-delegated
-// - in order to support same slot re-delegation we need an delegation index or similar to
-//   distinguish the two delegations
-#[tokio::test]
-#[ignore = "Same slot redelegation is currently not possible and currently it is detected as a single delegation operation."]
-async fn test_undelegate_redelegate_to_us_in_same_slot() {
-    let mut slot: u64 = 11;
+const INITIAL_SLOT: u64 = 22;
 
-    let ctx = TestContext::init(slot).await;
-    let TestContext {
-        chainlink,
-        bank,
-        rpc_client,
-        ..
-    } = ctx.clone();
+/// Publishes the delegation generation separately from its RPC observation slot.
+fn add_record(
+    ctx: &TestContext,
+    pubkey: Pubkey,
+    owner: Pubkey,
+    slot: u64,
+    actions: Option<PostDelegationActions>,
+) -> Pubkey {
+    let record = DelegationRecord {
+        authority: ctx.validator_pubkey,
+        owner,
+        delegation_slot: slot,
+        lamports: 1_000,
+        commit_frequency_ms: 2_000,
+    };
+    let mut data = delegation_record_to_vec(&record);
+    if let Some(actions) = actions {
+        data.extend_from_slice(&borsh::to_vec(&actions).unwrap());
+    }
+    let record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
+    ctx.rpc_client.add_account(
+        record_pubkey,
+        Account {
+            owner: dlp_api::id(),
+            data,
+            ..Default::default()
+        },
+    );
+    record_pubkey
+}
 
+fn failing_action() -> PostDelegationActions {
+    // Invalid v42 discriminator: activation must not leave a usable delegation.
+    PostDelegationActions {
+        inserted_signers: 0,
+        inserted_non_signers: 0,
+        signers: vec![*v42_calculator_interface::ID.as_array()],
+        non_signers: vec![],
+        instructions: vec![MaybeEncryptedInstruction {
+            program_id: 0,
+            accounts: vec![],
+            data: MaybeEncryptedIxData {
+                prefix: vec![0xFF],
+                suffix: EncryptedBuffer::default(),
+            },
+        }],
+    }
+}
+
+async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
+    let ctx = TestContext::init(INITIAL_SLOT).await;
     let pubkey = Pubkey::new_unique();
-    let program_pubkey = Pubkey::new_unique();
-    let acc = Account {
+    let owner = Pubkey::new_unique();
+    let remote = Account {
         lamports: 1_000_000,
+        owner: dlp_api::id(),
+        data: vec![1],
         ..Default::default()
     };
+    ctx.rpc_client.add_account(pubkey, remote.clone());
+    let record = add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
+    ctx.ensure_account(&pubkey).await.unwrap();
+    assert_cloned_as_delegated!(ctx.bank, &[pubkey], INITIAL_SLOT, owner);
+    assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
+    ctx.force_undelegation(&pubkey).await;
+    ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
+    assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
+    (ctx, pubkey, owner, remote)
+}
 
-    // 1. Account delegated to us
-    // Initial state: Account is delegated to us and we can read/write to it
-    let deleg_record_pubkey = {
-        info!("1. Account delegated to us");
-
-        slot = rpc_client.set_slot(slot + 11);
-        let delegated_acc =
-            account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
-
-        rpc_client.add_account(pubkey, delegated_acc.into());
-        let delegation_record = add_delegation_record_for(
-            &rpc_client,
+/// Proves an atomic base-chain callback can redelegate at a newer slot without
+/// any intermediate ReadOnly notification, restoring the complete account image.
+#[tokio::test]
+async fn redelegation_without_readonly_notification() {
+    let (ctx, pubkey, owner, mut remote) = undelegating_account().await;
+    let slot = ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
+    let record = add_record(&ctx, pubkey, owner, slot, None);
+    remote.lamports += 123;
+    remote.data = vec![2, 3, 4];
+    assert!(
+        ctx.send_and_receive_account_update(
             pubkey,
-            ctx.validator_pubkey,
-            program_pubkey,
-        );
-
-        // Transaction to read
-        // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
-        ctx.ensure_account(&pubkey).await.unwrap();
-        assert_cloned_as_delegated!(bank, &[pubkey], slot, program_pubkey);
-        assert_not_subscribed!(&chainlink, &[&pubkey, &delegation_record]);
-
-        delegation_record
-    };
-
-    // 2. Account is undelegated and redelegated to us (same slot)
-    // Undelegation requested, setup subscription, writes refused until redelegation
-    {
-        info!(
-            "2.1. Account is undelegated - Undelegation requested (account owner set to DP in Ephem)"
-        );
-
-        ctx.force_undelegation(&pubkey).await;
-
-        info!("2.2. Would refuse write (account still owned by DP in Ephem)");
-        assert_remain_undelegating!(bank, &[pubkey], slot);
-
-        slot = rpc_client.set_slot(slot + 1);
-
-        info!("2.3. Account is undelegated and redelegated to us in same slot");
-
-        // First trigger undelegation subscription
-        ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
-
-        // Then immediately delegate back to us (simulating same slot operation)
-        ctx.delegate_existing_account_to(
-            &pubkey,
-            &ctx.validator_pubkey,
-            &program_pubkey,
+            remote.clone(),
+            Some(8_000)
         )
         .await
-        .unwrap();
+    );
+    assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
+    ctx.bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |local| {
+            assert_eq!(local.lamports(), remote.lamports);
+            assert_eq!(local.data(), remote.data);
+        })
+        .unwrap()
+        .expect("local account");
+    assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
+}
 
-        // Account should be cloned as delegated back to us
-        info!("2.4. Would allow write (delegated to us again)");
-        assert_cloned_as_delegated!(bank, &[pubkey], slot, program_pubkey);
+/// Proves a newer notification does not turn an old delegation into a new generation.
+#[tokio::test]
+async fn old_delegation_keeps_recovery_subscription() {
+    let (ctx, pubkey, owner, remote) = undelegating_account().await;
+    ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
+    add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
+    assert!(
+        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000))
+            .await
+    );
+    assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
+    assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
+}
 
-        // Account is delegated to us, so we don't subscribe to it nor its delegation record
-        assert_not_subscribed!(chainlink, &[&pubkey, &deleg_record_pubkey]);
-    }
+/// Proves failed activation retains recovery subscriptions and a later valid
+/// delegation can restore the account without an intermediate ReadOnly update.
+#[tokio::test]
+async fn failed_redelegation_can_recover() {
+    let (ctx, pubkey, owner, remote) = undelegating_account().await;
+    let slot = ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
+    let record = add_record(&ctx, pubkey, owner, slot, Some(failing_action()));
+    assert!(
+        ctx.send_and_receive_account_update(
+            pubkey,
+            remote.clone(),
+            Some(8_000)
+        )
+        .await
+    );
+    assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
+    assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
+
+    let slot = ctx.rpc_client.set_slot(slot + 1);
+    add_record(&ctx, pubkey, owner, slot, None);
+    assert!(
+        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000))
+            .await
+    );
+    assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
+    assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
 }
