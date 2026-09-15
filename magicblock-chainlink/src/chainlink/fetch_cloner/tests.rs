@@ -142,10 +142,8 @@ async fn waiter_applies_newer_account_image() {
         older,
         AccountFetchContext::rpc_get_multiple_accounts(),
     );
-    let newer = fetch.clone_account_with_post_delegation_action_invariants(
-        newer,
-        AccountFetchContext::rpc_get_multiple_accounts(),
-    );
+    let newer = fetch
+        .clone_account(newer, AccountFetchContext::rpc_get_multiple_accounts());
     let (older, newer) = tokio::join!(older, newer);
     older.expect("older materialization succeeds");
     newer.expect("newer waiter materializes its own image");
