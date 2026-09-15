@@ -1,7 +1,4 @@
-use std::{
-    fmt, net::SocketAddr, num::NonZeroU64, path::PathBuf, sync::Arc,
-    time::Duration,
-};
+use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
 use nucleus::config::{
     AccountsDBParams, Authority, BlockstoreParams, LedgerParams,
@@ -174,16 +171,15 @@ mod blockstore {
         #[serde(default = "default_blocktime", with = "humantime")]
         blocktime: Duration,
         #[serde(default = "default_superblock")]
-        superblock: NonZeroU64,
+        superblock: u64,
     }
 
     pub(super) fn default_blocktime() -> Duration {
         Duration::from_millis(consts::DEFAULT_LEDGER_BLOCK_TIME_MS)
     }
 
-    pub(super) fn default_superblock() -> NonZeroU64 {
-        NonZeroU64::new(consts::DEFAULT_SUPERBLOCK_SIZE)
-            .expect("default superblock size must be non-zero")
+    pub(super) const fn default_superblock() -> u64 {
+        consts::DEFAULT_SUPERBLOCK_SIZE
     }
 }
 
