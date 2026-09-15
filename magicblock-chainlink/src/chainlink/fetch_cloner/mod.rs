@@ -1657,70 +1657,82 @@ where
             .as_ref()
             .and_then(|dr| self.get_delegated_to_other(dr));
 
-        // Delegated subscription cleanup is limited to direct subscription/pubsub tracking
-        // ownership here; undelegation tracking owns protected subscriptions
-        // until undelegation is explicitly complete.
-        if undelegation_completed_on_chain {
-            if !account.read().is(AccountMode::Delegated) {
-                self.ensure_direct_subscription_for_completed_account(pubkey)
-                    .await;
-            }
-            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
-                .await;
-        }
-        if account.read().is(AccountMode::Delegated) {
-            self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                .await;
-        }
-
+        let delegated = account.read().is(AccountMode::Delegated);
+        let slot = account.read().slot();
         if account.read().flags().contains(StateFlags::EXECUTABLE) {
+            self.cleanup_completed_subscription_update(
+                pubkey,
+                delegated,
+                undelegation_completed_on_chain,
+            )
+            .await;
             self.handle_executable_sub_update(
                 pubkey,
                 account,
                 &companion_fetch_log_context,
             )
             .await;
-        } else {
-            let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
-                dr.authority
-                    .eq(&self.validator_pubkey)
-                    .then_some(dr.commit_frequency_ms)
-            });
-            if let Err(err) = self
-                .clone_account_with_post_delegation_action_invariants(
-                    AccountCloneRequest {
-                        pubkey,
-                        account,
-                        commit_frequency_ms,
-                        post_delegation_mode: ClonePostDelegationMode::from(
-                            delegation_actions,
-                        ),
-                        delegated_to_other,
-                    },
-                    subscription_clone_context.clone(),
+            return;
+        }
+
+        let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
+            dr.authority
+                .eq(&self.validator_pubkey)
+                .then_some(dr.commit_frequency_ms)
+        });
+        if let Err(err) = self
+            .clone_account_with_post_delegation_action_invariants(
+                AccountCloneRequest {
+                    pubkey,
+                    account,
+                    commit_frequency_ms,
+                    post_delegation_mode: ClonePostDelegationMode::from(
+                        delegation_actions,
+                    ),
+                    delegated_to_other,
+                },
+                subscription_clone_context.clone(),
+            )
+            .await
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clone account into bank"
+            );
+            return;
+        }
+
+        // A successful clone call can leave a rescued account Transient.
+        // Retain recovery subscriptions until the local image actually
+        // reflects completion, not merely a newer on-chain delegation.
+        if self.read_account(&pubkey, |local| {
+            local.slot() >= slot
+                && !local.is(AccountMode::Transient)
+                && local.is(AccountMode::Delegated) == delegated
+        }) == Some(true)
+        {
+            self.cleanup_completed_subscription_update(
+                pubkey,
+                delegated,
+                undelegation_completed_on_chain,
+            )
+            .await;
+        }
+
+        if let Some(projected_ata_clone_request) = projected_ata_clone_request
+            && let Err(err) = self
+                .clone_projected_ata_request(
+                    projected_ata_clone_request,
+                    subscription_clone_context,
                 )
                 .await
-            {
-                error!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone account into bank"
-                );
-            } else if let Some(projected_ata_clone_request) =
-                projected_ata_clone_request
-                && let Err(err) = self
-                    .clone_projected_ata_request(
-                        projected_ata_clone_request,
-                        subscription_clone_context,
-                    )
-                    .await
-            {
-                error!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone projected ATA from delegated eATA update"
-                );
-            }
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clone projected ATA from delegated eATA update"
+            );
         }
     }
 
@@ -2262,6 +2274,27 @@ where
                 error = %err,
                 "Failed to clean up direct subscription for delegated account"
             );
+        }
+    }
+
+    /// Releases only subscription reasons whose lifecycle work has completed.
+    async fn cleanup_completed_subscription_update(
+        &self,
+        pubkey: Pubkey,
+        delegated: bool,
+        undelegation_completed: bool,
+    ) {
+        if undelegation_completed {
+            if !delegated {
+                self.ensure_direct_subscription_for_completed_account(pubkey)
+                    .await;
+            }
+            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
+                .await;
+        }
+        if delegated {
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
         }
     }
 
