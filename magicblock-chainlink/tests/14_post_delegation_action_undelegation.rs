@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use dlp_api::{
     args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
@@ -89,6 +91,7 @@ async fn failing_post_delegation_action_is_rejected() {
         },
     );
     add_delegation_record_with_failing_action(&ctx, delegated_pubkey, owner);
+    let mut processed = ctx.bank.transactions().subscribe_processed().unwrap();
 
     let err = ctx
         .ensure_account(&delegated_pubkey)
@@ -98,4 +101,34 @@ async fn failing_post_delegation_action_is_rejected() {
         err.to_string().contains("Failed to clone"),
         "invalid action must fail account materialization: {err}"
     );
+
+    // Both attempts must reach execution: an error alone cannot distinguish
+    // activation rejection from the existing fixture's rejected rescue.
+    for program in [
+        v42_calculator_interface::ID,
+        magicblock_magic_program_api::id(),
+    ] {
+        let completed =
+            tokio::time::timeout(Duration::from_secs(4), processed.recv())
+                .await
+                .expect("activation and rescue are processed")
+                .expect("processed stream remains open");
+        let keys = completed.transaction.static_account_keys();
+        assert!(keys.contains(&delegated_pubkey));
+        assert!(
+            keys.contains(&program),
+            "expected activation followed by rescue"
+        );
+        assert!(
+            completed
+                .execution
+                .result
+                .as_ref()
+                .expect("attempt reaches execution")
+                .execution_details
+                .status
+                .is_err(),
+            "fixture continues to reject both attempts"
+        );
+    }
 }
