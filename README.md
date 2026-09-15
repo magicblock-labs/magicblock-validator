@@ -9,20 +9,125 @@
 
   <p>
     <a href="https://docs.magicblock.gg"><img alt="Documentation" src="https://img.shields.io/badge/docs-tutorials-blueviolet" /></a>
-    <a href="https://github.com/magicblock-labs/magicblock-validator/blob/main/LICENSE.md"><img alt="License" src="https://img.shields.io/badge/license-BSL--1.1-blue" /></a>
+    <a href="LICENSE.md"><img alt="License" src="https://img.shields.io/badge/license-BSL--1.1-blue" /></a>
     <a href="https://discord.com/invite/MBkdC3gxcv"><img alt="Discord Chat" src="https://img.shields.io/discord/943797222162726962?color=blueviolet" /></a>
   </p>
 </div>
 
-## 📖 Overview
+## Overview
 
-The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runtime designed to power **Ephemeral Rollups**. It enables seamless scaling by cloning accounts and programs just-in-time from a reference cluster (like Solana Mainnet or Devnet), executing transactions in a high-performance environment, and settling state changes back to the base chain.
+MagicBlock Validator hosts an **Ephemeral Rollup**: it brings base-chain accounts
+into local state, accepts Solana-style transactions, and coordinates settlement
+back to the base chain. [Engine](https://github.com/magicblock-labs/magicblock-engine)
+owns execution, account storage, and replication; this workspace owns the
+validator service graph and operator tools.
 
-### Key Features
-- **Ephemeral Rollups**: Offload compute to a dedicated layer while inheriting Solana's security and state.
-- **Just-in-Time Cloning**: Automatically fetches accounts from a remote cluster when accessed.
-- **State Settlement**: Batches and commits state transitions back to the reference chain.
-- **Developer Friendly**: Can be used as a super-charged development environment compatible with standard Solana tooling.
+- **Leader:** application RPC/WebSocket endpoints, account synchronization,
+  settlement, and repeated tasks.
+- **Verifier:** follows an upstream replication stream with the same runtime
+  image, without starting application services.
+- **Operator clients:** explicit domain management, healthchecks, and a terminal
+  monitor, independent of either host's lifecycle.
+
+## Getting started
+
+Use the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml).
+Formatting additionally uses nightly Rust. Native dependencies are required by
+the storage and cryptography crates; consult the repository's
+[build workflows](.github/workflows) for platform setup.
+
+From the workspace root:
+
+```bash
+cargo build --release --locked \
+  -p magicblock-validator -p magicblock-verifier \
+  -p magicblock -p magicblock-validator-tui
+```
+
+Edit the [leader configuration](config.example.toml) before running: replace
+sample identities and provider credentials, choose storage/listener addresses,
+and supply the configured program ELF files.
+
+```bash
+cargo run --release --locked -p magicblock-validator -- --config config.example.toml
+```
+
+For a follower, configure the [verifier example](config.verifier.example.toml),
+including the upstream's address/authority, follower allowlist, independent
+storage, and matching program artifacts:
+
+```bash
+cargo run --release --locked -p magicblock-verifier -- config.verifier.example.toml
+```
+
+Leader settings use `MBV_` environment variables; verifier settings use
+`MBV_VERIFIER_`. Nested keys use `__`. See
+[configuration precedence and validation](magicblock-config/README.md).
+Choose the process role through its binary, not a `lifecycle` setting.
+
+Domain registration is explicit and can submit base-chain transactions; see the
+[operator CLI](bins/magicblock/README.md). Use the
+[TUI](bins/magicblock-validator-tui/README.md) to monitor a leader's RPC endpoints.
+Both Engine-hosting binaries expose a separate combined MBV/Engine metrics
+endpoint.
+
+## Documentation
+
+- [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md):
+  project relationships, cross-chain contracts, deployment, and recovery.
+- **Crate READMEs below:** local responsibilities, usage, and sharp edges.
+  The same text is included in crate-level Rust documentation.
+- [Contributing](docs/CONTRIBUTING.md) and [AGENTS.md](AGENTS.md):
+  repository workflow and validation.
+
+Generate local API documentation with `cargo doc --workspace --no-deps`.
+Run the affected package's checks as described in AGENTS.md; the integration
+and manual-test workspaces retain their own instructions.
+
+## Workspace
+
+### Processes
+
+| Crate | Responsibility |
+| --- | --- |
+| [`magicblock-validator`](bins/magicblock-validator/README.md) | Leader, application services, and upstream replication. |
+| [`magicblock-verifier`](bins/magicblock-verifier/README.md) | Follower replay, snapshot reopen, and optional relay. |
+| [`magicblock`](bins/magicblock/README.md) | Domain operations and end-to-end healthchecks. |
+| [`magicblock-validator-tui`](bins/magicblock-validator-tui/README.md) | External RPC/WebSocket terminal monitor. |
+
+### Host services
+
+| Crate | Responsibility |
+| --- | --- |
+| [`magicblock-runtime`](magicblock-runtime/README.md) | Shared native programs and startup account image. |
+| [`magicblock-config`](magicblock-config/README.md) | Role-specific CLI, environment, and TOML configuration. |
+| [`magicblock-aperture`](magicblock-aperture/README.md) | Application JSON-RPC, WebSocket subscriptions, and Geyser. |
+| [`magicblock-chainlink`](magicblock-chainlink/README.md) | Base-chain account/program synchronization and materialization. |
+| [`magicblock-aml`](magicblock-aml/README.md) | Risk-server client for activation checks. |
+| [`magicblock-committor-service`](magicblock-committor-service/README.md) | Base-chain settlement preparation, delivery, and recovery. |
+| [`magicblock-task-scheduler`](magicblock-task-scheduler/README.md) | Persistent repeated tasks and Engine crank submission. |
+| [`magicblock-services`](magicblock-services/README.md) | Action callbacks and observed undelegation requests. |
+| [`magicblock-validator-admin`](magicblock-validator-admin/README.md) | Periodic base-chain fee claims. |
+| [`magicblock-metrics`](magicblock-metrics/README.md) | Validator collectors and combined metrics endpoint. |
+
+### Programs and shared libraries
+
+| Crate | Responsibility |
+| --- | --- |
+| [`magicblock-program`](programs/magicblock/README.md) | Native Magic, crank, callback, and ephemeral-system programs. |
+| [`magicblock-magic-program-api`](magicblock-magic-program-api/README.md) | Shared IDs, instructions, PDAs, and response layouts. |
+| [`magicblock-committor-program`](magicblock-committor-program/README.md) | Base-chain commit buffers and chunk tracking. |
+| [`magicblock-table-mania`](magicblock-table-mania/README.md) | Base-chain address lookup table lifecycle. |
+| [`magicblock-rpc-client`](magicblock-rpc-client/README.md) | Base-chain reads, submission, and confirmation. |
+| [`magicblock-core`](magicblock-core/README.md) | Shared intent types, logging, and host utilities. |
+| [`magicblock-version`](magicblock-version/README.md) | Build and compatibility metadata. |
+
+### Legacy compatibility
+
+| Crate | Responsibility |
+| --- | --- |
+| [`magicblock-ledger-deprecated`](magicblock-ledger/README.md) | Read-only historical RocksDB ledger. |
+| [`solana-storage-proto`](storage-proto/README.md) | Legacy protobuf schemas and conversions. |
 
 ## API Stability and Security
 
@@ -30,152 +135,7 @@ The Ephemeral Validator remains under active development, but its public, applic
 
 The Delegation Program—the on-chain contract governing delegation, settlement, and state commitment—has been independently audited. The validator internals have been battle-tested, but the complete validator codebase and all internal components have not undergone a comprehensive audit. Use at your own risk.
 
-Internal interfaces and lifecycle modes explicitly marked experimental or unsupported may still change.
-
-## Packages
-
-| Package                                                                              | Description                                                    | Version                                                                                                                                                            | Docs                                                                                         |
-|:-------------------------------------------------------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|
-| `@magicblock-labs/ephemeral-validator`                                               | Released binaries of the ephemeral validator                   | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-validator.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-validator) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-| `ephemeral-rollups-sdk`                                                              | Rust SDK for integrating with the Ephemeral Rollups            | [![Crates.io](https://img.shields.io/crates/v/ephemeral-rollups-sdk?color=blue)](https://crates.io/crates/ephemeral-rollups-sdk)                                   | [![Docs.rs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz/) |
-| `@magicblock-labs/ephemeral-rollups-sdk`                                             | TypeScript helper for preparing transactions (@solana/web3.js) | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-sdk.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-sdk) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-| `@magicblock-labs/ephemeral-rollups-kit`                                             | TypeScript helper for preparing transactions (@solana/kit)     | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-kit.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-kit) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-
-## 🚀 Getting Started
-
-### Prerequisites
-- **Rust**: Latest stable and nightly toolchains.
-- **Dependencies**: `solana-cli` (optional), `protobuf-compiler` (for gRPC support).
-
-### Installation
-
-1. **Clone the repository:**
-```bash
-   git clone https://github.com/magicblock-labs/magicblock-validator.git
-   cd magicblock-validator
-```
-
-2. **Build the operator binaries:**
-```bash
-cargo build --release -p mbv-leader -p mbv-verifier -p mbv -p mbv-tui
-```
-
-
-
-## ⚙️ Configuration
-
-The validator is highly configurable via TOML files or environment variables. A comprehensive reference configuration is available in [`config.example.toml`](./config.example.toml).
-
-### Core Operational Modes (`lifecycle`)
-
-The `lifecycle` setting determines how the validator manages state and syncing.
-
-* **`ephemeral`** (**Currently Supported**): Clones accounts on demand from the remote cluster and writes changes only to delegated accounts. This is the primary mode for Ephemeral Rollups.
-* *Note: Other modes (`replica`, `offline`) are present in the codebase but are currently experimental or unsupported.*
-
-### Connecting to a Cluster
-
-Configure the `remotes` list to specify where to fetch state from:
-
-```toml
-# Example: Sync with Solana Devnet
-remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com"]
-
-```
-
-## 🏃 Usage
-
-### Running a leader
-
-The leader binary runs `Engine<Leader>` and the validator service graph:
-
-```bash
-cargo run --release -p mbv-leader -- --config config.example.toml
-```
-
-### Running a verifier
-
-The verifier binary runs only `Engine<Follower>` and its replication client:
-
-```bash
-cargo run --release -p mbv-verifier -- config.verifier.example.toml
-```
-
-Both Engine-hosting binaries expose MBV and Engine Prometheus collectors from
-their configured `/metrics` endpoint. Configure distinct metrics addresses when
-running a leader and verifier on the same host.
-
-### Managing the Magic Domain Program
-
-Domain registration is an explicit operator action and is not part of leader
-startup or shutdown:
-
-```bash
-cargo run --release -p mbv -- domain register \
-  --config config.example.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-
-cargo run --release -p mbv -- domain sync \
-  --config config.example.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-
-cargo run --release -p mbv -- domain unregister \
-  --config config.example.toml
-```
-
-### Running the TUI
-
-The TUI is an external RPC/websocket client:
-
-```bash
-cargo run --release -p mbv-tui -- \
-  --rpc-url http://127.0.0.1:7799 \
-  --ws-url ws://127.0.0.1:7800
-```
-
-### Using Environment Variables
-
-Leader settings use the `MBV_` prefix. Verifier settings use
-`MBV_VERIFIER_`.
-
-```bash
-# Example: Run as an ephemeral validator syncing from Mainnet
-MBV_LIFECYCLE=ephemeral \
-MBV_LISTEN=0.0.0.0:8899 \
-cargo run --release -p mbv-leader -- --config config.example.toml
-
-```
-
-### Docker
-
-Official Docker images are available for streamlined deployment:
-
-```bash
-docker run -p 8899:8899 -p 8900:8900 magicblocklabs/validator
-
-```
-
-## ☁️ Remote Development Cluster
-
-If you prefer not to run the validator locally, we provide a stable public cluster for development:
-
-* **Endpoint**: `https://devnet.magicblock.app`
-* **Base Cluster**: Solana Devnet
-
-This cluster allows you to test Ephemeral Rollup interactions without local setup.
-
-## 🧪 Testing
-
-The project includes a comprehensive test suite managed via `Makefile`.
-
-* **Run the workspace tests:**
-```bash
-make test
-```
-
-
+Internal interfaces explicitly marked experimental or unsupported may still change.
 
 ## ⚖️ Disclaimer
 

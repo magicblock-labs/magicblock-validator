@@ -1,45 +1,52 @@
-# Task Scheduler API
+# `magicblock-task-scheduler`
 
-## Architecture
+Persists and executes repeated application tasks for the leader. This scheduler
+is separate from Engine's transaction sequencer and the base-chain committor.
 
-### Components
+## Request and execution flow
 
-1. **TaskContext Account**: Stores tasks and cancellation requests on-chain
-2. **Task Scheduler Service**: Runs alongside the validator to execute scheduled tasks
-3. **Database**: SQLite database for efficient task storage and retrieval
-4. **Geyser Integration**: Monitors TaskContext account changes
+1. Native task instructions emit wincode-encoded `TaskRequest` service messages.
+2. `TaskSchedulerService` consumes the Engine message stream and updates SQLite
+   plus its in-memory delay queue.
+3. Due tasks are submitted directly to Engine as crank transactions.
+4. Completion updates or removes the matching stored task version.
 
-### Data Flow
+The service does not poll TaskContext accounts or submit cranks through
+loopback RPC. The crank uses Engine's authority; each task retains its own
+authority for application instructions and schedule/cancellation checks.
 
-1. User schedules task via program instruction
-2. Task is stored in TaskContext account
-3. Task Scheduler Service monitors TaskContext periodically
-4. Service adds task to local database
-5. Service executes tasks at scheduled intervals
-6. Service updates task state after execution
+Replacing a task requires the same authority. Cancellation by a different
+authority is ignored. Cancellation does not undo an already-running crank.
+
+## Timing and recovery
+
+New task intervals are clamped to the configured minimum, but first execution
+is queued immediately. On restart, persisted tasks wait at least two slot
+intervals so a blockhash can become available. An interval is not a precise
+wall-clock execution guarantee.
+
+SQLite progress updates are version-conditional: completion of an older task
+must not overwrite a replacement's bookkeeping. Engine execution and SQLite
+completion are separate operations, however. A crash between them can leave
+uncertain completion; recurring instructions should tolerate re-execution.
+
+Retryable failures have bounded in-memory retries. Exhausted or non-retryable
+failures move to failure records. Runtime retry counts are reset on reload, so
+the bound is not a lifetime limit across restarts. Normal shutdown drains workers
+and records completion; error shutdown stops them.
 
 ## Configuration
 
-The task scheduler can be configured via the validator configuration:
+The leader's `[task-scheduler]` section controls reset, minimum interval, and
+failure-record retention. `reset` removes the task database; it is not an
+ordinary restart option. Retention cleanup removes old failed execution and
+scheduling records, not active tasks.
 
-```toml
-[task-scheduler]
-reset = false
-min-interval = "10ms"
-failed-task-retention = "7d"
-failed-task-cleanup-interval = "1h"
-```
+Use the [leader configuration example][leader-config] for field names and
+defaults. See [scheduled-task contracts][tasks] for cross-component authority
+and recovery requirements.
 
-Failed task execution records and failed scheduling records older than
-`failed-task-retention` are deleted every `failed-task-cleanup-interval`.
+[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
 
-## Security Considerations
-
-- Only task authorities can cancel their own tasks
-- Database is protected by file system permissions
-
-## Performance Considerations
-
-- Same-tick delay-queue draining; crank sends parallelize `send_transaction` (consider bounding concurrency under heavy load).
-- `Arc` for stored instructions; configurable `RpcSendTransactionConfig` for crank sends.
-- SQLite: WAL journal, `NORMAL` synchronous mode, enlarged page cache; after each crank RPC batch completes, success/failure persistence uses one transaction (`apply_crank_batch_completion`) instead of one commit per task.
+[leader-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.example.toml
+[tasks]: https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/scheduled-tasks.md

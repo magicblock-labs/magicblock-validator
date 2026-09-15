@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 pub type Slot = u64;
 
 /// A macro that panics when running a debug build and logs the panic message

@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![allow(deprecated)]
 
 mod signature_confirmer;

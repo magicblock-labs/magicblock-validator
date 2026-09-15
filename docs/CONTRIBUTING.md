@@ -1,6 +1,8 @@
 # Contributing to magicblock-validator
 
-Thanks for contributing. This repository implements a high-performance, long-running solana execution engine.  
+Thanks for contributing. This repository hosts MagicBlock validators and
+coordinates their application services. Engine owns execution, account storage,
+and replication.
 Correctness, determinism, and operational safety matter more than velocity.
 
 Please keep contributions **small, explicit, and reviewable**.
@@ -50,7 +52,8 @@ Explicitly call out any of the following in the PR description:
 - migrations (disk, state, network, protocol)
 - behavior changes affecting operators
 
-Describe these concerns under **Compatibility**. Write `None` when none apply.
+Describe these concerns under **Impact**. State when no runtime behavior or
+compatibility changes apply.
 
 ---
 
@@ -59,7 +62,7 @@ Describe these concerns under **Compatibility**. Write `None` when none apply.
 - Changes affecting correctness, consensus, or state handling **must** be tested.
 - Small refactors may rely on existing coverage; explain why if no new tests are added.
 - Performance-sensitive changes should include rationale or benchmarks where relevant.
-- Under **Validation**, list the exact commands or scenarios and their results.
+- Under **Reviewer notes**, list the exact commands or scenarios and their results.
 
 ---
 
@@ -100,7 +103,7 @@ Changes here require:
 ## Security
 
 If you believe you’ve found a security issue, **do not open a public issue**.  
-Use the repository’s security policy instead.
+Use the repository’s [security policy](SECURITY.md) instead.
 
 ---
 

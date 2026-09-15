@@ -1,64 +1,56 @@
-# MagicBlock Configuration
+# `magicblock-config`
 
-Typed configuration for the MagicBlock leader and verifier binaries.
+Typed configuration for the leader, verifier, and operator tooling. The role
+determines the accepted settings; replication is not a leader `lifecycle` mode.
 
 ## Leader
 
-`LeaderParams::try_new` merges configuration in this precedence order:
+`LeaderParams::try_new` merges settings from highest to lowest precedence:
 
 1. command-line arguments;
 2. `MBV_` environment variables;
-3. the TOML file passed with `--config`;
+3. the TOML file selected with `--config`;
 4. defaults.
 
-Environment nesting uses `__`, for example
-`MBV_ENGINE__LEDGER__SIZE_LIMIT`.
+Nested environment keys use `__`, for example
+`MBV_METRICS__ADDRESS=127.0.0.1:9090`. Missing remote endpoint types can be
+filled from defaults or derived URLs; check the effective configuration before
+assuming which base-chain services will be contacted.
 
-```rust
-use magicblock_config::LeaderParams;
+`LeaderParams::load` applies file/environment layers without parsing the
+process CLI. The operator commands use it to obtain the base-chain RPC endpoint
+and local signing identity.
 
-let config = LeaderParams::try_new(std::env::args_os())?;
-```
-
-[`config.example.toml`](../config.example.toml) documents the complete leader
-configuration. `LeaderParams::load` loads the same file and environment layers
-without parsing process arguments; operator tools use it to share the leader's
-RPC endpoint and signing authority.
-
-The optional `[admin]` section controls periodic administrative work:
-
-```toml
-[admin]
-claim-fees-frequency = 300
-```
-
-Magic Domain Program registration is intentionally not a lifecycle setting.
-Use the `mbv domain` commands to register, synchronize, or unregister a leader.
+The [leader example][leader-config] documents service, account synchronization,
+storage, replication, plugin, and task settings. `[admin]` enables periodic
+fee claims. Domain registration remains an explicit operator action.
 
 ## Verifier
 
-`VerifierParams::try_new` loads the required positional TOML path and overlays
-`MBV_VERIFIER_` environment variables. The verifier accepts only follower
-engine settings and derives the engine's remote authority from the configured
-replication upstream.
+`VerifierParams::try_new` requires a positional TOML path and overlays
+`MBV_VERIFIER_` variables with the same nested-key convention. Its configuration
+contains metrics, follower Engine settings, and startup programs, not the
+leader's application-service graph.
 
-See
-[`config.verifier.example.toml`](../config.verifier.example.toml) for the
-minimal follower configuration.
+Remote authority is derived from `replication.upstream-authority`; explicitly
+supplying `engine.authority.remote` is rejected. The upstream identity is
+different from the verifier's local signing identity.
 
-## Shared engine configuration
+Use the [verifier example][verifier-config] as the starting point, replacing
+sample identities and addresses.
 
-`EngineConfig<R>` owns identity, AccountsDB, ledger, block production, and
-role-specific replication configuration:
+## Shared runtime inputs
 
-- `EngineConfig<LeaderReplication>` is embedded by `LeaderParams`;
-- `EngineConfig<FollowerReplication>` is embedded by `VerifierParams`.
+`EngineConfig<R>` carries authority, account storage, ledger, block production,
+and role-specific replication settings. Both roles pass their startup programs
+through the [shared runtime builder][runtime]. The actual ELF artifacts must
+match across hosts; matching configuration structure alone is insufficient.
 
-Both process roles use the same `magicblock-runtime` image builder, so builtins,
-loadable programs, and genesis accounts stay identical.
+Configuration names, merge precedence, and validation errors are operator-facing
+interfaces. Keep changes synchronized with the example files and binary usage.
 
-## Validation
+[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
 
-```bash
-cargo test -p magicblock-config
-```
+[leader-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.example.toml
+[verifier-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.verifier.example.toml
+[runtime]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-runtime/README.md

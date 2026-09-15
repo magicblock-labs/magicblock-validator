@@ -1,47 +1,52 @@
-# Architecture of Intent Execution
-Here the flow of Intent Execution is explained. After its creation by User it
-makes it to CommittorService. The main responsibility of CommittorService - execution of Intents.
+# `magicblock-committor-service`
 
+Delivers the leader's settlement intents to the base chain: commits,
+undelegations, finalization, and associated actions. Engine execution and local
+intent scheduling are not themselves settlement completion.
 
-Due to blocking nature of intents, where one intent can block execution of another,
-we introduce **Schedulers**
+## Delivery pipeline
 
-## Schedulers
-We can't directly spawn a bunch of **IntentExecutor**s. The reason is that one message can block execution of another message. To handle this the messages have to go through Scheduling.
+`CommittorProcessor` prepares scheduled work for `IntentExecutionManager`.
+The intent scheduler orders conflicting work before executors prepare and send
+transactions; independent intents can execute concurrently under bounded permits.
 
-Details: Once message make it to `CommittorProcessor::schedule_base_intents` it outsources intent to tokio task `IntentExecutionEngine` which figures out a scheduling.
+Task construction resolves the account/delegation information and commit IDs
+needed by the Delegation Program. Transaction preparation selects inline or
+buffered payloads, prepares [lookup tables][tables] and [commit buffers][buffers],
+and assembles the required transaction strategy. Large deliveries may require
+separate staging and finalization phases.
 
-## IntentExecutionEngine
-Accepts new messages, schedules them, and spawns up to `MAX_EXECUTORS`(50) parallel **IntentExecutor**s for each Intent. Once a particular **IntentExecutor** finishes execution we broadcast result to subscribers, like: `RemoteScheduledCommitsProcessor` or `ExternalAccountsManager`
+`IntentExecutionService` integrates this pipeline with Chainlink, Engine,
+recovered intents, and result handling. Base-chain action callbacks are separate
+local transactions, not part of the base-chain transaction's atomic outcome.
 
-Details: For scheduling logic see **IntentScheduler**.  Number of parallel **IntentExecutor** is controller by Semaphore.
+## Retries and durability
 
-## IntentExecutor
-IntentExecutor - responsible for execution of Intent. Calls  **TransactionPreparator** and then executes a transaction returning as result necessary signatures
+Active executors and sleeping retries have separate limits. A retry releases its
+execution permit during backoff so unrelated work can continue; retry-capacity
+exhaustion makes that failure terminal.
 
-## TransactionPreparator
-TransactionPreparator - is an entity that handles all of the above "Transaction preparation" calling **TaskBuilderV1**,  **TaskStrategist**, **DeliveryPreparator** and then assempling it all and passing to **MessageExecutor**
+Retry policy distinguishes commit-bearing intents, which have on-chain nonce
+deduplication, from action-only intents. An unobserved successful send can make
+an action-only retry execute twice, so those retries are restricted to pre-send
+failures.
 
-## DeliveryPreparator
-After our **BaseTask**s are ready we need to prepare eveything for their successful execution. **DeliveryPreparator** - handles ALTs and commit buffers
+Optional persistence tracks intent status and supports recovery. It is not an
+atomic transaction spanning the local database, base chain, and callbacks.
+Completion reports distinguish intent execution from callback scheduling.
+Callback signatures do not confirm callback execution; inspect execution errors
+and scheduling errors rather than treating queue admission or a signature as
+final success.
 
-## TaskBuilder
-First, lets build atomic tasks from scheduled message/intent.
+## Integration constraints
 
-High level: TaskBuilder responsible for creating BaseTasks(to be renamed...) from ScheduledBaseIntent(to be renamed...).
-Details: To do that is requires additional information from DelegationMetadata, it is provided **CommitIdFetcher**
+Preserve conflicting-account order, commit IDs, payload limits, ALT readiness,
+and buffer cleanup across delivery changes. Retryability must reflect whether
+a send could already have taken effect. See [settlement delivery][delivery] for
+staging, acknowledgement, and recovery contracts.
 
-### BaseTask
-High level: BaseTask - is an atomic operation that is to be performed on the Base layer, like: Commit, Undelegate, Finalize, Action.
+[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
 
-Details: There's to implementation of BaseTask: ArgsTask, BufferTask. ArgsTask - gives instruction using args. BufferTask - gives instruction using buffer. BufferTask at the moment supports only commits
-
-### TaskInfoFetcher
-High level: for account to be accepted by `dlp` it needs to have incremental commit ids. TaskInfoFetcher provides a user with the correct ids/nonces for set of committees
-
-Details: CacheTaskInfoFetcher - implementation of TaskInfoFetcher, that caches and locally increments commit ids using LruCache
-
-## TaskStrategist
-After our tasks were built with **TaskBuilder**, they need to be optimized to fit into transaction. That what TaskStrategist does.
-
-Details: Initially **TaskBuilder** builds ArgsTasks,  **TaskStrategist** if needed optimzes them to BufferTask.
+[tables]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-table-mania/README.md
+[buffers]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-committor-program/README.md
+[delivery]: https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/settlement-delivery.md

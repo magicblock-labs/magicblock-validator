@@ -1,4 +1,4 @@
-# MagicBlock CLI
+# `magicblock`
 
 `magicblock` provides explicit operator commands for managing a leader's Magic
 Domain record and checking a validator's RPC, execution, and PubSub paths.
@@ -65,3 +65,8 @@ Within one end-to-end deadline, the command:
 The account notification's value and context slot are intentionally ignored.
 Success is written as one line to stdout. Structured progress and timing are
 written to stderr; set `RUST_LOG` to control their verbosity.
+
+Domain commands sign and submit base-chain transactions; they are not dry runs.
+They do not start or stop the validator process.
+
+[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Configuration](https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-config/README.md)

@@ -1,28 +1,27 @@
+# `magicblock-ledger-deprecated`
 
-# Summary
+Read-only access to the RocksDB ledger written by earlier validator versions.
+The directory retains its historical name, but the Cargo package is explicitly
+deprecated. Engine owns current block production and storage.
 
-Stores all types of chain information in key-value stores: signatures, statuses, metas, slots.
-This is basically a massive optimized and serialized `HashMap<Column, OrderedHashMap<Key, Value>>`.
-Uses rocksdb library internally as a fancy storage datastructure that automatically saves to file.
+## Historical RPC fallback
 
-# Details
+[Aperture][aperture] consults this store after a successful Engine history read
+returns no data. Engine errors are not converted into legacy fallback reads.
 
-*Important symbols:*
+`Ledger` exposes historical blocks, transactions, signatures, and statuses.
+The database/column modules and [storage-proto][storage] preserve their old
+encodings. This is compatibility access, not a second live ledger or a migration
+writer.
 
-- `Ledger` struct
-  - Depends on a `Database`
-  - Contains a bunch of `LedgeColumn`, one for each stored data type
-  - Implements all the fetching/putting/serialization logic for each stored data type
+Reads use synchronous RocksDB operations. Aperture bounds concurrent legacy
+reads and runs them off its async worker threads; that admission bound does not
+guarantee disk latency or bound every queued request.
 
-- `Database` struct
-  - Depends on a `Rocks` which depends on `rocksdb::DB`
-  - Just a fast column (namespace) and key-value (ordered-hash-map) database
-  - Allows fetching generic deserialized datastructure directly
+Retain decoding compatibility while old history remains supported. Do not add
+new execution writes here.
 
-- `LedgerColumn` struct
-  - Represent a single key-value store (or namespace) in the rocksdb
-  - Expose get/put/iter/delete (with optionally protobuf) rocksdb's methods
+[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
 
-# Notes
-
-N/A
+[aperture]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-aperture/README.md
+[storage]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/storage-proto/README.md

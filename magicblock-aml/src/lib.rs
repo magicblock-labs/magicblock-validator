@@ -1,9 +1,4 @@
-//! Thin client for the risk server that assesses address risk.
-//!
-//! The validator no longer talks to the upstream AML provider (Range) directly.
-//! Instead it queries the risk server, which owns the provider credentials, the
-//! cache, and the risk threshold. This crate is a small `reqwest` wrapper that
-//! asks the server whether a set of addresses is risky.
+#![doc = include_str!("../README.md")]
 
 use futures_util::future::try_join_all;
 use magicblock_config::config::{AmlCheckStrategy, RiskConfig};
