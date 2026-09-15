@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![allow(clippy::manual_is_multiple_of)]
 
 use solana_pubkey::declare_id;

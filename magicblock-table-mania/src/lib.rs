@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 mod compute_budget;
 mod derive_keypair;
 pub mod error;

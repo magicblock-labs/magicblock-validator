@@ -15,7 +15,7 @@ use tracing::*;
 // Implements the following flow:
 //
 // ## Account created then fetched, then delegated
-// @docs/flows/deleg-non-existing-after-sub.md
+// Materialization rules: ../README.md#materialization-and-ordering
 
 // NOTE: Flow "Account created then fetched, then delegated"
 #[tokio::test]
