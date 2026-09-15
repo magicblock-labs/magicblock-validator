@@ -702,11 +702,7 @@ where
         let this = this.clone();
         let fetch_context = fetch_context.clone();
         pending.spawn(async move {
-            this.clone_account_with_post_delegation_action_invariants(
-                request,
-                fetch_context,
-            )
-            .await
+            this.clone_account(request, fetch_context).await
         });
     }
     pending

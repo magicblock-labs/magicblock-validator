@@ -770,20 +770,17 @@ where
         );
         let result =
             cloner::clone_account(&self.engine, accessor, request).await;
-        if result.is_ok() {
-            metrics::inc_chainlink_clone_accounts_total_with_context(
-                fetch_context.clone(),
-                remote_result,
-                clone_intent,
-                ChainlinkCloneOutcome::CloneSucceeded,
-            );
-        } else {
-            metrics::inc_chainlink_clone_accounts_total_with_context(
-                fetch_context.clone(),
-                remote_result,
-                clone_intent,
-                ChainlinkCloneOutcome::CloneFailed,
-            );
+        metrics::inc_chainlink_clone_accounts_total_with_context(
+            fetch_context.clone(),
+            remote_result,
+            clone_intent,
+            if result.is_ok() {
+                ChainlinkCloneOutcome::CloneSucceeded
+            } else {
+                ChainlinkCloneOutcome::CloneFailed
+            },
+        );
+        if result.is_err() {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context.clone(),
                 remote_result,
@@ -1083,7 +1080,7 @@ where
         result
     }
 
-    async fn clone_account_with_post_delegation_action_invariants(
+    async fn clone_account(
         &self,
         mut request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
@@ -1108,79 +1105,81 @@ where
         self.normalize_unresolved_dlp_clone_request(&mut request)?;
         Self::normalize_immutable_account(&mut request);
 
-        let ClonePostDelegationMode::ExecuteActions(delegation) =
-            &request.post_delegation_mode
-        else {
-            let Some(accessor) =
-                cloner::claim_materialization(&self.engine, &mut request)
-                    .await?
-            else {
-                return Ok(());
-            };
-            return self
-                .submit_account(accessor, request, fetch_context)
-                .await
-                .map_err(Into::into);
+        // Resolve dependencies before claiming the target: dependency cloning
+        // can itself need account ownership. Preserve failures until the target
+        // is reclassified, since another caller may already have activated it.
+        let activation = if let Some(delegation) =
+            request.post_delegation_mode.delegation()
+        {
+            if !request.account.read().is(AccountMode::Delegated) {
+                return Err(ChainlinkError::InvalidDelegationActions(
+                    request.pubkey,
+                    "post-delegation actions attached to non-delegated clone target"
+                        .to_string(),
+                ));
+            }
+            Some((
+                delegation.source_program(),
+                self.ensure_delegation_action_dependencies(
+                    request.pubkey,
+                    request.account.read().slot(),
+                    delegation,
+                    fetch_context.clone(),
+                )
+                .await,
+            ))
+        } else {
+            None
         };
-
-        if !request.account.read().is(AccountMode::Delegated) {
-            return Err(ChainlinkError::InvalidDelegationActions(
-                request.pubkey,
-                "post-delegation actions attached to non-delegated clone target"
-                    .to_string(),
-            ));
-        }
-        let source_program = delegation.source_program();
-
-        let dependency_error = self
-            .ensure_delegation_action_dependencies(
-                request.pubkey,
-                request.account.read().slot(),
-                delegation,
-                fetch_context.clone(),
-            )
-            .await
-            .err();
 
         let Some(accessor) =
             cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             return Ok(());
         };
-        if let Some(err) = dependency_error {
-            request.post_delegation_mode =
-                ClonePostDelegationMode::RescueUndelegate(source_program);
+        let Some((source_program, dependencies)) = activation else {
+            return self
+                .submit_account(accessor, request, fetch_context)
+                .await
+                .map_err(Into::into);
+        };
+        let actions = mem::replace(
+            &mut request.post_delegation_mode,
+            ClonePostDelegationMode::RescueUndelegate(source_program),
+        );
+        if let Err(err) = dependencies {
+            drop(actions);
             return self
                 .rescue_failed_activation(accessor, request, fetch_context, err)
                 .await;
         }
-        // Keep the shared account buffer for fallback without cloning the
-        // action instructions that move into the activation attempt.
-        let mut rescue = AccountCloneRequest {
-            pubkey: request.pubkey,
+        // Retain the rescue request and share its account buffer; only the
+        // original action bundle moves into the activation attempt.
+        let activation = AccountCloneRequest {
             account: request.account.clone(),
-            commit_frequency_ms: request.commit_frequency_ms,
-            post_delegation_mode: ClonePostDelegationMode::RescueUndelegate(
-                source_program,
-            ),
-            delegated_to_other: request.delegated_to_other,
+            post_delegation_mode: actions,
+            ..request
         };
-        let Err(err) = self
-            .submit_account(accessor, request, fetch_context.clone())
+        let err = match self
+            .submit_account(accessor, activation, fetch_context.clone())
             .await
-        else {
-            return Ok(());
+        {
+            Ok(()) => return Ok(()),
+            Err(err) if err.allows_rescue() => err,
+            Err(err) => return Err(err.into()),
         };
-        // Submission consumes the lease. Reacquire and reclassify so
-        // recovery cannot overwrite a concurrently materialized account.
+        // Engine retains ownership even if the caller cancels its wait;
+        // cancellation does not authorize another mutation. Reacquire and
+        // reclassify before fallback so a concurrent materialization
+        // cannot be overwritten or have its actions replayed.
         let Some(accessor) =
-            cloner::claim_materialization(&self.engine, &mut rescue).await?
+            cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             return Ok(());
         };
         self.rescue_failed_activation(
             accessor,
-            rescue,
+            request,
             fetch_context,
             err.into(),
         )
@@ -1678,7 +1677,7 @@ where
                 .then_some(dr.commit_frequency_ms)
         });
         if let Err(err) = self
-            .clone_account_with_post_delegation_action_invariants(
+            .clone_account(
                 AccountCloneRequest {
                     pubkey,
                     account,
@@ -1872,7 +1871,7 @@ where
             return Ok(());
         }
 
-        self.clone_account_with_post_delegation_action_invariants(
+        self.clone_account(
             request,
             fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )

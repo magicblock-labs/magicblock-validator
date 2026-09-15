@@ -108,6 +108,7 @@ lru-capacity = 5000
 
 [engine.blockstore]
 blocktime = "400ms"
+# Slots per superblock; 0 disables periodic sealing.
 superblock = 72000
 
 [engine.ledger]
