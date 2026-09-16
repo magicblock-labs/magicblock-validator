@@ -16,7 +16,7 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    FetchCloner,
+    FetchCloner, delegation,
     subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::{
         AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
@@ -127,7 +127,6 @@ fn classify_single_account(
                         plain.push(AccountCloneRequest {
                             pubkey,
                             account,
-                            commit_frequency_ms: None,
                             post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
                         });
@@ -280,15 +279,15 @@ where
         } in accounts_fully_resolved.into_iter()
         {
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other, delegation_actions) =
-                if let Some(delegation_record_data) = delegation_record {
+            let (delegated_to_other, delegation_actions) =
+                if let Some(record_data) = delegation_record {
                     // NOTE: failing here is fine when resolving all accounts for a transaction
                     // since if something is off we better not run it anyways
                     // However we may consider a different behavior when user is getting
                     // multiple accounts.
                     let (delegation_record, delegation_actions) = match this
                         .parse_delegation_record(
-                            delegation_record_data.read().data(),
+                            record_data.read().data(),
                             delegation_record_pubkey,
                         ) {
                         Ok(x) => x,
@@ -301,12 +300,15 @@ where
                                     pubkey,
                                     reason: SubscriptionReason::DirectAccount,
                                 })
-                                .chain(record_subs.iter().copied().map(|pubkey| {
-                                    SubscriptionRelease::Pubkey {
-                                        pubkey,
-                                        reason: SubscriptionReason::DelegationRecord,
-                                    }
-                                }))
+                                .chain(
+                                    record_subs.iter().copied().map(|pubkey| {
+                                        SubscriptionRelease::Pubkey {
+                                    pubkey,
+                                    reason:
+                                        SubscriptionReason::DelegationRecord,
+                                }
+                                    }),
+                                )
                                 .collect::<Vec<_>>();
                             release_subs(
                                 &this.remote_account_provider,
@@ -319,16 +321,17 @@ where
 
                     trace!(pubkey = %pubkey, "Delegation record found");
 
-                    let delegated_to_other =
-                        this.get_delegated_to_other(&delegation_record);
+                    let delegated_to_other = delegation::delegated_to_other(
+                        &this.validator_pubkey,
+                        &delegation_record,
+                    );
 
-                    let (updated_account, commit_freq) = this
-                        .apply_delegation_record_to_account(
-                            pubkey,
-                            account,
-                            &delegation_record,
-                        );
-                    account = updated_account;
+                    account = delegation::apply_record(
+                        &this.validator_pubkey,
+                        pubkey,
+                        account,
+                        &delegation_record,
+                    );
 
                     // Skip high-cardinality owner programs such as SPL Token.
                     if account.read().is(AccountMode::Delegated)
@@ -347,13 +350,13 @@ where
                             None
                         };
 
-                    (commit_freq, delegated_to_other, delegation_actions)
-                } else if is_internal_dlp_account_data(account.read().data()) {
-                    (None, None, None)
+                    (delegated_to_other, delegation_actions)
                 } else {
-                    missing_delegation_record
-                        .push((pubkey, account.read().slot()));
-                    (None, None, None)
+                    if !is_internal_dlp_account_data(account.read().data()) {
+                        missing_delegation_record
+                            .push((pubkey, account.read().slot()));
+                    }
+                    (None, None)
                 };
             let cleanup_delegated_subscription =
                 account.read().is(AccountMode::Delegated);
@@ -364,7 +367,6 @@ where
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account,
-                commit_frequency_ms,
                 post_delegation_mode: ClonePostDelegationMode::from(
                     delegation_actions,
                 ),

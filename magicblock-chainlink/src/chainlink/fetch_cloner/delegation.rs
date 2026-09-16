@@ -92,19 +92,17 @@ fn parse_post_delegation_actions(
     Ok(instructions)
 }
 
-pub(crate) fn apply_delegation_record_to_account<T, U>(
-    this: &FetchCloner<T, U>,
+/// Restores the owner and resolves the account mode from its delegation record.
+/// Confined accounts have zero lamports; raw eATAs never become committable.
+pub(super) fn apply_record(
+    validator: &Pubkey,
     account_pubkey: Pubkey,
     account: AccountBuilder,
     delegation_record: &DelegationRecord,
-) -> (AccountBuilder, Option<u64>)
-where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-{
+) -> AccountBuilder {
     let is_confined = delegation_record.authority.eq(&Pubkey::default());
     let is_delegated_to_us =
-        delegation_record.authority.eq(&this.validator_pubkey) || is_confined;
+        delegated_to_other(validator, delegation_record).is_none();
     let is_raw_eata = parse_raw_eata_pda(
         &account_pubkey,
         account.read().data(),
@@ -125,17 +123,11 @@ where
         AccountMode::ReadOnly
     };
     let account = account.owner(delegation_record.owner).mode(mode);
-    let account = if is_confined {
+    if is_confined {
         account.lamports(0)
     } else {
         account
-    };
-    let commit_frequency_ms = if is_delegated_to_us && !is_raw_eata {
-        Some(delegation_record.commit_frequency_ms)
-    } else {
-        None
-    };
-    (account, commit_frequency_ms)
+    }
 }
 
 pub(crate) fn parse_raw_eata_pda(
@@ -154,17 +146,13 @@ pub(crate) fn parse_raw_eata_pda(
         .then_some((eata.owner, eata.mint))
 }
 
-pub(crate) fn get_delegated_to_other<T, U>(
-    this: &FetchCloner<T, U>,
+/// Returns the other validator, or `None` for local or confined delegations.
+pub(super) fn delegated_to_other(
+    validator: &Pubkey,
     delegation_record: &DelegationRecord,
-) -> Option<Pubkey>
-where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-{
-    let is_delegated_to_us =
-        delegation_record.authority.eq(&this.validator_pubkey)
-            || delegation_record.authority.eq(&Pubkey::default());
+) -> Option<Pubkey> {
+    let is_delegated_to_us = delegation_record.authority.eq(validator)
+        || delegation_record.authority.eq(&Pubkey::default());
 
     (!is_delegated_to_us).then_some(delegation_record.authority)
 }

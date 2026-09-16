@@ -257,7 +257,6 @@ where
     Some(AccountCloneRequest {
         pubkey: ata_pubkey,
         account: projected_ata,
-        commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::from(
             delegation_actions.cloned(),
         ),
@@ -659,7 +658,6 @@ where
     let mut deleg_iter = deleg_results.into_iter();
     for input in ata_inputs {
         let mut account_to_clone = input.ata_account;
-        let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
         let mut actions = None;
 
@@ -667,9 +665,10 @@ where
             && let Some(Some(deleg)) = deleg_iter.next()
         {
             let (deleg_record, delegation_actions) = deleg;
-            delegated_to_other =
-                delegation::get_delegated_to_other(this, &deleg_record);
-            commit_frequency_ms = Some(deleg_record.commit_frequency_ms);
+            delegated_to_other = delegation::delegated_to_other(
+                &this.validator_pubkey,
+                &deleg_record,
+            );
 
             if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
                 this,
@@ -686,7 +685,6 @@ where
         accounts_to_clone.push(AccountCloneRequest {
             pubkey: input.ata_pubkey,
             account: account_to_clone,
-            commit_frequency_ms,
             post_delegation_mode: ClonePostDelegationMode::from(actions),
             delegated_to_other,
         });
