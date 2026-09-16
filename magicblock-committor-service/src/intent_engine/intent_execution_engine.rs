@@ -111,13 +111,6 @@ pub struct ResultSubscriber(
     broadcast::Sender<BroadcastedIntentExecutionResult>,
 );
 impl ResultSubscriber {
-    #[cfg(test)]
-    pub(crate) fn new(
-        sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
-    ) -> Self {
-        Self(sender)
-    }
-
     pub fn subscribe(
         &self,
     ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
