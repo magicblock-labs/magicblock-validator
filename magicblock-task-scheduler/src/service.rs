@@ -203,10 +203,13 @@ impl Processor {
 
     /// Returns whether a hydra-owned crank account currently exists at `crank`.
     fn crank_exists(&self, crank: &Pubkey) -> bool {
-        matches!(
-            self.engine.accounts().loader().load(crank),
-            Ok(Some(account)) if *account.owner() == EPHEMERAL_PROGRAM_ID
-        )
+        self.engine
+            .accounts()
+            .loader()
+            .read(crank, |account| *account.owner() == EPHEMERAL_PROGRAM_ID)
+            .ok()
+            .flatten()
+            .unwrap_or(false)
     }
 
     /// Builds and sends the transaction that creates and funds a hydra crank.
