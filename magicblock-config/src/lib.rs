@@ -27,9 +27,7 @@ mod tests;
 pub mod types;
 
 use crate::{
-    config::{
-        ChainLinkConfig, CommittorConfig, LedgerConfig, LoadableProgram,
-    },
+    config::{ChainLinkConfig, CommittorConfig, LedgerConfig, LoadableProgram},
     types::Remote,
 };
 
