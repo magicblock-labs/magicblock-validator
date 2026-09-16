@@ -516,7 +516,7 @@ mod tests {
         intent_engine::{
             db::{BacklogDB, DummyDB},
             intent_channel::channel,
-            intent_scheduler::{create_test_intent, create_test_intent_bundle},
+            intent_scheduler::create_test_intent_bundle,
         },
         intent_executor::{
             IntentExecutionResult, IntentExecutor,
@@ -601,10 +601,10 @@ mod tests {
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg.clone()).unwrap();
 
@@ -622,8 +622,8 @@ mod tests {
 
         // Send two conflicting messages
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey], false);
-        let msg2 = create_test_intent(2, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
+        let msg2 = create_test_intent_bundle(2, &[pubkey], &[]);
 
         sender.try_send(msg1.clone()).unwrap();
         sender.try_send(msg2.clone()).unwrap();
@@ -649,7 +649,7 @@ mod tests {
         let a = pubkey!("1111111111111111111111111111111111111111111");
         let b = pubkey!("21111111111111111111111111111111111111111111");
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
-        let msg2 = create_test_intent(2, &[a], false);
+        let msg2 = create_test_intent_bundle(2, &[a], &[]);
 
         sender.try_send(msg1.clone()).unwrap();
         sender.try_send(msg2.clone()).unwrap();
@@ -672,10 +672,10 @@ mod tests {
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message that will fail
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg.clone()).unwrap();
 
@@ -698,10 +698,10 @@ mod tests {
         let (_sender, worker, db) = setup_engine(false);
 
         // Add a message to the DB
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         db.lock().unwrap().store_intent_bundle(msg.clone()).unwrap();
 
@@ -733,10 +733,10 @@ mod tests {
 
         // Send a flood of messages
         for i in 0..NUM_MESSAGES {
-            let msg = create_test_intent(
+            let msg = create_test_intent_bundle(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
-                false,
+                &[],
             );
             sender.try_send(msg).unwrap();
         }
@@ -777,7 +777,7 @@ mod tests {
         const NUM_FAILURES: usize = 10;
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         for i in 0..NUM_FAILURES {
-            let msg = create_test_intent(i as u64, &[pubkey], false);
+            let msg = create_test_intent_bundle(i as u64, &[pubkey], &[]);
             sender.try_send(msg).unwrap();
         }
 
@@ -833,8 +833,8 @@ mod tests {
 
         let poisoned_pubkey =
             pubkey!("1111111111111111111111111111111111111111111");
-        let head = create_test_intent(0, &[poisoned_pubkey], false);
-        let successor = create_test_intent(1, &[poisoned_pubkey], false);
+        let head = create_test_intent_bundle(0, &[poisoned_pubkey], &[]);
+        let successor = create_test_intent_bundle(1, &[poisoned_pubkey], &[]);
         sender.try_send(head).unwrap();
         sender.try_send(successor).unwrap();
 
@@ -851,7 +851,7 @@ mod tests {
         // A brand new intent on the now-poisoned pubkey is rejected at
         // admission - it never reaches an executor, so no broadcast for
         // it ever arrives.
-        let rejected = create_test_intent(2, &[poisoned_pubkey], false);
+        let rejected = create_test_intent_bundle(2, &[poisoned_pubkey], &[]);
         sender.try_send(rejected).unwrap();
         let silence =
             timeout(Duration::from_millis(300), result_receiver.recv()).await;
@@ -864,7 +864,7 @@ mod tests {
         // and still executes (and fails for real, not as poisoned).
         let unrelated_pubkey =
             pubkey!("21111111111111111111111111111111111111111111");
-        let unrelated = create_test_intent(3, &[unrelated_pubkey], false);
+        let unrelated = create_test_intent_bundle(3, &[unrelated_pubkey], &[]);
         sender.try_send(unrelated).unwrap();
         let result = timeout(Duration::from_secs(5), result_receiver.recv())
             .await
@@ -890,10 +890,10 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg).unwrap();
 
@@ -911,10 +911,10 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg).unwrap();
 
@@ -935,10 +935,10 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg).unwrap();
 
@@ -957,10 +957,10 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         sender.try_send(msg).unwrap();
 
@@ -988,7 +988,7 @@ mod tests {
         let mut received_ids = HashSet::new();
         for i in 0..NUM_MESSAGES {
             let unique_pubkey = Pubkey::new_unique(); // Each message gets unique key
-            let msg = create_test_intent(i, &[unique_pubkey], false);
+            let msg = create_test_intent_bundle(i, &[unique_pubkey], &[]);
 
             received_ids.insert(i);
             sender.try_send(msg).unwrap();
@@ -1054,7 +1054,7 @@ mod tests {
                 vec![Pubkey::new_unique()]
             };
 
-            let msg = create_test_intent(i as u64, &pubkeys, false);
+            let msg = create_test_intent_bundle(i as u64, &pubkeys, &[]);
             sender.try_send(msg).unwrap();
         }
 

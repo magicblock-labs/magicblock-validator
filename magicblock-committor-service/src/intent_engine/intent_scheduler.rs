@@ -589,15 +589,15 @@ mod simple_test {
     fn test_non_conflicting_intents() {
         setup();
         let mut scheduler = IntentScheduler::new();
-        let msg1 = create_test_intent(
+        let msg1 = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        let msg2 = create_test_intent(
+        let msg2 = create_test_intent_bundle(
             2,
             &[pubkey!("22222222222222222222222222222222222222222222")],
-            false,
+            &[],
         );
 
         // First intent should execute immediately
@@ -616,12 +616,12 @@ mod simple_test {
 
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
 
         // First message executes immediately
         assert!(scheduler.schedule(msg1).is_some());
         for id in 2..=NUM_INTENTS {
-            let msg = create_test_intent(id, &[pubkey], false);
+            let msg = create_test_intent_bundle(id, &[pubkey], &[]);
             // intent gets blocked
             assert!(scheduler.schedule(msg).is_none());
         }
@@ -648,8 +648,8 @@ mod completion_simple_test {
         setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey], false);
-        let msg2 = create_test_intent(2, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
+        let msg2 = create_test_intent_bundle(2, &[pubkey], &[]);
 
         // First intent executes immediately
         let executed = scheduler.schedule(msg1.clone()).unwrap();
@@ -670,9 +670,9 @@ mod completion_simple_test {
         setup();
         let mut scheduler = IntentScheduler::new();
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey], false);
-        let msg2 = create_test_intent(2, &[pubkey], false);
-        let msg3 = create_test_intent(3, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
+        let msg2 = create_test_intent_bundle(2, &[pubkey], &[]);
+        let msg3 = create_test_intent_bundle(3, &[pubkey], &[]);
 
         // First intent executes immediately
         let executed = scheduler.schedule(msg1.clone()).unwrap();
@@ -727,25 +727,25 @@ mod complex_blocking_test {
 
         // intent 1: [a1, a2, a3]
         let msg1_keys = vec![a1, a2, a3];
-        let msg1 = create_test_intent(1, &msg1_keys, false);
+        let msg1 = create_test_intent_bundle(1, &msg1_keys, &[]);
         assert!(scheduler.schedule(msg1.clone()).is_some());
         assert_eq!(scheduler.intents_blocked(), 0);
 
         // intent 2:  [b1, b2, b3]
         let msg2_keys = vec![b1, b2, b3];
-        let msg2 = create_test_intent(2, &msg2_keys, false);
+        let msg2 = create_test_intent_bundle(2, &msg2_keys, &[]);
         assert!(scheduler.schedule(msg2.clone()).is_some());
         assert_eq!(scheduler.intents_blocked(), 0);
 
         // intent 3: [a1, b1] - blocked by msg1 & msg2
         let msg3_keys = vec![a1, b1];
-        let msg3 = create_test_intent(3, &msg3_keys, false);
+        let msg3 = create_test_intent_bundle(3, &msg3_keys, &[]);
         assert!(scheduler.schedule(msg3.clone()).is_none());
         assert_eq!(scheduler.intents_blocked(), 1);
 
         // intent 4: [a1, a3] - blocked by msg1 & msg3
         let msg4_keys = vec![a1, a3];
-        let msg4 = create_test_intent(4, &msg4_keys, false);
+        let msg4 = create_test_intent_bundle(4, &msg4_keys, &[]);
         assert!(scheduler.schedule(msg4.clone()).is_none());
         assert_eq!(scheduler.intents_blocked(), 2);
 
@@ -788,15 +788,15 @@ mod complex_blocking_test {
 
         // intent 1: [a1, a2, a3] (executing)
         let msg1_keys = vec![a1, a2, a3];
-        let msg1 = create_test_intent(1, &msg1_keys, false);
+        let msg1 = create_test_intent_bundle(1, &msg1_keys, &[]);
 
         // intent 2: [c1, a1] (blocked by msg1)
         let msg2_keys = vec![c1, a1];
-        let msg2 = create_test_intent(2, &msg2_keys, false);
+        let msg2 = create_test_intent_bundle(2, &msg2_keys, &[]);
 
         // intent 3: [c2, c1] (arriving later)
         let msg3_keys = vec![c2, c1];
-        let msg3 = create_test_intent(3, &msg3_keys, false);
+        let msg3 = create_test_intent_bundle(3, &msg3_keys, &[]);
 
         // Schedule msg1 (executes immediately)
         let executed_msg1 = scheduler.schedule(msg1.clone()).unwrap();
@@ -838,11 +838,11 @@ mod complex_blocking_test {
         let c = pubkey!("31111111111111111111111111111111111111111111");
 
         // intents with various key combinations
-        let msg1 = create_test_intent(1, &[a, b], false);
-        let msg2 = create_test_intent(2, &[a, c], false);
-        let msg3 = create_test_intent(3, &[c], false);
-        let msg4 = create_test_intent(4, &[b], false);
-        let msg5 = create_test_intent(5, &[a], false);
+        let msg1 = create_test_intent_bundle(1, &[a, b], &[]);
+        let msg2 = create_test_intent_bundle(2, &[a, c], &[]);
+        let msg3 = create_test_intent_bundle(3, &[c], &[]);
+        let msg4 = create_test_intent_bundle(4, &[b], &[]);
+        let msg5 = create_test_intent_bundle(5, &[a], &[]);
 
         // msg1 executes immediately
         let executed1 = scheduler.schedule(msg1.clone()).unwrap();
@@ -893,7 +893,7 @@ mod edge_cases_test {
     fn test_intent_without_pubkeys() {
         setup();
         let mut scheduler = IntentScheduler::new();
-        let mut msg = create_test_intent(1, &[], false);
+        let mut msg = create_test_intent_bundle(1, &[], &[]);
         msg.inner.intent_bundle = MagicIntentBundle::default();
 
         // Should execute immediately since it has no pubkeys
@@ -919,10 +919,10 @@ mod complete_error_test {
     fn test_complete_non_scheduled_message() {
         setup();
         let mut scheduler = IntentScheduler::new();
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
 
         // Attempt to complete message that was never scheduled
@@ -941,11 +941,11 @@ mod complete_error_test {
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
 
         // Schedule first intent
-        let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
+        let mut msg1 = create_test_intent_bundle(1, &[pubkey1, pubkey2], &[]);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
         // Schedule second intent that conflicts with first
-        let msg2 = create_test_intent(2, &[pubkey1], false);
+        let msg2 = create_test_intent_bundle(2, &[pubkey1], &[]);
         assert!(scheduler.schedule(msg2.clone()).is_none());
 
         msg1.inner.get_commit_intent_accounts_mut().unwrap().pop();
@@ -967,7 +967,7 @@ mod complete_error_test {
         let pubkey3 = pubkey!("31111111111111111111111111111111111111111111");
 
         // Schedule first intent
-        let mut msg1 = create_test_intent(1, &[pubkey1, pubkey2], false);
+        let mut msg1 = create_test_intent_bundle(1, &[pubkey1, pubkey2], &[]);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
         msg1.inner
@@ -996,11 +996,11 @@ mod complete_error_test {
         let pubkey2 = pubkey!("21111111111111111111111111111111111111111111");
 
         // Schedule first intent for pubkey1 only
-        let msg1 = create_test_intent(1, &[pubkey1], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey1], &[]);
         assert!(scheduler.schedule(msg1.clone()).is_some());
 
         // Create second intent using both pubkeys
-        let msg2 = create_test_intent(2, &[pubkey1, pubkey2], false);
+        let msg2 = create_test_intent_bundle(2, &[pubkey1, pubkey2], &[]);
         // Manually add to blocked_keys without proper scheduling
         scheduler.schedule(msg2.clone());
 
@@ -1019,8 +1019,8 @@ mod complete_error_test {
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
 
         // Schedule two intents for same pubkey
-        let msg1 = create_test_intent(1, &[pubkey], false);
-        let msg2 = create_test_intent(2, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
+        let msg2 = create_test_intent_bundle(2, &[pubkey], &[]);
 
         // First executes immediately
         assert!(scheduler.schedule(msg1.clone()).is_some());
@@ -1056,11 +1056,11 @@ mod intent_bundle_test {
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
 
         // msg2 conflicts with commit key (a)
-        let msg2 = create_test_intent(2, &[a], false);
+        let msg2 = create_test_intent_bundle(2, &[a], &[]);
         // msg3 conflicts with cau key (b)
-        let msg3 = create_test_intent(3, &[b], false);
+        let msg3 = create_test_intent_bundle(3, &[b], &[]);
         // msg4 is unrelated (c), should run immediately even while msg1 executes
-        let msg4 = create_test_intent(4, &[c], false);
+        let msg4 = create_test_intent_bundle(4, &[c], &[]);
 
         // msg1 executes immediately
         let executed1 = scheduler.schedule(msg1.clone()).unwrap();
@@ -1088,8 +1088,8 @@ mod intent_bundle_test {
         // msg1 has commit[a] and cau[b]
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
         // both should be blocked behind msg1
-        let msg2 = create_test_intent(2, &[a], false);
-        let msg3 = create_test_intent(3, &[b], false);
+        let msg2 = create_test_intent_bundle(2, &[a], &[]);
+        let msg3 = create_test_intent_bundle(3, &[b], &[]);
 
         // msg1 executes immediately
         let executed1 = scheduler.schedule(msg1.clone()).unwrap();
@@ -1155,13 +1155,13 @@ mod poisoned_test {
         let b1 = pubkey!("31111111111111111111111111111111111111111111");
         let b2 = pubkey!("41111111111111111111111111111111111111111111");
 
-        let executing_a = create_test_intent(1, &[a1, a2], false);
-        let executing_b = create_test_intent(2, &[b1, b2], false);
+        let executing_a = create_test_intent_bundle(1, &[a1, a2], &[]);
+        let executing_b = create_test_intent_bundle(2, &[b1, b2], &[]);
         assert!(scheduler.schedule(executing_a.clone()).is_some());
         assert!(scheduler.schedule(executing_b.clone()).is_some());
 
-        let x = create_test_intent(3, &[a2, b1], false);
-        let y = create_test_intent(4, &[a1, a2], false);
+        let x = create_test_intent_bundle(3, &[a2, b1], &[]);
+        let y = create_test_intent_bundle(4, &[a1, a2], &[]);
         assert!(scheduler.schedule(x.clone()).is_none());
         assert!(scheduler.schedule(y.clone()).is_none());
 
@@ -1209,13 +1209,13 @@ mod poisoned_test {
         let b1 = pubkey!("31111111111111111111111111111111111111111111");
         let b2 = pubkey!("41111111111111111111111111111111111111111111");
 
-        let executing_a = create_test_intent(1, &[a1, a2], false);
-        let i1 = create_test_intent(2, &[b1, b2], false);
+        let executing_a = create_test_intent_bundle(1, &[a1, a2], &[]);
+        let i1 = create_test_intent_bundle(2, &[b1, b2], &[]);
         assert!(scheduler.schedule(executing_a).is_some());
         assert!(scheduler.schedule(i1.clone()).is_some());
 
-        let bridge = create_test_intent(3, &[a2, b1], false);
-        let i2 = create_test_intent(4, &[a1, a2], false);
+        let bridge = create_test_intent_bundle(3, &[a2, b1], &[]);
+        let i2 = create_test_intent_bundle(4, &[a1, a2], &[]);
         assert!(scheduler.schedule(bridge).is_none());
         assert!(scheduler.schedule(i2.clone()).is_none());
 
@@ -1258,14 +1258,14 @@ mod poisoned_test {
         let b1 = pubkey!("31111111111111111111111111111111111111111111");
         let b2 = pubkey!("41111111111111111111111111111111111111111111");
 
-        let executing_a = create_test_intent(1, &[a1, a2], false);
-        let i1 = create_test_intent(2, &[b1, b2], false);
+        let executing_a = create_test_intent_bundle(1, &[a1, a2], &[]);
+        let i1 = create_test_intent_bundle(2, &[b1, b2], &[]);
         assert!(scheduler.schedule(executing_a.clone()).is_some());
         assert!(scheduler.schedule(i1.clone()).is_some());
 
-        let i2 = create_test_intent(3, &[a1, a2], false);
-        let i3 = create_test_intent(4, &[a2, b1], false);
-        let i4 = create_test_intent(5, &[a1, a2], false);
+        let i2 = create_test_intent_bundle(3, &[a1, a2], &[]);
+        let i3 = create_test_intent_bundle(4, &[a2, b1], &[]);
+        let i4 = create_test_intent_bundle(5, &[a1, a2], &[]);
         assert!(scheduler.schedule(i2.clone()).is_none());
         assert!(scheduler.schedule(i3.clone()).is_none());
         assert!(scheduler.schedule(i4.clone()).is_none());
@@ -1278,7 +1278,7 @@ mod poisoned_test {
         // Every pubkey touched by a voided intent rejects new scheduling,
         // even a1/a2 where I2 is still healthily queued.
         for pk in [a1, a2, b1, b2] {
-            let probe = create_test_intent(100, &[pk], false);
+            let probe = create_test_intent_bundle(100, &[pk], &[]);
             assert!(
                 scheduler.schedule(probe).is_none(),
                 "{pk} must reject new scheduling after the cascade"
@@ -1322,10 +1322,10 @@ mod poisoned_test {
         let b1 = pubkey!("31111111111111111111111111111111111111111111");
         let b2 = pubkey!("41111111111111111111111111111111111111111111");
 
-        let i1 = create_test_intent(1, &[b2], false);
-        let i2 = create_test_intent(2, &[b1, b2], false);
-        let i3 = create_test_intent(3, &[a2, b1], false);
-        let i4 = create_test_intent(4, &[a1, a2], false);
+        let i1 = create_test_intent_bundle(1, &[b2], &[]);
+        let i2 = create_test_intent_bundle(2, &[b1, b2], &[]);
+        let i3 = create_test_intent_bundle(3, &[a2, b1], &[]);
+        let i4 = create_test_intent_bundle(4, &[a1, a2], &[]);
         assert!(scheduler.schedule(i1.clone()).is_some());
         assert!(scheduler.schedule(i2.clone()).is_none());
         assert!(scheduler.schedule(i3.clone()).is_none());
@@ -1341,7 +1341,7 @@ mod poisoned_test {
         );
 
         for pk in [a1, a2, b1, b2] {
-            let probe = create_test_intent(100, &[pk], false);
+            let probe = create_test_intent_bundle(100, &[pk], &[]);
             assert!(
                 scheduler.schedule(probe).is_none(),
                 "{pk} must reject new scheduling after the cascade"
@@ -1387,10 +1387,10 @@ mod poisoned_test {
         let q1 = pubkey!("31111111111111111111111111111111111111111111");
         let q2 = pubkey!("41111111111111111111111111111111111111111111");
 
-        let f = create_test_intent(1, &[p1, p2], false);
-        let a = create_test_intent(2, &[p1, q1], false);
-        let b = create_test_intent(3, &[p2, q2], false);
-        let x = create_test_intent(4, &[q1, q2], false);
+        let f = create_test_intent_bundle(1, &[p1, p2], &[]);
+        let a = create_test_intent_bundle(2, &[p1, q1], &[]);
+        let b = create_test_intent_bundle(3, &[p2, q2], &[]);
+        let x = create_test_intent_bundle(4, &[q1, q2], &[]);
         assert!(scheduler.schedule(f.clone()).is_some());
         assert!(scheduler.schedule(a.clone()).is_none());
         assert!(scheduler.schedule(b.clone()).is_none());
@@ -1406,7 +1406,7 @@ mod poisoned_test {
         );
 
         for pk in [p1, p2, q1, q2] {
-            let probe = create_test_intent(100, &[pk], false);
+            let probe = create_test_intent_bundle(100, &[pk], &[]);
             assert!(
                 scheduler.schedule(probe).is_none(),
                 "{pk} must reject new scheduling after the cascade"
@@ -1430,7 +1430,7 @@ mod poisoned_test {
 
         // F touches only a1, executes immediately (nothing queued behind
         // it), then fails - poisons exactly {a1}.
-        let f = create_test_intent(1, &[a1], false);
+        let f = create_test_intent_bundle(1, &[a1], &[]);
         let executed_f = scheduler.schedule(f).unwrap();
         let voided = scheduler.failed(&executed_f).unwrap();
         assert!(voided.is_empty());
@@ -1438,13 +1438,13 @@ mod poisoned_test {
         // Z touches the poisoned a1 *and* c1 in one atomic bundle. Since
         // Z can never execute, its effect on c1 never happens either -
         // rejecting Z must poison c1 too, not just a1.
-        let z = create_test_intent(2, &[a1, c1], false);
+        let z = create_test_intent_bundle(2, &[a1, c1], &[]);
         assert!(scheduler.schedule(z).is_none());
 
         // W touches only c1. A caller could construct W assuming Z's
         // (never-landed) effect on c1 already happened - e.g. undelegating
         // c1 assuming funds Z was supposed to deposit. W must be rejected.
-        let w = create_test_intent(3, &[c1], false);
+        let w = create_test_intent_bundle(3, &[c1], &[]);
         assert!(
             scheduler.schedule(w).is_none(),
             "c1 was touched by Z, which will never execute; schedule() \
@@ -1452,56 +1452,6 @@ mod poisoned_test {
              already landed"
         );
     }
-}
-
-// Helper function to create test intents
-#[cfg(test)]
-pub(crate) fn create_test_intent(
-    id: u64,
-    pubkeys: &[Pubkey],
-    is_undelegate: bool,
-) -> OutboxIntentBundle {
-    use magicblock_core::intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
-        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
-    };
-    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
-    use solana_account::Account;
-    use solana_hash::Hash;
-
-    let mut intent = ScheduledIntentBundle {
-        id,
-        slot: 0,
-        blockhash: Hash::default(),
-        sent_transaction: Default::default(),
-        payer: Pubkey::default(),
-        intent_bundle: MagicIntentBundle::default(),
-    };
-
-    if !pubkeys.is_empty() {
-        let committed_accounts = pubkeys
-            .iter()
-            .map(|&pubkey| CommittedAccount {
-                pubkey,
-                account: Account::default(),
-                remote_slot: Default::default(),
-            })
-            .collect();
-
-        let commit_type = CommitType::Standalone(committed_accounts);
-        if is_undelegate {
-            intent.intent_bundle.commit_and_undelegate =
-                Some(CommitAndUndelegate {
-                    commit_action: commit_type,
-                    undelegate_action: UndelegateType::Standalone,
-                })
-        } else {
-            intent.intent_bundle.commit = Some(commit_type);
-        }
-    }
-
-    let bump = outbox_intent_pda_with_bump(id).1;
-    OutboxIntentBundle::accepted(intent, bump)
 }
 
 #[cfg(test)]
