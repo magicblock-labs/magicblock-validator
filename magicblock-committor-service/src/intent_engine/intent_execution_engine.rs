@@ -106,18 +106,6 @@ impl Deref for BroadcastedIntentExecutionResult {
     }
 }
 
-/// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
-pub struct ResultSubscriber(
-    broadcast::Sender<BroadcastedIntentExecutionResult>,
-);
-impl ResultSubscriber {
-    pub fn subscribe(
-        &self,
-    ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
-        self.0.subscribe()
-    }
-}
-
 pub(crate) struct IntentExecutionEngine<D, F, T> {
     intent_stream: IntentStream<D>,
     executor_builder: Arc<F>,
@@ -149,12 +137,12 @@ where
         }
     }
 
-    /// Spawns `main_loop` and return `Receiver` listening to results
-    pub fn spawn(self) -> ResultSubscriber {
+    /// Spawns `main_loop` and returns a sender that can create result subscriptions.
+    pub fn spawn(self) -> broadcast::Sender<BroadcastedIntentExecutionResult> {
         let (result_sender, _) = broadcast::channel(100);
         tokio::spawn(self.main_loop(result_sender.clone()));
 
-        ResultSubscriber(result_sender)
+        result_sender
     }
 
     /// Main loop that:

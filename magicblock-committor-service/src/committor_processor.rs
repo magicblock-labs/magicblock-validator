@@ -11,17 +11,25 @@ use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use tokio::sync::{broadcast, oneshot, oneshot::error::RecvError};
+use tokio::sync::{
+    broadcast,
+    mpsc::{Sender, error::TrySendError},
+    oneshot,
+    oneshot::error::RecvError,
+};
 use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
     error::{CommittorServiceError, CommittorServiceResult},
     intent_engine::{
-        BroadcastedIntentExecutionResult, IntentEngineHandle, db::BacklogDB,
+        BroadcastedIntentExecutionResult, IntentExecutionEngine,
+        db::BacklogDB,
+        intent_channel::{IntentScheduleError, channel},
     },
     intent_executor::{
-        error::IntentExecutorError, intent_executor_factory::ExecutorConfig,
+        error::IntentExecutorError,
+        intent_executor_factory::{ExecutorConfig, IntentExecutorBuilderImpl},
     },
     outbox::OutboxClient,
     tasks::task_info_fetcher::{
@@ -32,12 +40,15 @@ use crate::{
 
 const POISONED_MUTEX_MSG: &str =
     "CommittorProcessor pending messages mutex poisoned!";
+const POISONED_BACKLOG_MSG: &str = "intent backlog mutex poisoned";
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
 pub struct CommittorProcessor<D> {
     _table_mania: TableMania,
-    commits_scheduler: IntentEngineHandle<D>,
+    backlog: Arc<Mutex<D>>,
+    intent_sender: Sender<OutboxIntentBundle>,
+    result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
@@ -87,27 +98,30 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             Some(gc_config),
         );
 
-        // Create commit scheduler
         let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
             RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
         ));
-        let commits_scheduler = IntentEngineHandle::new(
-            authority.insecure_clone(),
-            magic_block_rpc_client.clone(),
-            db,
-            task_info_fetcher.clone(),
-            outbox_client,
-            table_mania.clone(),
-            ExecutorConfig {
+        let backlog = Arc::new(Mutex::new(db));
+        let executor_builder = IntentExecutorBuilderImpl {
+            authority: authority.insecure_clone(),
+            rpc_client: magic_block_rpc_client.clone(),
+            table_mania: table_mania.clone(),
+            executor_config: ExecutorConfig {
                 compute_budget_config: chain_config
                     .compute_budget_config
                     .clone(),
                 actions_timeout: chain_config.actions_timeout,
             },
+            outbox_client,
+            task_info_fetcher: task_info_fetcher.clone(),
             actions_callback_executor,
-        );
+        };
 
-        let result_subscription = commits_scheduler.subscribe_for_results();
+        let (intent_sender, intent_stream) = channel(&backlog, 1000);
+        let intent_engine =
+            IntentExecutionEngine::new(intent_stream, executor_builder);
+        let result_sender = intent_engine.spawn();
+        let result_subscription = result_sender.subscribe();
         let pending_result_listeners = Arc::new(Mutex::new(HashMap::new()));
         tokio::spawn(Self::dispatcher(
             result_subscription,
@@ -116,7 +130,9 @@ impl<D: BacklogDB> CommittorProcessor<D> {
 
         Self {
             _table_mania: table_mania,
-            commits_scheduler,
+            backlog,
+            intent_sender,
+            result_sender,
             task_info_fetcher,
             pending_result_listeners,
         }
@@ -127,12 +143,35 @@ impl<D: BacklogDB> CommittorProcessor<D> {
         &self,
         intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        self.commits_scheduler
-            .schedule(intent_bundles)
-            .await
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to schedule intent");
-            })?;
+        let backlog = self.backlog.lock().expect(POISONED_BACKLOG_MSG);
+        let schedule_result = if backlog.is_empty() {
+            let mut iter = intent_bundles.into_iter();
+            // Treated as regular value not propagated lower
+            #[allow(clippy::result_large_err)]
+            let send_result =
+                iter.try_for_each(|bundle| self.intent_sender.try_send(bundle));
+            match send_result {
+                Ok(_) => Ok(()),
+                Err(TrySendError::Closed(_)) => {
+                    Err(IntentScheduleError::ChannelClosed)
+                }
+                Err(TrySendError::Full(bundle)) => {
+                    let leftovers =
+                        std::iter::once(bundle).chain(iter).collect();
+                    backlog
+                        .store_intent_bundles(leftovers)
+                        .map_err(IntentScheduleError::from)
+                }
+            }
+        } else {
+            backlog
+                .store_intent_bundles(intent_bundles)
+                .map_err(IntentScheduleError::from)
+        };
+
+        schedule_result.inspect_err(|err| {
+            error!(error = ?err, "Failed to schedule intent");
+        })?;
 
         Ok(())
     }
@@ -197,7 +236,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
     pub fn subscribe_for_results(
         &self,
     ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
-        self.commits_scheduler.subscribe_for_results()
+        self.result_sender.subscribe()
     }
 
     /// Fetches current commit nonces
