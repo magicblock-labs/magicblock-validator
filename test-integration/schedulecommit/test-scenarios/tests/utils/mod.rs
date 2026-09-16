@@ -291,18 +291,16 @@ pub fn assert_is_instruction_error(
 pub fn assert_is_one_of_instruction_errors(
     tx_err: TransactionError,
     tx_result_err: &client_error::Error,
-    ix_error1: InstructionError,
-    ix_error2: InstructionError,
+    expected: &[InstructionError],
 ) {
     assert!(
         matches!(
             tx_err,
             TransactionError::InstructionError(_, err)
-            if err == ix_error1 || err == ix_error2
+            if expected.contains(&err)
         ),
-        "Expected InstructionError({:?} | {:?}), got: {:?}",
-        ix_error1,
-        ix_error2,
+        "Expected one of {:?}, got: {:?}",
+        expected,
         tx_result_err.get_transaction_error()
     );
 }
