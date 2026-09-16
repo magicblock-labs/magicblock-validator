@@ -3839,6 +3839,7 @@ dependencies = [
  "isocountry",
  "magic-domain-program",
  "magicblock-config",
+ "magicblock-delegation-program-api",
  "magicblock-engine-nucleus",
  "rand 0.9.5",
  "serde",
@@ -4591,7 +4592,6 @@ dependencies = [
  "magicblock-runtime",
  "magicblock-services",
  "magicblock-task-scheduler",
- "magicblock-validator-admin",
  "magicblock-version",
  "num_cpus",
  "solana-commitment-config",
@@ -4605,25 +4605,6 @@ dependencies = [
  "solana-signer",
  "solana-transaction",
  "solana-transaction-error 3.3.1",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "magicblock-validator-admin"
-version = "0.15.3"
-dependencies = [
- "magicblock-delegation-program-api",
- "magicblock-engine",
- "magicblock-engine-nucleus",
- "magicblock-rpc-client",
- "solana-commitment-config",
- "solana-pubkey 4.2.0",
- "solana-rpc-client",
- "solana-signature 3.4.1",
- "solana-signer",
- "solana-transaction",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

@@ -233,16 +233,6 @@ request-timeout = "5s"
 check-strategy = "all-signers"
 
 # ==============================================================================
-# Leader Administration (Optional)
-# ==============================================================================
-# This section is optional. Remove it to disable periodic fee claims.
-
-[admin]
-# How often to claim accrued fees from the chain (e.g. "24h").
-# Env: MBV_ADMIN__CLAIM_FEES_FREQUENCY
-claim-fees-frequency = "24h"
-
-# ==============================================================================
 # Internal Task Scheduler
 # ==============================================================================
 [task-scheduler]
