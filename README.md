@@ -63,7 +63,8 @@ Component guides explain each crate's purpose and important usage constraints.
 | Application access | [RPC and subscriptions](magicblock-aperture/README.md) |
 | Account synchronization | [Chainlink](magicblock-chainlink/README.md), [risk checks](magicblock-aml/README.md) |
 | Settlement | [Delivery](magicblock-committor-service/README.md), [buffers](magicblock-committor-program/README.md), [lookup tables](magicblock-table-mania/README.md) |
-| Background work | [Recurring tasks](magicblock-task-scheduler/README.md), [callbacks and undelegation](magicblock-services/README.md), [fee claims](magicblock-validator-admin/README.md) |
+| Background work | [Recurring tasks](magicblock-task-scheduler/README.md), [callbacks and undelegation](magicblock-services/README.md) |
+| Fee claims | [One-shot operator command](bins/magicblock/README.md#fee-claims) |
 | Programs | [Native programs](programs/magicblock/README.md), [instruction API](magicblock-magic-program-api/README.md) |
 | Shared utilities | [Core types](magicblock-core/README.md), [base-chain RPC client](magicblock-rpc-client/README.md), [metrics](magicblock-metrics/README.md), [version metadata](magicblock-version/README.md) |
 | Legacy history | [Read-only ledger](magicblock-ledger/README.md), [storage schemas](storage-proto/README.md) |

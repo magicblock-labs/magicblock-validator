@@ -22,19 +22,6 @@ impl Default for CommittorConfig {
     }
 }
 
-/// Optional leader-owned administrative background work.
-#[derive(Deserialize, Serialize, Debug, Clone)]
-#[serde(rename_all = "kebab-case", deny_unknown_fields)]
-pub struct AdminConfig {
-    /// Frequency at which the validator claims accrued fees from the chain.
-    #[serde(default = "default_claim_fees_frequency", with = "humantime")]
-    pub claim_fees_frequency: Duration,
-}
-
-fn default_claim_fees_frequency() -> Duration {
-    Duration::from_secs(24 * 60 * 60)
-}
-
 /// Configuration for ChainLink (Cloning/BaseChain synchronization)
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]

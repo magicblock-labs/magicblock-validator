@@ -1,7 +1,8 @@
 # magicblock
 
-Operator tools for managing a validator's domain record and checking its RPC,
-execution, and subscriptions. These commands do not start or stop the validator.
+Operator tools for claiming validator fees, managing a validator's domain record,
+and checking its RPC, execution, and subscriptions. These commands do not start
+or stop the validator or Engine.
 
 ## Build
 
@@ -14,10 +15,44 @@ cargo build --release --locked -p magicblock
 The binary is `target/release/magicblock`. Use that path below, or add it to
 your `PATH`. Run `magicblock --help` for available commands.
 
+## Fee claims
+
+Claim accrued fees once using the base-chain RPC and signing identity from the
+[leader configuration](../../magicblock-config/README.md):
+
+```bash
+magicblock claim-fees --config /etc/magicblock/config.toml
+```
+
+The command sends and confirms a real base-chain transaction, paying fees from
+the configured identity and receiving the claim at that same identity. Vault
+balances at or below 100,000,000 lamports are skipped successfully. Structured
+info logs on stderr report the confirmed signature or skip reason; `RUST_LOG`
+controls verbosity. Configuration, signing, and RPC failures exit nonzero with
+an error on stderr.
+
+### Migration and scheduling
+
+The validator no longer claims fees at startup or periodically. Remove the
+obsolete `[admin]` section and `MBV_ADMIN__*` environment overrides; they are no
+longer accepted. Fee-vault setup remains part of validator startup.
+
+For recurring claims, invoke the one-shot command from cron or a systemd timer.
+For example, this cron entry runs daily at midnight:
+
+```cron
+0 0 * * * /usr/local/bin/magicblock claim-fees --config /etc/magicblock/config.toml
+```
+
+Use the intended service user and environment, including any `MBV_` overrides,
+and capture stdout/stderr in your scheduler's logs. There is no CLI interval loop.
+
 ## Domain records
 
 Commands use the [leader configuration](../../magicblock-config/README.md) and
-its signing identity. They submit real base-chain transactions.
+its signing identity. They submit real base-chain transactions. Operator commands
+require the exact file supplied with `--config`; missing files fail rather than
+falling back to defaults or searching parent directories.
 
 ```bash
 magicblock domain register --config config.toml \

@@ -4185,25 +4185,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-validator-admin"
-version = "0.15.3"
-dependencies = [
- "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",
- "magicblock-engine",
- "magicblock-engine-nucleus",
- "magicblock-rpc-client",
- "solana-commitment-config",
- "solana-pubkey 4.2.0",
- "solana-rpc-client",
- "solana-signature",
- "solana-signer",
- "solana-transaction 4.1.5",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9818,7 +9799,6 @@ dependencies = [
  "magicblock-config",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",
  "magicblock-program",
- "magicblock-validator-admin",
  "solana-commitment-config",
  "solana-rpc-client",
  "solana-rpc-client-api",

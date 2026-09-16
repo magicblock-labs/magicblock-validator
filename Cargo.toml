@@ -24,7 +24,6 @@ members = [
     "magicblock-services",
     "magicblock-table-mania",
     "magicblock-task-scheduler",
-    "magicblock-validator-admin",
     "magicblock-version",
     "programs/magicblock",
     "storage-proto"
@@ -62,7 +61,6 @@ magicblock-runtime = { path = "magicblock-runtime" }
 magicblock-services = { path = "magicblock-services" }
 magicblock-table-mania = { path = "magicblock-table-mania" }
 magicblock-task-scheduler = { path = "magicblock-task-scheduler" }
-magicblock-validator-admin = { path = "magicblock-validator-admin" }
 magicblock-version = { path = "magicblock-version" }
 
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }

@@ -1,12 +1,14 @@
 #![doc = include_str!("../README.md")]
 
+mod claim_fees;
 mod domain;
 mod healthcheck;
 
-use std::io;
+use std::{io, path::PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use magicblock_config::LeaderParams;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -18,6 +20,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Claim accrued validator fees once on the base chain.
+    ClaimFees(ConfigArgs),
     /// Manage the Magic Domain Program record for a leader.
     Domain(domain::Args),
     /// Check a validator's RPC, execution, and subscription paths.
@@ -27,9 +31,25 @@ enum Command {
 impl Command {
     async fn run(self) -> Result<()> {
         match self {
+            Self::ClaimFees(args) => claim_fees::run(args.load()?).await,
             Self::Domain(args) => args.run().await,
             Self::Healthcheck(args) => args.run().await,
         }
+    }
+}
+
+#[derive(clap::Args)]
+struct ConfigArgs {
+    /// Leader configuration supplying RPC and signing identity.
+    #[arg(long)]
+    config: PathBuf,
+}
+
+impl ConfigArgs {
+    fn load(self) -> Result<LeaderParams> {
+        LeaderParams::load(&self.config).with_context(|| {
+            format!("failed to load leader config {}", self.config.display())
+        })
     }
 }
 

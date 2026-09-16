@@ -24,7 +24,6 @@ magicblock-program = { workspace = true }
 magicblock-runtime = { workspace = true }
 magicblock-services = { workspace = true }
 magicblock-task-scheduler = { workspace = true }
-magicblock-validator-admin = { workspace = true }
 magicblock-version = { workspace = true }
 nucleus = { workspace = true }
 num_cpus = { workspace = true }
