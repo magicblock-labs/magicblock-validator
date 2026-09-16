@@ -43,7 +43,7 @@ fn defaults_use_leader_engine_configuration() {
         Duration::from_millis(consts::DEFAULT_LEDGER_BLOCK_TIME_MS),
     );
     assert_eq!(
-        config.engine.blockstore.superblock.get(),
+        config.engine.blockstore.superblock,
         consts::DEFAULT_SUPERBLOCK_SIZE,
     );
     assert_eq!(
@@ -89,7 +89,7 @@ fn engine_configuration_loads_from_toml() {
         config.engine.blockstore.blocktime,
         Duration::from_millis(250),
     );
-    assert_eq!(config.engine.blockstore.superblock.get(), 20);
+    assert_eq!(config.engine.blockstore.superblock, 20);
     assert_eq!(
         config.engine.ledger.directory,
         PathBuf::from("/var/lib/magicblock/ledger"),

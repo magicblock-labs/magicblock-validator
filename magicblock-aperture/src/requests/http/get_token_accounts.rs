@@ -1,4 +1,4 @@
-use solana_account::{AccountSeqLock, AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     UiAccountEncoding, parse_token::is_known_spl_token_id,
 };
@@ -87,32 +87,29 @@ impl HttpDispatcher {
         let accounts = self
             .engine
             .accounts()
-            .program(&program)
-            .map_err(RpcError::internal)?
-            .filter_map(|(pubkey, account)| {
-                AccountSeqLock::new(account).read(|account| {
-                    let token = StateWithExtensions::<TokenAccount>::unpack(
-                        account.data(),
-                    )
-                    .ok()?;
-                    if token.base.state == AccountState::Uninitialized
-                        || mint.is_some_and(|mint| token.base.mint != mint)
-                    {
-                        return None;
+            .program(&program, |pubkey, account| {
+                let token =
+                    StateWithExtensions::<TokenAccount>::unpack(account.data())
+                        .ok()?;
+                if token.base.state == AccountState::Uninitialized
+                    || mint.is_some_and(|mint| token.base.mint != mint)
+                {
+                    return None;
+                }
+                let matches = match authority {
+                    TokenAccountAuthority::Owner => {
+                        token.base.owner == authority_key
                     }
-                    let matches = match authority {
-                        TokenAccountAuthority::Owner => {
-                            token.base.owner == authority_key
-                        }
-                        TokenAccountAuthority::Delegate => {
-                            token.base.delegate.contains(&authority_key)
-                        }
-                    };
-                    matches.then(|| {
-                        AccountWithPubkey::new(pubkey, account, encoding, slice)
-                    })
+                    TokenAccountAuthority::Delegate => {
+                        token.base.delegate.contains(&authority_key)
+                    }
+                };
+                matches.then(|| {
+                    AccountWithPubkey::new(*pubkey, account, encoding, slice)
                 })
             })
+            .map_err(RpcError::internal)?
+            .filter_map(|(_, account)| account)
             .collect::<Vec<_>>();
 
         let slot = self.engine.blocks().latest().slot;

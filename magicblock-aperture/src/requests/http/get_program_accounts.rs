@@ -1,5 +1,5 @@
 use json::Serialize;
-use solana_account::{AccountSeqLock, AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
 };
@@ -73,15 +73,13 @@ impl HttpDispatcher {
 
         let accounts = self.engine.accounts();
         let accounts = accounts
-            .program(&program)
-            .map_err(RpcError::internal)?
-            .filter_map(|(pubkey, account)| {
-                AccountSeqLock::new(account).read(|account| {
-                    matches_filters(&filters, account.data()).then(|| {
-                        AccountWithPubkey::new(pubkey, account, encoding, slice)
-                    })
+            .program(&program, |pubkey, account| {
+                matches_filters(&filters, account.data()).then(|| {
+                    AccountWithPubkey::new(*pubkey, account, encoding, slice)
                 })
             })
+            .map_err(RpcError::internal)?
+            .filter_map(|(_, account)| account)
             .collect::<Vec<_>>();
 
         if config.with_context.unwrap_or_default() {
