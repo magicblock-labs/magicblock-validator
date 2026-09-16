@@ -1649,9 +1649,9 @@ where
         }
 
         // Determine if delegated to another validator
-        let delegated_to_other = deleg_record
-            .as_ref()
-            .and_then(|dr| self.get_delegated_to_other(dr));
+        let delegated_to_other = deleg_record.as_ref().and_then(|dr| {
+            delegation::delegated_to_other(&self.validator_pubkey, dr)
+        });
 
         let delegated = account.read().is(AccountMode::Delegated);
         let slot = account.read().slot();
@@ -1671,17 +1671,11 @@ where
             return;
         }
 
-        let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
-            dr.authority
-                .eq(&self.validator_pubkey)
-                .then_some(dr.commit_frequency_ms)
-        });
         if let Err(err) = self
             .clone_account(
                 AccountCloneRequest {
                     pubkey,
                     account,
-                    commit_frequency_ms,
                     post_delegation_mode: ClonePostDelegationMode::from(
                         delegation_actions,
                     ),
@@ -2440,13 +2434,12 @@ where
                                     );
                                 }
 
-                                let account = self
-                                    .apply_delegation_record_to_account(
-                                        pubkey,
-                                        account,
-                                        &delegation_record,
-                                    )
-                                    .0;
+                                let account = delegation::apply_record(
+                                    &self.validator_pubkey,
+                                    pubkey,
+                                    account,
+                                    &delegation_record,
+                                );
 
                                 // For accounts delegated to us, subscribe to the original owner
                                 // program for undelegation update resilience.
@@ -2660,33 +2653,6 @@ where
             delegation_record_pubkey,
             self.validator_keypair.as_ref(),
         )
-    }
-
-    /// Applies delegation record settings to an account: sets the owner,
-    /// delegation status, and confined status based on the delegation
-    /// record's authority field.
-    /// Returns commit frequency if account is delegated to us
-    fn apply_delegation_record_to_account(
-        &self,
-        account_pubkey: Pubkey,
-        account: AccountBuilder,
-        delegation_record: &DelegationRecord,
-    ) -> (AccountBuilder, Option<u64>) {
-        delegation::apply_delegation_record_to_account(
-            self,
-            account_pubkey,
-            account,
-            delegation_record,
-        )
-    }
-
-    /// Returns the pubkey of another validator if account is delegated to them,
-    /// None if delegated to us or delegated to the system program (confined).
-    fn get_delegated_to_other(
-        &self,
-        delegation_record: &DelegationRecord,
-    ) -> Option<Pubkey> {
-        delegation::get_delegated_to_other(self, delegation_record)
     }
 
     /// Fetches and parses the delegation record for an account, returning the

@@ -17,7 +17,6 @@ fn request(account: AccountBuilder) -> AccountCloneRequest {
     AccountCloneRequest {
         pubkey: Pubkey::new_unique(),
         account,
-        commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
     }
@@ -130,7 +129,6 @@ async fn waiter_applies_newer_account_image() {
             .owner(system_program::id())
             .mode(AccountMode::ReadOnly)
             .slot(slot),
-        commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
     };
