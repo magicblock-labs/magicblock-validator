@@ -68,7 +68,6 @@ magicblock-version = { path = "magicblock-version" }
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
 keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
 ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
-magic-root-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
 nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
 replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
 v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.8.0" }
