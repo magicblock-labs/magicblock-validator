@@ -1,24 +1,17 @@
-# `solana-storage-proto`
+# solana-storage-proto
 
-Protobuf schemas and conversion code for the validator's
-[legacy ledger][legacy]. This is retained-history compatibility support, not
-Engine's current ledger format.
+Schemas and conversions for the validator's
+[legacy ledger](../magicblock-ledger/README.md). These describe retained historical
+records, not Engine's current storage format.
 
 ## Updating schemas
 
-Edit `proto/*.proto` and the corresponding conversion logic in `src/convert.rs`.
-The build script generates Rust types into Cargo's output directory; do not edit
-generated files. Set `PROTOC` to use an explicit compiler; non-Windows builds otherwise use
-`protobuf-src` to supply one.
+Edit the [protobuf definitions](proto/) and
+[conversion code](src/convert.rs). Rust types are generated during the build;
+do not edit generated output. Set `PROTOC` if you need a specific compiler.
 
-Field numbers, enum values, and conversions for errors, balances, loaded
-addresses, logs, return data, and compute metadata are compatibility boundaries.
-Older bincode-backed records have their own stored representations and defaults;
-a missing historical field must not be presented as newly recorded data.
+Preserve compatibility with existing records, including field numbers and enum
+values. Missing fields in old records must not be treated as data that was
+actually recorded.
 
-Keep schema changes coordinated with both readers and producers. Successful
-decoding alone does not validate an untrusted transaction or its execution.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[legacy]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-ledger/README.md
+[Back to workspace](../README.md)

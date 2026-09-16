@@ -1,18 +1,13 @@
-# `magicblock-version`
+# magicblock-version
 
-Build and compatibility metadata for validator version reporting.
+Provides build metadata for validator version reporting, including package,
+source, and compatibility identifiers.
 
-`Version::default` combines the Cargo package version, optional `CI_COMMIT`
-prefix, feature-set identifier, MagicBlock client ID, Solana RPC API version,
-and Git-derived version string. An absent or unparseable commit prefix is
-represented as zero.
+Use the shared `Version` type and formatting helpers for consistent reporting
+across services. The short display shows the package version; debug output adds
+build details useful for diagnostics.
 
-`Display` emits the package's semantic version; `Debug` adds source, feature,
-and client information. The `semver!` and `version!` macros expose those two
-presentations.
+Version metadata identifies a build. It does not establish that a deployment is
+healthy or compatible with a particular replication peer.
 
-The serialized fields and numeric client identifiers are compatibility data.
-A version response describes a build; it does not establish deployment health
-or compatibility with a particular upstream replication peer.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
+[Back to workspace](../README.md)

@@ -1,72 +1,48 @@
-# `magicblock`
+# magicblock
 
-`magicblock` provides explicit operator commands for managing a leader's Magic
-Domain record and checking a validator's RPC, execution, and PubSub paths.
+Operator tools for managing a validator's domain record and checking its RPC,
+execution, and subscriptions. These commands do not start or stop the validator.
 
 ## Build
 
+From the workspace root:
+
 ```bash
-cargo build -p magicblock --locked
+cargo build --release --locked -p magicblock
 ```
 
-The binary is written to `target/debug/magicblock`.
+The binary is `target/release/magicblock`. Use that path below, or add it to
+your `PATH`. Run `magicblock --help` for available commands.
 
 ## Domain records
 
-Domain commands load the leader configuration, including `MBV_` environment
-overlays, and use its first HTTP remote and local authority. They submit and
-confirm a Magic Domain Program transaction.
-
-Register a record:
+Commands use the [leader configuration](../../magicblock-config/README.md) and
+its signing identity. They submit real base-chain transactions.
 
 ```bash
-magicblock domain register \
-  --config config.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-```
+magicblock domain register --config config.toml \
+  --country-code US --fqdn https://validator.example.com
 
-Synchronize its mutable fields:
+magicblock domain sync --config config.toml \
+  --country-code US --fqdn https://validator.example.com
 
-```bash
-magicblock domain sync \
-  --config config.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-```
-
-Remove it:
-
-```bash
 magicblock domain unregister --config config.toml
 ```
 
+Use `register` to create a record, `sync` to update it, and `unregister` to
+remove it.
+
 ## Healthcheck
 
-The healthcheck requires a validator configured with the v42 calculator
-program. It derives the WebSocket endpoint from the HTTP URL using the
-adjacent-port Solana convention.
+The validator must have the v42 calculator program configured. Use its HTTP
+address; the WebSocket endpoint is derived using the next port.
 
 ```bash
-magicblock healthcheck \
-  --url http://127.0.0.1:8899 \
-  --timeout 10s
+magicblock healthcheck --url http://127.0.0.1:7799 --timeout 10s
 ```
 
-Within one end-to-end deadline, the command:
+This submits a test transaction and checks execution status and subscription
+notifications within the deadline. Success is printed to stdout; progress and
+errors go to stderr. Set `RUST_LOG` to adjust logging.
 
-1. builds one bounded randomized v42 expression containing recursive CPIs;
-2. signs one transaction with a fresh keypair;
-3. registers signature and target-account subscriptions before submission;
-4. requires `sendTransaction` to return the locally derived signature;
-5. requires successful signature notification and `getSignatureStatuses`;
-6. requires an account notification before the deadline.
-
-The account notification's value and context slot are intentionally ignored.
-Success is written as one line to stdout. Structured progress and timing are
-written to stderr; set `RUST_LOG` to control their verbosity.
-
-Domain commands sign and submit base-chain transactions; they are not dry runs.
-They do not start or stop the validator process.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Configuration](https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-config/README.md)
+[Back to workspace](../../README.md)

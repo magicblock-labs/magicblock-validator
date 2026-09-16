@@ -1,21 +1,17 @@
-# `magicblock-core`
+# magicblock-core
 
-Shared host-side types and utilities used across validator services: settlement
-intent models, account traits, token-program helpers, and tracing setup.
+Shared types and utilities for validator services, including settlement intents,
+account helpers, and logging setup.
 
-The `intent` module carries scheduled work and results between the runtime,
-committor, and callback services. These are coordination types, not a second
-execution engine or a substitute for the public [Magic Program API][api].
+Use this crate for concepts shared across services. Keep service-specific
+behavior in the owning crate; transaction execution and storage belong to
+Engine. Application instruction definitions live in the
+[Magic Program API](../magicblock-magic-program-api/README.md).
 
 ## Logging
 
-Use `logger` to initialize the process tracing configuration or test logging.
-The `debug_panic!` macro panics in debug builds but logs in release builds;
-it must not be used as validation for an expected failure.
+The `logger` module sets up process or test logging. The `debug_panic!` macro
+panics only in debug builds and logs in release builds, so it is not a substitute
+for handling expected errors.
 
-Keep service-specific behavior in its owning crate. Engine owns transaction
-execution, account storage, and replication.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[api]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-magic-program-api/README.md
+[Back to workspace](../README.md)

@@ -1,34 +1,19 @@
-# `magicblock-runtime`
+# magicblock-runtime
 
-Builds the Keeper startup image shared by the validator leader and verifier.
-Both processes call `keeper_builder` so their native programs and initial
-account construction come from one implementation.
+Builds the shared startup image used by leaders and verifiers: native programs,
+configured program executables, and initial accounts.
 
-## Image construction
+## Integration
 
-The builder combines role-specific Engine authority/storage settings with:
+Both processes use `keeper_builder` to prepare the image before opening Engine.
+This crate does not start application services or manage process shutdown.
 
-- native Magic, crank, callback, and ephemeral-system entrypoints;
-- configured program ELF files;
-- initial accounts derived from those programs and the shared runtime setup;
-- default rent parameters, which the embedding host can override.
+Provide matching program IDs and executable files on the leader and verifier.
+Sharing a builder does not make separately deployed artifacts identical.
+Configured files must be available at startup.
 
-Program files are read before returning the builder. Read failures report the
-program ID, path, and original I/O error.
+See [configuration](../magicblock-config/README.md) for inputs and the
+[leader](../bins/magicblock-validator/README.md) and
+[verifier](../bins/magicblock-verifier/README.md) guides for running each role.
 
-## Host responsibilities
-
-This crate constructs an image; it does not open Engine, start application
-services, or own process shutdown. The leader uses internal block pacing and
-the verifier supplies replicated blocks. The leader replaces the builder's
-default rent with rent fetched from the base chain before opening Engine;
-the verifier uses the builder's default.
-
-Using the same builder does not make separately supplied ELF files identical.
-Leader and verifier deployments must provide matching program IDs and artifacts.
-See the [configuration crate][config] and [deployment inputs][deployment].
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-config/README.md
-[deployment]: https://github.com/magicblock-labs/knowledge-base/blob/main/system/operations/deployment-prerequisites.md
+[Back to workspace](../README.md)

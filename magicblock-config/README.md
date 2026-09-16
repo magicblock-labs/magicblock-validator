@@ -1,56 +1,36 @@
-# `magicblock-config`
+# magicblock-config
 
-Typed configuration for the leader, verifier, and operator tooling. The role
-determines the accepted settings; replication is not a leader `lifecycle` mode.
+Loads and validates configuration for the leader, verifier, and operator tools.
 
-## Leader
+Start with the example for the process you want to run:
 
-`LeaderParams::try_new` merges settings from highest to lowest precedence:
+- [Leader configuration](../config.example.toml): application services, remote
+  providers, storage, and replication.
+- [Verifier configuration](../config.verifier.example.toml): upstream replication,
+  local storage, identity, and startup programs.
 
-1. command-line arguments;
-2. `MBV_` environment variables;
-3. the TOML file selected with `--config`;
-4. defaults.
+Replace sample identities, credentials, addresses, and program paths before use.
 
-Nested environment keys use `__`, for example
-`MBV_METRICS__ADDRESS=127.0.0.1:9090`. Missing remote endpoint types can be
-filled from defaults or derived URLs; check the effective configuration before
-assuming which base-chain services will be contacted.
+## Overrides
 
-`LeaderParams::load` applies file/environment layers without parsing the
-process CLI. The operator commands use it to obtain the base-chain RPC endpoint
-and local signing identity.
+Leader settings are applied in this order, highest priority first:
 
-The [leader example][leader-config] documents service, account synchronization,
-storage, replication, plugin, and task settings. `[admin]` enables periodic
-fee claims. Domain registration remains an explicit operator action.
+1. Command-line options, including the file selected with `--config`.
+2. `MBV_` environment variables.
+3. TOML settings.
+4. Defaults.
 
-## Verifier
+The verifier takes a positional TOML path and uses `MBV_VERIFIER_` environment
+overrides. Both prefixes use `__` between nested keys, for example
+`MBV_METRICS__ADDRESS=127.0.0.1:9090`.
 
-`VerifierParams::try_new` requires a positional TOML path and overlays
-`MBV_VERIFIER_` variables with the same nested-key convention. Its configuration
-contains metrics, follower Engine settings, and startup programs, not the
-leader's application-service graph.
+## Running both roles
 
-Remote authority is derived from `replication.upstream-authority`; explicitly
-supplying `engine.authority.remote` is rejected. The upstream identity is
-different from the verifier's local signing identity.
+Give each process its own identity, storage, and listener addresses. The
+verifier's upstream authority identifies the leader it follows, not its own
+signing identity. Supply matching program IDs and executable files to both.
 
-Use the [verifier example][verifier-config] as the starting point, replacing
-sample identities and addresses.
+See the [leader](../bins/magicblock-validator/README.md) and
+[verifier](../bins/magicblock-verifier/README.md) guides for launch commands.
 
-## Shared runtime inputs
-
-`EngineConfig<R>` carries authority, account storage, ledger, block production,
-and role-specific replication settings. Both roles pass their startup programs
-through the [shared runtime builder][runtime]. The actual ELF artifacts must
-match across hosts; matching configuration structure alone is insufficient.
-
-Configuration names, merge precedence, and validation errors are operator-facing
-interfaces. Keep changes synchronized with the example files and binary usage.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[leader-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.example.toml
-[verifier-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.verifier.example.toml
-[runtime]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-runtime/README.md
+[Back to workspace](../README.md)

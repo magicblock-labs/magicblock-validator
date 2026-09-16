@@ -1,51 +1,38 @@
-# `magicblock-verifier`
+# magicblock-verifier
 
-Follower process that applies an upstream Engine replication stream using the
-shared MBV runtime image. It does not start application RPC, account cloning,
-settlement, task scheduling, or administrative services.
+Runs a follower that replays an upstream Engine replication stream using the
+same runtime programs as the leader. It does not expose application RPC or run
+account synchronization, settlement, or recurring tasks.
 
-## Configure and run
+## Run a verifier
+
+Prepare a configuration using the [verifier example](../../config.verifier.example.toml):
+
+- Give it a local signing identity and independent storage.
+- Set the upstream address and authority, and allow the verifier's identity on
+  the upstream.
+- Supply the same program IDs and executable files as the leader.
+- Choose a metrics address that does not conflict with other processes.
 
 From the workspace root:
 
 ```bash
-cargo build --release --locked -p magicblock-verifier
-cargo run --release --locked -p magicblock-verifier -- config.verifier.example.toml
+cargo run --release --locked -p magicblock-verifier -- config.verifier.toml
 ```
 
-Before running, edit the [verifier example][verifier-config]:
+The configuration path is positional. Use `MBV_VERIFIER_` environment variables
+for overrides; see [configuration](../../magicblock-config/README.md).
 
-- supply the verifier's local signing identity and independent storage paths;
-- set the upstream replication address and the upstream's actual authority;
-- allow the verifier's identity in the upstream's follower configuration;
-- supply program IDs and ELF artifacts matching the leader;
-- use a metrics address that does not conflict with other local processes.
+## Monitoring and recovery
 
-The TOML path is positional. `MBV_VERIFIER_` environment values override the
-file; nested keys use `__`. Remote authority comes from the upstream setting,
-not an independent `engine.authority.remote` override.
+Monitor the process through logs and [metrics](../../magicblock-metrics/README.md),
+not the application TUI. A reachable metrics endpoint does not mean replication
+is caught up.
 
-## Replication lifecycle
+The verifier reopens Engine when a replicated snapshot requires it. It can also
+relay replication to configured downstream followers.
 
-The verifier opens Engine with external block pacing and starts
-`ReplicationClient`. A nonempty downstream follower allowlist also enables
-a replication dispatcher, allowing a verifier to relay to other followers.
+See [recovery guidance](https://github.com/magicblock-labs/knowledge-base/blob/main/system/operations/recovery.md)
+for operational recovery procedures.
 
-When a replicated snapshot requires reopening storage, `RestartRequired`
-closes the Engine instance and starts a new one from disk. The process keeps its
-metrics listener bound throughout that loop. Other managed-service termination
-reasons end the process after coordinated shutdown.
-
-`GET /metrics` exposes MBV and Engine collectors; it is not an application RPC
-or a guarantee that replication is caught up. Diagnose startup and divergence
-using the process logs and upstream configuration.
-
-See [deployment inputs][deployment], [recovery][recovery], and
-[replication trust][replication] for host and protocol boundaries.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[verifier-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.verifier.example.toml
-[deployment]: https://github.com/magicblock-labs/knowledge-base/blob/main/system/operations/deployment-prerequisites.md
-[recovery]: https://github.com/magicblock-labs/knowledge-base/blob/main/system/operations/recovery.md
-[replication]: https://github.com/magicblock-labs/knowledge-base/blob/main/system/architecture/replication-trust.md
+[Back to workspace](../../README.md)

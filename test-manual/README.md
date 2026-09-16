@@ -1,26 +1,15 @@
-# Test Manual
+# Manual integration tests
 
-This workspace contains manual integration tests for the Magicblock validator that require external dependencies or manual setup steps that prevent full automation.
+Tests for integrations that need external services, credentials, and funded
+accounts. This is a separate Cargo workspace.
 
-## Tests
+## Available tests
 
-### [helius-laser](helius-laser/)
+[Helius Laser](helius-laser/README.md) exercises base-chain account cloning and
+subscription updates using Helius or Triton devnet services.
 
-Tests the validator's laser gRPC client integration with Helius devnet. This test validates that the validator can properly clone accounts from remote clusters and maintain synchronized state.
+Read its prerequisites and runner limitations before use. The runner is
+`make test-laser` from this directory, but it needs updating for the current
+validator CLI and configuration.
 
-**Requirements**: Helius API key, Solana devnet keypair with SOL
-
-**Run with**: `make manual-test-laser`
-
-See the [helius-laser README](helius-laser/README.md) for detailed setup and usage instructions.
-
-## Why Manual Tests?
-
-These tests cannot be fully automated because they require:
-
-- External API keys (Helius, etc.)
-- Real blockchain accounts with funds
-- Manual setup steps
-- Network connectivity to external services
-
-They are designed to validate real-world integration scenarios that unit/integration tests cannot cover.
+[Back to workspace](../README.md)

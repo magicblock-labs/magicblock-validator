@@ -1,22 +1,13 @@
-# `magicblock-validator-admin`
+# magicblock-validator-admin
 
-Periodic administrative work for the leader. Currently this crate claims
-accumulated validator fees from the base-chain Delegation Program.
+Claims accumulated validator fees from the base chain on behalf of the leader.
 
-## Fee claims
+Enable periodic claims through `[admin]` in the
+[leader configuration](../config.example.toml). Claims use the leader's local
+signing authority; a verifier cannot claim its upstream's fees. Small balances
+are skipped, and a failed claim is logged without stopping future attempts.
 
-`run_claim_fees_loop` waits for the configured period before the first claim,
-then repeats until its shutdown handle is signalled. Individual claim errors
-are logged and do not stop subsequent ticks.
+Domain registration is a separate operator action. Use the
+[magicblock CLI](../bins/magicblock/README.md) to manage domain records.
 
-`claim_fees` requires Engine's represented authority to match its local signer.
-A follower identity cannot claim a remote authority's vault. Balances at or below
-the minimum claim threshold are skipped; eligible claims are sent using the
-local signer and a confirmed-commitment RPC client.
-
-The leader enables this loop through its optional `[admin]` configuration.
-Domain registration is not part of this crate: use the [operator CLI][operator].
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[operator]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/bins/magicblock/README.md
+[Back to workspace](../README.md)

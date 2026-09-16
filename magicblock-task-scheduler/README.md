@@ -1,52 +1,27 @@
-# `magicblock-task-scheduler`
+# magicblock-task-scheduler
 
-Persists and executes repeated application tasks for the leader. This scheduler
-is separate from Engine's transaction sequencer and the base-chain committor.
+Stores and runs recurring application tasks on the leader. Applications schedule
+work through the [native Magic programs](../programs/magicblock/README.md);
+the scheduler persists it and submits due transactions to Engine.
 
-## Request and execution flow
+## Task behavior
 
-1. Native task instructions emit wincode-encoded `TaskRequest` service messages.
-2. `TaskSchedulerService` consumes the Engine message stream and updates SQLite
-   plus its in-memory delay queue.
-3. Due tasks are submitted directly to Engine as crank transactions.
-4. Completion updates or removes the matching stored task version.
+Tasks belong to an authority. Replacing or cancelling one requires that same
+authority, and cancellation does not undo work already running.
 
-The service does not poll TaskContext accounts or submit cranks through
-loopback RPC. The crank uses Engine's authority; each task retains its own
-authority for application instructions and schedule/cancellation checks.
-
-Replacing a task requires the same authority. Cancellation by a different
-authority is ignored. Cancellation does not undo an already-running crank.
-
-## Timing and recovery
-
-New task intervals are clamped to the configured minimum, but first execution
-is queued immediately. On restart, persisted tasks wait at least two slot
-intervals so a blockhash can become available. An interval is not a precise
-wall-clock execution guarantee.
-
-SQLite progress updates are version-conditional: completion of an older task
-must not overwrite a replacement's bookkeeping. Engine execution and SQLite
-completion are separate operations, however. A crash between them can leave
-uncertain completion; recurring instructions should tolerate re-execution.
-
-Retryable failures have bounded in-memory retries. Exhausted or non-retryable
-failures move to failure records. Runtime retry counts are reset on reload, so
-the bound is not a lifetime limit across restarts. Normal shutdown drains workers
-and records completion; error shutdown stops them.
+Intervals are subject to a configured minimum and are not exact wall-clock
+guarantees. Persisted tasks resume after restart. Execution and progress recording
+are separate operations, so applications should tolerate re-execution after a
+crash.
 
 ## Configuration
 
-The leader's `[task-scheduler]` section controls reset, minimum interval, and
-failure-record retention. `reset` removes the task database; it is not an
-ordinary restart option. Retention cleanup removes old failed execution and
-scheduling records, not active tasks.
+Use the `[task-scheduler]` section of the
+[leader configuration](../config.example.toml) for timing and retention settings.
+The `reset` option deletes the task database; leave it disabled for normal
+restarts.
 
-Use the [leader configuration example][leader-config] for field names and
-defaults. See [scheduled-task contracts][tasks] for cross-component authority
-and recovery requirements.
+See [scheduled tasks](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/scheduled-tasks.md)
+for detailed authority and recovery constraints.
 
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[leader-config]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/config.example.toml
-[tasks]: https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/scheduled-tasks.md
+[Back to workspace](../README.md)

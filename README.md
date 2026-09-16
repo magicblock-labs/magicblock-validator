@@ -16,118 +16,67 @@
 
 ## Overview
 
-MagicBlock Validator hosts an **Ephemeral Rollup**: it brings base-chain accounts
-into local state, accepts Solana-style transactions, and coordinates settlement
-back to the base chain. [Engine](https://github.com/magicblock-labs/magicblock-engine)
-owns execution, account storage, and replication; this workspace owns the
-validator service graph and operator tools.
+MagicBlock Validator runs an **Ephemeral Rollup**: applications use Solana-style
+transactions against local accounts, with state settled back to the base chain.
 
-- **Leader:** application RPC/WebSocket endpoints, account synchronization,
-  settlement, and repeated tasks.
-- **Verifier:** follows an upstream replication stream with the same runtime
-  image, without starting application services.
-- **Operator clients:** explicit domain management, healthchecks, and a terminal
-  monitor, independent of either host's lifecycle.
+- The **leader** serves application RPC and coordinates account synchronization,
+  settlement, and recurring tasks.
+- A **verifier** follows replication without running application services.
+- **Operator tools** manage domain records, check health, and monitor a leader.
+
+[Engine](https://github.com/magicblock-labs/magicblock-engine) provides transaction
+execution, account storage, and replication.
 
 ## Getting started
 
-Use the Rust toolchain pinned in [rust-toolchain.toml](rust-toolchain.toml).
-Formatting additionally uses nightly Rust. Native dependencies are required by
-the storage and cryptography crates; consult the repository's
-[build workflows](.github/workflows) for platform setup.
+Use the Rust toolchain in [rust-toolchain.toml](rust-toolchain.toml). For native
+build dependencies, see the [build workflows](.github/workflows/).
 
-From the workspace root:
+Choose a process and follow its setup guide:
 
-```bash
-cargo build --release --locked \
-  -p magicblock-validator -p magicblock-verifier \
-  -p magicblock -p magicblock-validator-tui
-```
+| Goal | Guide |
+| --- | --- |
+| Run a leader | [Validator](bins/magicblock-validator/README.md) |
+| Follow a leader | [Verifier](bins/magicblock-verifier/README.md) |
+| Manage domain records or check health | [Operator CLI](bins/magicblock/README.md) |
+| Monitor a leader in the terminal | [TUI](bins/magicblock-validator-tui/README.md) |
+| Run a packaged local development stack | [npm package](.github/packages/npm-package/README.md) |
 
-Edit the [leader configuration](config.example.toml) before running: replace
-sample identities and provider credentials, choose storage/listener addresses,
-and supply the configured program ELF files.
-
-```bash
-cargo run --release --locked -p magicblock-validator -- --config config.example.toml
-```
-
-For a follower, configure the [verifier example](config.verifier.example.toml),
-including the upstream's address/authority, follower allowlist, independent
-storage, and matching program artifacts:
+For a leader, prepare `config.toml` using the
+[example configuration](config.example.toml), then run from the workspace root:
 
 ```bash
-cargo run --release --locked -p magicblock-verifier -- config.verifier.example.toml
+cargo run --release --locked -p magicblock-validator -- --config config.toml
 ```
 
-Leader settings use `MBV_` environment variables; verifier settings use
-`MBV_VERIFIER_`. Nested keys use `__`. See
-[configuration precedence and validation](magicblock-config/README.md).
-Choose the process role through its binary, not a `lifecycle` setting.
+Replace sample identities, provider credentials, addresses, and program paths
+before starting. See [configuration](magicblock-config/README.md) for environment
+overrides and the separate verifier configuration.
 
-Domain registration is explicit and can submit base-chain transactions; see the
-[operator CLI](bins/magicblock/README.md). Use the
-[TUI](bins/magicblock-validator-tui/README.md) to monitor a leader's RPC endpoints.
-Both Engine-hosting binaries expose a separate combined MBV/Engine metrics
-endpoint.
+## Find your way around
 
-## Documentation
+Component guides explain each crate's purpose and important usage constraints.
 
+| Area | Components |
+| --- | --- |
+| Runtime and configuration | [Runtime image](magicblock-runtime/README.md), [configuration](magicblock-config/README.md) |
+| Application access | [RPC and subscriptions](magicblock-aperture/README.md) |
+| Account synchronization | [Chainlink](magicblock-chainlink/README.md), [risk checks](magicblock-aml/README.md) |
+| Settlement | [Delivery](magicblock-committor-service/README.md), [buffers](magicblock-committor-program/README.md), [lookup tables](magicblock-table-mania/README.md) |
+| Background work | [Recurring tasks](magicblock-task-scheduler/README.md), [callbacks and undelegation](magicblock-services/README.md), [fee claims](magicblock-validator-admin/README.md) |
+| Programs | [Native programs](programs/magicblock/README.md), [instruction API](magicblock-magic-program-api/README.md) |
+| Shared utilities | [Core types](magicblock-core/README.md), [base-chain RPC client](magicblock-rpc-client/README.md), [metrics](magicblock-metrics/README.md), [version metadata](magicblock-version/README.md) |
+| Legacy history | [Read-only ledger](magicblock-ledger/README.md), [storage schemas](storage-proto/README.md) |
+
+## Contributing and further reading
+
+- [Contributing](docs/CONTRIBUTING.md) and [repository guidance](AGENTS.md):
+  development workflow and checks.
+- [Manual tests](test-manual/README.md): integrations needing external setup.
 - [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md):
-  project relationships, cross-chain contracts, deployment, and recovery.
-- **Crate READMEs below:** local responsibilities, usage, and sharp edges.
-  The same text is included in crate-level Rust documentation.
-- [Contributing](docs/CONTRIBUTING.md) and [AGENTS.md](AGENTS.md):
-  repository workflow and validation.
+  architecture, deployment, and recovery.
 
-Generate local API documentation with `cargo doc --workspace --no-deps`.
-Run the affected package's checks as described in AGENTS.md; the integration
-and manual-test workspaces retain their own instructions.
-
-## Workspace
-
-### Processes
-
-| Crate | Responsibility |
-| --- | --- |
-| [`magicblock-validator`](bins/magicblock-validator/README.md) | Leader, application services, and upstream replication. |
-| [`magicblock-verifier`](bins/magicblock-verifier/README.md) | Follower replay, snapshot reopen, and optional relay. |
-| [`magicblock`](bins/magicblock/README.md) | Domain operations and end-to-end healthchecks. |
-| [`magicblock-validator-tui`](bins/magicblock-validator-tui/README.md) | External RPC/WebSocket terminal monitor. |
-
-### Host services
-
-| Crate | Responsibility |
-| --- | --- |
-| [`magicblock-runtime`](magicblock-runtime/README.md) | Shared native programs and startup account image. |
-| [`magicblock-config`](magicblock-config/README.md) | Role-specific CLI, environment, and TOML configuration. |
-| [`magicblock-aperture`](magicblock-aperture/README.md) | Application JSON-RPC, WebSocket subscriptions, and Geyser. |
-| [`magicblock-chainlink`](magicblock-chainlink/README.md) | Base-chain account/program synchronization and materialization. |
-| [`magicblock-aml`](magicblock-aml/README.md) | Risk-server client for activation checks. |
-| [`magicblock-committor-service`](magicblock-committor-service/README.md) | Base-chain settlement preparation, delivery, and recovery. |
-| [`magicblock-task-scheduler`](magicblock-task-scheduler/README.md) | Persistent repeated tasks and Engine crank submission. |
-| [`magicblock-services`](magicblock-services/README.md) | Action callbacks and observed undelegation requests. |
-| [`magicblock-validator-admin`](magicblock-validator-admin/README.md) | Periodic base-chain fee claims. |
-| [`magicblock-metrics`](magicblock-metrics/README.md) | Validator collectors and combined metrics endpoint. |
-
-### Programs and shared libraries
-
-| Crate | Responsibility |
-| --- | --- |
-| [`magicblock-program`](programs/magicblock/README.md) | Native Magic, crank, callback, and ephemeral-system programs. |
-| [`magicblock-magic-program-api`](magicblock-magic-program-api/README.md) | Shared IDs, instructions, PDAs, and response layouts. |
-| [`magicblock-committor-program`](magicblock-committor-program/README.md) | Base-chain commit buffers and chunk tracking. |
-| [`magicblock-table-mania`](magicblock-table-mania/README.md) | Base-chain address lookup table lifecycle. |
-| [`magicblock-rpc-client`](magicblock-rpc-client/README.md) | Base-chain reads, submission, and confirmation. |
-| [`magicblock-core`](magicblock-core/README.md) | Shared intent types, logging, and host utilities. |
-| [`magicblock-version`](magicblock-version/README.md) | Build and compatibility metadata. |
-
-### Legacy compatibility
-
-| Crate | Responsibility |
-| --- | --- |
-| [`magicblock-ledger-deprecated`](magicblock-ledger/README.md) | Read-only historical RocksDB ledger. |
-| [`solana-storage-proto`](storage-proto/README.md) | Legacy protobuf schemas and conversions. |
+Generate API documentation with `cargo doc --workspace --no-deps`.
 
 ## API Stability and Security
 

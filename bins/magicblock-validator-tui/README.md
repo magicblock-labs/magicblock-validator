@@ -1,12 +1,12 @@
-# `magicblock-validator-tui`
+# magicblock-validator-tui
 
-Standalone terminal monitor for a leader's HTTP RPC and WebSocket endpoints.
-It runs out of process and can monitor a remote host without access to the
-validator's local storage.
+A terminal monitor for a leader's transactions, slots, and logs. It connects over
+HTTP RPC and WebSocket, so it can monitor a remote validator without access to
+its storage.
 
 ## Run
 
-From the workspace root, using the addresses configured on the leader:
+From the workspace root, using your leader's endpoint addresses:
 
 ```bash
 cargo run --release --locked -p magicblock-validator-tui -- \
@@ -14,24 +14,19 @@ cargo run --release --locked -p magicblock-validator-tui -- \
   --ws-url ws://127.0.0.1:7800
 ```
 
-Use `--help` for optional display metadata. Ledger path and block-time display
-values do not configure or modify the remote validator.
+Use `--help` for additional options. Display settings do not change the remote
+validator's configuration.
 
-## Data and controls
+## Controls
 
-Slot subscriptions drive slot updates and HTTP `getBlock` transaction reads.
-`logsSubscribe` supplies transaction logs, while `getTransaction` supplies
-transaction details. These are RPC observations, not an in-process view of
-validator tracing or an authoritative execution audit.
+- Tab and arrow keys move between views and entries.
+- Enter opens transaction details.
+- `q` closes a detail view or quits.
 
-Use Tab/arrow keys to move between views, Enter to inspect a selected
-transaction, and `q` to quit (or close an open detail view first).
-Connection and subscription failures are shown in the client log stream.
+Connection failures appear in the client log stream. The monitor shows RPC
+observations, not internal validator tracing.
 
-The TUI cannot monitor a verifier through application RPC because the verifier
-does not expose those services. Use the [verifier's metrics and logs][verifier]
-for its operational state.
+Verifiers do not expose application RPC; use their
+[metrics and logs](../magicblock-verifier/README.md) instead.
 
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[verifier]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/bins/magicblock-verifier/README.md
+[Back to workspace](../../README.md)

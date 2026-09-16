@@ -1,52 +1,26 @@
-# `magicblock-committor-service`
+# magicblock-committor-service
 
-Delivers the leader's settlement intents to the base chain: commits,
-undelegations, finalization, and associated actions. Engine execution and local
-intent scheduling are not themselves settlement completion.
+Delivers the leader's account commits, undelegations, and associated actions to
+the base chain. It prepares settlement transactions, sends them, and handles
+confirmation and recovery.
 
-## Delivery pipeline
+Large payloads use [commit buffers](../magicblock-committor-program/README.md)
+and [address lookup tables](../magicblock-table-mania/README.md). Work affecting
+the same accounts is ordered while independent work can proceed concurrently.
 
-`CommittorProcessor` prepares scheduled work for `IntentExecutionManager`.
-The intent scheduler orders conflicting work before executors prepare and send
-transactions; independent intents can execute concurrently under bounded permits.
+## Completion and retries
 
-Task construction resolves the account/delegation information and commit IDs
-needed by the Delegation Program. Transaction preparation selects inline or
-buffered payloads, prepares [lookup tables][tables] and [commit buffers][buffers],
-and assembles the required transaction strategy. Large deliveries may require
-separate staging and finalization phases.
+Local execution or queue acceptance does not mean settlement has completed.
+Base-chain actions and local callbacks are separate executions; callback
+signatures alone do not confirm their success.
 
-`IntentExecutionService` integrates this pipeline with Chainlink, Engine,
-recovered intents, and result handling. Base-chain action callbacks are separate
-local transactions, not part of the base-chain transaction's atomic outcome.
+Retry safety depends on whether a transaction could already have taken effect.
+Commit-bearing work uses on-chain deduplication, while action-only retries are
+restricted to failures before sending. Optional persistence supports recovery,
+but does not make the database, base chain, and callbacks one atomic operation.
 
-## Retries and durability
+See the [leader configuration](../config.example.toml) for settings and
+[settlement delivery](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/settlement-delivery.md)
+for the detailed completion and recovery contract.
 
-Active executors and sleeping retries have separate limits. A retry releases its
-execution permit during backoff so unrelated work can continue; retry-capacity
-exhaustion makes that failure terminal.
-
-Retry policy distinguishes commit-bearing intents, which have on-chain nonce
-deduplication, from action-only intents. An unobserved successful send can make
-an action-only retry execute twice, so those retries are restricted to pre-send
-failures.
-
-Optional persistence tracks intent status and supports recovery. It is not an
-atomic transaction spanning the local database, base chain, and callbacks.
-Completion reports distinguish intent execution from callback scheduling.
-Callback signatures do not confirm callback execution; inspect execution errors
-and scheduling errors rather than treating queue admission or a signature as
-final success.
-
-## Integration constraints
-
-Preserve conflicting-account order, commit IDs, payload limits, ALT readiness,
-and buffer cleanup across delivery changes. Retryability must reflect whether
-a send could already have taken effect. See [settlement delivery][delivery] for
-staging, acknowledgement, and recovery contracts.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[tables]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-table-mania/README.md
-[buffers]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-committor-program/README.md
-[delivery]: https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/settlement-delivery.md
+[Back to workspace](../README.md)

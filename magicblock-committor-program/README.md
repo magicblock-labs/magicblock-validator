@@ -1,33 +1,17 @@
-# `magicblock-committor-program`
+# magicblock-committor-program
 
-Base-chain buffer program and shared layouts used to deliver large settlement
-payloads. It stages bytes for the settlement pipeline; it does not replace the
-Delegation Program's authority checks or final state application.
+Stages large settlement payloads in base-chain buffers so they can be delivered
+in chunks. The [committor service](../magicblock-committor-service/README.md)
+coordinates writing, finalizing, and cleaning up those buffers.
 
-## Buffer lifecycle
+## Using it
 
-The instruction builders construct four operations:
+Use this crate's instruction builders and address helpers to create, resize,
+write, and close buffers. Host applications enable the `no-entrypoint` feature
+to use the library without exporting the on-chain program entrypoint.
 
-1. `Init` creates buffer and chunk-tracking PDAs for an account and commit ID.
-2. `ReallocBuffer` grows a buffer when the payload requires it.
-3. `Write` writes a chunk and records its progress.
-4. `Close` reclaims the buffer and tracking accounts after use, returning
-   their lamports to the validator authority.
+A complete buffer is not a completed settlement. The Delegation Program still
+controls authorization and final state application. Instruction and stored
+data layouts must remain compatible with their readers.
 
-Use the provided builders and PDA helpers so account order, seeds, bumps,
-offsets, and chunk layouts remain consistent with the processor.
-
-## Library and program use
-
-The crate builds as both a library and a deployable program. Host consumers
-enable `no-entrypoint` to use builders and shared changeset types without
-exporting the Solana program entrypoint.
-
-Buffer completion is not proof of settlement completion. The
-[committor service][committor] owns delivery sequencing and the downstream
-commit/finalization transaction. Treat serialized instruction and changeset
-layouts as compatibility interfaces.
-
-[Workspace](https://github.com/magicblock-labs/magicblock-validator/blob/dev/README.md) · [Knowledge base](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md)
-
-[committor]: https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-committor-service/README.md
+[Back to workspace](../README.md)
