@@ -136,18 +136,12 @@ async fn waiter_applies_newer_account_image() {
     };
     let older = build(11, 1);
     let newer = build(12, 2);
-    let mut accessor = ctx.bank.account(pubkey).await;
-    let older = async {
-        let result = fetch
-            .submit_account(
-                &mut accessor,
-                older,
-                AccountFetchContext::rpc_get_multiple_accounts(),
-            )
-            .await;
-        drop(accessor);
-        result
-    };
+    let accessor = ctx.bank.account(pubkey).await;
+    let older = fetch.submit_account(
+        accessor,
+        older,
+        AccountFetchContext::rpc_get_multiple_accounts(),
+    );
     let newer = fetch.clone_account_with_post_delegation_action_invariants(
         newer,
         AccountFetchContext::rpc_get_multiple_accounts(),

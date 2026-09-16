@@ -485,20 +485,14 @@ where
         pubkey: Pubkey,
         account: &AccountSharedData,
     ) -> DlpProgramUpdateInterest {
-        if let Some((undelegating, delegated)) =
-            self.read_account(&pubkey, |account| {
-                (
-                    account.is(AccountMode::Transient),
-                    account.is(AccountMode::Delegated),
-                )
-            })
-        {
-            if undelegating {
+        match self.account_mode(&pubkey) {
+            Some(AccountMode::Transient) => {
                 return DlpProgramUpdateInterest::ProcessUndelegating;
             }
-            if delegated {
+            Some(AccountMode::Delegated) => {
                 return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
             }
+            _ => {}
         }
 
         if self.remote_account_provider.is_watching(&pubkey) {
@@ -660,6 +654,10 @@ where
             .flatten()
     }
 
+    pub(crate) fn account_mode(&self, pubkey: &Pubkey) -> Option<AccountMode> {
+        self.engine.accounts().loader().mode(pubkey).ok().flatten()
+    }
+
     pub(crate) fn contains_account(&self, pubkey: &Pubkey) -> bool {
         self.engine
             .accounts()
@@ -750,7 +748,7 @@ where
 
     async fn submit_account(
         &self,
-        accessor: &mut engine::AccountAccessor<'_>,
+        accessor: engine::AccountAccessor<'_>,
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ClonerResult<()> {
@@ -1034,7 +1032,7 @@ where
                 Ok(ProgramDataWatch::Installed)
             );
 
-        let Some(mut accessor) =
+        let Some(accessor) =
             cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
@@ -1052,10 +1050,9 @@ where
             clone_intent,
             ChainlinkCloneOutcome::Submitted,
         );
-        let result = cloner::clone_program(&mut accessor, request)
+        let result = cloner::clone_program(accessor, request)
             .await
             .map_err(ChainlinkError::from);
-        drop(accessor);
         if result.is_ok() {
             if is_loaderv3 {
                 let _ = self.watch_programdata(program_id).await;
@@ -1114,14 +1111,14 @@ where
         let ClonePostDelegationMode::ExecuteActions(delegation) =
             &request.post_delegation_mode
         else {
-            let Some(mut accessor) =
+            let Some(accessor) =
                 cloner::claim_materialization(&self.engine, &mut request)
                     .await?
             else {
                 return Ok(());
             };
             return self
-                .submit_account(&mut accessor, request, fetch_context)
+                .submit_account(accessor, request, fetch_context)
                 .await
                 .map_err(Into::into);
         };
@@ -1145,7 +1142,7 @@ where
             .await
             .err();
 
-        let Some(mut accessor) =
+        let Some(accessor) =
             cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             return Ok(());
@@ -1154,17 +1151,12 @@ where
             request.post_delegation_mode =
                 ClonePostDelegationMode::RescueUndelegate(source_program);
             return self
-                .rescue_failed_activation(
-                    &mut accessor,
-                    request,
-                    fetch_context,
-                    err,
-                )
+                .rescue_failed_activation(accessor, request, fetch_context, err)
                 .await;
         }
         // Keep the shared account buffer for fallback without cloning the
         // action instructions that move into the activation attempt.
-        let rescue = AccountCloneRequest {
+        let mut rescue = AccountCloneRequest {
             pubkey: request.pubkey,
             account: request.account.clone(),
             commit_frequency_ms: request.commit_frequency_ms,
@@ -1173,26 +1165,31 @@ where
             ),
             delegated_to_other: request.delegated_to_other,
         };
-        match self
-            .submit_account(&mut accessor, request, fetch_context.clone())
+        let Err(err) = self
+            .submit_account(accessor, request, fetch_context.clone())
             .await
-        {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                self.rescue_failed_activation(
-                    &mut accessor,
-                    rescue,
-                    fetch_context,
-                    err.into(),
-                )
-                .await
-            }
-        }
+        else {
+            return Ok(());
+        };
+        // Submission consumes the lease. Reacquire and reclassify so
+        // recovery cannot overwrite a concurrently materialized account.
+        let Some(accessor) =
+            cloner::claim_materialization(&self.engine, &mut rescue).await?
+        else {
+            return Ok(());
+        };
+        self.rescue_failed_activation(
+            accessor,
+            rescue,
+            fetch_context,
+            err.into(),
+        )
+        .await
     }
 
     async fn rescue_failed_activation(
         &self,
-        accessor: &mut engine::AccountAccessor<'_>,
+        accessor: engine::AccountAccessor<'_>,
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
         err: ChainlinkError,
@@ -1871,9 +1868,7 @@ where
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
-        if let Some(true) = self.read_account(&request.pubkey, |account| {
-            account.is(AccountMode::Transient)
-        }) {
+        if self.account_mode(&request.pubkey) == Some(AccountMode::Transient) {
             return Ok(());
         }
 
