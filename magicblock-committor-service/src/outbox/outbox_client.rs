@@ -17,7 +17,7 @@ use solana_rpc_client_api::{
     client_error, client_error::ErrorKind as RpcClientErrorKind,
 };
 use solana_transaction_error::TransactionError;
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::{
     intent_executor::{
@@ -57,18 +57,14 @@ impl InternalOutboxClient {
             self.rpc_client
                 .send_and_confirm_transaction(tx)
                 .await
-                .map_err(|err| {
-                    match err.kind() {
-                        RpcClientErrorKind::TransactionError(_) => {
-                            backoff::Error::Permanent(err)
-                        }
-                        _ => {
-                            error!(signature = ?signature, error = ?err, "Transient error accepting intents, retrying");
-                            backoff::Error::transient(err)
-                        }
+                .map_err(|err| match err.kind() {
+                    RpcClientErrorKind::TransactionError(_) => {
+                        backoff::Error::Permanent(err)
                     }
+                    _ => backoff::Error::transient(err),
                 })
-        }).await?;
+        })
+        .await?;
 
         Ok(())
     }
@@ -110,11 +106,31 @@ impl InternalOutboxClient {
             };
             match self.send_with_backoff(backoff_config, &tx).await {
                 Ok(_) => accepted.extend(remaining.drain(..chunk_size)),
-                Err(err) => return Err((accepted, err.into())),
+                Err(err) => {
+                    error!(
+                        signature = ?tx.get_signature(),
+                        intent_ids = ?remaining[..chunk_size].iter().map(|i| i.id).collect::<Vec<_>>(),
+                        error = ?err,
+                        "Failed to accept scheduled intents"
+                    );
+                    return Err((accepted, err.into()));
+                }
             }
         }
 
         Ok(accepted)
+    }
+
+    /// Builds and executes a notification using the engine's current blockhash.
+    async fn send_fresh_commit_sent_tx(
+        &self,
+        intent_id: u64,
+    ) -> Result<(), InternalOutboxClientError> {
+        let tx = InstructionUtils::scheduled_commit_sent(
+            intent_id,
+            self.engine.blockhash(),
+        );
+        self.execute_via_engine(tx).await
     }
 }
 
@@ -139,9 +155,7 @@ impl OutboxClient for InternalOutboxClient {
                 MagicContext::deserialize(account.data())
             })
             .map_err(|err| (vec![], err.into()))?
-            .expect(
-                "Validator found to be running without MagicContext account!",
-            )
+            .ok_or((vec![], InternalOutboxClientError::MagicContextMissing))?
             .map_err(|err| (vec![], err.into()))?;
 
         self.send_accept_tx(magic_context.scheduled_base_intents)
@@ -168,6 +182,14 @@ impl OutboxClient for InternalOutboxClient {
             &tx,
         )
         .await
+        .inspect_err(|err| {
+            error!(
+                intent_id,
+                signature = ?tx.get_signature(),
+                error = ?err,
+                "Failed to set intent execution stage"
+            )
+        })
         .map_err(Into::into)
     }
 
@@ -186,6 +208,14 @@ impl OutboxClient for InternalOutboxClient {
             &tx,
         )
         .await
+        .inspect_err(|err| {
+            error!(
+                intent_id,
+                signature = ?tx.get_signature(),
+                error = ?err,
+                "Failed to close intent"
+            )
+        })
         .map_err(Into::into)
     }
 
@@ -195,22 +225,36 @@ impl OutboxClient for InternalOutboxClient {
         result: &IntentExecutorResult<ExecutionOutput>,
         execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
-        let tx = match mem::take(&mut meta.intent_sent_transaction) {
-            IntentSentTransaction::Known(tx) => tx,
-            IntentSentTransaction::Recovered => {
-                let blockhash = self.engine.blockhash();
-                InstructionUtils::scheduled_commit_sent(meta.id, blockhash)
-            }
-        };
+        let intent_id = meta.id;
+        let transaction = mem::take(&mut meta.intent_sent_transaction);
         let sent_commit = build_sent_commit(meta, result, execution_report);
         // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
+        // Register once before submission. Only BlockhashNotFound permits a
+        // fallback because it occurs before the processor can consume this payload.
         register_scheduled_commit_sent(sent_commit);
-        self.execute_via_engine(tx)
-            .await
-            .inspect(|_| debug!("Sent commit signaled"))
-            .inspect_err(
-                |err| error!(error = ?err, "Failed to signal sent commit"),
-            )?;
+        match transaction {
+            IntentSentTransaction::Known(tx) => {
+                let signature = tx.signatures[0];
+                match self.execute_via_engine(tx).await {
+                    Err(InternalOutboxClientError::TransactionError(
+                        TransactionError::BlockhashNotFound,
+                    )) => {
+                        warn!(
+                            %signature,
+                            intent_id,
+                            "Pre-signed commit notification expired; its logged signature is best-effort"
+                        );
+                        self.send_fresh_commit_sent_tx(intent_id).await
+                    }
+                    result => result,
+                }
+            }
+            IntentSentTransaction::Recovered => {
+                self.send_fresh_commit_sent_tx(intent_id).await
+            }
+        }
+        .inspect(|_| debug!("Sent commit signaled"))
+        .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))?;
 
         Ok(())
     }
@@ -223,6 +267,8 @@ impl OutboxClient for InternalOutboxClient {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalOutboxClientError {
+    #[error("MagicContext account is missing from AccountsDb")]
+    MagicContextMissing,
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
     #[error("RpcClientError: {0}")]

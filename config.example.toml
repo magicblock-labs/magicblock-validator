@@ -6,7 +6,7 @@
 # comments will be used.
 #
 # CONFIGURATION PRECEDENCE (Highest to Lowest):
-# 1. CLI Arguments      (e.g. --lifecycle offline)
+# 1. CLI Arguments      (e.g. --listen 127.0.0.1:8899)
 # 2. Environment Vars   (e.g. MBV_ENGINE__LEDGER__SIZE_LIMIT=536870912)
 # 3. TOML Config File   (this file)
 # 4. System Defaults
@@ -19,17 +19,6 @@
 # ==============================================================================
 
 # --- Core Settings ---
-
-# The operational mode of the validator.
-# Default: "ephemeral"
-# Options:
-# - "ephemeral":       Clone accounts on demand; writes only to delegated accounts.
-# - "replica":         Clone all accounts; writes to all accounts.
-# - "programs-replica": Clone program accounts; writes to all accounts.
-# - "offline":         Clone no accounts; writes to all accounts.
-# CLI: --lifecycle <MODE>
-# Env: MBV_LIFECYCLE
-lifecycle = "ephemeral"
 
 # Remote endpoints for syncing with the base chain.
 # You can specify multiple remotes of different types.

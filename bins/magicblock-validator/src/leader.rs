@@ -6,8 +6,9 @@ use std::{
 use engine::Engine;
 use magicblock_aperture::{SharedState, initialize_aperture};
 use magicblock_chainlink::{
-    ProdChainlink, config::ChainlinkConfig, errors::ChainlinkError,
-    remote_account_provider::Endpoints,
+    ProdChainlink,
+    errors::ChainlinkError,
+    remote_account_provider::{Endpoints, config::RemoteAccountProviderConfig},
 };
 use magicblock_committor_service::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
@@ -16,7 +17,7 @@ use magicblock_committor_service::{
     outbox::outbox_client::InternalOutboxClient,
     service::IntentExecutionService,
 };
-use magicblock_config::{LeaderParams, config::LifecycleMode};
+use magicblock_config::LeaderParams;
 use magicblock_metrics::MetricsService;
 use magicblock_program::{init_magic_sys, validator::init_validator_authority};
 use magicblock_runtime::keeper_builder;
@@ -31,8 +32,9 @@ use nucleus::{
     shutdown::{Service, ShutdownManager, ShutdownReason},
 };
 use replicator::ReplicationDispatcher;
-use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
+use solana_commitment_config::CommitmentConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
+use solana_program::{rent::Rent, sysvar};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
@@ -43,8 +45,6 @@ use crate::{
     ledger,
     magic_sys_adapter::MagicSysAdapter,
 };
-
-type ChainlinkImpl = ProdChainlink;
 
 type CommittorProcessorImpl = CommittorProcessor<AccountsDbIntentBacklog>;
 
@@ -57,6 +57,7 @@ type IntentExecutionServiceImpl =
 pub struct Leader {
     config: LeaderParams,
     engine: Engine,
+    chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
     intent_execution_service: Option<IntentExecutionServiceImpl>,
     undelegation_request_service: Option<UndelegationRequestService>,
@@ -80,7 +81,9 @@ impl Leader {
         timer.record("Deprecated ledger initialized");
 
         let mut shutdown = ShutdownManager::default();
-        let builder = keeper_builder(&config.engine, &config.programs)?;
+        let mut builder = keeper_builder(&config.engine, &config.programs)?;
+        builder.rent =
+            Self::fetch_rent_from_base_chain(config.rpc_url()).await?;
         timer.record("Keeper runtime configured");
         let engine = Engine::new(builder, None, &mut shutdown).await?;
         timer.record("Engine initialized");
@@ -185,6 +188,7 @@ impl Leader {
         Ok(Self {
             config,
             engine,
+            chainlink,
             shutdown,
             intent_execution_service: Some(intent_execution_service),
             undelegation_request_service: Some(undelegation_request_service),
@@ -239,7 +243,7 @@ impl Leader {
     }
 
     fn init_intent_execution_service(
-        chainlink: &Arc<ChainlinkImpl>,
+        chainlink: &Arc<ProdChainlink>,
         outbox_client: &Arc<InternalOutboxClient>,
         committor_processor: &Arc<CommittorProcessorImpl>,
         slot_interval: Duration,
@@ -257,28 +261,20 @@ impl Leader {
         config: &LeaderParams,
         engine: &Engine,
         chain_slot: Arc<AtomicU64>,
-    ) -> ApiResult<ChainlinkImpl> {
+    ) -> ApiResult<ProdChainlink> {
         let endpoints = Endpoints::try_from(config.remotes.as_slice())
             .map_err(ChainlinkError::from)?;
 
-        let mut chainlink_config = ChainlinkConfig::default_with_lifecycle_mode(
-            LifecycleMode::Ephemeral,
-        );
-        chainlink_config.remote_account_provider = chainlink_config
-            .remote_account_provider
+        let provider_config = RemoteAccountProviderConfig::default()
             .with_resubscription_delay(config.chainlink.resubscription_delay)
-            .map(|conf| conf.with_grpc(config.grpc.clone()))
-            .map_err(ChainlinkError::from)?;
-        let commitment_config = {
-            let level = CommitmentLevel::Confirmed;
-            CommitmentConfig { commitment: level }
-        };
-        ChainlinkImpl::try_new_from_endpoints(
+            .map_err(ChainlinkError::from)?
+            .with_grpc(config.grpc.clone());
+        ProdChainlink::try_new_from_endpoints(
             &endpoints,
-            commitment_config,
+            CommitmentConfig::confirmed(),
             engine.clone(),
             config.engine.authority.local.insecure_clone(),
-            chainlink_config,
+            provider_config,
             &config.chainlink,
             chain_slot,
         )
@@ -289,6 +285,21 @@ impl Leader {
     // -----------------
     // Start/Stop
     // -----------------
+    async fn fetch_rent_from_base_chain(rpc_url: &str) -> ApiResult<Rent> {
+        let account = RpcClient::new_with_commitment(
+            rpc_url.to_owned(),
+            CommitmentConfig::confirmed(),
+        )
+        .get_account(&sysvar::rent::ID)
+        .await
+        .map_err(|err| ApiError::FailedToSyncBaseChainRent(err.to_string()))?;
+        let rent = bincode::deserialize(&account.data).map_err(|err| {
+            ApiError::FailedToSyncBaseChainRent(err.to_string())
+        })?;
+        info!(?rent, "Fetched rent parameters from base chain");
+        Ok(rent)
+    }
+
     async fn ensure_validator_funded_on_chain(
         rpc_url: String,
         identity: Pubkey,
@@ -532,9 +543,7 @@ impl Leader {
     #[instrument(skip(self))]
     pub fn start(&mut self) {
         let mut timer = EventTimer::new("startup");
-        if matches!(self.config.lifecycle, LifecycleMode::Ephemeral) {
-            self.spawn_primary_onchain_setup();
-        }
+        self.spawn_primary_onchain_setup();
 
         let undelegation_request_service = self
             .undelegation_request_service
@@ -584,6 +593,7 @@ impl Leader {
     #[instrument(skip(self))]
     pub async fn wait(&mut self) -> ShutdownReason {
         let reason = self.shutdown.wait().await;
+        self.chainlink.shutdown().await;
         reason.combine(self.shutdown.terminate().await)
     }
 }

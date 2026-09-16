@@ -13,7 +13,6 @@ pub struct TuiConfig {
     pub validator_identity: String,
     pub ledger_path: String,
     pub block_time_ms: u64,
-    pub lifecycle_mode: String,
     pub help_url: String,
     pub version: String,
     pub git_version: String,
@@ -28,7 +27,6 @@ pub struct ValidatorConfig {
     pub validator_identity: String,
     pub ledger_path: String,
     pub block_time: String,
-    pub lifecycle_mode: String,
 }
 
 impl From<&TuiConfig> for ValidatorConfig {
@@ -46,7 +44,6 @@ impl From<&TuiConfig> for ValidatorConfig {
             validator_identity: config.validator_identity.clone(),
             ledger_path: config.ledger_path.clone(),
             block_time: format!("{}ms", config.block_time_ms),
-            lifecycle_mode: config.lifecycle_mode.clone(),
         }
     }
 }
@@ -831,7 +828,6 @@ mod tests {
             validator_identity: "validator".to_string(),
             ledger_path: "/tmp/ledger".to_string(),
             block_time_ms: 400,
-            lifecycle_mode: "ephemeral".to_string(),
             help_url: "https://example.com/help".to_string(),
             version: "1.0.0".to_string(),
             git_version: "abc123".to_string(),

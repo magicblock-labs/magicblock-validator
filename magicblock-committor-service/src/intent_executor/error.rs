@@ -119,8 +119,8 @@ impl IntentExecutorError {
 
     /// True when re-executing the whole intent from scratch may succeed:
     /// the failure was transport/RPC-side rather than deterministic.
-    /// Once a commit landed (two-stage finalize failures) re-execution would
-    /// commit the same state again, so those are never transient.
+    /// Once either stage exposes a submitted signature, re-execution could
+    /// duplicate work whose base-layer outcome is still ambiguous.
     pub fn is_transient(&self) -> bool {
         match self {
             Self::EmptyIntentError
@@ -137,7 +137,7 @@ impl IntentExecutorError {
             Self::FailedToFinalizeError {
                 err,
                 commit_signature: None,
-                ..
+                finalize_signature: None,
             } => err.is_transient(),
             Self::FailedToFinalizeError { .. }
             | Self::FailedFinalizePreparationError(_) => false,
@@ -356,6 +356,28 @@ mod tests {
             ),
         );
         assert!(err.is_transient());
+
+        // Not-found on fetch is transient (may be a stale RPC read)
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::FinalizedTasksBuildError(
+                TaskInfoFetcherError::AccountNotFoundError(
+                    solana_pubkey::Pubkey::new_unique(),
+                ),
+            ),
+        );
+        assert!(err.is_transient());
+
+        // A delegation created after the committed snapshot is terminal
+        let err = super::IntentExecutorError::TaskBuilderError(
+            TaskBuilderError::FinalizedTasksBuildError(
+                TaskInfoFetcherError::DelegationSessionChangedError {
+                    delegated_account: solana_pubkey::Pubkey::new_unique(),
+                    delegation_slot: 2,
+                    snapshot_slot: 1,
+                },
+            ),
+        );
+        assert!(!err.is_transient());
 
         // Missing delegation metadata is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(

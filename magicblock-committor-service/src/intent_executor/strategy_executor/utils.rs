@@ -1,4 +1,4 @@
-use std::{ops::ControlFlow, time::Duration};
+use std::{collections::HashMap, ops::ControlFlow, time::Duration};
 
 use async_trait::async_trait;
 use magicblock_core::traits::{
@@ -321,26 +321,39 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     strategy: &mut TransactionStrategy,
     intent_id: u64,
 ) -> Result<TransactionStrategy, TaskBuilderError> {
-    let min_context_slot = strategy
+    let snapshot_slots: HashMap<Pubkey, u64> = strategy
         .optimized_tasks
         .iter()
         .filter_map(|task| match task {
-            BaseTaskImpl::Commit(task) => {
-                Some(task.committed_account.remote_slot)
-            }
-            BaseTaskImpl::CommitFinalize(task) => {
-                Some(task.committed_account.remote_slot)
-            }
+            BaseTaskImpl::Commit(task) => Some((
+                task.committed_account.pubkey,
+                task.committed_account.remote_slot,
+            )),
+            BaseTaskImpl::CommitFinalize(task) => Some((
+                task.committed_account.pubkey,
+                task.committed_account.remote_slot,
+            )),
             _ => None,
         })
-        .max()
-        .unwrap_or_default();
+        .collect();
+    let min_context_slot =
+        snapshot_slots.values().copied().max().unwrap_or_default();
+    let committed_accounts: Vec<_> = committed_pubkeys
+        .iter()
+        .map(|pubkey| {
+            let slot = snapshot_slots
+                .get(pubkey)
+                .copied()
+                .unwrap_or(min_context_slot);
+            (*pubkey, slot)
+        })
+        .collect();
 
     // We reset TaskInfoFetcher for all committed accounts
     // We re-fetch them to fix out of sync tasks
     task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
     let commit_ids = task_info_fetcher
-        .fetch_next_commit_nonces(committed_pubkeys, min_context_slot)
+        .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
         .await
         .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
@@ -703,7 +716,8 @@ mod tests {
 
     use super::*;
     use crate::tasks::{
-        task_info_fetcher::TaskInfoFetcherResult, utils::create_commit_task,
+        task_info_fetcher::{AccountSnapshot, TaskInfoFetcherResult},
+        utils::create_commit_task,
     };
 
     /// Reports commit id 1 except for one unchanged account at commit id 5.
@@ -713,12 +727,12 @@ mod tests {
     impl TaskInfoFetcher for FreshDelegationFetcher {
         async fn fetch_next_commit_nonces(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys
+            Ok(accounts
                 .iter()
-                .map(|pubkey| {
+                .map(|(pubkey, _)| {
                     (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 })
                 })
                 .collect())
@@ -726,12 +740,12 @@ mod tests {
 
         async fn fetch_current_commit_nonces(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys
+            Ok(accounts
                 .iter()
-                .map(|pubkey| {
+                .map(|(pubkey, _)| {
                     (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 })
                 })
                 .collect())
@@ -739,13 +753,13 @@ mod tests {
 
         async fn fetch_delegation_metadata(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
         {
-            Ok(pubkeys
+            Ok(accounts
                 .iter()
-                .map(|pubkey| {
+                .map(|(pubkey, _)| {
                     (
                         *pubkey,
                         DelegationMetadata {

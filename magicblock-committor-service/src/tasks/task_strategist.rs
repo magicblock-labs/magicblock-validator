@@ -427,7 +427,9 @@ mod tests {
             UndelegateTask,
             commit_task::CommitTask,
             task_builder::{TaskBuilderImpl, TasksBuilder},
-            task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherResult},
+            task_info_fetcher::{
+                AccountSnapshot, TaskInfoFetcher, TaskInfoFetcherResult,
+            },
             utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_task},
         },
         test_utils,
@@ -442,29 +444,29 @@ mod tests {
     impl TaskInfoFetcher for MockInfoFetcher {
         async fn fetch_next_commit_nonces(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+            Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
         }
 
         async fn fetch_current_commit_nonces(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+            Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
         }
 
         async fn fetch_delegation_metadata(
             &self,
-            pubkeys: &[Pubkey],
+            accounts: &[AccountSnapshot],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
         {
-            Ok(pubkeys
+            Ok(accounts
                 .iter()
-                .map(|pubkey| {
+                .map(|(pubkey, _)| {
                     let (undelegation_requester, rent_payer) = self
                         .delegation_metadata
                         .get(pubkey)

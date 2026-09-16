@@ -2,7 +2,6 @@
 #![allow(dead_code)]
 use std::sync::Arc;
 
-use magicblock_config::config::LifecycleMode;
 use solana_account::ReadableAccount;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -101,11 +100,8 @@ pub fn dump_remote_account_update_source(
 
 pub fn create_test_subscribed_accounts()
 -> (Arc<SubscribedAccounts>, RemoteAccountProviderConfig) {
-    let config = RemoteAccountProviderConfig::try_new_with_metrics(
-        LifecycleMode::Ephemeral,
-        false,
-    )
-    .unwrap();
+    let config =
+        RemoteAccountProviderConfig::default().with_subscription_metrics(false);
     (create_test_subscribed_accounts_with_config(&config), config)
 }
 

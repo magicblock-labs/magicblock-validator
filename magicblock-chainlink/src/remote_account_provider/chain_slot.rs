@@ -35,8 +35,8 @@ impl ChainSlot {
 
     /// The maximum amount of slots we expect to pass from the time
     /// a subscription is requested until the point when it is
-    /// activated. ~10 secs
-    pub const MAX_SLOTS_SUB_ACTIVATION: u64 = 25;
+    /// activated. ~40 secs
+    pub const MAX_SLOTS_SUB_ACTIVATION: u64 = 100;
 
     /// Computes a `from_slot` for backfilling based on the current
     /// chain slot.

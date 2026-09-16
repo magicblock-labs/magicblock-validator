@@ -39,10 +39,6 @@ struct Args {
     #[arg(long, default_value_t = 400)]
     block_time_ms: u64,
 
-    /// Optional lifecycle mode display value
-    #[arg(long, default_value = "external")]
-    lifecycle_mode: String,
-
     /// Help URL shown in footer
     #[arg(long, default_value = "https://docs.magicblock.xyz")]
     help_url: String,
@@ -59,7 +55,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         validator_identity: args.validator_identity.unwrap_or_default(),
         ledger_path: args.ledger_path,
         block_time_ms: args.block_time_ms,
-        lifecycle_mode: args.lifecycle_mode,
         help_url: args.help_url,
         version: env!("CARGO_PKG_VERSION").to_string(),
         git_version: option_env!("GIT_HASH").unwrap_or("unknown").to_string(),

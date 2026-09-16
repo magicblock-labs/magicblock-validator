@@ -674,6 +674,13 @@ where
         &self.remote_account_provider
     }
 
+    /// Stops chain subscriptions before the engine scheduler shuts down.
+    pub async fn shutdown(&self) {
+        if let Err(err) = self.remote_account_provider.shutdown().await {
+            warn!(error = ?err, "Failed to shut down chain subscriptions");
+        }
+    }
+
     /// Check if a program is allowed to be cloned.
     /// Returns true if:
     /// - No allowed_programs restriction is set (None), OR

@@ -23,8 +23,8 @@ use magicblock_committor_service::{
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
         task_info_fetcher::{
-            CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
-            TaskInfoFetcherResult,
+            AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher,
+            TaskInfoFetcherError, TaskInfoFetcherResult,
         },
     },
     transaction_preparator::{
@@ -281,28 +281,28 @@ pub struct MockTaskInfoFetcher(MagicblockRpcClient);
 impl TaskInfoFetcher for MockTaskInfoFetcher {
     async fn fetch_next_commit_nonces(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
     }
 
     async fn fetch_current_commit_nonces(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(pubkeys.iter().map(|pubkey| (*pubkey, 0)).collect())
+        Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
     }
 
     async fn fetch_delegation_metadata(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         _: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
-        Ok(pubkeys
+        Ok(accounts
             .iter()
-            .map(|pubkey| {
+            .map(|(pubkey, _)| {
                 (
                     *pubkey,
                     DelegationMetadata {

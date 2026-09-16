@@ -10,7 +10,6 @@ use engine::{
 };
 use keeper::testkit::{Dirs, keeper_builder};
 use magicblock_aml::RiskService;
-use magicblock_config::config::LifecycleMode;
 use solana_account::{Account, AccountBuilder, AccountMode, AccountSharedData};
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;
@@ -53,9 +52,7 @@ impl TestContext {
     pub async fn init(slot: Slot) -> Self {
         Self::init_with_config_and_risk(
             slot,
-            RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                LifecycleMode::Ephemeral,
-            ),
+            RemoteAccountProviderConfig::default(),
             None,
             None,
         )
@@ -68,9 +65,7 @@ impl TestContext {
     ) -> Self {
         Self::init_with_config_and_risk(
             slot,
-            RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                LifecycleMode::Ephemeral,
-            ),
+            RemoteAccountProviderConfig::default(),
             risk_service,
             None,
         )
@@ -87,9 +82,7 @@ impl TestContext {
     pub async fn init_with_lru_capacity(slot: Slot, capacity: usize) -> Self {
         Self::init_with_config_and_risk(
             slot,
-            RemoteAccountProviderConfig::default_with_lifecycle_mode(
-                LifecycleMode::Ephemeral,
-            ),
+            RemoteAccountProviderConfig::default(),
             None,
             Some(capacity),
         )
@@ -131,7 +124,7 @@ impl TestContext {
                 create_test_subscribed_accounts_with_config(&config);
 
             let provider = Arc::new(
-                RemoteAccountProvider::try_from_clients_and_mode(
+                RemoteAccountProvider::try_new_from_clients(
                     rpc_client.clone(),
                     pubsub_client.clone(),
                     tx,
@@ -140,8 +133,7 @@ impl TestContext {
                     Arc::<AtomicU64>::default(),
                 )
                 .await
-                .expect("create remote account provider")
-                .expect("ephemeral lifecycle enables remote accounts"),
+                .expect("create remote account provider"),
             );
             FetchCloner::new(
                 &provider,

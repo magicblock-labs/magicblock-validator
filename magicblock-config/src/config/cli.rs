@@ -3,10 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser};
 use serde::Serialize;
 
-use crate::{
-    config::LifecycleMode,
-    types::{BindAddress, network::Remote},
-};
+use crate::types::{BindAddress, network::Remote};
 
 /// CLI arguments mirroring the structure of [`crate::LeaderParams`].
 /// All fields are optional to allow "overlay" behavior on top of the config file.
@@ -32,11 +29,6 @@ pub struct CliParams {
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remotes: Option<Vec<Remote>>,
-
-    /// The application's operational mode.
-    #[arg(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub lifecycle: Option<LifecycleMode>,
 
     /// Listen address for the metrics endpoint.
     #[arg(long, short)]

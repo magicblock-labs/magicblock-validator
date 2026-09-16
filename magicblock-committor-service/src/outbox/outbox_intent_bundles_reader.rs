@@ -78,7 +78,7 @@ impl InternalOutboxIntentBundlesReader {
 
         let accounts = self.engine.accounts();
         let outbox_candidates_iter =
-            accounts.program(&magicblock_program::ID)?;
+            accounts.program(&magicblock_program::OUTBOX_INTENT_PROGRAM_ID)?;
 
         // Create iterator that yields valid, unconsumed intents
         let outbox_iter = outbox_candidates_iter
@@ -236,7 +236,7 @@ mod tests {
         let account = AccountBuilder::default()
             .lamports(0)
             .data(bytes)
-            .owner(magicblock_program::ID)
+            .owner(magicblock_program::OUTBOX_INTENT_PROGRAM_ID)
             .mode(AccountMode::Ephemeral);
         te.account(pubkey)
             .await

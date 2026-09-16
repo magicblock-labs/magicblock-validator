@@ -27,17 +27,16 @@ use tracing::*;
 
 use crate::{
     cloner,
-    config::ChainlinkConfig,
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
-        RemoteAccountProvider, SubscriptionReason,
+        ProdRemoteAccountProvider, RemoteAccountProvider, SubscriptionReason,
         chain_updates_client::ChainUpdatesClient,
+        config::RemoteAccountProviderConfig,
     },
     submux::SubMuxClient,
 };
 
 mod account_still_undelegating_on_chain;
-pub mod config;
 pub mod errors;
 pub mod fetch_cloner;
 
@@ -184,67 +183,64 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             evicted_accounts_sub,
         })
     }
+}
 
+impl InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>> {
     #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(endpoints, engine, config, chainlink_config,))]
+    #[instrument(skip(endpoints, engine, provider_config, chainlink_config))]
     pub async fn try_new_from_endpoints(
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
         engine: Engine,
         validator_keypair: Keypair,
-        config: ChainlinkConfig,
+        provider_config: RemoteAccountProviderConfig,
         chainlink_config: &ChainLinkConfig,
         chain_slot: Arc<AtomicU64>,
-    ) -> ChainlinkResult<ProdChainlink> {
-        // Extract accounts provider and create fetch cloner while connecting
-        // the subscription channel
+    ) -> ChainlinkResult<Self> {
+        // Connect the provider and fetch cloner through one update channel.
         let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
-        let account_provider = RemoteAccountProvider::try_from_urls_and_config(
-            endpoints,
-            commitment,
-            tx,
-            &config.remote_account_provider,
-            Some(chain_slot),
-        )
-        .await?;
+        let provider = Arc::new(
+            ProdRemoteAccountProvider::try_new_from_endpoints(
+                endpoints,
+                commitment,
+                tx,
+                &provider_config,
+                chain_slot,
+            )
+            .await?,
+        );
         let (undelegation_request_sender, _) = broadcast::channel(1024);
-        let fetch_cloner = if let Some(provider) = account_provider {
-            let provider = Arc::new(provider);
-            let risk_service =
-                RiskService::try_from_config(&chainlink_config.risk)?
-                    .map(Arc::new);
-            match risk_service.as_ref() {
-                // Which policy is live decides whether an action can activate
-                // unchecked, so make it visible at startup.
-                Some(service) => info!(
-                    risk_server_url = %chainlink_config.risk.risk_server_url,
-                    check_strategy = ?service.check_strategy(),
-                    "Address risk checks enabled"
-                ),
-                None => info!("Address risk checks disabled"),
-            }
-            let fetch_cloner =
-                FetchCloner::new_with_undelegation_request_sender(
-                    &provider,
-                    engine.clone(),
-                    validator_keypair,
-                    rx,
-                    chainlink_config.allowed_programs.clone(),
-                    risk_service,
-                    undelegation_request_sender.clone(),
-                );
-            Some(fetch_cloner)
-        } else {
-            None
-        };
+        let risk_service =
+            RiskService::try_from_config(&chainlink_config.risk)?.map(Arc::new);
+        match risk_service.as_ref() {
+            // Which policy is live decides whether an action can activate
+            // unchecked, so make it visible at startup.
+            Some(service) => info!(
+                risk_server_url = %chainlink_config.risk.risk_server_url,
+                check_strategy = ?service.check_strategy(),
+                "Address risk checks enabled"
+            ),
+            None => info!("Address risk checks disabled"),
+        }
+        let fetch_cloner = FetchCloner::new_with_undelegation_request_sender(
+            &provider,
+            engine.clone(),
+            validator_keypair,
+            rx,
+            chainlink_config.allowed_programs.clone(),
+            risk_service,
+            undelegation_request_sender.clone(),
+        );
 
-        InnerChainlink::try_new_with_undelegation_request_sender(
+        Self::try_new_with_undelegation_request_sender(
             engine,
-            fetch_cloner,
+            Some(fetch_cloner),
             undelegation_request_sender,
         )
     }
+}
 
+impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     fn subscribe_stale_accounts(
         engine: Engine,
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
@@ -454,6 +450,13 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 ENSURE_ACCOUNTS_TIMEOUT.as_secs(),
             ))
         })
+    }
+
+    /// Stops chain subscriptions before the engine scheduler shuts down.
+    pub async fn shutdown(&self) {
+        if let Some(fetch_cloner) = self.fetch_cloner() {
+            fetch_cloner.shutdown().await;
+        }
     }
 
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.

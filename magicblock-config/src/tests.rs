@@ -3,7 +3,7 @@ use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, time::Duration};
 use serial_test::parallel;
 use tempfile::TempDir;
 
-use crate::{LeaderParams, config::LifecycleMode, consts};
+use crate::{LeaderParams, consts};
 
 fn run_cli(args: &[&str]) -> LeaderParams {
     let args = std::iter::once("validator")
@@ -26,7 +26,6 @@ fn create_temp_config(content: &str) -> (TempDir, PathBuf) {
 fn defaults_use_leader_engine_configuration() {
     let config = run_cli(&[]);
 
-    assert_eq!(config.lifecycle, LifecycleMode::Ephemeral);
     assert_eq!(
         config.engine.ledger.directory,
         PathBuf::from(consts::DEFAULT_ENGINE_LEDGER_DIRECTORY),
@@ -62,8 +61,6 @@ fn defaults_use_leader_engine_configuration() {
 fn engine_configuration_loads_from_toml() {
     let (_dir, path) = create_temp_config(
         r#"
-        lifecycle = "offline"
-
         [engine.accountsdb]
         directory = "/var/lib/magicblock/accounts"
         lru-capacity = 9000
@@ -83,7 +80,6 @@ fn engine_configuration_loads_from_toml() {
 
     let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
 
-    assert_eq!(config.lifecycle, LifecycleMode::Offline);
     assert_eq!(
         config.engine.accountsdb.directory,
         PathBuf::from("/var/lib/magicblock/accounts"),

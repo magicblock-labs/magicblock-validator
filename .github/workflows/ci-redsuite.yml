@@ -4,17 +4,49 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
-# Temporarily manual-only while RedSuite migrates to the leader's structured
-# Engine configuration. Restore the push and pull_request triggers once its
-# topology no longer invokes the removed legacy CLI options.
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      benchmarks:
+        description: Also run the redline benchmarks
+        type: boolean
+        default: false
+  release:
+    types: [published]
+  push:
+    branches: [master, dev]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
+  pull_request:
+    branches: [master, dev]
+    types: [opened, reopened, synchronize, ready_for_review]
+    paths:
+      - '**/*.rs'
+      - '**/Cargo.toml'
+      - '**/Cargo.lock'
+      - '**/build.rs'
+      - '**/*.proto'
+      - 'rust-toolchain.toml'
+      - '.github/workflows/ci-redsuite.yml'
+      - '.github/actions/setup-build-env/**'
+      - '.github/actions/setup-solana/**'
 
 permissions:
   contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: v0.1
+  REDSUITE_REV: 06c80157f8bc87c39ac48fd59367a8e9280d2db9
+  BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
+  BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
 
 jobs:
   build_er:
@@ -39,10 +71,12 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
-      - name: Build validator release binary
+      - name: Build validator and verifier release binaries
         run: |
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C link-arg=-fuse-ld=lld -C target-cpu=native" \
-            cargo build --release --locked --bin magicblock-validator -j "$HOST_CARGO_JOBS"
+            cargo build --release --locked \
+              --bin magicblock-validator --bin magicblock-verifier \
+              -j "$HOST_CARGO_JOBS"
         shell: bash
         working-directory: magicblock-validator
 
@@ -56,29 +90,58 @@ jobs:
         shell: bash
         working-directory: magicblock-validator
 
-      - name: Upload ER + committor artifact
+      - name: Upload ER + verifier + committor artifact
         uses: actions/upload-artifact@v4
         with:
           name: redsuite-er-bin
           path: |
             magicblock-validator/target/release/magicblock-validator
+            magicblock-validator/target/release/magicblock-verifier
             magicblock-validator/target/deploy/magicblock_committor_program.so
           retention-days: 1
           if-no-files-found: error
           compression-level: 0
 
+  plan:
+    runs-on: ubuntu-latest
+    name: Select suites
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+    steps:
+      - id: select
+        run: |
+          set -euo pipefail
+          correctness='{"suite":"correctness","targets":"redshift redhat"}'
+          benchmarks='{"suite":"benchmarks","targets":"redline"}'
+          if [ "$RUN_BENCHMARKS" = "true" ]; then
+            echo "matrix=[$correctness,$benchmarks]" >> "$GITHUB_OUTPUT"
+          else
+            echo "matrix=[$correctness]" >> "$GITHUB_OUTPUT"
+          fi
+        shell: bash
+        env:
+          RUN_BENCHMARKS: >-
+            ${{
+              github.event_name == 'release'
+              || (github.event_name == 'push' && github.ref == 'refs/heads/master')
+              || (github.event_name == 'workflow_dispatch' && inputs.benchmarks)
+            }}
+
   run_redsuite:
-    needs: build_er
-    runs-on: blacksmith-8vcpu-ubuntu-2404
-    name: RedSuite lite
+    needs: [build_er, plan]
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    name: RedSuite ${{ matrix.suite }}
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
     permissions:
       contents: read
-      actions: read
-      pull-requests: write
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-validator
+      MAGICBLOCK_VERIFIER_BIN: ${{ github.workspace }}/magicblock-validator/target/release/magicblock-verifier
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -112,14 +175,15 @@ jobs:
           rustup toolchain install
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
             cargo build --release --locked -p redsuite
-          cargo xtask programs
+          env -u REDSUITE_ROOT cargo xtask programs
           mkdir -p ../redsuite-dist/deploy
           cp target/release/redsuite ../redsuite-dist/
-          cp target/deploy/*.so ../redsuite-dist/deploy/
+          cp target/deploy/*.so target/deploy/fixtures.json ../redsuite-dist/deploy/
+          rm -rf target
         shell: bash
         working-directory: redsuite
 
-      - name: Download ER + committor artifact
+      - name: Download ER + verifier + committor artifact
         uses: actions/download-artifact@v4
         with:
           name: redsuite-er-bin
@@ -129,79 +193,86 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p runroot/target/deploy runroot/target/redsuite-stack
-          cp redsuite-dist/deploy/*.so runroot/target/deploy/
-          chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN"
+          cp redsuite-dist/deploy/* runroot/target/deploy/
+          chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN" "$MAGICBLOCK_VERIFIER_BIN"
+          test -x "$MAGICBLOCK_VALIDATOR_BIN" -a -x "$MAGICBLOCK_VERIFIER_BIN"
         shell: bash
 
-      - name: Run redsuite lite suite
+      - name: Run redsuite ${{ matrix.suite }} suite
         run: |
           set -euo pipefail
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
           [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
-          ./redsuite-dist/redsuite run all --profile lite
+          for target in $TARGETS; do
+            ./redsuite-dist/redsuite run "$target" --profile lite
+          done
         shell: bash
         env:
           REDSUITE_CLONE_URL: ${{ secrets.REDSUITE_CLONE_URL }}
+          TARGETS: ${{ matrix.targets }}
 
       - name: Upload stack logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: redsuite-stack-logs
+          name: redsuite-stack-logs-${{ matrix.suite }}
           path: runroot/target/redsuite-stack/*.log*
           retention-days: 3
           if-no-files-found: ignore
 
-      # Push-run artifacts double as the comparison baseline for PRs, so they
-      # keep the maximum retention; a quiet base branch must not lose it.
       - name: Upload scenario reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: redsuite-reports
+          name: redsuite-reports-${{ matrix.suite }}
           path: runroot/target/redsuite-reports/
-          retention-days: ${{ github.event_name == 'push' && 90 || 14 }}
+          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
           if-no-files-found: ignore
+
+      - name: Export Bencher Metric Format
+        if: matrix.suite == 'benchmarks'
+        run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
+        shell: bash
+
+      - uses: bencherdev/bencher@v0.6.10
+        if: matrix.suite == 'benchmarks'
+
+      - name: Track results with Bencher
+        if: matrix.suite == 'benchmarks'
+        run: |
+          set -euo pipefail
+          if [ -z "${BENCHER_API_KEY:-}" ]; then
+            echo "BENCHER_API_KEY not set — skipping Bencher tracking"
+            exit 0
+          fi
+          bencher run \
+            --project "$BENCHER_PROJECT" \
+            --key "$BENCHER_API_KEY" \
+            --branch "$BENCHER_BRANCH" \
+            --testbed "$BENCHER_TESTBED" \
+            --threshold-measure latency \
+            --threshold-test t_test \
+            --threshold-min-sample-size 4 \
+            --threshold-max-sample-size 30 \
+            --threshold-lower-boundary _ \
+            --threshold-upper-boundary 0.99 \
+            --threshold-measure throughput \
+            --threshold-test t_test \
+            --threshold-min-sample-size 4 \
+            --threshold-max-sample-size 30 \
+            --threshold-lower-boundary 0.99 \
+            --threshold-upper-boundary _ \
+            --thresholds-reset \
+            --adapter json \
+            --file redsuite-bmf.json
+        shell: bash
+        env:
+          BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
+          BENCHER_BRANCH: ${{ github.event.release.target_commitish || github.ref_name }}
 
       - name: Stack down
         if: always()
         run: ./redsuite-dist/redsuite stack down
         shell: bash
-
-      - name: Fetch baseline reports from base branch
-        id: baseline
-        if: github.event_name != 'push'
-        continue-on-error: true
-        run: |
-          set -euo pipefail
-          run_id=$(gh api \
-            "repos/$REPO/actions/workflows/ci-redsuite.yml/runs?branch=$BASE_REF&status=success&per_page=1" \
-            --jq '.workflow_runs[0].id // empty')
-          if [ -z "$run_id" ]; then
-            echo "no successful baseline run on $BASE_REF yet"
-            exit 1
-          fi
-          gh run download "$run_id" --repo "$REPO" \
-            --name redsuite-reports --dir baseline-reports
-          cp baseline-reports/*.json runroot/target/redsuite-reports/
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
-
-      - name: Compare against base branch
-        if: github.event_name != 'push' && steps.baseline.outcome == 'success'
-        run: |
-          set -euo pipefail
-          {
-            echo "## redsuite: PR vs $BASE_REF"
-            echo '```'
-            ./redsuite-dist/redsuite report compare
-            echo '```'
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-        shell: bash
-        env:
-          BASE_REF: ${{ github.event.pull_request.base.ref }}
