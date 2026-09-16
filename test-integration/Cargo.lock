@@ -4073,7 +4073,6 @@ name = "magicblock-program"
 version = "0.15.3"
 dependencies = [
  "lazy_static",
- "magic-root-interface",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",
  "magicblock-engine-nucleus",
