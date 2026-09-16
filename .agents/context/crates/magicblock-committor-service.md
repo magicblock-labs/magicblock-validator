@@ -46,7 +46,7 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `src/lib.rs` | Public crate surface. Re-exports `ComputeBudgetConfig`, `DEFAULT_ACTIONS_TIMEOUT`, and committor-program changeset types. |
 | `src/config.rs` and `src/compute_budget.rs` | Chain/RPC configuration, default action timeout, and per-task compute-budget helpers. |
 | `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `IntentEngineHandle`, and `CacheTaskInfoFetcher`. `CommittorProcessor<D: BacklogDB>` exposes `schedule_intent_bundles`, `execute_intent_bundles`, `subscribe_for_results`, and `fetch_current_commit_nonces` directly as async methods. |
-| `src/intent_engine.rs` and `src/intent_engine/intent_channel.rs` | `IntentEngineHandle` wraps the executor factory and spawns `IntentExecutionEngine`. `IntentScheduleHandle`/`IntentStream` form the scheduling channel: bundles go to an mpsc channel when it has room, otherwise to the `BacklogDB` backlog, which is drained before the channel is polled again to preserve arrival order. |
+| `src/intent_engine.rs` and `src/intent_engine/intent_channel.rs` | `IntentEngineHandle` owns the scheduling channel/backlog entrypoint, wraps the executor factory, and spawns `IntentExecutionEngine`. `IntentStream` drains the mpsc channel and `BacklogDB` backlog while preserving arrival order. |
 | `src/intent_engine/db.rs` | `BacklogDB` trait plus `DummyIntentBacklog` (production: stores intent ids and re-reads the intent from `AccountsDb` on pop) and `DummyDB` (test-only, in-memory). This backlog only smooths bursts past channel capacity — it is not the intent durability mechanism. |
 | `src/intent_engine/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), transient-failure intent retries (`MAX_INTENT_ATTEMPTS = 3` with jittered linear backoff, bounded by a `MAX_SLEEPING_RETRIERS = 5_000` semaphore), result broadcasting, metrics, and per-attempt cleanup spawning. |
 | `src/intent_engine/intent_scheduler.rs` | Pubkey conflict scheduler for committed accounts. Maintains FIFO blocking queues and prevents duplicate/concurrent conflicting intents. |
@@ -164,7 +164,7 @@ Recovery does not re-create or duplicate outbox intent PDAs — it only reschedu
 
 ### Scheduling and concurrency flow
 
-`IntentScheduleHandle::schedule` first checks whether its `BacklogDB` backlog is empty. If it is not empty, new bundles are stored there to preserve order. If the channel is full, the current and remaining bundles are also stored in the backlog. The production `DummyIntentBacklog` only stores intent ids in memory and re-reads each intent from `AccountsDb` on pop; it exists to preserve arrival order under backpressure, not for durability — durable recovery is the outbox intent PDA scan described above.
+`IntentEngineHandle::schedule` first checks whether its `BacklogDB` backlog is empty. If it is not empty, new bundles are stored there to preserve order. If the channel is full, the current and remaining bundles are also stored in the backlog. The production `DummyIntentBacklog` only stores intent ids in memory and re-reads each intent from `AccountsDb` on pop; it exists to preserve arrival order under backpressure, not for durability — durable recovery is the outbox intent PDA scan described above.
 
 `IntentExecutionEngine` repeatedly:
 
@@ -264,7 +264,7 @@ Standalone actions are currently built through commit-task paths even when there
 
 ### Scheduling backpressure
 
-`CommittorProcessor::schedule_intent_bundles` and `execute_intent_bundles` call `IntentScheduleHandle::schedule` directly (no actor/message-channel indirection). Backpressure is handled inside that call: bundles go to the executor's mpsc channel when there is room, otherwise to the `BacklogDB` backlog (see Scheduling and concurrency flow above). `execute_intent_bundles` awaits its oneshot listeners after scheduling, so a caller only returns once every requested intent has broadcast a result.
+`CommittorProcessor::schedule_intent_bundles` and `execute_intent_bundles` call `IntentEngineHandle::schedule` directly (no actor/message-channel indirection). Backpressure is handled inside that call: bundles go to the executor's mpsc channel when there is room, otherwise to the `BacklogDB` backlog (see Scheduling and concurrency flow above). `execute_intent_bundles` awaits its oneshot listeners after scheduling, so a caller only returns once every requested intent has broadcast a result.
 
 ## Important invariants
 

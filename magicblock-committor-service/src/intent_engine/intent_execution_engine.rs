@@ -111,6 +111,13 @@ pub struct ResultSubscriber(
     broadcast::Sender<BroadcastedIntentExecutionResult>,
 );
 impl ResultSubscriber {
+    #[cfg(test)]
+    pub(crate) fn new(
+        sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
+    ) -> Self {
+        Self(sender)
+    }
+
     pub fn subscribe(
         &self,
     ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
@@ -506,13 +513,16 @@ mod tests {
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
-    use tokio::time::{sleep, timeout};
+    use tokio::{
+        sync::mpsc::Sender,
+        time::{sleep, timeout},
+    };
 
     use super::*;
     use crate::{
         intent_engine::{
             db::{BacklogDB, DummyDB},
-            intent_channel::{IntentScheduleHandle, channel},
+            intent_channel::channel,
             intent_scheduler::{create_test_intent, create_test_intent_bundle},
         },
         intent_executor::{
@@ -562,7 +572,7 @@ mod tests {
     fn setup_engine(
         should_fail: bool,
     ) -> (
-        IntentScheduleHandle<DummyDB>,
+        Sender<OutboxIntentBundle>,
         MockIntentExecutionEngine,
         Arc<Mutex<DummyDB>>,
     ) {
@@ -577,7 +587,7 @@ mod tests {
     fn setup_engine_with_factory(
         executor_factory: MockIntentExecutorFactory,
     ) -> (
-        IntentScheduleHandle<DummyDB>,
+        Sender<OutboxIntentBundle>,
         MockIntentExecutionEngine,
         Arc<Mutex<DummyDB>>,
     ) {
@@ -603,7 +613,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg.clone()]).unwrap();
+        sender.try_send(msg.clone()).unwrap();
 
         // Verify the message was processed
         let result = result_receiver.recv().await.unwrap();
@@ -622,8 +632,8 @@ mod tests {
         let msg1 = create_test_intent(1, &[pubkey], false);
         let msg2 = create_test_intent(2, &[pubkey], false);
 
-        sender.schedule(vec![msg1.clone()]).unwrap();
-        sender.schedule(vec![msg2.clone()]).unwrap();
+        sender.try_send(msg1.clone()).unwrap();
+        sender.try_send(msg2.clone()).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -648,8 +658,8 @@ mod tests {
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
         let msg2 = create_test_intent(2, &[a], false);
 
-        sender.schedule(vec![msg1.clone()]).unwrap();
-        sender.schedule(vec![msg2.clone()]).unwrap();
+        sender.try_send(msg1.clone()).unwrap();
+        sender.try_send(msg2.clone()).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -674,7 +684,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg.clone()]).unwrap();
+        sender.try_send(msg.clone()).unwrap();
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
@@ -735,7 +745,7 @@ mod tests {
                 &[pubkey!("1111111111111111111111111111111111111111111")],
                 false,
             );
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         // Process results and verify constraints
@@ -775,7 +785,7 @@ mod tests {
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         for i in 0..NUM_FAILURES {
             let msg = create_test_intent(i as u64, &[pubkey], false);
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         let mut results = Vec::with_capacity(NUM_FAILURES);
@@ -832,8 +842,8 @@ mod tests {
             pubkey!("1111111111111111111111111111111111111111111");
         let head = create_test_intent(0, &[poisoned_pubkey], false);
         let successor = create_test_intent(1, &[poisoned_pubkey], false);
-        sender.schedule(vec![head]).unwrap();
-        sender.schedule(vec![successor]).unwrap();
+        sender.try_send(head).unwrap();
+        sender.try_send(successor).unwrap();
 
         // Head fails for real, successor is voided by the cascade.
         for _ in 0..2 {
@@ -849,7 +859,7 @@ mod tests {
         // admission - it never reaches an executor, so no broadcast for
         // it ever arrives.
         let rejected = create_test_intent(2, &[poisoned_pubkey], false);
-        sender.schedule(vec![rejected]).unwrap();
+        sender.try_send(rejected).unwrap();
         let silence =
             timeout(Duration::from_millis(300), result_receiver.recv()).await;
         assert!(
@@ -862,7 +872,7 @@ mod tests {
         let unrelated_pubkey =
             pubkey!("21111111111111111111111111111111111111111111");
         let unrelated = create_test_intent(3, &[unrelated_pubkey], false);
-        sender.schedule(vec![unrelated]).unwrap();
+        sender.try_send(unrelated).unwrap();
         let result = timeout(Duration::from_secs(5), result_receiver.recv())
             .await
             .expect("must not hang")
@@ -892,7 +902,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
@@ -913,7 +923,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -937,7 +947,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -959,7 +969,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             false,
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -988,7 +998,7 @@ mod tests {
             let msg = create_test_intent(i, &[unique_pubkey], false);
 
             received_ids.insert(i);
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         // Process results
@@ -1052,7 +1062,7 @@ mod tests {
             };
 
             let msg = create_test_intent(i as u64, &pubkeys, false);
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         // Process results

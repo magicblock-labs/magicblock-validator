@@ -9,57 +9,13 @@ use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use pin_project::pin_project;
 use tokio::sync::{
     mpsc,
-    mpsc::{Receiver, Sender, error::TrySendError},
+    mpsc::{Receiver, Sender},
 };
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::intent_engine::{db, db::BacklogDB};
 
-const POISONED_MSG: &str = "Dummy DB mutex poisoned";
-
-/// Handle for scheduling intents in ExecutionEngine
-pub struct IntentScheduleHandle<D> {
-    db: Arc<Mutex<D>>,
-    sender: Sender<OutboxIntentBundle>,
-}
-
-impl<D: BacklogDB> IntentScheduleHandle<D> {
-    pub fn new(db: Arc<Mutex<D>>, sender: Sender<OutboxIntentBundle>) -> Self {
-        Self { db, sender }
-    }
-
-    pub fn schedule(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> Result<(), IntentScheduleError> {
-        // If db not empty push el-t there
-        // This means that at some point channel got full
-        // Worker first will clean-up channel, and then DB.
-        // Pushing into channel would break order of commits
-        // Lock shall be held across to avoid races
-        let db = self.db.lock().expect(POISONED_MSG);
-        if !db.is_empty() {
-            db.store_intent_bundles(intent_bundles)?;
-            return Ok(());
-        }
-
-        let mut iter = intent_bundles.into_iter();
-        // Treated as regular value not propagated lower
-        #[allow(clippy::result_large_err)]
-        let res = iter.try_for_each(|el| self.sender.try_send(el));
-        match res {
-            Ok(_) => Ok(()),
-            Err(TrySendError::Closed(_)) => {
-                Err(IntentScheduleError::ChannelClosed)
-            }
-            Err(TrySendError::Full(el)) => {
-                let leftovers = std::iter::once(el).chain(iter).collect();
-                db.store_intent_bundles(leftovers)
-                    .map_err(IntentScheduleError::from)
-            }
-        }
-    }
-}
+const POISONED_MSG: &str = "intent backlog mutex poisoned";
 
 /// Stream of Intents that also handles backlog
 /// If backlog is not empty we switch to reading from it until it is depleted
@@ -116,13 +72,12 @@ impl<D: BacklogDB> Stream for IntentStream<D> {
 pub(crate) fn channel<D: BacklogDB>(
     db: &Arc<Mutex<D>>,
     buffer: usize,
-) -> (IntentScheduleHandle<D>, IntentStream<D>) {
+) -> (Sender<OutboxIntentBundle>, IntentStream<D>) {
     let (sender, receiver) = mpsc::channel(buffer);
 
-    let handle = IntentScheduleHandle::new(db.clone(), sender);
     let stream = IntentStream::new(db.clone(), receiver);
 
-    (handle, stream)
+    (sender, stream)
 }
 
 #[derive(thiserror::Error, Debug)]
