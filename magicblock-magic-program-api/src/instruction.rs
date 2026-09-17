@@ -361,19 +361,6 @@ pub enum MagicBlockInstruction {
     /// | `0` | Validator Authority. Authorizes eviction. | SIGNER |
     /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
-
-    /// Executes a crank
-    ///
-    /// # Account references
-    /// | Index | Account | Access |
-    /// | --- | --- | --- |
-    /// | `0` | Validator Authority. Authorizes crank execution. | SIGNER |
-    /// | `1` | Crank signer PDA. PDA signer used by embedded instructions. | - |
-    /// | `2..n` | Instruction accounts. Accounts required by the embedded instructions. | - |
-    ExecuteCrank {
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    },
 }
 
 impl MagicBlockInstruction {
