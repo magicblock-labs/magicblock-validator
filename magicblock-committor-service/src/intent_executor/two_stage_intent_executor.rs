@@ -37,12 +37,22 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
-pub struct TwoStageIntentExecutor<T, F, A, O> {
+pub struct TwoStageIntentExecutor<
+    TPreparator,
+    TTaskFetcher,
+    TCallbackScheduler,
+    TOutbox,
+> {
     authority: Keypair,
     /// Current stage of TwoStage execution flow
     stage: TwoStageProgress,
     /// Intent Executor context
-    ctx: IntentExecutorCtx<T, F, A, O>,
+    ctx: IntentExecutorCtx<
+        TPreparator,
+        TTaskFetcher,
+        TCallbackScheduler,
+        TOutbox,
+    >,
 
     /// Timeout for Intent's actions
     pub actions_timeout: Duration,
@@ -50,16 +60,27 @@ pub struct TwoStageIntentExecutor<T, F, A, O> {
     pub started_at: Instant,
 }
 
-impl<T, F, A, O> TwoStageIntentExecutor<T, F, A, O>
+impl<TPreparator, TTaskFetcher, TCallbackScheduler, TOutbox>
+    TwoStageIntentExecutor<
+        TPreparator,
+        TTaskFetcher,
+        TCallbackScheduler,
+        TOutbox,
+    >
 where
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
+    TPreparator: TransactionPreparator,
+    TTaskFetcher: TaskInfoFetcher,
+    TCallbackScheduler: ActionsCallbackScheduler,
+    TOutbox: OutboxClient,
+    TOutbox::Error: Into<IntentExecutorError>,
 {
     pub fn new(
-        ctx: IntentExecutorCtx<T, F, A, O>,
+        ctx: IntentExecutorCtx<
+            TPreparator,
+            TTaskFetcher,
+            TCallbackScheduler,
+            TOutbox,
+        >,
         actions_timeout: Duration,
         stage: TwoStageProgress,
     ) -> Self {
@@ -216,18 +237,25 @@ where
 }
 
 #[async_trait]
-impl<T, F, A, O> IntentExecutor<T> for TwoStageIntentExecutor<T, F, A, O>
+impl<TPreparator, TTaskFetcher, TCallbackScheduler, TOutbox>
+    IntentExecutor<TPreparator>
+    for TwoStageIntentExecutor<
+        TPreparator,
+        TTaskFetcher,
+        TCallbackScheduler,
+        TOutbox,
+    >
 where
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
+    TPreparator: TransactionPreparator,
+    TTaskFetcher: TaskInfoFetcher,
+    TCallbackScheduler: ActionsCallbackScheduler,
+    TOutbox: OutboxClient,
+    TOutbox::Error: Into<IntentExecutorError>,
 {
     async fn execute(
         mut self: Box<Self>,
         intent: ScheduledIntentBundle,
-    ) -> (IntentExecutionResult, CleanupHandle<T>) {
+    ) -> (IntentExecutionResult, CleanupHandle<TPreparator>) {
         // Duplicates AcceptedIntentExecutor::execute
         let meta = ScheduledBaseIntentMeta::new(&intent);
         let pubkeys = intent.get_all_committed_pubkeys();

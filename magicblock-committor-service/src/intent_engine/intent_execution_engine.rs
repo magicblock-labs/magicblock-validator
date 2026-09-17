@@ -24,7 +24,7 @@ use crate::{
     error::IntentScheduleError,
     intent_engine::{
         db::BacklogDB,
-        intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
+        intent_scheduler::{IntentScheduler, POISONED_SCHEDULER_MSG},
         intent_stream::IntentStream,
     },
     intent_executor::{
@@ -107,24 +107,30 @@ impl Deref for BroadcastedIntentExecutionResult {
     }
 }
 
-pub(crate) struct IntentExecutionEngine<D, F, T> {
-    intent_stream: IntentStream<D>,
-    executor_builder: Arc<F>,
+pub(crate) struct IntentExecutionEngine<TBacklog, TExecutorBuilder, TPreparator>
+{
+    intent_stream: IntentStream<TBacklog>,
+    executor_builder: Arc<TExecutorBuilder>,
 
-    inner: Arc<Mutex<IntentScheduler>>,
+    scheduler: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     retries_semaphore: Arc<Semaphore>,
-    _phantom_data: PhantomData<T>,
+    _phantom_data: PhantomData<TPreparator>,
 }
 
-impl<D, F, T> IntentExecutionEngine<D, F, T>
+impl<TBacklog, TExecutorBuilder, TPreparator>
+    IntentExecutionEngine<TBacklog, TExecutorBuilder, TPreparator>
 where
-    D: BacklogDB,
-    T: TransactionPreparator,
-    F: IntentExecutorBuilder<T> + Send + Sync + 'static,
+    TBacklog: BacklogDB,
+    TPreparator: TransactionPreparator,
+    TExecutorBuilder:
+        IntentExecutorBuilder<TPreparator> + Send + Sync + 'static,
 {
-    pub fn new(intent_stream: IntentStream<D>, executor_builder: F) -> Self {
+    pub fn new(
+        intent_stream: IntentStream<TBacklog>,
+        executor_builder: TExecutorBuilder,
+    ) -> Self {
         Self {
             intent_stream,
             executor_builder: Arc::new(executor_builder),
@@ -133,7 +139,7 @@ where
                 MAX_EXECUTORS as usize,
             )),
             retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
-            inner: Arc::new(Mutex::new(IntentScheduler::new())),
+            scheduler: Arc::new(Mutex::new(IntentScheduler::new())),
             _phantom_data: PhantomData,
         }
     }
@@ -186,7 +192,7 @@ where
 
             // Spawn executor
             let executor_factory = self.executor_builder.clone();
-            let inner = self.inner.clone();
+            let scheduler = self.scheduler.clone();
             let limits = ExecutionLimits {
                 executors: self.executors_semaphore.clone(),
                 retries: self.retries_semaphore.clone(),
@@ -195,7 +201,7 @@ where
             let handle = tokio::spawn(Self::execute(
                 executor_factory,
                 intent,
-                inner,
+                scheduler,
                 limits,
                 permit,
                 result_sender.clone(),
@@ -218,9 +224,9 @@ where
 
         let can_receive = || {
             let num_blocked_intents = self
-                .inner
+                .scheduler
                 .lock()
-                .expect(POISONED_INNER_MSG)
+                .expect(POISONED_SCHEDULER_MSG)
                 .intents_blocked();
             if num_blocked_intents < SCHEDULER_CAPACITY {
                 true
@@ -240,11 +246,11 @@ where
                     error!(error = ?err, "Executor failed");
                 };
                 trace!("Worker executed intent bundle, fetching new available one");
-                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
+                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).pop_next_scheduled_intent()
             },
             result = Self::get_new_intent(intent_stream), if can_receive() => {
                 let intent = result?;
-                self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
+                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).schedule(intent)
             },
             else => {
                 // Shouldn't be possible:
@@ -270,7 +276,7 @@ where
 
     /// Returns [`ScheduledIntentBundle`] from external channel
     async fn get_new_intent(
-        intent_stream: &mut IntentStream<D>,
+        intent_stream: &mut IntentStream<TBacklog>,
     ) -> Result<OutboxIntentBundle, IntentScheduleError> {
         intent_stream
             .next()
@@ -282,11 +288,11 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, intent, scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
-        executor_factory: Arc<F>,
+        executor_factory: Arc<TExecutorBuilder>,
         intent: OutboxIntentBundle,
-        inner_scheduler: Arc<Mutex<IntentScheduler>>,
+        scheduler: Arc<Mutex<IntentScheduler>>,
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -307,7 +313,7 @@ where
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
-        let mut scheduler = inner_scheduler.lock().expect(POISONED_INNER_MSG);
+        let mut scheduler = scheduler.lock().expect(POISONED_SCHEDULER_MSG);
         if is_err {
             // Poison this intent's pubkeys and evict any successor that's
             // reachable from them, so a terminal failure can't leave the
@@ -380,7 +386,7 @@ where
     /// execution permit is still held (`None` only if the executors
     /// semaphore closed mid-retry).
     async fn execute_with_retries(
-        executor_factory: Arc<F>,
+        executor_factory: Arc<TExecutorBuilder>,
         intent: &OutboxIntentBundle,
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,

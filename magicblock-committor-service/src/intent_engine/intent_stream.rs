@@ -14,29 +14,31 @@ use crate::intent_engine::{db, db::BacklogDB};
 
 const POISONED_MSG: &str = "intent backlog mutex poisoned";
 
-/// Stream of Intents that also handles backlog
-/// If backlog is not empty we switch to reading from it until it is depleted
-/// Once it is depleted we switch to polling `ReceiverStream`
+/// Stream of intents from the live channel and persisted backlog.
+///
+/// When backlog exists, already-buffered channel entries are returned first
+/// because they were scheduled before the backlog entries. If the channel has
+/// nothing ready, the stream immediately pops from backlog instead of waiting.
 #[pin_project]
-pub struct IntentStream<D> {
-    db: Arc<Mutex<D>>,
+pub struct IntentStream<TBacklog> {
+    backlog: Arc<Mutex<TBacklog>>,
     #[pin]
     stream: ReceiverStream<OutboxIntentBundle>,
 }
 
-impl<D: BacklogDB> IntentStream<D> {
+impl<TBacklog: BacklogDB> IntentStream<TBacklog> {
     pub fn new(
-        db: Arc<Mutex<D>>,
+        backlog: Arc<Mutex<TBacklog>>,
         receiver: Receiver<OutboxIntentBundle>,
     ) -> Self {
         Self {
-            db,
+            backlog,
             stream: ReceiverStream::new(receiver),
         }
     }
 }
 
-impl<D: BacklogDB> Stream for IntentStream<D> {
+impl<TBacklog: BacklogDB> Stream for IntentStream<TBacklog> {
     type Item = Result<OutboxIntentBundle, db::Error>;
 
     fn poll_next(
@@ -44,24 +46,19 @@ impl<D: BacklogDB> Stream for IntentStream<D> {
         cx: &mut Context<'_>,
     ) -> Poll<Option<Self::Item>> {
         let this = self.project();
-        let db = this.db.lock().expect(POISONED_MSG);
-        // That means we have backlog
-        // prior to using channel again we have to clean it all first
-        if !db.is_empty() {
-            // Before starting to clean backlog we need to clean channel first.
-            // A closed channel (`Ready(None)`) must NOT end the stream here -
-            // backlog still has items to drain, and the channel closing
-            // doesn't mean there's no more work left.
+        let backlog = this.backlog.lock().expect(POISONED_MSG);
+        if backlog.is_empty() {
+            let item = ready!(this.stream.poll_next(cx));
+            Poll::Ready(item.map(Ok))
+        } else {
+            // A closed channel (`Ready(None)`) must not end the stream here:
+            // backlog still has work to drain.
             if let Poll::Ready(Some(item)) = this.stream.poll_next(cx) {
                 Poll::Ready(Some(Ok(item)))
             } else {
-                // Some(T) always will be returned here as per check above
-                let el = db.pop_intent_bundle();
-                Poll::Ready(el.transpose())
+                // Some(T) is expected because emptiness was checked above.
+                Poll::Ready(backlog.pop_intent_bundle().transpose())
             }
-        } else {
-            let item = ready!(this.stream.poll_next(cx));
-            Poll::Ready(item.map(Ok))
         }
     }
 }

@@ -5,8 +5,8 @@ use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::{error, warn};
 
-pub(crate) const POISONED_INNER_MSG: &str =
-    "Mutex on CommitSchedulerInner is poisoned.";
+pub(crate) const POISONED_SCHEDULER_MSG: &str =
+    "Mutex on IntentScheduler is poisoned.";
 
 type IntentID = u64;
 struct IntentMeta {

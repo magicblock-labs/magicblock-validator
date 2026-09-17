@@ -18,11 +18,11 @@ use crate::{
     transaction_preparator::TransactionPreparatorImpl,
 };
 
-pub trait IntentExecutorBuilder<T> {
+pub trait IntentExecutorBuilder<TPreparator> {
     fn create_instance(
         &self,
         status: OutboxIntentBundleStatus,
-    ) -> Box<dyn IntentExecutor<T>>;
+    ) -> Box<dyn IntentExecutor<TPreparator>>;
 }
 
 pub struct ExecutorConfig {
@@ -31,23 +31,24 @@ pub struct ExecutorConfig {
 }
 
 /// Dummy struct to simplify signature of IntentExecutionEngine
-pub struct IntentExecutorBuilderImpl<A, O> {
+pub struct IntentExecutorBuilderImpl<TCallbackScheduler, TOutbox> {
     /// Base-layer signing identity — the engine's authority keypair.
     pub authority: Keypair,
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     pub executor_config: ExecutorConfig,
     pub task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    pub outbox_client: Arc<O>,
-    pub actions_callback_executor: A,
+    pub outbox_client: Arc<TOutbox>,
+    pub actions_callback_executor: TCallbackScheduler,
 }
 
-impl<A, O> IntentExecutorBuilder<TransactionPreparatorImpl>
-    for IntentExecutorBuilderImpl<A, O>
+impl<TCallbackScheduler, TOutbox>
+    IntentExecutorBuilder<TransactionPreparatorImpl>
+    for IntentExecutorBuilderImpl<TCallbackScheduler, TOutbox>
 where
-    A: ActionsCallbackScheduler,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
+    TCallbackScheduler: ActionsCallbackScheduler,
+    TOutbox: OutboxClient,
+    TOutbox::Error: Into<IntentExecutorError>,
 {
     fn create_instance(
         &self,

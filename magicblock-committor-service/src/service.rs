@@ -29,33 +29,33 @@ use crate::{
 
 pub type ChainlinkImpl = ProdChainlink;
 
-pub struct IntentExecutionService<O, D> {
+pub struct IntentExecutionService<TOutbox, TBacklog> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
-    outbox_client: Arc<O>,
+    outbox_client: Arc<TOutbox>,
     /// Processor of accepted intents
-    processor: Arc<CommittorProcessor<D>>,
+    processor: Arc<CommittorProcessor<TBacklog>>,
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
 }
 
-impl<O, D: BacklogDB> IntentExecutionService<O, D>
+impl<TOutbox, TBacklog: BacklogDB> IntentExecutionService<TOutbox, TBacklog>
 where
-    O: OutboxClient,
+    TOutbox: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
-    O::Error: Into<IntentExecutionServiceError>,
+    TOutbox::Error: Into<IntentExecutionServiceError>,
     // OutboxClient errors should be convertible into IntentExecutor errors
-    O::Error: Into<IntentExecutorError>,
+    TOutbox::Error: Into<IntentExecutorError>,
     // OutboxReader errors should be convertible to Service errors
-    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
+    <TOutbox::OutboxReader as OutboxIntentBundlesReader>::Error:
         Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        outbox_client: Arc<O>,
-        processor: Arc<CommittorProcessor<D>>,
+        outbox_client: Arc<TOutbox>,
+        processor: Arc<CommittorProcessor<TBacklog>>,
         slot_interval: Duration,
     ) -> Self {
         Self {
@@ -154,7 +154,7 @@ where
                 error!(error = ?err, "Failed to reschedule pending bundles")
             }
 
-            // Check if we've rescheduled intents from Outbox
+            // Check if we've rescheduled intents from outbox
             if read_len != RESCHEDULE_CHUNK_SIZE.get() {
                 return Ok(());
             }
@@ -177,14 +177,14 @@ where
         .await
     }
 
-    async fn process_intent_bundles<F, Fut>(
+    async fn process_intent_bundles<TScheduleFn, TScheduleFuture>(
         &self,
         intent_bundles: Vec<OutboxIntentBundle>,
-        schedule: F,
+        schedule: TScheduleFn,
     ) -> CommittorServiceResult<()>
     where
-        F: FnOnce(Vec<OutboxIntentBundle>) -> Fut,
-        Fut: Future<Output = CommittorServiceResult<()>>,
+        TScheduleFn: FnOnce(Vec<OutboxIntentBundle>) -> TScheduleFuture,
+        TScheduleFuture: Future<Output = CommittorServiceResult<()>>,
     {
         if intent_bundles.is_empty() {
             return Ok(());

@@ -45,28 +45,28 @@ const POISONED_BACKLOG_MSG: &str = "intent backlog mutex poisoned";
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
-pub struct CommittorProcessor<D> {
+pub struct CommittorProcessor<TBacklog> {
     _table_mania: TableMania,
-    backlog: Arc<Mutex<D>>,
+    backlog: Arc<Mutex<TBacklog>>,
     intent_sender: Sender<OutboxIntentBundle>,
     result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     task_info_fetcher: Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
     pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
 }
 
-impl<D: BacklogDB> CommittorProcessor<D> {
-    pub fn new<A, O>(
+impl<TBacklog: BacklogDB> CommittorProcessor<TBacklog> {
+    pub fn new<TCallbackScheduler, TOutbox>(
         authority: Keypair,
         chain_config: ChainConfig,
         chain_slot: Option<Arc<AtomicU64>>,
-        db: D,
-        outbox_client: Arc<O>,
-        actions_callback_executor: A,
+        db: TBacklog,
+        outbox_client: Arc<TOutbox>,
+        actions_callback_executor: TCallbackScheduler,
     ) -> Self
     where
-        A: ActionsCallbackScheduler,
-        O: OutboxClient,
-        O::Error: Into<IntentExecutorError>,
+        TCallbackScheduler: ActionsCallbackScheduler,
+        TOutbox: OutboxClient,
+        TOutbox::Error: Into<IntentExecutorError>,
     {
         let rpc_client = RpcClient::new_with_commitment(
             chain_config.rpc_uri.to_string(),
