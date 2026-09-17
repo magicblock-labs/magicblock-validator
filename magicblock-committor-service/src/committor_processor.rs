@@ -13,7 +13,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use tokio::sync::{
     broadcast,
-    mpsc::{Sender, error::TrySendError},
+    mpsc::{self, Sender, error::TrySendError},
     oneshot,
     oneshot::error::RecvError,
 };
@@ -21,11 +21,12 @@ use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
+    error::{
+        CommittorServiceError, CommittorServiceResult, IntentScheduleError,
+    },
     intent_engine::{
-        BroadcastedIntentExecutionResult, IntentExecutionEngine,
-        db::BacklogDB,
-        intent_channel::{IntentScheduleError, channel},
+        BroadcastedIntentExecutionResult, IntentExecutionEngine, db::BacklogDB,
+        intent_stream::IntentStream,
     },
     intent_executor::{
         error::IntentExecutorError,
@@ -117,7 +118,10 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             actions_callback_executor,
         };
 
-        let (intent_sender, intent_stream) = channel(&backlog, 1000);
+        let (intent_sender, intent_stream) = {
+            let (sender, receiver) = mpsc::channel(1000);
+            (sender, IntentStream::new(backlog.clone(), receiver))
+        };
         let intent_engine =
             IntentExecutionEngine::new(intent_stream, executor_builder);
         let result_sender = intent_engine.spawn();

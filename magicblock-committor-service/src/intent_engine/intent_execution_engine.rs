@@ -21,10 +21,11 @@ use tracing::{error, info, instrument, trace, warn};
 #[cfg(feature = "dev-context-only-utils")]
 use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
+    error::IntentScheduleError,
     intent_engine::{
         db::BacklogDB,
-        intent_channel::{IntentScheduleError, IntentStream},
         intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
+        intent_stream::IntentStream,
     },
     intent_executor::{
         ExecutionOutput, IntentExecutionResult,
@@ -495,7 +496,7 @@ mod tests {
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
     use tokio::{
-        sync::mpsc::Sender,
+        sync::mpsc::{self, Sender},
         time::{sleep, timeout},
     };
 
@@ -503,8 +504,8 @@ mod tests {
     use crate::{
         intent_engine::{
             db::{BacklogDB, DummyDB},
-            intent_channel::channel,
             intent_scheduler::create_test_intent_bundle,
+            intent_stream::IntentStream,
         },
         intent_executor::{
             IntentExecutionResult, IntentExecutor,
@@ -575,7 +576,8 @@ mod tests {
         test_utils::init_test_logger();
 
         let db = Arc::new(Mutex::new(DummyDB::new()));
-        let (handle, intent_stream) = channel(&db, 1000);
+        let (handle, receiver) = mpsc::channel(1000);
+        let intent_stream = IntentStream::new(db.clone(), receiver);
         let worker =
             IntentExecutionEngine::new(intent_stream, executor_factory);
 

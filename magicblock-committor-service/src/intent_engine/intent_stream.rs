@@ -7,10 +7,7 @@ use std::{
 use futures_util::ready;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use pin_project::pin_project;
-use tokio::sync::{
-    mpsc,
-    mpsc::{Receiver, Sender},
-};
+use tokio::sync::mpsc::Receiver;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::intent_engine::{db, db::BacklogDB};
@@ -67,23 +64,4 @@ impl<D: BacklogDB> Stream for IntentStream<D> {
             Poll::Ready(item.map(Ok))
         }
     }
-}
-
-pub(crate) fn channel<D: BacklogDB>(
-    db: &Arc<Mutex<D>>,
-    buffer: usize,
-) -> (Sender<OutboxIntentBundle>, IntentStream<D>) {
-    let (sender, receiver) = mpsc::channel(buffer);
-
-    let stream = IntentStream::new(db.clone(), receiver);
-
-    (sender, stream)
-}
-
-#[derive(thiserror::Error, Debug)]
-pub enum IntentScheduleError {
-    #[error("Channel was closed")]
-    ChannelClosed,
-    #[error("DBError: {0}")]
-    DBError(#[from] db::Error),
 }
