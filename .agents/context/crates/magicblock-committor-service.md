@@ -8,7 +8,7 @@ Intent durability follows an Outbox pattern: each scheduled intent is represente
 
 High-level responsibilities:
 
-- expose `CommittorProcessor` / `IntentExecutionService` as the async service boundary used by `magicblock-api` and account cloning;
+- expose `CommittorProcessor` / `IntentExecutionService` as the async service boundary used by the validator runtime and account cloning;
 - schedule intent bundles without executing mutually conflicting committed accounts in parallel;
 - fetch Delegation Program metadata, including commit nonces and rent payer data, plus base accounts needed for task construction;
 - choose commit delivery strategies: state args, diff args, state buffers, diff buffers, and optional ALTs;
@@ -45,18 +45,18 @@ For the general documentation-update rule, see .agents/memory/agent-memory-and-d
 | `magicblock-committor-service/README.md` | High-level architecture notes for intent execution, schedulers, task builders, strategist, and delivery preparation. |
 | `src/lib.rs` | Public crate surface. Re-exports `ComputeBudgetConfig`, `DEFAULT_ACTIONS_TIMEOUT`, and committor-program changeset types. |
 | `src/config.rs` and `src/compute_budget.rs` | Chain/RPC configuration, default action timeout, and per-task compute-budget helpers. |
-| `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `IntentEngineHandle`, and `CacheTaskInfoFetcher`. `CommittorProcessor<D: BacklogDB>` exposes `schedule_intent_bundles`, `execute_intent_bundles`, `subscribe_for_results`, and `fetch_current_commit_nonces` directly as async methods. |
-| `src/intent_engine.rs` and `src/intent_engine/intent_channel.rs` | `IntentEngineHandle` owns the scheduling channel/backlog entrypoint, wraps the executor factory, and spawns `IntentExecutionEngine`. `IntentStream` drains the mpsc channel and `BacklogDB` backlog while preserving arrival order. |
-| `src/intent_engine/db.rs` | `BacklogDB` trait plus `DummyIntentBacklog` (production: stores intent ids and re-reads the intent from `AccountsDb` on pop) and `DummyDB` (test-only, in-memory). This backlog only smooths bursts past channel capacity — it is not the intent durability mechanism. |
+| `src/committor_processor.rs` | Constructs `MagicblockRpcClient`, `TableMania`, `CacheTaskInfoFetcher`, the scheduling channel/backlog entrypoint, and `IntentExecutionEngine`. `CommittorProcessor<D: BacklogDB>` exposes `schedule_intent_bundles`, `execute_intent_bundles`, `subscribe_for_results`, and `fetch_current_commit_nonces` directly as async methods. |
+| `src/intent_engine/mod.rs` and `src/intent_engine/intent_channel.rs` | `intent_engine` is the module root for the backlog, channel stream, execution engine, and conflict scheduler. `IntentStream` drains the mpsc channel and `BacklogDB` backlog while preserving arrival order. |
+| `src/intent_engine/db.rs` | `BacklogDB` trait plus `AccountsDbIntentBacklog` (production: stores intent ids and re-reads the intent from `AccountsDb` on pop) and `DummyDB` (test-only, in-memory). This backlog only smooths bursts past channel capacity — it is not the intent durability mechanism. |
 | `src/intent_engine/intent_execution_engine.rs` | Main scheduler loop, executor semaphore (`MAX_EXECUTORS = 50`), transient-failure intent retries (`MAX_INTENT_ATTEMPTS = 3` with jittered linear backoff, bounded by a `MAX_SLEEPING_RETRIERS = 5_000` semaphore), result broadcasting, metrics, and per-attempt cleanup spawning. |
 | `src/intent_engine/intent_scheduler.rs` | Pubkey conflict scheduler for committed accounts. Maintains FIFO blocking queues and prevents duplicate/concurrent conflicting intents. |
 | `src/intent_executor/` | Intent execution state machine, transaction client, factory (`ExecutorConfig`/`IntentExecutorBuilderImpl`), single-stage/two-stage executors, and timeout helpers. |
 | `src/tasks/` | Atomic base-layer task types, task builders/strategist for commit, commit-finalize, undelegate, actions, buffers, ALTs, and compute budgets, plus `task_info_fetcher.rs` (commit nonce fetcher/cache). |
 | `src/transaction_preparator/` | Converts a `TransactionStrategy` into a `VersionedMessage` after preparing buffers and lookup tables; owns buffer/ALT cleanup. |
 | `src/outbox/` | `OutboxClient` trait and `ScheduledBaseIntentMeta`/`IntentSentTransaction` (`mod.rs`); `InternalOutboxClient` production implementation that submits `set_intent_execution_stage`/`notify_commit_sent`/`close_intent` transactions and runs `accept_scheduled_intents` (`outbox_client.rs`); `InternalOutboxIntentBundlesReader`, which scans `AccountsDb` for outbox intent PDAs owned by the outbox intent program (`outbox_intent_bundles_reader.rs`). |
-| `magicblock-api/src/magic_validator.rs` | Starts the service at validator initialization: builds `InternalOutboxClient` and `CommittorProcessor<DummyIntentBacklog>`, then either `IntentExecutionService::disabled()` in replica mode or `IntentExecutionService::new(...)` otherwise, wires `MagicSysAdapter` to the processor for commit-nonce syscalls. |
+| `bins/magicblock-validator/src/leader.rs` | Starts the service at validator initialization: builds `InternalOutboxClient` and `CommittorProcessor<AccountsDbIntentBacklog>`, then either disables intent execution in replica mode or runs `IntentExecutionService` otherwise, and wires `MagicSysAdapter` to the processor for commit-nonce syscalls. |
 | `src/service.rs` | `IntentExecutionService<O, D>` (`Created`/`Started`/`Stopped`/`Disabled`/`Error` states) and `ServiceInner`: on start, recovers pending intents by scanning the outbox before accepting new ones, then periodically calls `OutboxClient::accept_scheduled_intents` and schedules the result with `CommittorProcessor`. |
-| `magicblock-api/src/magic_sys_adapter.rs` | Fetches current commit nonces through the committor service for Magic syscalls. |
+| `bins/magicblock-validator/src/magic_sys_adapter.rs` | Fetches current commit nonces through the committor service for Magic syscalls. |
 
 Main upstream dependencies:
 
@@ -82,9 +82,9 @@ Most modules are public for tests and consumers, but the intended runtime bounda
 
 ### `CommittorProcessor`
 
-`CommittorProcessor::new(authority, chain_config, chain_slot, db: D, outbox_client, actions_callback_executor)` builds `MagicblockRpcClient`, `TableMania`, and an `IntentEngineHandle<D>`, then spawns a `dispatcher` task that pairs broadcast execution results with pending callers. There is no actor/message-channel indirection — callers invoke async methods directly:
+`CommittorProcessor::new(authority, chain_config, chain_slot, db: D, outbox_client, actions_callback_executor)` builds `MagicblockRpcClient`, `TableMania`, the scheduling channel/backlog entrypoint, and `IntentExecutionEngine`, then spawns a `dispatcher` task that pairs broadcast execution results with pending callers. There is no actor/message-channel indirection — callers invoke async methods directly:
 
-- `schedule_intent_bundles(Vec<OutboxIntentBundle>)` hands bundles to the `IntentEngineHandle` for scheduling and returns once they are accepted into the engine/backlog;
+- `schedule_intent_bundles(Vec<OutboxIntentBundle>)` accepts bundles into the engine channel or backlog and returns once that handoff succeeds;
 - `execute_intent_bundles(Vec<OutboxIntentBundle>)` registers one oneshot listener per intent id in `pending_result_listeners`, schedules the bundles, and awaits all listeners; duplicate ids in flight are rejected with `RepeatingMessageError`;
 - `subscribe_for_results()` returns a broadcast receiver of `BroadcastedIntentExecutionResult` values;
 - `fetch_current_commit_nonces(pubkeys, min_context_slot)` returns current base-layer nonces without incrementing the cache.
@@ -99,7 +99,7 @@ The background `dispatcher` task consumes the broadcast result stream and forwar
 
 ### Config and compute budgets
 
-`ChainConfig` stores RPC URI, optional websocket URI, Solana commitment, `ComputeBudgetConfig`, and `actions_timeout` (`DEFAULT_ACTIONS_TIMEOUT = 60s`). The validator currently constructs it in `magicblock-api` with confirmed base-layer commitment and the configured commit compute-unit price.
+`ChainConfig` stores RPC URI, optional websocket URI, Solana commitment, `ComputeBudgetConfig`, and `actions_timeout` (`DEFAULT_ACTIONS_TIMEOUT = 60s`). The validator currently constructs it from the validator binary with confirmed base-layer commitment and the configured commit compute-unit price.
 
 `ComputeBudgetConfig::new(compute_unit_price)` controls budgets for args processing, buffer close, buffer process-and-close, finalize, undelegate, buffer init/realloc, and buffer writes. Buffer init/realloc/write budgets currently hard-code `compute_unit_price: 1_000_000` rather than the caller-provided price; treat that as current behavior when validating fee/priority-fee changes.
 
@@ -122,14 +122,14 @@ Each outbox intent PDA holds an `OutboxIntentBundle`: the inner `ScheduledIntent
 ### Startup and service wiring
 
 ```text
-magicblock-api::MagicValidator (startup)
+magicblock-validator leader startup
   -> init_outbox_client -> InternalOutboxClient::new(accounts_db, rpc_client, transaction_scheduler, latest_block)
   -> init_committor_processor -> CommittorProcessor::new
      -> MagicblockRpcClient from RPC/websocket/chain_slot
      -> TableMania with default GC
      -> CacheTaskInfoFetcher<RpcTaskInfoFetcher>
-     -> IntentEngineHandle + IntentExecutionEngine
-     -> DummyIntentBacklog::new(accounts_db)
+     -> scheduling channel/backlog + IntentExecutionEngine
+     -> AccountsDbIntentBacklog::new(accounts_db)
   -> IntentExecutionService::disabled() in replica mode, else IntentExecutionService::new(chainlink, outbox_client, committor_processor, block_time, cancellation_token)
   -> init_magic_sys(MagicSysAdapter wired to committor_processor)
 ```
@@ -144,7 +144,7 @@ Magic Program schedules intent in ER
   -> ServiceInner::accept_worker interval tick
   -> OutboxClient::accept_scheduled_intents (creates/updates outbox intent PDA(s), status = Accepted)
   -> CommittorProcessor::schedule_intent_bundles
-     -> IntentEngineHandle::schedule -> mpsc channel, or BacklogDB if the channel is full
+     -> mpsc channel, or BacklogDB if the channel is full
      -> IntentExecutionEngine::main_loop
      -> IntentScheduler blocks conflicts by committed pubkeys
      -> executor advances the outbox intent PDA's ExecutionStage via OutboxClient::set_intent_execution_stage, sends base-layer transaction(s)
@@ -164,7 +164,7 @@ Recovery does not re-create or duplicate outbox intent PDAs — it only reschedu
 
 ### Scheduling and concurrency flow
 
-`IntentEngineHandle::schedule` first checks whether its `BacklogDB` backlog is empty. If it is not empty, new bundles are stored there to preserve order. If the channel is full, the current and remaining bundles are also stored in the backlog. The production `DummyIntentBacklog` only stores intent ids in memory and re-reads each intent from `AccountsDb` on pop; it exists to preserve arrival order under backpressure, not for durability — durable recovery is the outbox intent PDA scan described above.
+`CommittorProcessor::schedule_intent_bundles` first checks whether its `BacklogDB` backlog is empty. If it is empty, new bundles are sent to the execution channel until the channel fills. If the backlog is already non-empty, or if the channel fills partway through scheduling, bundles are stored in the backlog to preserve arrival order. The production `AccountsDbIntentBacklog` only stores intent ids in memory and re-reads each intent from `AccountsDb` on pop; it exists to preserve arrival order under backpressure, not for durability — durable recovery is the outbox intent PDA scan described above.
 
 `IntentExecutionEngine` repeatedly:
 
@@ -264,7 +264,7 @@ Standalone actions are currently built through commit-task paths even when there
 
 ### Scheduling backpressure
 
-`CommittorProcessor::schedule_intent_bundles` and `execute_intent_bundles` call `IntentEngineHandle::schedule` directly (no actor/message-channel indirection). Backpressure is handled inside that call: bundles go to the executor's mpsc channel when there is room, otherwise to the `BacklogDB` backlog (see Scheduling and concurrency flow above). `execute_intent_bundles` awaits its oneshot listeners after scheduling, so a caller only returns once every requested intent has broadcast a result.
+`CommittorProcessor::schedule_intent_bundles` and `execute_intent_bundles` enqueue intents directly into the executor's mpsc channel or the `BacklogDB` backlog (see Scheduling and concurrency flow above). `execute_intent_bundles` awaits its oneshot listeners after scheduling, so a caller only returns once every requested intent has broadcast a result.
 
 ## Important invariants
 
@@ -288,7 +288,7 @@ Standalone actions are currently built through commit-task paths even when there
 
 ### Changing service API, startup, or shutdown
 
-Start with `src/service.rs`, `src/committor_processor.rs`, and `magicblock-api/src/magic_validator.rs`. Then inspect `magicblock-api/src/magic_sys_adapter.rs`. Check oneshot dispatcher behavior, channel/backlog capacity, the replica-mode `Disabled` state, cancellation, and whether consumers need errors instead of logged-only failures.
+Start with `src/service.rs`, `src/committor_processor.rs`, and `bins/magicblock-validator/src/leader.rs`. Then inspect `bins/magicblock-validator/src/magic_sys_adapter.rs`. Check oneshot dispatcher behavior, channel/backlog capacity, the replica-mode `Disabled` state, cancellation, and whether consumers need errors instead of logged-only failures.
 
 ### Changing scheduling or concurrency
 
@@ -296,7 +296,7 @@ Start with `src/intent_engine/intent_scheduler.rs`, `src/intent_engine/intent_ex
 
 ### Changing commit nonce or metadata fetching
 
-Start with `src/tasks/task_info_fetcher.rs` and `src/tasks/task_builder.rs`. Inspect `magicblock-api/src/magic_sys_adapter.rs` for current nonce queries. Preserve sorted lock acquisition, cache reset behavior, `min_context_slot`, Delegation Program PDA derivation, and retry/error classification.
+Start with `src/tasks/task_info_fetcher.rs` and `src/tasks/task_builder.rs`. Inspect `bins/magicblock-validator/src/magic_sys_adapter.rs` for current nonce queries. Preserve sorted lock acquisition, cache reset behavior, `min_context_slot`, Delegation Program PDA derivation, and retry/error classification.
 
 ### Changing task construction or strategy selection
 
