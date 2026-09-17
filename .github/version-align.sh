@@ -25,13 +25,14 @@ jq --arg version "$version" '.version = $version' packages/npm-package/package.j
 # Update the main package version and only ephemeral-validator optionalDependencies versions in packages/npm-package/package.json
 jq --arg version "$version" '(.version = $version) | (.optionalDependencies |= with_entries(if (.key | contains("ephemeral-validator")) then .value = $version else . end))' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
 
-# Check and update vrf-oracle and rpc-router to latest NPM versions
-echo "Checking latest NPM versions for vrf-oracle and rpc-router..."
+# Check and update vrf-oracle, rpc-router and hydra-cranker to latest NPM versions
+echo "Checking latest NPM versions for vrf-oracle, rpc-router and hydra-cranker..."
 
 # Get latest versions from NPM
 vrf_latest=$(npm view @magicblock-labs/vrf-oracle-linux-x64 version 2>/dev/null || echo "")
 router_latest=$(npm view @magicblock-labs/rpc-router-linux-x64 version 2>/dev/null || echo "")
 query_filtering_service_latest=$(npm view @magicblock-labs/query-filtering-service-linux-x64 version 2>/dev/null || echo "")
+hydra_cranker_latest=$(npm view @magicblock-labs/hydra-cranker-linux-x64 version 2>/dev/null || echo "")
 
 if [ -n "$vrf_latest" ]; then
     echo "Updating vrf-oracle dependencies to version: $vrf_latest"
@@ -52,6 +53,13 @@ if [ -n "$query_filtering_service_latest" ]; then
     jq --arg version "$query_filtering_service_latest" '.optionalDependencies |= with_entries(if (.key | contains("query-filtering-service")) then .value = $version else . end)' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
 else
     echo "Warning: Could not fetch latest query-filtering-service version from NPM"
+fi
+
+if [ -n "$hydra_cranker_latest" ]; then
+    echo "Updating hydra-cranker dependencies to version: $hydra_cranker_latest"
+    jq --arg version "$hydra_cranker_latest" '.optionalDependencies |= with_entries(if (.key | contains("hydra-cranker")) then .value = $version else . end)' packages/npm-package/package.json > temp.json && mv temp.json packages/npm-package/package.json
+else
+    echo "Warning: Could not fetch latest hydra-cranker version from NPM"
 fi
 
 # Check if the any changes have been made to the specified files, if running with --check
