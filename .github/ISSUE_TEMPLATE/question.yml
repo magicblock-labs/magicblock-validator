@@ -19,13 +19,13 @@ body:
     id: context
     attributes:
       label: Context
-      description: What led to this question, and what is already known?
+      description: Add background or prior findings when they help explain the question.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: desired-output
     attributes:
       label: Desired output
-      description: What answer, recommendation, prototype, or other artifact would be useful?
+      description: Specify an answer, recommendation, prototype, or other artifact when not already clear from the question.
     validations:
-      required: true
+      required: false

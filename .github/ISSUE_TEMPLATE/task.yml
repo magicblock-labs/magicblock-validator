@@ -10,24 +10,22 @@ body:
         in sentence case, without a category prefix or terminal punctuation.
         Example: `Configure full Rust CI workflow`
   - type: textarea
-    id: outcome
-    attributes:
-      label: Outcome
-      description: What should be true when this task is complete?
-    validations:
-      required: true
-  - type: textarea
     id: scope
     attributes:
       label: Scope
-      description: What work is included, and what should remain unchanged?
+      description: >-
+        Add details beyond the outcome only when useful: what needs to change,
+        why, and where it belongs. Introduce new
+        concepts before using them; do not assume familiarity with related work.
+        Link to relevant code or design context when useful.
     validations:
-      required: true
+      required: false
   - type: textarea
-    id: acceptance-criteria
+    id: outcome
     attributes:
-      label: Acceptance criteria
-      description: List the observable conditions that define completion.
-      placeholder: '- [ ] Describe an observable condition'
+      label: Outcome
+      description: >-
+        Describe the observable result that defines completion, with enough
+        context to understand the task on its own.
     validations:
       required: true

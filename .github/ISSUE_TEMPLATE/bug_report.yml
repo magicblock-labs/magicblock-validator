@@ -20,20 +20,20 @@ body:
     id: reproduction
     attributes:
       label: Reproduction
-      description: Give the smallest steps or input that reproduces it. If it is intermittent, say so.
+      description: Give the smallest reproduction when known. Note if the failure is intermittent.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: expected
     attributes:
       label: Expected
-      description: What should happen instead?
+      description: Describe what should happen instead when it is not already clear from the problem.
     validations:
-      required: true
+      required: false
   - type: textarea
     id: context
     attributes:
       label: Context
-      description: Include the revision and crate or path. Add environment details only when relevant.
+      description: Add the revision, crate or path, and environment details when known and relevant.
     validations:
-      required: true
+      required: false

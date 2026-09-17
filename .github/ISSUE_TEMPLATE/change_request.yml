@@ -8,7 +8,7 @@ body:
       value: >-
         Title: start with an imperative verb and describe the requested outcome
         in sentence case, without a category prefix or terminal punctuation.
-        Example: `Add durable engine state replication`
+        Example: `Add validator restart coverage`
   - type: textarea
     id: goal
     attributes:
@@ -27,6 +27,6 @@ body:
     id: scope
     attributes:
       label: Scope
-      description: What should change, and what should remain unchanged?
+      description: Add boundaries or implementation scope when known and not already clear from the goal.
     validations:
-      required: true
+      required: false
