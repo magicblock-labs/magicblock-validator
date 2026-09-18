@@ -37,7 +37,9 @@ use magicblock_core::{
     link::{
         link,
         replication::Message,
-        transactions::{SchedulerMode, TransactionSchedulerHandle},
+        transactions::{
+            with_encoded, SchedulerMode, TransactionSchedulerHandle,
+        },
     },
     Slot,
 };
@@ -46,6 +48,7 @@ use magicblock_ledger::{
     ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     LatestBlock, Ledger,
 };
+use magicblock_magic_program_api::instruction::AccountModification;
 use magicblock_metrics::{metrics::TRANSACTION_COUNT, MetricsService};
 use magicblock_processor::{
     build_svm_env,
@@ -54,6 +57,7 @@ use magicblock_processor::{
 };
 use magicblock_program::{
     init_magic_sys,
+    instruction_utils::InstructionUtils,
     validator::{self, validator_authority},
     TransactionScheduler as ActionTransactionScheduler,
 };
@@ -70,12 +74,16 @@ use mdp::state::{
     status::ErStatus,
     version::v0::RecordV0,
 };
+use solana_account::AccountSharedData;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_keypair::Keypair;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_pubkey::Pubkey;
+use solana_rent::Rent;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk_ids::sysvar;
 use solana_signer::Signer;
+use solana_transaction::Transaction as SolanaTransaction;
 use tokio::{
     runtime::Builder,
     sync::mpsc::{channel, Sender},
@@ -113,6 +121,7 @@ pub struct MagicValidator {
     exit: Arc<AtomicBool>,
     token: CancellationToken,
     accountsdb: Arc<AccountsDb>,
+    chainlink: Arc<ChainlinkImpl>,
     ledger: Arc<Ledger>,
     ledger_truncator: LedgerTruncator,
     intent_execution_service: IntentExecutionServiceImpl,
@@ -460,6 +469,7 @@ impl MagicValidator {
 
         Ok(Self {
             accountsdb,
+            chainlink,
             config,
             exit,
             _metrics: (metrics_service, system_metrics_ticker),
@@ -801,6 +811,49 @@ impl MagicValidator {
         }
     }
 
+    /// Mirrors the base chain's rent sysvar into the ER's own rent sysvar.
+    ///
+    /// The stored value drives both the SVM rent-state checks and the sysvar
+    /// programs read to fund new accounts (see `build_svm_env`). A higher
+    /// rate than the base chain's rejects cloning of accounts that are
+    /// legitimately rent-exempt there (SIMD-0437 lowers the rate in steps),
+    /// while a lower rate admits account states the base layer refuses on
+    /// commit — settlement the validator pays for assuming 1:1 rent parity.
+    ///
+    /// Called only after ledger replay has completed: replay must run under
+    /// the persisted rent its transactions were recorded with, and the new
+    /// value takes effect at the next block boundary (see `refresh_rent` in
+    /// the transaction executor).
+    ///
+    /// NOTE: a rate reduction activating on the base chain while the
+    /// validator runs still requires a restart to be picked up. Offline mode
+    /// deliberately keeps the last persisted value so recovered ledgers
+    /// replay under the rate they were produced with.
+    async fn sync_rent_from_base_chain(
+        rpc_url: &str,
+        accountsdb: &AccountsDb,
+    ) -> ApiResult<()> {
+        let err = |err: &dyn std::fmt::Display| {
+            ApiError::FailedToSyncBaseChainRent(err.to_string())
+        };
+        let account = RpcClient::new_with_commitment(
+            rpc_url.to_owned(),
+            CommitmentConfig::confirmed(),
+        )
+        .get_account(&sysvar::rent::ID)
+        .await
+        .map_err(|e| err(&e))?;
+        let rent: Rent =
+            bincode::deserialize(&account.data).map_err(|e| err(&e))?;
+        info!(?rent, "Synced rent parameters from base chain");
+        let account = AccountSharedData::new_data(1, &rent, &sysvar::ID)
+            .map_err(|e| err(&e))?;
+        accountsdb
+            .insert_account(&sysvar::rent::ID, &account)
+            .map_err(|e| err(&e))?;
+        Ok(())
+    }
+
     async fn ensure_validator_funded_on_chain(
         rpc_url: String,
         identity: Pubkey,
@@ -973,6 +1026,145 @@ impl MagicValidator {
         }
     }
 
+    /// Evicts accounts left undelegating whose undelegation has settled on
+    /// chain: the delegation record is gone or belongs to a newer delegation.
+    /// Runs as a validator transaction so replicas see it; anything uncertain
+    /// stays locked.
+    fn spawn_undelegating_accounts_recovery(&self) {
+        let accountsdb = self.accountsdb.clone();
+        let rpc_url = self.config.rpc_url().to_owned();
+        let token = self.token.clone();
+        let scheduler = self.transaction_scheduler.clone();
+        let latest_block = self.ledger.latest_block().clone();
+        tokio::spawn(async move {
+            // Undelegating accounts are owned by the delegation program.
+            let undelegating = match accountsdb
+                .get_program_accounts(&dlp_api::id(), |account| {
+                    account.undelegating()
+                }) {
+                Ok(scanner) => scanner
+                    .map(|(pubkey, account)| (pubkey, account.remote_slot()))
+                    .collect::<Vec<_>>(),
+                Err(err) => {
+                    warn!(error = ?err, "Failed to scan undelegating accounts");
+                    return;
+                }
+            };
+            if undelegating.is_empty() {
+                return;
+            }
+            info!(
+                count = undelegating.len(),
+                "Checking undelegating accounts against chain"
+            );
+            let records = undelegating
+                .iter()
+                .map(|(pubkey, _)| {
+                    dlp_api::pda::delegation_record_pda_from_delegated_account(
+                        pubkey,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let rpc = RpcClient::new(rpc_url);
+            let mut evicted = 0usize;
+            for (pubkeys, records) in
+                undelegating.chunks(100).zip(records.chunks(100))
+            {
+                if token.is_cancelled() {
+                    return;
+                }
+                let response = tokio::select! {
+                    _ = token.cancelled() => return,
+                    res = rpc.get_multiple_accounts_with_commitment(
+                        records,
+                        CommitmentConfig::finalized(),
+                    ) => match res {
+                        Ok(response) => response,
+                        Err(err) => {
+                            warn!(
+                                error = ?err,
+                                "Failed to check undelegating accounts against chain"
+                            );
+                            continue;
+                        }
+                    },
+                };
+                // A response older than our banked state proves nothing.
+                let newest_remote_slot = pubkeys
+                    .iter()
+                    .map(|(_, remote_slot)| *remote_slot)
+                    .max()
+                    .unwrap_or_default();
+                if response.context.slot < newest_remote_slot {
+                    warn!(
+                        response_slot = response.context.slot,
+                        newest_remote_slot,
+                        "Chain response predates local state, skipping chunk"
+                    );
+                    continue;
+                }
+                let accounts = response.value;
+                for ((pubkey, remote_slot), record) in
+                    pubkeys.iter().zip(accounts)
+                {
+                    // No record, or one from a later delegation, means the
+                    // undelegation settled; anything else keeps the lock.
+                    let completed = match record {
+                        None => true,
+                        Some(account) => parse_delegation_slot(&account.data)
+                            .is_some_and(|slot| slot > *remote_slot),
+                    };
+                    if !completed {
+                        continue;
+                    }
+                    // Skip if the account was re-cloned or unlocked meanwhile.
+                    let still_locked =
+                        accountsdb.get_account(pubkey).is_some_and(|account| {
+                            account.undelegating()
+                                && account.remote_slot() == *remote_slot
+                        });
+                    if !still_locked {
+                        continue;
+                    }
+                    // Unlock first: EvictAccount rejects undelegating accounts.
+                    let unlock = InstructionUtils::modify_accounts_instruction(
+                        vec![AccountModification {
+                            pubkey: *pubkey,
+                            ..Default::default()
+                        }],
+                        Some("undelegation completed on chain".to_string()),
+                    );
+                    let evict =
+                        InstructionUtils::evict_account_instruction(*pubkey);
+                    let authority = validator_authority();
+                    let tx = SolanaTransaction::new_signed_with_payer(
+                        &[unlock, evict],
+                        Some(&authority.pubkey()),
+                        &[&authority],
+                        latest_block.load().blockhash,
+                    );
+                    let tx = match with_encoded(tx) {
+                        Ok(tx) => tx,
+                        Err(err) => {
+                            warn!(pubkey = %pubkey, error = ?err, "Failed to encode eviction transaction");
+                            continue;
+                        }
+                    };
+                    if let Err(err) = scheduler.execute(tx).await {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Failed to evict undelegated account"
+                        );
+                    } else {
+                        evicted += 1;
+                    }
+                }
+            }
+            info!(evicted, "Evicted undelegated accounts");
+        });
+    }
+
     fn spawn_primary_onchain_setup(&self) {
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.identity;
@@ -1085,6 +1277,24 @@ impl MagicValidator {
         self.maybe_process_ledger().await?;
 
         log_timing("startup", "maybe_process_ledger", step_start);
+
+        // Rent must match the base layer exactly: commits there are paid by
+        // the validator under the assumption they were paid 1:1 in the ER.
+        // Synced only after ledger replay, which must run under the persisted
+        // rent its transactions were recorded with; executors adopt the new
+        // value at the next block boundary (see `refresh_rent`). Replicas
+        // fetch as well, since the direct AccountsDb write of the sysvar is
+        // not carried over by replication. Offline mode keeps the persisted
+        // rent and needs no remote.
+        if self.config.lifecycle.needs_remote_account_provider() {
+            let step_start = Instant::now();
+            Self::sync_rent_from_base_chain(
+                self.config.rpc_url(),
+                &self.accountsdb,
+            )
+            .await?;
+            log_timing("startup", "sync_rent_from_base_chain", step_start);
+        }
 
         if self.config.accountsdb.defragment_on_startup {
             let step_start = Instant::now();
@@ -1219,6 +1429,7 @@ impl MagicValidator {
             mode == CoordinationMode::Primary
         };
         if is_primary_mode {
+            self.spawn_undelegating_accounts_recovery();
             tokio::spawn(async move {
                 let step_start = Instant::now();
                 let join_handle = match task_scheduler.start().await {
@@ -1259,6 +1470,15 @@ impl MagicValidator {
         // replication drain treats a closed channel as "producer finished"
         // and otherwise waits out its full timeout.
         self.replication_tx = None;
+
+        // Stop chain subscriptions before the token is cancelled: the cloner
+        // turns subscription updates into scheduled transactions, and once
+        // the scheduler is gone each one fails with `ClusterMaintenance` and
+        // is retried until the process is killed, which keeps the RPC
+        // runtime alive past its shutdown timeout.
+        let step_start = Instant::now();
+        self.chainlink.shutdown().await;
+        log_timing("shutdown", "chainlink_stop", step_start);
 
         // Stop request ingress before stopping intent execution so shutdown
         // does not admit new local undelegation scheduling work.
@@ -1380,6 +1600,19 @@ impl MagicValidator {
         }
         log_timing("shutdown", "prepare_ledger_for_shutdown", step_start);
     }
+}
+
+/// Parses the delegation slot from raw delegation-record account data.
+fn parse_delegation_slot(data: &[u8]) -> Option<u64> {
+    let size = dlp_api::state::DelegationRecord::size_with_discriminator();
+    if data.len() < size {
+        return None;
+    }
+    dlp_api::state::DelegationRecord::try_from_bytes_with_discriminator(
+        &data[..size],
+    )
+    .ok()
+    .map(|record| record.delegation_slot)
 }
 
 fn log_timing(phase: &'static str, step: &'static str, start: Instant) {

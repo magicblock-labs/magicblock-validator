@@ -142,7 +142,8 @@ pub(crate) fn process_schedule_intent_bundle(
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
-    )?;
+    )?
+    .0;
     if let Some(magic_fee_vault) = magic_fee_vault {
         let chargable_accounts = scheduled_intent.get_all_committed_accounts();
         let nonces = fetch_current_commit_nonces(&chargable_accounts)?;

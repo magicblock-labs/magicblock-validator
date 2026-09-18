@@ -2076,6 +2076,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         self.received_updates_count.load(Ordering::Relaxed)
     }
 
+    /// Shuts down the chain subscriptions feeding this provider, so no
+    /// further account updates are delivered.
+    pub async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
+        self.pubsub_client.shutdown().await
+    }
+
     fn listen_for_account_updates(
         &self,
         mut updates: mpsc::Receiver<SubscriptionUpdate>,
@@ -4132,9 +4138,19 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 };
             };
 
-            // TODO: should we retry if not or respond with an error?
+            // The retry loop above already re-requests when the response slot is
+            // behind min_context_slot. If we still observe a lagging slot here,
+            // fail waiters like the cardinality mismatch path below and like
+            // `fetch_multi_rpc_only` (return Err instead of panicking).
             let (response_slot, response_value) = response;
-            assert!(response_slot >= min_context_slot);
+            if response_slot < min_context_slot {
+                let err_msg = format!(
+                    "Response slot {response_slot} < {min_context_slot} fetching accounts {}",
+                    pubkeys_str(&pubkeys)
+                );
+                notify_error(&err_msg);
+                return;
+            }
 
             if response_value.len() != pubkeys.len() {
                 let err_msg = format!(

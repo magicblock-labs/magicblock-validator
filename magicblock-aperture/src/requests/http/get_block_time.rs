@@ -11,15 +11,17 @@ impl HttpDispatcher {
     /// Reads the blocktime column directly — a single-key get that stays
     /// cheap even while truncation tombstones make slot iteration slow —
     /// instead of assembling the full block.
-    pub(crate) fn get_block_time(
+    pub(crate) async fn get_block_time(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
         let block = parse_params!(request.params()?, Slot);
         let block = some_or_err!(block);
 
-        let block_time =
-            self.ledger.get_block_time(block)?.ok_or_else(|| {
+        let block_time = self
+            .with_ledger(|ledger| ledger.get_block_time(block))
+            .await?
+            .ok_or_else(|| {
                 let error = format!(
                     "Slot {block} was skipped, or is not yet available"
                 );

@@ -18,7 +18,7 @@ impl HttpDispatcher {
     /// checks a hot in-memory cache of recent transactions before falling back to the
     /// persistent ledger. The returned list has the same length as the input, with
     /// `null` entries for signatures that are not found.
-    pub(crate) fn get_signature_statuses(
+    pub(crate) async fn get_signature_statuses(
         &self,
         request: &mut JsonRequest,
     ) -> HandlerResult {
@@ -29,29 +29,36 @@ impl HttpDispatcher {
                 "too many signatures were requested, max allowed: 256",
             ));
         }
-        let mut statuses = Vec::with_capacity(signatures.len());
+        let mut statuses: Vec<_> = signatures
+            .iter()
+            .map(|signature| {
+                self.transactions.get(&signature.0).and_then(|cached| {
+                    cached.as_ref().map(|status| {
+                        build_transaction_status(
+                            status.slot,
+                            status.result.clone(),
+                        )
+                    })
+                })
+            })
+            .collect();
 
-        for signature in signatures.into_iter().map(Into::into) {
-            // Level 1: Check the hot in-memory cache first.
-            if let Some(Some(cached_status)) = self.transactions.get(&signature)
-            {
-                statuses.push(Some(build_transaction_status(
-                    cached_status.slot,
-                    cached_status.result.clone(),
-                )));
-                continue;
-            }
-
-            // Level 2: Fall back to the persistent ledger for historical lookups.
-            let ledger_status =
-                self.ledger.get_transaction_status(signature, Slot::MAX)?;
-            if let Some((slot, meta)) = ledger_status {
-                let status = build_transaction_status(slot, meta.status);
-                statuses.push(Some(status));
-            } else {
-                // The signature was not found in the cache or the ledger.
-                statuses.push(None);
-            }
+        // One admission for the entire batch, and none for cache-only requests.
+        if statuses.iter().any(Option::is_none) {
+            self.with_ledger(|ledger| {
+                for (signature, status) in signatures.iter().zip(&mut statuses)
+                {
+                    if status.is_none() {
+                        *status = ledger
+                            .get_transaction_status(signature.0, Slot::MAX)?
+                            .map(|(slot, meta)| {
+                                build_transaction_status(slot, meta.status)
+                            });
+                    }
+                }
+                Ok::<_, RpcError>(())
+            })
+            .await?;
         }
 
         let slot = self.blocks.block_height();

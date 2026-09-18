@@ -9,6 +9,7 @@ use magicblock_core::{
 };
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{ReadableAccount, WritableAccount};
+use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -54,7 +55,6 @@ pub(crate) fn process_schedule_commit(
     let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
     if ix_ctx.get_program_key()? != &crate::id() {
@@ -79,17 +79,12 @@ pub(crate) fn process_schedule_commit(
 
     let payer_account =
         get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-    let magic_fee_vault = try_get_fee_vault(
+    let (magic_fee_vault, committees_start) = try_get_fee_vault(
         transaction_context,
         invoke_context,
         PAYER_IDX,
         MAGIC_CONTEXT_IDX + 1,
     )?;
-    let committees_start = if magic_fee_vault.is_some() {
-        COMMITTEES_START + 1
-    } else {
-        COMMITTEES_START
-    };
 
     // Assert enough accounts
     if ix_accs_len <= committees_start {
@@ -180,6 +175,19 @@ pub(crate) fn process_schedule_commit(
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} is a Magic ATA and cannot be committed or undelegated; use the shuttle withdrawal flow",
+                acc_pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
+        }
+
+        // Accounts larger than 10_240 bytes can't be committed
+        // TDOO: enable large commits and remove this
+        if acc.to_account_shared_data()?.data().len()
+            > MAX_PERMITTED_DATA_INCREASE
+        {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account {} is too large to be committed",
                 acc_pubkey
             );
             return Err(InstructionError::InvalidAccountData);

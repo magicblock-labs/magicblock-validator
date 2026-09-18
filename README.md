@@ -24,6 +24,14 @@ The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runti
 - **State Settlement**: Batches and commits state transitions back to the reference chain.
 - **Developer Friendly**: Can be used as a super-charged development environment compatible with standard Solana tooling.
 
+## API Stability and Security
+
+The Ephemeral Validator remains under active development, but its public, application-facing APIs have matured. Breaking changes to supported APIs are expected to be infrequent and will be clearly communicated in release notes.
+
+The Delegation Program—the on-chain contract governing delegation, settlement, and state commitment—has been independently audited. The validator internals have been battle-tested, but the complete validator codebase and all internal components have not undergone a comprehensive audit. Use at your own risk.
+
+Internal interfaces and lifecycle modes explicitly marked experimental or unsupported may still change.
+
 ## Packages
 
 | Package                                                                              | Description                                                    | Version                                                                                                                                                            | Docs                                                                                         |
@@ -161,15 +169,6 @@ This project is licensed under the **Business Source License 1.1**. See [LICENSE
 
 ---
 
-## 🚧 Status: Under Construction
-
-> **⚠️ Warning:** The Ephemeral Validator is in **active development**. All APIs are subject to change. This code is **unaudited**. Use at your own risk.
-
----
-
----
-
 <div align="center">
 <sub>Built with ❤️ by MagicBlock Labs</sub>
 </div>
-

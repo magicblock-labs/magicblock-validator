@@ -192,4 +192,9 @@ impl Database {
     pub fn set_oldest_slot(&self, slot: Slot) {
         self.backend.set_oldest_slot(slot);
     }
+
+    /// Returns the shared, monotonic lower bound used by reads and compaction.
+    pub fn oldest_slot(&self) -> Slot {
+        self.backend.oldest_slot()
+    }
 }

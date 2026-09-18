@@ -2,7 +2,9 @@ use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use magicblock_committor_service::{
     committor_processor::CommittorProcessor,
-    intent_executor::task_info_fetcher::TaskInfoFetcherResult,
+    intent_executor::task_info_fetcher::{
+        AccountSnapshot, TaskInfoFetcherResult,
+    },
     tasks::intent_size_validator::IntentSizeValidator,
 };
 use magicblock_core::{
@@ -43,19 +45,19 @@ impl MagicSysAdapter {
 
     fn fetch_current_commit_nonces_sync(
         &self,
-        pubkeys: &[Pubkey],
+        accounts: &[AccountSnapshot],
         min_context_slot: u64,
     ) -> std::sync::mpsc::Receiver<TaskInfoFetcherResult<HashMap<Pubkey, u64>>>
     {
         let (sender, receiver) = std::sync::mpsc::channel();
         let committor_processor = self.committor_processor.clone();
-        let pubkeys = pubkeys.to_owned();
+        let accounts = accounts.to_owned();
 
         // This is required to switch from TransactionExecutor runtime
         // blocking on it would cause a panic
         self.handle.spawn(async move {
             let result = committor_processor
-                .fetch_current_commit_nonces(&pubkeys, min_context_slot)
+                .fetch_current_commit_nonces(&accounts, min_context_slot)
                 .await;
             if let Err(err) = sender.send(result) {
                 error!(error = ?err, "Failed to send result back");
@@ -80,12 +82,14 @@ impl MagicSys for MagicSysAdapter {
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let pubkeys: Vec<_> =
-            commits.iter().map(|account| account.pubkey).collect();
+        let accounts: Vec<_> = commits
+            .iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
         let receiver =
-            self.fetch_current_commit_nonces_sync(&pubkeys, min_context_slot);
+            self.fetch_current_commit_nonces_sync(&accounts, min_context_slot);
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)
             .map_err(|err| match err {

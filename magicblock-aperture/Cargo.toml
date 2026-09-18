@@ -17,6 +17,7 @@ fastwebsockets = { workspace = true, features = ["upgrade"] }
 # runtime
 futures = { workspace = true }
 libloading = { workspace = true }
+num_cpus = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
