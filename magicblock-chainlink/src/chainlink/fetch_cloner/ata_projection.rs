@@ -324,6 +324,8 @@ pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
 ) -> (
     AccountSharedData,
     Option<(DelegationRecord, Option<DelegationActions>)>,
+    // Slot of the eATA snapshot a projection was built from
+    Option<u64>,
 )
 where
     T: ChainRpcClient,
@@ -332,13 +334,13 @@ where
     C: Cloner,
 {
     let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let Some((eata_pubkey, _)) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
     else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
@@ -363,7 +365,7 @@ where
 
     // Known-empty eATAs skip the fetch only if the subscription was already live.
     if was_watching && subscribed && is_known_empty_eata(this, &eata_pubkey) {
-        return (ata_account, None);
+        return (ata_account, None, None);
     }
 
     let (eata_account, definitively_not_found) = match this
@@ -403,7 +405,7 @@ where
         if definitively_not_found && subscribed {
             mark_eata_empty(this, eata_pubkey);
         }
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let deleg_record = delegation::fetch_and_parse_delegation_record(
@@ -416,7 +418,7 @@ where
     .await;
 
     let Some(deleg_record) = deleg_record else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
     let (deleg_record, delegation_actions) = deleg_record;
 
@@ -426,9 +428,13 @@ where
         &eata_account,
         &deleg_record,
     ) {
-        return (projected_ata, Some((deleg_record, delegation_actions)));
+        return (
+            projected_ata,
+            Some((deleg_record, delegation_actions)),
+            Some(eata_account.remote_slot()),
+        );
     }
-    (ata_account, Some((deleg_record, delegation_actions)))
+    (ata_account, Some((deleg_record, delegation_actions)), None)
 }
 
 pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(

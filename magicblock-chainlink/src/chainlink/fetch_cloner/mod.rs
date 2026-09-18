@@ -2321,7 +2321,7 @@ where
         }
 
         let update_source = update.source;
-        let (resolved_account, deleg_record, delegation_actions, resolved_slot) =
+        let (resolved_account, deleg_record, delegation_actions, source_slots) =
             self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
                 &companion_fetch_log_context,
@@ -2332,8 +2332,9 @@ where
         };
         // Resolution may re-fetch at a newer slot than the sighting; order and
         // source the update by that view.
-        let update_slot =
-            resolved_slot.map_or(update_slot, |s| s.max(update_slot));
+        let source_slots =
+            source_slots.unwrap_or(CloneSourceSlots::single(update_slot));
+        let update_slot = update_slot.max(source_slots.data);
         let subscription_clone_context =
             AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
@@ -2543,9 +2544,7 @@ where
                             raw_delegation_actions,
                         ),
                         delegated_to_other,
-                        source_slots: Some(CloneSourceSlots::single(
-                            update_slot,
-                        )),
+                        source_slots: Some(source_slots),
                     },
                     subscription_clone_context.clone(),
                 )
@@ -3181,8 +3180,8 @@ where
         Option<AccountSharedData>,
         Option<DelegationRecord>,
         DelegationActions,
-        // Pre-stamp slot of a resolved delegated account
-        Option<u64>,
+        // Chain views behind a resolved delegated account or projection
+        Option<CloneSourceSlots>,
     ) {
         let ForwardedSubscriptionUpdate {
             pubkey,
@@ -3321,7 +3320,9 @@ where
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
                                     delegation_actions.unwrap_or_default(),
-                                    Some(resolved_slot),
+                                    Some(CloneSourceSlots::single(
+                                        resolved_slot,
+                                    )),
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
@@ -3431,7 +3432,8 @@ where
                     }
                 }
             } else {
-                let (account, deleg_record) = self
+                let ata_slot = account.remote_slot();
+                let (account, deleg_record, eata_slot) = self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
                         account,
@@ -3439,11 +3441,18 @@ where
                     )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
+                    // The base ATA vouches for the data; the eATA snapshot
+                    // bounds the projection's view.
+                    let source_slots =
+                        eata_slot.map(|eata_slot| CloneSourceSlots {
+                            data: ata_slot,
+                            view: ata_slot.max(eata_slot),
+                        });
                     (
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
-                        None,
+                        source_slots,
                     )
                 } else {
                     (Some(account), None, DelegationActions::default(), None)
@@ -3491,6 +3500,7 @@ where
     ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
+        Option<u64>,
     ) {
         ata_projection::maybe_project_ata_from_subscription_update(
             self,
