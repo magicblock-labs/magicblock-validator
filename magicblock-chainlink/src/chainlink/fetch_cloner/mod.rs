@@ -2937,10 +2937,14 @@ where
             {
                 let in_bank = self.accounts_bank.get_account(&pubkey);
                 let bank_slot = in_bank.as_ref().map(|acc| acc.remote_slot());
-                // A delegated copy carries its delegation slot, which can
-                // trail the sighting slot; it is materialized regardless.
+                // A delegated copy carries its delegation slot, so it is
+                // judged against the record's generation, not the sighting.
                 if in_bank.is_none_or(|acc| {
-                    !acc.delegated() && acc.remote_slot() < account.remote_slot()
+                    if acc.delegated() {
+                        acc.remote_slot() < deleg_record.delegation_slot
+                    } else {
+                        acc.remote_slot() < account.remote_slot()
+                    }
                 }) {
                     trace!(
                         pubkey = %pubkey,
