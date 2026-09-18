@@ -466,7 +466,9 @@ pub fn set_account_from_fields(
         return Err(
             MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
         );
-    } else if acc.remote_slot() > fields.remote_slot {
+    } else if acc.remote_slot() > fields.remote_slot
+        && !(fields.delegated && !acc.delegated() && !acc.undelegating())
+    {
         return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
     }
 

@@ -456,9 +456,10 @@ where
             return None;
         }
     };
-    let projected_slot =
-        ata_account.remote_slot().max(eata_account.remote_slot());
-    projected_ata.set_remote_slot(projected_slot);
+    // Delegated to us: the projection only changes at the delegation slot,
+    // so stamp that rather than the fetch context slot (see
+    // `apply_delegation_record_to_account`).
+    projected_ata.set_remote_slot(deleg_record.delegation_slot);
     projected_ata.set_delegated(true);
     Some(projected_ata)
 }

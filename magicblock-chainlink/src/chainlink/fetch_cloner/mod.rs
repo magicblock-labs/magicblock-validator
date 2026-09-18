@@ -1074,9 +1074,12 @@ where
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
                 let request_slot = request.account.remote_slot();
+                let delegation_over_plain = request.account.delegated()
+                    && !account.delegated()
+                    && !account.undelegating();
                 (active_delegation_satisfies_request
                     && Self::account_is_actively_delegated(&account))
-                    || local_slot > request_slot
+                    || (local_slot > request_slot && !delegation_over_plain)
                     || (local_slot == request_slot
                         && account.eq(&request.account))
             })
@@ -2302,23 +2305,38 @@ where
         // The stricter intent is to ignore non-advancing subscription updates: if the bank
         // already has the account at the same slot, then a normal/plain update at that slot is
         // treated as stale/duplicate and should not overwrite local state, with the following
-        // exception:
+        // exceptions:
         //
-        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
-        //    or undelegating version while the subscription update carries the delegated state
+        //  - A delegated update carries the delegation slot, which can trail a plain copy
+        //    fetched later; a delegation always overrides a plain version.
+        //  - In the undelegate/redelegate same-slot path, the bank can still hold an
+        //    undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
         //
+        // An actively delegated bank copy is authoritative: drop the update and release the
+        // direct subscription before any slot comparison.
+        //
+        if self
+            .accounts_bank
+            .get_account(&pubkey)
+            .is_some_and(|in_bank| {
+                in_bank.delegated() && !in_bank.undelegating()
+            })
+        {
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
+            return;
+        }
+
         let non_advancing_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                 let bank_slot = in_bank.remote_slot();
                 let update_slot = account.remote_slot();
-                let same_slot_delegated_refresh = bank_slot == update_slot
-                    && account.delegated()
-                    && (!in_bank.delegated() || in_bank.undelegating());
-                if bank_slot > update_slot
-                    || (bank_slot == update_slot
-                        && !same_slot_delegated_refresh)
-                {
+                // Delegated clones carry the delegation slot, so a delegation
+                // always wins over a plain copy fetched at a later slot.
+                let delegated_refresh = account.delegated()
+                    && (!in_bank.undelegating() || bank_slot == update_slot);
+                if bank_slot >= update_slot && !delegated_refresh {
                     Some(bank_slot)
                 } else {
                     None
@@ -2357,12 +2375,6 @@ where
 
         let mut undelegation_completed_on_chain = false;
         if let Some(in_bank) = self.accounts_bank.get_account(&pubkey) {
-            if in_bank.delegated() && !in_bank.undelegating() {
-                self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                    .await;
-                return;
-            }
-
             if in_bank.undelegating() {
                 debug!(
                     pubkey = %pubkey,

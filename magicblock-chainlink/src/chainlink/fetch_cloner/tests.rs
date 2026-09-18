@@ -53,6 +53,7 @@ use crate::{
         cloner_stub::ClonerStub,
         deleg::{
             add_delegation_record_for, add_delegation_record_with_actions_for,
+            add_delegation_record_with_slot_for,
             add_invalid_delegation_record_for, delegation_record_to_vec,
         },
         eatas::{
@@ -449,33 +450,6 @@ fn clone_classification_treats_action_dependency_as_action_dependency() {
         TestFetchCloner::clone_intent_for_request(&request),
         ChainlinkCloneIntent::ActionDependency
     );
-}
-
-fn add_delegation_record_with_slot_for(
-    rpc_client: &ChainRpcClientMock,
-    pubkey: Pubkey,
-    authority: Pubkey,
-    owner: Pubkey,
-    delegation_slot: u64,
-) -> Pubkey {
-    let deleg_record_pubkey =
-        dlp_api::pda::delegation_record_pda_from_delegated_account(&pubkey);
-    let deleg_record = DelegationRecord {
-        authority,
-        owner,
-        delegation_slot,
-        lamports: 1_000,
-        commit_frequency_ms: 2_000,
-    };
-    rpc_client.add_account(
-        deleg_record_pubkey,
-        Account {
-            owner: dlp_api::id(),
-            data: delegation_record_to_vec(&deleg_record),
-            ..Default::default()
-        },
-    );
-    deleg_record_pubkey
 }
 
 /// Helper function to initialize FetchCloner for tests with subscription updates
@@ -6362,11 +6336,12 @@ async fn test_released_collision_candidate_keeps_pending_undelegation_locked() {
     )
     .await;
 
-    add_delegation_record_for(
+    add_delegation_record_with_slot_for(
         &rpc_client,
         account_pubkey,
         validator_pubkey,
         account_owner,
+        1,
     );
     let delegation_record_pubkey =
         dlp_api::pda::delegation_record_pda_from_delegated_account(
@@ -6702,7 +6677,7 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
         .expect("release must clone the candidate from the effective slot");
     assert!(in_bank.delegated());
     assert_eq!(in_bank.owner(), &account_owner);
-    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT);
+    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT - 10);
 }
 
 // A released collision candidate delegated to another validator must be
@@ -7304,7 +7279,7 @@ async fn test_same_slot_delegated_subscription_update_overrides_undelegating_ban
                 .is_some_and(|account| {
                     account.delegated()
                         && !account.undelegating()
-                        && account.remote_slot() == CURRENT_SLOT
+                        && account.remote_slot() == CURRENT_SLOT + 1
                         && account.owner() == &account_owner
                 });
             if refreshed {
@@ -8129,7 +8104,7 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
         .get_account(&ata_pubkey)
         .expect("ATA should be projected from delegated eATA");
     assert!(projected_ata.delegated());
-    assert_eq!(projected_ata.remote_slot(), ATA_SLOT);
+    assert_eq!(projected_ata.remote_slot(), EATA_SLOT);
 
     let ata_data = projected_ata.data();
     assert!(
@@ -9590,8 +9565,8 @@ async fn test_delegated_eata_update_projects_existing_plain_ata_in_bank() {
     assert!(projected_ata.delegated());
     assert_eq!(
         projected_ata.remote_slot(),
-        PLAIN_ATA_SLOT,
-        "Projected ATA should preserve the freshest source slot",
+        EATA_SLOT,
+        "Projected ATA should carry the delegation slot",
     );
 
     let ata_data = projected_ata.data();
@@ -9698,8 +9673,8 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
     assert_eq!(projected_ata.data().len(), expected_len);
     assert_eq!(
         projected_ata.remote_slot(),
-        PLAIN_ATA_SLOT,
-        "Projected ATA should preserve the freshest source slot",
+        EATA_SLOT,
+        "Projected ATA should carry the delegation slot",
     );
 
     let ata_data = projected_ata.data();
@@ -10460,7 +10435,7 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
     assert_eq!(*projected_ata.owner(), TOKEN_2022_PROGRAM_ID);
     assert_eq!(projected_ata.lamports(), rent_exempt_reserve);
     assert_eq!(projected_ata.data().len(), expected_len);
-    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT + 1);
 
     let ata_data = projected_ata.data();
     let projected_token_account =
