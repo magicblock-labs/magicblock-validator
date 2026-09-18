@@ -2673,12 +2673,16 @@ where
         &self,
         candidate: ParkedCollisionCandidate,
     ) {
-        // A pre-delegation bank copy must be force-refreshed; a delegated copy
-        // (stamped with its delegation slot) settles the candidate.
+        // A pre-delegation bank copy must be force-refreshed; only a
+        // delegated copy at the sighted slot or newer settles the candidate
+        // here. A delegated copy stamped with an older delegation slot is
+        // judged against the released record's generation below.
         let fresh_delegated_in_bank = self
             .accounts_bank
             .get_account(&candidate.pubkey)
-            .is_some_and(|in_bank| in_bank.delegated());
+            .is_some_and(|in_bank| {
+                in_bank.delegated() && in_bank.remote_slot() >= candidate.slot
+            });
         if fresh_delegated_in_bank {
             return;
         }
@@ -2795,8 +2799,13 @@ where
                 return;
             }
             let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
+            // A delegated copy carries its delegation slot: settled only if
+            // it matches or supersedes the released record's generation.
             let settled = in_bank.as_ref().is_some_and(|in_bank| {
-                in_bank.delegated() || in_bank.remote_slot() > candidate.slot
+                in_bank.remote_slot() > candidate.slot
+                    || (in_bank.delegated()
+                        && in_bank.remote_slot()
+                            >= deleg_record.delegation_slot)
             });
             if settled {
                 return;
