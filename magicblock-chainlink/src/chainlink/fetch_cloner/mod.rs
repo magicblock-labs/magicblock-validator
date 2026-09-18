@@ -89,7 +89,7 @@ use crate::{
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, ClonePostDelegationMode, Cloner,
+        AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
         DelegationActions,
     },
     remote_account_provider::{
@@ -1081,7 +1081,9 @@ where
                     && !account.delegated()
                     && !account.undelegating()
                 {
-                    request.source_slot.unwrap_or(request_slot)
+                    request
+                        .source_slots
+                        .map_or(request_slot, |slots| slots.data)
                 } else {
                     request_slot
                 };
@@ -1111,8 +1113,8 @@ where
         };
         let plain_slot = in_bank.remote_slot();
         let source_slot = request
-            .source_slot
-            .unwrap_or_else(|| request.account.remote_slot());
+            .source_slots
+            .map_or(request.account.remote_slot(), |slots| slots.data);
         if !in_bank.delegated()
             && !in_bank.undelegating()
             && plain_slot > request.account.remote_slot()
@@ -1838,9 +1840,15 @@ where
         }
 
         let result = async {
+            // Dependencies must be at least as fresh as every input view,
+            // not just the delegation slot stamped on the target.
+            let dependency_floor = request
+                .source_slots
+                .map_or(0, |slots| slots.view)
+                .max(request.account.remote_slot());
             self.ensure_delegation_action_dependencies(
                 request.pubkey,
-                request.account.remote_slot(),
+                dependency_floor,
                 delegation_actions,
                 fetch_context.clone(),
             )
@@ -2530,7 +2538,9 @@ where
                             raw_delegation_actions,
                         ),
                         delegated_to_other,
-                        source_slot: Some(update_slot),
+                        source_slots: Some(CloneSourceSlots::single(
+                            update_slot,
+                        )),
                     },
                     subscription_clone_context.clone(),
                 )
@@ -4674,7 +4684,7 @@ where
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             })
             .await?;
         Ok(())

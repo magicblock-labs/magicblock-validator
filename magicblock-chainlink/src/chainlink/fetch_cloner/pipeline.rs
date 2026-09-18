@@ -25,7 +25,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
         errors::ClonerResult, AccountCloneRequest, ClonePostDelegationMode,
-        Cloner, DelegationActions,
+        CloneSourceSlots, Cloner, DelegationActions,
     },
     remote_account_provider::{
         program_account::{
@@ -141,7 +141,7 @@ fn classify_single_account(
                             commit_frequency_ms: None,
                             post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
-                            source_slot: None,
+                            source_slots: None,
                         });
                     }
                 }
@@ -307,7 +307,7 @@ where
                 commit_frequency_ms,
                 delegated_to_other,
                 delegation_actions,
-                source_slot,
+                source_slots,
             ) = if let Some(delegation_record_data) = delegation_record {
                 // NOTE: failing here is fine when resolving all accounts for a transaction
                 // since if something is off we better not run it anyways
@@ -348,7 +348,8 @@ where
                     this.get_delegated_to_other(&delegation_record);
 
                 // Fetch slot before the delegation slot is stamped on
-                let source_slot = Some(account.remote_slot());
+                let source_slots =
+                    Some(CloneSourceSlots::single(account.remote_slot()));
                 let commit_freq = this.apply_delegation_record_to_account(
                     pubkey,
                     &mut account,
@@ -374,7 +375,7 @@ where
                     commit_freq,
                     delegated_to_other,
                     delegation_actions,
-                    source_slot,
+                    source_slots,
                 )
             } else if is_internal_dlp_account_data(account.data()) {
                 (None, None, DelegationActions::default(), None)
@@ -395,7 +396,7 @@ where
                     delegation_actions,
                 ),
                 delegated_to_other,
-                source_slot,
+                source_slots,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {

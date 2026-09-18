@@ -375,7 +375,7 @@ fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
         commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
-        source_slot: None,
+        source_slots: None,
     }
 }
 
@@ -8310,7 +8310,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8363,7 +8363,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8416,7 +8416,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8465,7 +8465,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8528,7 +8528,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8585,7 +8585,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8637,7 +8637,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8730,7 +8730,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8852,7 +8852,7 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8936,7 +8936,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                         actions.clone(),
                     ),
                     delegated_to_other: None,
-                    source_slot: None,
+                    source_slots: None,
                 },
                 AccountFetchContext::rpc_get_account(),
             )
@@ -9004,7 +9004,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9066,7 +9066,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
-                source_slot: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )

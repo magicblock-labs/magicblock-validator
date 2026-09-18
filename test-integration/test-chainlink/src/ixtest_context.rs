@@ -104,7 +104,7 @@ impl IxtestContext {
                         commit_frequency_ms: None,
                         post_delegation_mode: ClonePostDelegationMode::None,
                         delegated_to_other: None,
-                        source_slot: None,
+                        source_slots: None,
                     })
                     .await
                     .unwrap();

@@ -786,7 +786,7 @@ mod tests {
                 DelegationActions::from(actions),
             ),
             delegated_to_other: None,
-            source_slot: None,
+            source_slots: None,
         }
     }
 

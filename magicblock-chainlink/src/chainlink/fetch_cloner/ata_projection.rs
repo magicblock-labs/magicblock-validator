@@ -21,7 +21,8 @@ use super::{
 };
 use crate::{
     cloner::{
-        AccountCloneRequest, ClonePostDelegationMode, Cloner, DelegationActions,
+        AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
+        DelegationActions,
     },
     remote_account_provider::{
         pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
@@ -258,8 +259,11 @@ where
         ),
         delegated_to_other: None,
         // Only the base ATA vouches for the layout data the projection
-        // carries; the eATA slot does not validate it.
-        source_slot: Some(base_ata.remote_slot()),
+        // carries; the eATA sighting still bounds dependency freshness.
+        source_slots: Some(CloneSourceSlots {
+            data: base_ata.remote_slot(),
+            view: base_ata.remote_slot().max(eata_account.remote_slot()),
+        }),
     })
 }
 
@@ -665,7 +669,7 @@ where
         let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
         let mut actions = None;
-        let mut source_slot = None;
+        let mut source_slots = None;
 
         if let Some(eata_shared) = &input.eata_shared {
             if let Some(Some(deleg)) = deleg_iter.next() {
@@ -682,9 +686,12 @@ where
                         &deleg_record,
                     )
                 {
-                    source_slot = Some(
-                        input.ata_account.account_shared_data().remote_slot(),
-                    );
+                    let base_slot =
+                        input.ata_account.account_shared_data().remote_slot();
+                    source_slots = Some(CloneSourceSlots {
+                        data: base_slot,
+                        view: base_slot.max(eata_shared.remote_slot()),
+                    });
                     account_to_clone = projected_ata;
                     actions = delegation_actions;
                 }
@@ -699,7 +706,7 @@ where
                 actions.unwrap_or_default(),
             ),
             delegated_to_other,
-            source_slot,
+            source_slots,
         });
     }
 
