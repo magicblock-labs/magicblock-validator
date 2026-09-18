@@ -1095,7 +1095,7 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, _actions) = fetch_cloner
+    let (resolved_account, delegation_record, _actions, _) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
             update,
             &companion_fetch_log_context,
@@ -5063,7 +5063,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, delegation_actions) =
+    let (resolved_account, delegation_record, delegation_actions, _) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,

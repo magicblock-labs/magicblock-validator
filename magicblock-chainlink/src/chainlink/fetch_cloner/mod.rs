@@ -1938,7 +1938,7 @@ where
                         Arc::clone(&self.pending_clones),
                         pubkey,
                     );
-                    let Some(owned_request) = request.take() else {
+                    let Some(mut owned_request) = request.take() else {
                         let err = ClonerError::CommittorServiceError(
                             "owner missing request for undelegation clone"
                                 .to_string(),
@@ -1961,6 +1961,7 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
+                    self.raise_delegated_stamp_over_plain(&mut owned_request);
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -2320,8 +2321,8 @@ where
         }
 
         let update_source = update.source;
-        let (resolved_account, deleg_record, delegation_actions) = self
-            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+        let (resolved_account, deleg_record, delegation_actions, resolved_slot) =
+            self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
                 &companion_fetch_log_context,
             )
@@ -2329,6 +2330,10 @@ where
         let Some(account) = resolved_account else {
             return;
         };
+        // Resolution may re-fetch at a newer slot than the sighting; order and
+        // source the update by that view.
+        let update_slot =
+            resolved_slot.map_or(update_slot, |s| s.max(update_slot));
         let subscription_clone_context =
             AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
@@ -3176,6 +3181,8 @@ where
         Option<AccountSharedData>,
         Option<DelegationRecord>,
         DelegationActions,
+        // Pre-stamp slot of a resolved delegated account
+        Option<u64>,
     ) {
         let ForwardedSubscriptionUpdate {
             pubkey,
@@ -3279,6 +3286,7 @@ where
                                     );
                                 }
 
+                                let resolved_slot = account.remote_slot();
                                 self.apply_delegation_record_to_account(
                                     pubkey,
                                     &mut account,
@@ -3313,12 +3321,13 @@ where
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
                                     delegation_actions.unwrap_or_default(),
+                                    Some(resolved_slot),
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None, DelegationActions::default())
+                                (None, None, DelegationActions::default(), None)
                             }
                         } else if let Ok(request) =
                             UndelegationRequest::try_from_bytes_with_discriminator(
@@ -3353,19 +3362,21 @@ where
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
+                                None,
                             )
                         } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
+                                None,
                             )
                         } else {
                             trace!(
                                 pubkey = %pubkey,
                                 "Skipping DLP-owned subscription update without delegation record"
                             );
-                            (None, None, DelegationActions::default())
+                            (None, None, DelegationActions::default(), None)
                         };
 
                         if !subs_to_remove.is_empty() {
@@ -3396,7 +3407,7 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                     Err(err) => {
                         log_companion_fetch_failure(
@@ -3416,7 +3427,7 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                 }
             } else {
@@ -3432,16 +3443,17 @@ where
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
+                        None,
                     )
                 } else {
-                    (Some(account), None, DelegationActions::default())
+                    (Some(account), None, DelegationActions::default(), None)
                 }
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None, DelegationActions::default())
+            (None, None, DelegationActions::default(), None)
         }
     }
 
