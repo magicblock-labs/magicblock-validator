@@ -81,7 +81,7 @@ async fn test_deleg_after_subscribe_case2() {
             AccountBuilder::from(AccountSharedData::from(acc.owned()))
                 .mode(AccountMode::ReadOnly)
                 .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey).await;
+        let mut local_updates = bank.accounts().subscribe(pubkey);
         assert!(
             ctx.send_and_receive_account_update(pubkey, acc, Some(8_000))
                 .await
@@ -116,7 +116,7 @@ async fn test_deleg_after_subscribe_case2() {
                 .owner(program_pubkey)
                 .mode(AccountMode::Delegated)
                 .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey).await;
+        let mut local_updates = bank.accounts().subscribe(pubkey);
         // Materialization precedes subscription cleanup; wait for both before
         // asserting that delegation released the subscription.
         assert!(

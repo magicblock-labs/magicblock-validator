@@ -30,7 +30,7 @@ impl WsDispatcher {
         let encoder = ProgramAccountEncoder { encoder, filters };
 
         let id = next_subid();
-        let mut rx = self.engine.accounts().subscribe_program(pubkey).await;
+        let mut rx = self.engine.accounts().subscribe_program(pubkey);
         let tx = self.chan.tx.clone();
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
