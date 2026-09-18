@@ -257,9 +257,9 @@ where
             delegation_actions.clone(),
         ),
         delegated_to_other: None,
-        source_slot: Some(
-            base_ata.remote_slot().max(eata_account.remote_slot()),
-        ),
+        // Only the base ATA vouches for the layout data the projection
+        // carries; the eATA slot does not validate it.
+        source_slot: Some(base_ata.remote_slot()),
     })
 }
 
@@ -683,11 +683,7 @@ where
                     )
                 {
                     source_slot = Some(
-                        input
-                            .ata_account
-                            .account_shared_data()
-                            .remote_slot()
-                            .max(eata_shared.remote_slot()),
+                        input.ata_account.account_shared_data().remote_slot(),
                     );
                     account_to_clone = projected_ata;
                     actions = delegation_actions;
