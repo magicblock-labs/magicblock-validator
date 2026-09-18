@@ -1,0 +1,18 @@
+[package]
+edition.workspace = true
+name = "test-runner"
+version.workspace = true
+
+[lib]
+crate-type = ["lib"]
+
+[[bin]]
+name = "run-tests"
+path = "bin/run_tests.rs"
+
+[dependencies]
+ctrlc = { workspace = true }
+integration-test-tools = { workspace = true }
+keeper = { workspace = true }
+teepee = { workspace = true }
+tempfile = { workspace = true }
