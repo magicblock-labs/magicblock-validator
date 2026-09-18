@@ -52,9 +52,6 @@ lint:
 ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
 
-ci-test-integration:
-	$(MAKE) -C test-integration ci-test
-
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.
 #
@@ -64,11 +61,9 @@ ci-test-integration:
 #  are more strict than the non-nightly ones.
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
-	$(MAKE) -C test-integration ci-fmt
 
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
-	$(MAKE) -C test-integration ci-lint
 
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml

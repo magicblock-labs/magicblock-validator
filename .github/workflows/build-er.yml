@@ -29,7 +29,7 @@ jobs:
         run: echo "key=$KEY" >> "$GITHUB_OUTPUT"
         shell: bash
         env:
-          KEY: er-debug-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/.github/workflows/build-er.yml', 'magicblock-validator/.github/actions/setup-build-env/**', 'magicblock-validator/.github/actions/setup-solana/**', 'magicblock-validator/Cargo.lock', 'magicblock-validator/**/Cargo.toml', 'magicblock-validator/**/*.rs', 'magicblock-validator/**/build.rs', 'magicblock-validator/**/*.proto', '!magicblock-validator/test-integration/**', '!magicblock-validator/target/**') }}
+          KEY: er-debug-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/.github/workflows/build-er.yml', 'magicblock-validator/.github/actions/setup-build-env/**', 'magicblock-validator/.github/actions/setup-solana/**', 'magicblock-validator/Cargo.lock', 'magicblock-validator/**/Cargo.toml', 'magicblock-validator/**/*.rs', 'magicblock-validator/**/build.rs', 'magicblock-validator/**/*.proto', '!magicblock-validator/target/**') }}
 
       - name: Restore prebuilt ER binaries
         id: restore
