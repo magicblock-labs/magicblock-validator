@@ -462,11 +462,16 @@ where
     // The projection only changes at the delegation slot, so stamp that
     // rather than a fetch context slot: every sighting of one delegation then
     // carries the same slot. A plain ATA already in the bank raises the floor
-    // so the projection still advances over it; a remote fetch slot never does.
+    // so the projection still advances over it, but only when the projection
+    // was built from data at least that fresh; a remote fetch slot never does.
     let plain_in_bank_slot = this
         .accounts_bank
         .get_account(ata_pubkey)
-        .filter(|in_bank| !in_bank.delegated() && !in_bank.undelegating())
+        .filter(|in_bank| {
+            !in_bank.delegated()
+                && !in_bank.undelegating()
+                && in_bank.remote_slot() <= ata_account.remote_slot()
+        })
         .map(|in_bank| in_bank.remote_slot())
         .unwrap_or_default();
     projected_ata
