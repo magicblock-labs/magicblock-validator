@@ -6,7 +6,7 @@ use solana_pubkey::Pubkey;
 #[derive(Default, Debug)]
 pub struct ExecutionTlsStash {
     tasks: VecDeque<TaskRequest>,
-    newly_created_rent_pending_atas: VecDeque<Pubkey>,
+    newly_created_magic_atas: VecDeque<Pubkey>,
     // TODO(bmuddha/taco-paco): intents should go in here
     intents: VecDeque<()>,
 }
@@ -25,22 +25,21 @@ impl ExecutionTlsStash {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| stash.tasks.pop_front())
     }
 
-    pub fn register_newly_created_rent_pending_ata(pubkey: Pubkey) {
+    pub fn register_newly_created_magic_ata(pubkey: Pubkey) {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
-            stash.newly_created_rent_pending_atas.push_back(pubkey)
+            stash.newly_created_magic_atas.push_back(pubkey)
         });
     }
 
-    pub fn pop_newly_created_rent_pending_ata() -> Option<Pubkey> {
-        EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
-            stash.newly_created_rent_pending_atas.pop_front()
-        })
+    pub fn pop_newly_created_magic_ata() -> Option<Pubkey> {
+        EXECUTION_TLS_STASH
+            .with_borrow_mut(|stash| stash.newly_created_magic_atas.pop_front())
     }
 
     pub fn clear() {
         EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
             stash.tasks.clear();
-            stash.newly_created_rent_pending_atas.clear();
+            stash.newly_created_magic_atas.clear();
             stash.intents.clear();
         })
     }

@@ -184,14 +184,14 @@ pub enum MagicBlockInstruction {
     /// - **2.** `[WRITE]` Vault account (source of rent refund)
     CloseEphemeralAccount,
 
-    /// Creates or verifies a local rent-pending projected ATA.
+    /// Creates or verifies a local Magic ATA.
     ///
     /// # Account references
     /// - **0.** `[SIGNER, WRITE]` Payer/sponsor
     /// - **1.** `[WRITE]`  Canonical ATA PDA
     /// - **2.** `[]`       Mint
     /// - **3.** `[]`       Token program
-    CreateRentPendingAta { wallet_owner: Pubkey },
+    CreateMagicAta { wallet_owner: Pubkey },
 
     /// Clone a single account that fits in one transaction (<63KB data).
     ///
@@ -314,15 +314,15 @@ pub enum MagicBlockInstruction {
         instructions: Vec<Instruction>,
     },
 
-    /// Closes a drained rent-pending ATA previously created via
-    /// `CreateRentPendingAta`. No-op unless the account matches the
-    /// rent-pending marker for the signing wallet owner and holds zero
+    /// Closes a drained Magic ATA previously created via
+    /// `CreateMagicAta`. No-op unless the account matches the
+    /// Magic ATA marker for the signing wallet owner and holds zero
     /// tokens, so it can be appended unconditionally to withdrawal flows.
     ///
     /// # Account references
     /// - **0.** `[SIGNER]` Wallet owner
     /// - **1.** `[WRITE]`  Canonical ATA PDA
-    CloseRentPendingAta,
+    CloseMagicAta,
 }
 
 impl MagicBlockInstruction {

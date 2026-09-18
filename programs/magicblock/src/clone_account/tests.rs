@@ -448,9 +448,9 @@ fn test_clone_account_rejects_delegated_account() {
 }
 
 #[test]
-fn test_clone_account_replaces_drained_rent_pending_ata() {
+fn test_clone_account_replaces_drained_magic_ata() {
     use magicblock_core::token_programs::{
-        derive_ata, RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+        derive_ata, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
     };
 
     init_logger!();
@@ -459,13 +459,13 @@ fn test_clone_account_replaces_drained_rent_pending_ata() {
     let pubkey = derive_ata(&wallet_owner, &mint);
 
     // SPL token layout: mint, owner, zero amount, initialized state, and the
-    // rent sysvar close authority that marks the account rent-pending.
+    // rent sysvar close authority that marks the account as a Magic ATA.
     let mut data = vec![0u8; 165];
     data[0..32].copy_from_slice(mint.as_ref());
     data[32..64].copy_from_slice(wallet_owner.as_ref());
     data[108] = 1;
     data[129..133].copy_from_slice(&1u32.to_le_bytes());
-    data[133..165].copy_from_slice(RENT_PENDING_ATA_CLOSE_AUTHORITY.as_ref());
+    data[133..165].copy_from_slice(MAGIC_ATA_CLOSE_AUTHORITY.as_ref());
 
     let mut account = AccountSharedData::new(0, 0, &TOKEN_PROGRAM_ID);
     account.set_data_from_slice(&data);
@@ -482,7 +482,7 @@ fn test_clone_account_replaces_drained_rent_pending_ata() {
         Vec::new(),
     );
 
-    // A drained rent-pending placeholder must not block its own replacement.
+    // A drained Magic ATA placeholder must not block its own replacement.
     process_instruction(
         &ix.data,
         tx_accounts(accounts, &ix.accounts),

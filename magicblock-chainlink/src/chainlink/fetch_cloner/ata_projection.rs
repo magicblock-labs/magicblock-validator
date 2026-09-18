@@ -5,7 +5,7 @@ use futures_util::future::{join_all, FutureExt};
 use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_core::token_programs::{
     is_ata, try_derive_eata_address_and_bump, try_derive_supported_ata_pubkeys,
-    try_get_rent_pending_ata_info, AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
+    try_get_magic_ata_info, AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use solana_account::{AccountSharedData, ReadableAccount};
@@ -212,24 +212,24 @@ where
     )?;
     let ata_pubkeys = derive_supported_ata_pubkeys(&wallet_owner, &mint);
 
-    // eATA updates only carry the projected balance fields. The base ATA is
+    // eATA updates only carry the projected balance fields. The ATA itself is
     // required so the clone preserves the actual token program owner and any
     // Token-2022 account layout extensions.
-    let mut base_ata = None;
+    let mut ata = None;
     for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
         {
             if is_ata(&candidate_pubkey, &candidate_account).is_some() {
-                base_ata = Some((candidate_pubkey, candidate_account));
+                ata = Some((candidate_pubkey, candidate_account));
                 break;
             }
         }
     }
-    let (ata_pubkey, base_ata) = match base_ata {
-        Some(base_ata) => base_ata,
+    let (ata_pubkey, ata) = match ata {
+        Some(ata) => ata,
         None => {
-            fetch_remote_base_ata(
+            fetch_remote_ata(
                 this,
                 &ata_pubkeys,
                 eata_account.remote_slot(),
@@ -239,12 +239,21 @@ where
         }
     };
 
-    if base_ata_blocks_projection(&ata_pubkey, &base_ata) {
+    if ata_blocks_projection(&ata_pubkey, &ata) {
+        if try_get_magic_ata_info(&ata_pubkey, &ata).is_some() {
+            warn!(
+                ata = %ata_pubkey,
+                eata = %eata_pubkey,
+                "Funded Magic ATA takes precedence over its base delegation; \
+                 the eATA projection applies once the Magic ATA is drained \
+                 through the shuttle flow"
+            );
+        }
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
         this,
-        &base_ata,
+        &ata,
         eata_account,
         deleg_record,
     )?;
@@ -260,7 +269,7 @@ where
     })
 }
 
-async fn fetch_remote_base_ata<T, U, V, C>(
+async fn fetch_remote_ata<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
@@ -443,14 +452,14 @@ where
     // Projecting from eATA must preserve the base ATA's owner and data length.
     // That is what keeps Token-2022 accounts from being rebuilt as legacy SPL
     // Token accounts when the eATA itself only stores owner, mint, and amount.
-    let projected_from_base_ata = if deleg_record.owner == EATA_PROGRAM_ID {
+    let projected_from_ata = if deleg_record.owner == EATA_PROGRAM_ID {
         EphemeralAta::try_from_account_data(eata_account.data())
             .and_then(|eata| eata.project_into_ata_account(ata_account))
     } else {
         None
     };
 
-    let mut projected_ata = match projected_from_base_ata {
+    let mut projected_ata = match projected_from_ata {
         Some(projected_ata) => projected_ata,
         None => {
             return None;
@@ -715,32 +724,29 @@ where
     accounts_to_clone
 }
 
-/// A local rent-pending ATA may be replaced by an eATA projection, but only
-/// once drained: a funded rent-pending balance must never be clobbered by a
-/// freshly delegated eATA.
-fn base_ata_blocks_projection(
-    ata_pubkey: &Pubkey,
-    base_ata: &AccountSharedData,
-) -> bool {
-    base_ata.undelegating()
-        || (base_ata.delegated()
-            && !is_drained_rent_pending_ata(ata_pubkey, base_ata))
+/// A funded Magic ATA takes precedence over a base delegation of the same
+/// ATA: its balance must never be clobbered by a freshly delegated eATA. The
+/// two merge only once the Magic ATA is drained to zero through the shuttle
+/// flow, after which the eATA projection replaces it.
+fn ata_blocks_projection(ata_pubkey: &Pubkey, ata: &AccountSharedData) -> bool {
+    ata.undelegating()
+        || (ata.delegated() && !is_drained_magic_ata(ata_pubkey, ata))
 }
 
-/// A rent-pending ATA that holds no tokens. It stays delegated until closed,
+/// A Magic ATA that holds no tokens. It stays delegated until closed,
 /// so it must not be mistaken for live delegated state.
-pub(crate) fn is_drained_rent_pending_ata(
+pub(crate) fn is_drained_magic_ata(
     ata_pubkey: &Pubkey,
     account: &AccountSharedData,
 ) -> bool {
-    try_get_rent_pending_ata_info(ata_pubkey, account)
+    try_get_magic_ata_info(ata_pubkey, account)
         .is_some_and(|info| info.amount == 0)
 }
 
 #[cfg(test)]
 mod guard_tests {
     use magicblock_core::token_programs::{
-        derive_ata, RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+        derive_ata, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
     };
     use solana_account::WritableAccount;
     use solana_program::{program_option::COption, program_pack::Pack};
@@ -748,7 +754,7 @@ mod guard_tests {
 
     use super::*;
 
-    fn rent_pending_ata(
+    fn magic_ata(
         wallet_owner: &Pubkey,
         mint: &Pubkey,
         amount: u64,
@@ -761,7 +767,7 @@ mod guard_tests {
             state: AccountState::Initialized,
             is_native: COption::None,
             delegated_amount: 0,
-            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
         let mut account =
             AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
@@ -771,34 +777,34 @@ mod guard_tests {
     }
 
     #[test]
-    fn drained_rent_pending_ata_allows_projection() {
+    fn drained_magic_ata_allows_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let account = rent_pending_ata(&wallet_owner, &mint, 0);
-        assert!(!base_ata_blocks_projection(&ata, &account));
+        let account = magic_ata(&wallet_owner, &mint, 0);
+        assert!(!ata_blocks_projection(&ata, &account));
     }
 
     #[test]
-    fn drained_rent_pending_ata_is_not_live_delegated_state() {
+    fn drained_magic_ata_is_not_live_delegated_state() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
 
-        let drained = rent_pending_ata(&wallet_owner, &mint, 0);
-        assert!(is_drained_rent_pending_ata(&ata, &drained));
+        let drained = magic_ata(&wallet_owner, &mint, 0);
+        assert!(is_drained_magic_ata(&ata, &drained));
 
-        let funded = rent_pending_ata(&wallet_owner, &mint, 7);
-        assert!(!is_drained_rent_pending_ata(&ata, &funded));
+        let funded = magic_ata(&wallet_owner, &mint, 7);
+        assert!(!is_drained_magic_ata(&ata, &funded));
     }
 
     #[test]
-    fn funded_rent_pending_ata_blocks_projection() {
+    fn funded_magic_ata_blocks_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let account = rent_pending_ata(&wallet_owner, &mint, 7);
-        assert!(base_ata_blocks_projection(&ata, &account));
+        let account = magic_ata(&wallet_owner, &mint, 7);
+        assert!(ata_blocks_projection(&ata, &account));
     }
 
     #[test]
@@ -806,33 +812,33 @@ mod guard_tests {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let mut account = rent_pending_ata(&wallet_owner, &mint, 0);
+        let mut account = magic_ata(&wallet_owner, &mint, 0);
         let mut token = SplAccount::unpack(account.data()).unwrap();
         token.close_authority = COption::None;
         SplAccount::pack(token, account.data_as_mut_slice()).unwrap();
-        assert!(base_ata_blocks_projection(&ata, &account));
+        assert!(ata_blocks_projection(&ata, &account));
     }
 
     #[test]
-    fn undelegating_rent_pending_ata_blocks_projection() {
+    fn undelegating_magic_ata_blocks_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let mut account = rent_pending_ata(&wallet_owner, &mint, 0);
+        let mut account = magic_ata(&wallet_owner, &mint, 0);
         account.set_undelegating(true);
-        assert!(base_ata_blocks_projection(&ata, &account));
+        assert!(ata_blocks_projection(&ata, &account));
     }
 
     #[test]
-    fn plain_base_ata_allows_projection() {
+    fn plain_ata_allows_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let mut account = rent_pending_ata(&wallet_owner, &mint, 0);
+        let mut account = magic_ata(&wallet_owner, &mint, 0);
         account.set_delegated(false);
         let mut token = SplAccount::unpack(account.data()).unwrap();
         token.close_authority = COption::None;
         SplAccount::pack(token, account.data_as_mut_slice()).unwrap();
-        assert!(!base_ata_blocks_projection(&ata, &account));
+        assert!(!ata_blocks_projection(&ata, &account));
     }
 }

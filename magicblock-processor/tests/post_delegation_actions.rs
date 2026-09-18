@@ -257,7 +257,7 @@ async fn executor_rejects_empty_undelegating_action_dependency() {
 }
 
 /// Actions legitimately create accounts mid-flight (receipts, permission PDAs,
-/// rent-pending ATAs) via Magic CPIs, declaring them writable non-signer and
+/// Magic ATAs) via Magic CPIs, declaring them writable non-signer and
 /// authorizing them with a program (PDA) signature. Such not-yet-created
 /// accounts must pass the pre-invocation check; post-execution validation
 /// still governs the result.

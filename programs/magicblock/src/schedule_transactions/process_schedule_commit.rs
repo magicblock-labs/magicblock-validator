@@ -5,7 +5,7 @@ use magicblock_core::{
         calculate_commit_fee, types::CommittedAccount, CommitAndUndelegate,
         CommitType, MagicBaseIntent, UndelegateType,
     },
-    token_programs::try_get_rent_pending_ata_info,
+    token_programs::try_get_magic_ata_info,
 };
 // no direct token remap helpers needed here; handled in CommittedAccount builder
 use solana_account::{ReadableAccount, WritableAccount};
@@ -172,17 +172,14 @@ pub(crate) fn process_schedule_commit(
             return Err(InstructionError::InvalidAccountData);
         }
 
-        // Rent-pending ATAs are ER-only and have no base delegation to commit
+        // Magic ATAs are ER-only and have no base delegation to commit
         // to; funds leave them via the shuttle withdrawal flow instead.
-        if try_get_rent_pending_ata_info(
-            acc_pubkey,
-            &acc.to_account_shared_data()?,
-        )
-        .is_some()
+        if try_get_magic_ata_info(acc_pubkey, &acc.to_account_shared_data()?)
+            .is_some()
         {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: account {} is a rent-pending ATA and cannot be committed or undelegated; use the shuttle withdrawal flow",
+                "ScheduleCommit ERR: account {} is a Magic ATA and cannot be committed or undelegated; use the shuttle withdrawal flow",
                 acc_pubkey
             );
             return Err(InstructionError::InvalidAccountData);

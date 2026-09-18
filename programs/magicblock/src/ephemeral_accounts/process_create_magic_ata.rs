@@ -2,9 +2,8 @@ use magicblock_core::{
     tls::ExecutionTlsStash,
     token_programs::{
         derive_ata_with_token_program, is_supported_token_program,
-        try_get_rent_pending_ata_info, try_remap_ata_to_eata,
-        RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_2022_PROGRAM_ID,
-        TOKEN_PROGRAM_ID,
+        try_get_magic_ata_info, try_remap_ata_to_eata,
+        MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
     },
 };
 use solana_account::{ReadableAccount, WritableAccount};
@@ -24,10 +23,7 @@ use spl_token_2022::{
         BaseStateWithExtensionsMut, ExtensionType, StateWithExtensions,
         StateWithExtensionsMut,
     },
-    state::{
-        Account as Token2022Account, AccountState as Token2022AccountState,
-        Mint as Token2022Mint,
-    },
+    state::{Account as Token2022Account, AccountState, Mint as Token2022Mint},
 };
 
 use crate::utils::accounts::{
@@ -42,10 +38,10 @@ const TOKEN_PROGRAM_IDX: u16 = 3;
 struct TokenAccountShape {
     len: usize,
     required_extensions: Vec<ExtensionType>,
-    initial_state: Token2022AccountState,
+    initial_state: AccountState,
 }
 
-pub(crate) fn process_create_rent_pending_ata(
+pub(crate) fn process_create_magic_ata(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
     wallet_owner: Pubkey,
@@ -70,7 +66,7 @@ pub(crate) fn process_create_rent_pending_ata(
     if !is_supported_token_program(&token_program) {
         return Err(InstructionError::UnsupportedProgramId);
     }
-    if is_native_mint(&mint, &token_program) {
+    if is_native_mint(&mint) {
         return Err(InstructionError::InvalidArgument);
     }
     let expected_ata =
@@ -82,7 +78,7 @@ pub(crate) fn process_create_rent_pending_ata(
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
     let ata_shared = ata.to_account_shared_data()?;
     if !is_empty_system_account(&ata_shared) {
-        if is_matching_existing_rent_pending_ata(
+        if is_matching_existing_magic_ata(
             &ata_pubkey,
             &ata_shared,
             &wallet_owner,
@@ -127,11 +123,11 @@ pub(crate) fn process_create_rent_pending_ata(
     acc.set_ephemeral(false);
     acc.set_confined(false);
     acc.set_undelegating(false);
-    ExecutionTlsStash::register_newly_created_rent_pending_ata(ata_pubkey);
+    ExecutionTlsStash::register_newly_created_magic_ata(ata_pubkey);
 
     ic_msg!(
         invoke_context,
-        "Created rent-pending ATA {} for owner {} mint {}",
+        "Created Magic ATA {} for owner {} mint {}",
         ata_pubkey,
         wallet_owner,
         mint
@@ -147,11 +143,9 @@ fn is_empty_system_account(
         && account.data().is_empty()
 }
 
-fn is_native_mint(mint: &Pubkey, token_program: &Pubkey) -> bool {
-    (*token_program == TOKEN_PROGRAM_ID
-        && *mint == spl_token::native_mint::id())
-        || (*token_program == TOKEN_2022_PROGRAM_ID
-            && *mint == spl_token_2022::native_mint::id())
+fn is_native_mint(mint: &Pubkey) -> bool {
+    *mint == spl_token::native_mint::id()
+        || *mint == spl_token_2022::native_mint::id()
 }
 
 fn token_account_shape(
@@ -164,7 +158,7 @@ fn token_account_shape(
         Ok(TokenAccountShape {
             len: SplAccount::LEN,
             required_extensions: Vec::new(),
-            initial_state: Token2022AccountState::Initialized,
+            initial_state: AccountState::Initialized,
         })
     } else {
         let mint = StateWithExtensions::<Token2022Mint>::unpack(mint_data)
@@ -177,17 +171,17 @@ fn token_account_shape(
                 let default_state = mint
                     .get_extension::<DefaultAccountState>()
                     .map_err(|_| InstructionError::InvalidAccountData)?;
-                Token2022AccountState::try_from(default_state.state)
+                AccountState::try_from(default_state.state)
                     .map_err(|_| InstructionError::InvalidAccountData)?
             } else {
-                Token2022AccountState::Initialized
+                AccountState::Initialized
             };
         let mut required_extensions =
             ExtensionType::get_required_init_account_extensions(
                 &mint_extensions,
             );
         if required_extensions.iter().any(|extension| {
-            !is_supported_rent_pending_account_extension(*extension)
+            !is_supported_magic_ata_account_extension(*extension)
         }) {
             return Err(InstructionError::InvalidAccountData);
         }
@@ -206,9 +200,7 @@ fn token_account_shape(
     }
 }
 
-fn is_supported_rent_pending_account_extension(
-    extension: ExtensionType,
-) -> bool {
+fn is_supported_magic_ata_account_extension(extension: ExtensionType) -> bool {
     matches!(
         extension,
         ExtensionType::ImmutableOwner
@@ -223,18 +215,22 @@ fn initialize_token_data(
     wallet_owner: Pubkey,
     mint: Pubkey,
     required_extensions: &[ExtensionType],
-    initial_state: Token2022AccountState,
+    initial_state: AccountState,
 ) -> Result<(), InstructionError> {
     if *token_program == TOKEN_PROGRAM_ID {
+        // Both token crates define their own AccountState enum with the same
+        // u8 layout, so the shared initial state is carried over by value.
+        let state = SplAccountState::try_from(initial_state as u8)
+            .map_err(|_| InstructionError::InvalidAccountData)?;
         let account = SplAccount {
             mint,
             owner: wallet_owner,
             amount: 0,
             delegate: COption::None,
-            state: SplAccountState::Initialized,
+            state,
             is_native: COption::None,
             delegated_amount: 0,
-            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
         SplAccount::pack(account, data)
             .map_err(|_| InstructionError::InvalidAccountData)
@@ -257,7 +253,7 @@ fn initialize_token_data(
             state: initial_state,
             is_native: COption::None,
             delegated_amount: 0,
-            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
         state.pack_base();
         state
@@ -266,14 +262,14 @@ fn initialize_token_data(
     }
 }
 
-fn is_matching_existing_rent_pending_ata(
+fn is_matching_existing_magic_ata(
     ata_pubkey: &Pubkey,
     account: &solana_account::AccountSharedData,
     wallet_owner: &Pubkey,
     mint: &Pubkey,
     token_program: &Pubkey,
 ) -> bool {
-    try_get_rent_pending_ata_info(ata_pubkey, account).is_some_and(|info| {
+    try_get_magic_ata_info(ata_pubkey, account).is_some_and(|info| {
         info.wallet_owner == *wallet_owner
             && info.mint == *mint
             && info.token_program == *token_program
@@ -297,6 +293,7 @@ fn is_matching_existing_projected_ata(
 
 #[cfg(test)]
 mod tests {
+    use magicblock_core::token_programs::TOKEN_2022_PROGRAM_ID;
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
     use solana_instruction::{AccountMeta, Instruction};
@@ -344,7 +341,7 @@ mod tests {
                     let extension = state
                         .init_extension::<DefaultAccountState>(false)
                         .unwrap();
-                    extension.state = Token2022AccountState::Frozen.into();
+                    extension.state = AccountState::Frozen.into();
                 }
                 ExtensionType::NonTransferable => {
                     state.init_extension::<NonTransferable>(false).unwrap();
@@ -368,7 +365,7 @@ mod tests {
     }
 
     #[test]
-    fn create_rent_pending_ata_initializes_local_token_account_shape() {
+    fn create_magic_ata_initializes_local_token_account_shape() {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
@@ -380,7 +377,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -424,13 +421,12 @@ mod tests {
         assert_eq!(token_account.delegated_amount, 0);
         assert_eq!(
             token_account.close_authority,
-            COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+            COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         );
     }
 
     #[test]
-    fn create_rent_pending_token_2022_ata_initializes_local_token_account_shape(
-    ) {
+    fn create_magic_token_2022_ata_initializes_local_token_account_shape() {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
@@ -442,7 +438,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -483,18 +479,18 @@ mod tests {
         assert_eq!(token_account.base.amount, 0);
         assert_eq!(
             token_account.base.close_authority,
-            COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+            COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         );
         assert!(token_account.get_extension::<ImmutableOwner>().is_ok());
 
-        let info = try_get_rent_pending_ata_info(&ata, ata_after).unwrap();
+        let info = try_get_magic_ata_info(&ata, ata_after).unwrap();
         assert_eq!(info.token_program, TOKEN_2022_PROGRAM_ID);
         assert_eq!(info.wallet_owner, wallet_owner);
         assert_eq!(info.mint, mint);
     }
 
     #[test]
-    fn create_rent_pending_token_2022_ata_initializes_required_extensions() {
+    fn create_magic_token_2022_ata_initializes_required_extensions() {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
@@ -506,7 +502,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -554,14 +550,13 @@ mod tests {
         assert!(token_account.get_extension::<ImmutableOwner>().is_ok());
         assert_eq!(
             token_account.base.close_authority,
-            COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+            COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         );
-        assert!(try_get_rent_pending_ata_info(&ata, ata_after).is_some());
+        assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
     }
 
     #[test]
-    fn create_rent_pending_token_2022_ata_rejects_stateful_account_extensions()
-    {
+    fn create_magic_token_2022_ata_rejects_stateful_account_extensions() {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
@@ -573,7 +568,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -607,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn create_rent_pending_token_2022_ata_honors_default_account_state() {
+    fn create_magic_token_2022_ata_honors_default_account_state() {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
@@ -619,7 +614,7 @@ mod tests {
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
             vec![
                 AccountMeta::new(payer, true),
                 AccountMeta::new(ata, false),
@@ -654,7 +649,7 @@ mod tests {
         let token_account =
             StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
                 .unwrap();
-        assert_eq!(token_account.base.state, Token2022AccountState::Frozen);
-        assert!(try_get_rent_pending_ata_info(&ata, ata_after).is_some());
+        assert_eq!(token_account.base.state, AccountState::Frozen);
+        assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
     }
 }

@@ -1,4 +1,4 @@
-use magicblock_core::token_programs::try_get_rent_pending_ata_info;
+use magicblock_core::token_programs::try_get_magic_ata_info;
 use solana_account::WritableAccount;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -13,7 +13,7 @@ use crate::utils::accounts::{
 const OWNER_IDX: u16 = 0;
 const ATA_IDX: u16 = 1;
 
-pub(crate) fn process_close_rent_pending_ata(
+pub(crate) fn process_close_magic_ata(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
@@ -30,9 +30,9 @@ pub(crate) fn process_close_rent_pending_ata(
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
     let ata_shared = ata.to_account_shared_data()?;
 
-    // No-op unless the account is this owner's drained rent-pending ATA, so
+    // No-op unless the account is this owner's drained Magic ATA, so
     // withdrawal flows can append this instruction unconditionally.
-    let closeable = try_get_rent_pending_ata_info(&ata_pubkey, &ata_shared)
+    let closeable = try_get_magic_ata_info(&ata_pubkey, &ata_shared)
         .is_some_and(|info| info.wallet_owner == owner && info.amount == 0);
     if !closeable {
         return Ok(());
@@ -51,7 +51,7 @@ pub(crate) fn process_close_rent_pending_ata(
 
     ic_msg!(
         invoke_context,
-        "Closed rent-pending ATA {} for owner {}",
+        "Closed Magic ATA {} for owner {}",
         ata_pubkey,
         owner
     );
@@ -61,7 +61,7 @@ pub(crate) fn process_close_rent_pending_ata(
 #[cfg(test)]
 mod tests {
     use magicblock_core::token_programs::{
-        derive_ata, RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+        derive_ata, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
     };
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_account::{AccountSharedData, ReadableAccount};
@@ -75,7 +75,7 @@ mod tests {
     use super::*;
     use crate::test_utils::process_instruction;
 
-    fn rent_pending_ata_account(
+    fn magic_ata_account(
         wallet_owner: Pubkey,
         mint: Pubkey,
         amount: u64,
@@ -88,7 +88,7 @@ mod tests {
             state: SplAccountState::Initialized,
             is_native: COption::None,
             delegated_amount: 0,
-            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
         let mut account =
             AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
@@ -100,7 +100,7 @@ mod tests {
     fn close_ix(owner: Pubkey, ata: Pubkey) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
-            &MagicBlockInstruction::CloseRentPendingAta,
+            &MagicBlockInstruction::CloseMagicAta,
             vec![
                 AccountMeta::new_readonly(owner, true),
                 AccountMeta::new(ata, false),
@@ -109,7 +109,7 @@ mod tests {
     }
 
     #[test]
-    fn close_rent_pending_ata_removes_drained_account() {
+    fn close_magic_ata_removes_drained_account() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
@@ -122,7 +122,7 @@ mod tests {
                     wallet_owner,
                     AccountSharedData::new(1_000_000, 0, &system_program::id()),
                 ),
-                (ata, rent_pending_ata_account(wallet_owner, mint, 0)),
+                (ata, magic_ata_account(wallet_owner, mint, 0)),
             ],
             ix.accounts,
             Ok(()),
@@ -137,11 +137,11 @@ mod tests {
     }
 
     #[test]
-    fn close_rent_pending_ata_noops_when_funded() {
+    fn close_magic_ata_noops_when_funded() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let funded = rent_pending_ata_account(wallet_owner, mint, 5);
+        let funded = magic_ata_account(wallet_owner, mint, 5);
 
         let ix = close_ix(wallet_owner, ata);
         let accounts = process_instruction(
@@ -162,12 +162,12 @@ mod tests {
     }
 
     #[test]
-    fn close_rent_pending_ata_noops_for_other_signer() {
+    fn close_magic_ata_noops_for_other_signer() {
         let wallet_owner = Pubkey::new_unique();
         let other = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
-        let drained = rent_pending_ata_account(wallet_owner, mint, 0);
+        let drained = magic_ata_account(wallet_owner, mint, 0);
 
         let ix = close_ix(other, ata);
         let accounts = process_instruction(
@@ -188,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn close_rent_pending_ata_noops_for_missing_account() {
+    fn close_magic_ata_noops_for_missing_account() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
@@ -209,7 +209,7 @@ mod tests {
     }
 
     #[test]
-    fn close_rent_pending_ata_requires_owner_signature() {
+    fn close_magic_ata_requires_owner_signature() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
@@ -223,7 +223,7 @@ mod tests {
                     wallet_owner,
                     AccountSharedData::new(1_000_000, 0, &system_program::id()),
                 ),
-                (ata, rent_pending_ata_account(wallet_owner, mint, 0)),
+                (ata, magic_ata_account(wallet_owner, mint, 0)),
             ],
             ix.accounts,
             Err(InstructionError::MissingRequiredSignature),

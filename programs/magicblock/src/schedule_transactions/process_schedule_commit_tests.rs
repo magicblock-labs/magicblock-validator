@@ -281,8 +281,7 @@ mod tests {
     };
     use magicblock_core::token_programs::{
         derive_ata, derive_ata_with_token_program, derive_eata,
-        EATA_PROGRAM_ID, RENT_PENDING_ATA_CLOSE_AUTHORITY,
-        TOKEN_2022_PROGRAM_ID,
+        EATA_PROGRAM_ID, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_2022_PROGRAM_ID,
     };
     use serial_test::serial;
     use solana_program::{program_option::COption, program_pack::Pack};
@@ -313,13 +312,13 @@ mod tests {
         acc
     }
 
-    fn make_rent_pending_spl_ata_account(
+    fn make_magic_spl_ata_account(
         owner: &Pubkey,
         mint: &Pubkey,
     ) -> AccountSharedData {
         let mut acc = make_delegated_spl_ata_account(owner, mint);
         let mut token = SplAccount::unpack(acc.data()).unwrap();
-        token.close_authority = COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY);
+        token.close_authority = COption::Some(MAGIC_ATA_CLOSE_AUTHORITY);
         SplAccount::pack(token, acc.data_as_mut_slice()).unwrap();
         acc
     }
@@ -682,7 +681,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_rejects_rent_pending_ata() {
+    fn test_schedule_commit_rejects_magic_ata() {
         init_logger!();
 
         let payer =
@@ -698,10 +697,10 @@ mod tests {
                 ata_pubkey,
             );
 
-        // Rent-pending ATAs are ER-only and must never be committed.
+        // Magic ATAs are ER-only and must never be committed.
         account_data.insert(
             ata_pubkey,
-            make_rent_pending_spl_ata_account(&wallet_owner, &mint),
+            make_magic_spl_ata_account(&wallet_owner, &mint),
         );
 
         let ix = InstructionUtils::schedule_commit_instruction(

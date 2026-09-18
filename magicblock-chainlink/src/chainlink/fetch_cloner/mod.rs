@@ -2028,7 +2028,7 @@ where
         Ok(())
     }
 
-    /// A drained rent-pending ATA is delegated but replaceable: its eATA
+    /// A drained Magic ATA is delegated but replaceable: its eATA
     /// projection must not be deduplicated away, or the stale zero balance
     /// would hide later eATA deposits.
     fn local_delegated_clone_target_active(&self, pubkey: Pubkey) -> bool {
@@ -2036,9 +2036,7 @@ where
             .get_account(&pubkey)
             .is_some_and(|account| {
                 account.delegated()
-                    && !ata_projection::is_drained_rent_pending_ata(
-                        &pubkey, &account,
-                    )
+                    && !ata_projection::is_drained_magic_ata(&pubkey, &account)
             })
     }
 

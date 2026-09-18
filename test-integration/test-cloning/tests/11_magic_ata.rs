@@ -10,7 +10,7 @@ use integration_test_tools::{
 };
 use magicblock_core::token_programs::{
     derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
-    RENT_PENDING_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+    MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
 };
 use magicblock_magic_program_api::{
     instruction::MagicBlockInstruction, ID as MAGIC_PROGRAM_ID,
@@ -41,7 +41,7 @@ const DEPOSIT_SPL_TOKENS: u8 = 2;
 const DELEGATE_EPHEMERAL_ATA: u8 = 4;
 const INITIALIZE_RENT_PDA: u8 = 23;
 const WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE: u8 = 26;
-const ENSURE_RENT_PENDING_DESTINATION: u8 = 35;
+const ENSURE_MAGIC_ATA_DESTINATION: u8 = 36;
 
 fn token_balance_ephem(
     ctx: &IntegrationTestContext,
@@ -66,9 +66,9 @@ fn ephem_account_exists(
         .is_some()
 }
 
-/// True when the ER account at `account` carries the rent-pending marker
+/// True when the ER account at `account` carries the Magic ATA marker
 /// (close_authority == rent sysvar).
-fn ephem_account_is_rent_pending(
+fn ephem_account_is_magic_ata(
     ctx: &IntegrationTestContext,
     account: &Pubkey,
 ) -> bool {
@@ -81,7 +81,7 @@ fn ephem_account_is_rent_pending(
             account.data.len() >= 165
                 && account.data[129..133] == 1u32.to_le_bytes()
                 && account.data[133..165]
-                    == RENT_PENDING_ATA_CLOSE_AUTHORITY.to_bytes()
+                    == MAGIC_ATA_CLOSE_AUTHORITY.to_bytes()
         })
 }
 
@@ -208,7 +208,7 @@ fn delegate_eata_ix(
     }
 }
 
-fn ensure_rent_pending_destination_ix(
+fn ensure_magic_ata_destination_ix(
     payer: Pubkey,
     destination_owner: Pubkey,
     mint: Pubkey,
@@ -224,18 +224,18 @@ fn ensure_rent_pending_destination_ix(
             AccountMeta::new_readonly(TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         ],
-        data: vec![ENSURE_RENT_PENDING_DESTINATION],
+        data: vec![ENSURE_MAGIC_ATA_DESTINATION],
     }
 }
 
-fn close_rent_pending_ata_ix(owner: Pubkey, mint: Pubkey) -> Instruction {
+fn close_magic_ata_ix(owner: Pubkey, mint: Pubkey) -> Instruction {
     Instruction {
         program_id: MAGIC_PROGRAM_ID,
         accounts: vec![
             AccountMeta::new_readonly(owner, true),
             AccountMeta::new(derive_ata(&owner, &mint), false),
         ],
-        data: MagicBlockInstruction::CloseRentPendingAta
+        data: MagicBlockInstruction::CloseMagicAta
             .try_to_vec()
             .unwrap(),
     }
@@ -401,9 +401,9 @@ fn setup_delegated_source(
 }
 
 /// Sends tokens inside the ER to a wallet that has no ATA anywhere: the eSPL
-/// ensure instruction materializes a rent-pending ATA and a plain SPL transfer
+/// ensure instruction materializes a Magic ATA and a plain SPL transfer
 /// funds it in the same transaction.
-fn receive_into_rent_pending_ata(
+fn receive_into_magic_ata(
     ctx: &IntegrationTestContext,
     ephem_payer: &Keypair,
     source_authority: &Keypair,
@@ -415,7 +415,7 @@ fn receive_into_rent_pending_ata(
     let destination_ata = derive_ata(destination, mint);
 
     let ixs = vec![
-        ensure_rent_pending_destination_ix(
+        ensure_magic_ata_destination_ix(
             ephem_payer.pubkey(),
             *destination,
             *mint,
@@ -437,13 +437,13 @@ fn receive_into_rent_pending_ata(
             &[ephem_payer, source_authority],
         )
         .unwrap();
-    assert!(confirmed, "rent-pending receive transaction failed");
+    assert!(confirmed, "Magic ATA receive transaction failed");
 
     assert_eq!(token_balance_ephem(ctx, &destination_ata), Some(amount));
 }
 
 #[test]
-fn test_rent_pending_ata_receive_drain_and_close() {
+fn test_magic_ata_receive_drain_and_close() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -455,11 +455,11 @@ fn test_rent_pending_ata_receive_drain_and_close() {
     ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
         .unwrap();
 
-    // Receive into a wallet without any ATA: rent-pending ATA is created
+    // Receive into a wallet without any ATA: Magic ATA is created
     // and funded inside the ER, nothing exists on chain.
     let destination = Keypair::new();
     let destination_ata = derive_ata(&destination.pubkey(), &mint);
-    receive_into_rent_pending_ata(
+    receive_into_magic_ata(
         &ctx,
         &ephem_payer,
         &source_authority,
@@ -482,10 +482,10 @@ fn test_rent_pending_ata_receive_drain_and_close() {
         Some(SOURCE_EATA_BALANCE - RECEIVE_AMOUNT)
     );
 
-    // A rent-pending ATA left empty at the end of its creation transaction
+    // A Magic ATA left empty at the end of its creation transaction
     // rolls the whole transaction back.
     let empty_destination = Keypair::new();
-    let ix = ensure_rent_pending_destination_ix(
+    let ix = ensure_magic_ata_destination_ix(
         ephem_payer.pubkey(),
         empty_destination.pubkey(),
         mint,
@@ -496,7 +496,7 @@ fn test_rent_pending_ata_receive_drain_and_close() {
         !ctx.send_and_confirm_transaction_ephem(&mut tx, &[&ephem_payer])
             .map(|(_, confirmed)| confirmed)
             .unwrap_or(false),
-        "unfunded rent-pending ATA creation must fail"
+        "unfunded Magic ATA creation must fail"
     );
     assert!(!ephem_account_exists(
         &ctx,
@@ -504,7 +504,7 @@ fn test_rent_pending_ata_receive_drain_and_close() {
     ));
 
     // Spend the whole balance back, then explicitly close the drained
-    // rent-pending ATA through the Magic Program.
+    // Magic ATA through the Magic Program.
     let ixs = vec![
         spl_token_ix::transfer(
             &spl_token::id(),
@@ -515,7 +515,7 @@ fn test_rent_pending_ata_receive_drain_and_close() {
             RECEIVE_AMOUNT,
         )
         .unwrap(),
-        close_rent_pending_ata_ix(destination.pubkey(), mint),
+        close_magic_ata_ix(destination.pubkey(), mint),
     ];
     let mut tx = Transaction::new_with_payer(&ixs, Some(&ephem_payer.pubkey()));
     let (_sig, confirmed) = ctx
@@ -528,7 +528,7 @@ fn test_rent_pending_ata_receive_drain_and_close() {
 
     assert!(
         !ephem_account_exists(&ctx, &destination_ata),
-        "closed rent-pending ATA must be removed from the ER"
+        "closed Magic ATA must be removed from the ER"
     );
     assert_eq!(
         token_balance_ephem(&ctx, &source_ata),
@@ -537,7 +537,7 @@ fn test_rent_pending_ata_receive_drain_and_close() {
 }
 
 #[test]
-fn test_rent_pending_ata_full_withdrawal() {
+fn test_magic_ata_full_withdrawal() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -552,7 +552,7 @@ fn test_rent_pending_ata_full_withdrawal() {
         .unwrap();
 
     let destination = Keypair::new();
-    receive_into_rent_pending_ata(
+    receive_into_magic_ata(
         &ctx,
         &ephem_payer,
         &source_authority,
@@ -561,7 +561,7 @@ fn test_rent_pending_ata_full_withdrawal() {
         RECEIVE_AMOUNT,
     );
 
-    // Base-layer withdrawal in the SDK's rent-pending shape: idempotent ATA
+    // Base-layer withdrawal in the SDK's Magic ATA shape: idempotent ATA
     // create (payer covers init) + ix 26 — no eATA init/delegate.
     fund_withdrawal_sponsors(&ctx, &fee_payer);
     let withdraw_ixs = vec![
@@ -593,13 +593,13 @@ fn test_rent_pending_ata_full_withdrawal() {
     assert_withdrawal_settled(&ctx, &destination.pubkey(), &mint, 7);
 }
 
-/// The SDK's default (non-rent-pending-aware) withdrawal shape — ATA create +
+/// The SDK's default (non-Magic-ATA-aware) withdrawal shape — ATA create +
 /// eATA init/delegate + ix 26 in one transaction — must also work over a
-/// rent-pending source: the freshly delegated 0-amount eATA cannot clobber the
+/// Magic ATA source: the freshly delegated 0-amount eATA cannot clobber the
 /// funded balance (the projection is deferred until it is drained), so callers
 /// never need to distinguish the two source kinds.
 #[test]
-fn test_rent_pending_ata_transparent_withdrawal() {
+fn test_magic_ata_transparent_withdrawal() {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -614,7 +614,7 @@ fn test_rent_pending_ata_transparent_withdrawal() {
         .unwrap();
 
     let destination = Keypair::new();
-    receive_into_rent_pending_ata(
+    receive_into_magic_ata(
         &ctx,
         &ephem_payer,
         &source_authority,
@@ -719,7 +719,7 @@ fn fund_withdrawal_sponsors(ctx: &IntegrationTestContext, fee_payer: &Keypair) {
 
 /// Waits for the withdrawal pipeline (ER fill + close actions, base commit,
 /// undelegate, settle) and asserts the end state: tokens in the owner's base
-/// ATA, no rent-pending marker left in the ER, shuttle accounts closed.
+/// ATA, no Magic ATA marker left in the ER, shuttle accounts closed.
 fn assert_withdrawal_settled(
     ctx: &IntegrationTestContext,
     destination: &Pubkey,
@@ -783,19 +783,19 @@ fn assert_withdrawal_settled(
         "withdrawn tokens must arrive in the owner's base ATA"
     );
 
-    // The fully drained rent-pending ATA was closed by the withdrawal action.
+    // The fully drained Magic ATA was closed by the withdrawal action.
     // The address may reappear as a plain clone of the freshly created base
-    // ATA (or an eATA projection), so assert the rent-pending marker is gone
+    // ATA (or an eATA projection), so assert the Magic ATA marker is gone
     // rather than absence.
     let mut closed = false;
     for _ in 0..50 {
-        if !ephem_account_is_rent_pending(ctx, &destination_ata) {
+        if !ephem_account_is_magic_ata(ctx, &destination_ata) {
             closed = true;
             break;
         }
         sleep(Duration::from_millis(200));
     }
-    assert!(closed, "drained rent-pending ATA must be closed in the ER");
+    assert!(closed, "drained Magic ATA must be closed in the ER");
 
     // Shuttle accounts are settled and closed on base.
     let chain_client = ctx.try_chain_client().unwrap();

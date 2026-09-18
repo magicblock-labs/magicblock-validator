@@ -27,19 +27,20 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
 
-// Marker written into a rent-pending ATA's close authority. It is a data
+// Marker written into a Magic ATA's close authority. It is a data
 // marker only, never a signer grant: the sysvar cannot sign, so these
 // accounts are closed exclusively via the Magic Program.
-pub const RENT_PENDING_ATA_CLOSE_AUTHORITY: Pubkey =
-    solana_program::sysvar::rent::ID;
+pub const MAGIC_ATA_CLOSE_AUTHORITY: Pubkey = solana_program::sysvar::rent::ID;
 
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
 /// A validator-created ER-only token account at the canonical ATA address,
 /// letting a wallet receive tokens before its ATA exists anywhere.
+/// While funded it takes precedence over a base delegation of the same ATA;
+/// the two merge only once it is drained to zero through the shuttle flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RentPendingAtaInfo {
+pub struct MagicAtaInfo {
     pub ata_pubkey: Pubkey,
     pub token_program: Pubkey,
     pub wallet_owner: Pubkey,
@@ -415,10 +416,10 @@ pub fn try_remap_ata_to_eata(
     Some((eata_pubkey, eata))
 }
 
-pub fn try_get_rent_pending_ata_info(
+pub fn try_get_magic_ata_info(
     pubkey: &Pubkey,
     account: &AccountSharedData,
-) -> Option<RentPendingAtaInfo> {
+) -> Option<MagicAtaInfo> {
     if !account.delegated()
         || account.ephemeral()
         || account.confined()
@@ -429,14 +430,13 @@ pub fn try_get_rent_pending_ata_info(
 
     let token_program = account.owner();
     let token_account =
-        parse_token_account_for_rent_pending(token_program, account.data())?;
-    if token_account.close_authority
-        != COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY)
+        parse_token_account_for_magic_ata(token_program, account.data())?;
+    if token_account.close_authority != COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         || token_account.is_native.is_some()
     {
         return None;
     }
-    // Degenerate default keys never classify as rent-pending.
+    // Degenerate default keys never classify as a Magic ATA.
     if token_account.owner == Pubkey::default()
         || token_account.mint == Pubkey::default()
     {
@@ -452,7 +452,7 @@ pub fn try_get_rent_pending_ata_info(
         return None;
     }
 
-    Some(RentPendingAtaInfo {
+    Some(MagicAtaInfo {
         ata_pubkey: *pubkey,
         token_program: *token_program,
         wallet_owner: token_account.owner,
@@ -466,7 +466,7 @@ pub fn is_supported_token_program(token_program: &Pubkey) -> bool {
         || *token_program == TOKEN_2022_PROGRAM_ID
 }
 
-fn parse_token_account_for_rent_pending(
+fn parse_token_account_for_magic_ata(
     token_program: &Pubkey,
     data: &[u8],
 ) -> Option<TokenAccountCommon> {
@@ -746,7 +746,7 @@ mod tests {
     }
 
     #[test]
-    fn rent_pending_ata_uses_rent_sysvar_close_authority() {
+    fn magic_ata_uses_rent_sysvar_close_authority() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
@@ -758,7 +758,7 @@ mod tests {
             state: AccountState::Initialized,
             is_native: COption::None,
             delegated_amount: 0,
-            close_authority: COption::Some(RENT_PENDING_ATA_CLOSE_AUTHORITY),
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
 
         let mut data = vec![0u8; SplAccount::LEN];
@@ -772,8 +772,8 @@ mod tests {
         });
         account.set_delegated(true);
 
-        let info = try_get_rent_pending_ata_info(&ata, &account)
-            .expect("rent-pending ATA should be detected");
+        let info = try_get_magic_ata_info(&ata, &account)
+            .expect("Magic ATA should be detected");
         assert_eq!(info.ata_pubkey, ata);
         assert_eq!(info.token_program, TOKEN_PROGRAM_ID);
         assert_eq!(info.wallet_owner, wallet_owner);
@@ -787,44 +787,38 @@ mod tests {
         SplAccount::pack(token, default_close_authority.data_as_mut_slice())
             .unwrap();
         assert!(
-            try_get_rent_pending_ata_info(&ata, &default_close_authority)
-                .is_none()
+            try_get_magic_ata_info(&ata, &default_close_authority).is_none()
         );
 
         let mut undelegating_account = account.clone();
         undelegating_account.set_undelegating(true);
-        assert!(try_get_rent_pending_ata_info(&ata, &undelegating_account)
-            .is_none());
+        assert!(try_get_magic_ata_info(&ata, &undelegating_account).is_none());
 
         let mut not_delegated = account.clone();
         not_delegated.set_delegated(false);
-        assert!(try_get_rent_pending_ata_info(&ata, &not_delegated).is_none());
+        assert!(try_get_magic_ata_info(&ata, &not_delegated).is_none());
 
         let mut ephemeral_account = account.clone();
         ephemeral_account.set_ephemeral(true);
-        assert!(
-            try_get_rent_pending_ata_info(&ata, &ephemeral_account).is_none()
-        );
+        assert!(try_get_magic_ata_info(&ata, &ephemeral_account).is_none());
 
         let mut confined_account = account.clone();
         confined_account.set_confined(true);
-        assert!(
-            try_get_rent_pending_ata_info(&ata, &confined_account).is_none()
-        );
+        assert!(try_get_magic_ata_info(&ata, &confined_account).is_none());
 
         let mut wrong_owner = account.clone();
         wrong_owner.set_owner(Pubkey::new_unique());
-        assert!(try_get_rent_pending_ata_info(&ata, &wrong_owner).is_none());
+        assert!(try_get_magic_ata_info(&ata, &wrong_owner).is_none());
 
         let mut native_account = account.clone();
         let mut token = SplAccount::unpack(native_account.data()).unwrap();
         token.is_native = COption::Some(0);
         SplAccount::pack(token, native_account.data_as_mut_slice()).unwrap();
-        assert!(try_get_rent_pending_ata_info(&ata, &native_account).is_none());
+        assert!(try_get_magic_ata_info(&ata, &native_account).is_none());
     }
 
     #[test]
-    fn rent_pending_ata_rejects_default_owner_and_mint() {
+    fn magic_ata_rejects_default_owner_and_mint() {
         for (wallet_owner, mint) in [
             (Pubkey::default(), Pubkey::new_unique()),
             (Pubkey::new_unique(), Pubkey::default()),
@@ -838,9 +832,7 @@ mod tests {
                 state: AccountState::Initialized,
                 is_native: COption::None,
                 delegated_amount: 0,
-                close_authority: COption::Some(
-                    RENT_PENDING_ATA_CLOSE_AUTHORITY,
-                ),
+                close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
             };
             let mut data = vec![0u8; SplAccount::LEN];
             SplAccount::pack(token_account, &mut data).unwrap();
@@ -853,7 +845,7 @@ mod tests {
             });
             account.set_delegated(true);
 
-            assert!(try_get_rent_pending_ata_info(&ata, &account).is_none());
+            assert!(try_get_magic_ata_info(&ata, &account).is_none());
         }
     }
 }

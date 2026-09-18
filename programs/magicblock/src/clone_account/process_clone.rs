@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 
 use super::{
     adjust_authority_lamports, set_account_from_fields, validate_and_get_index,
-    validate_authority, validate_mutable,
+    validate_authority, validate_clone_target,
     validate_post_delegation_action_sibling, validate_remote_slot,
 };
 
@@ -61,7 +61,7 @@ pub(crate) fn process_clone_account(
         let mut account =
             transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
-        validate_mutable(&account, &pubkey, invoke_context)?;
+        validate_clone_target(&account, &pubkey, invoke_context)?;
         validate_remote_slot(
             &mut account,
             &pubkey,

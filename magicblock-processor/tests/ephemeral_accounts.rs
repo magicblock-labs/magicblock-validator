@@ -132,7 +132,7 @@ fn init_spl_mint(env: &ExecutionTestEnv, mint: Pubkey) {
     env.accountsdb.insert_account(&mint, &account).unwrap();
 }
 
-fn create_rent_pending_ata_ix(
+fn create_magic_ata_ix(
     payer: Pubkey,
     wallet_owner: Pubkey,
     mint: Pubkey,
@@ -140,7 +140,7 @@ fn create_rent_pending_ata_ix(
     let ata = derive_ata(&wallet_owner, &mint);
     Instruction::new_with_bincode(
         MAGIC_PROGRAM_ID,
-        &MagicBlockInstruction::CreateRentPendingAta { wallet_owner },
+        &MagicBlockInstruction::CreateMagicAta { wallet_owner },
         vec![
             AccountMeta::new(payer, true),
             AccountMeta::new(ata, false),
@@ -190,7 +190,7 @@ fn close_ephemeral_account_ix(
 }
 
 #[tokio::test]
-async fn test_create_rent_pending_ata_zero_balance_rolls_back() {
+async fn test_create_magic_ata_zero_balance_rolls_back() {
     let env = ExecutionTestEnv::new_with_config(0, 1, false);
     let payer = env.get_payer().pubkey;
     let wallet_owner = Pubkey::new_unique();
@@ -200,7 +200,7 @@ async fn test_create_rent_pending_ata_zero_balance_rolls_back() {
     init_spl_mint(&env, mint);
     env.fund_account(ata, 0);
 
-    let ix = create_rent_pending_ata_ix(payer, wallet_owner, mint);
+    let ix = create_magic_ata_ix(payer, wallet_owner, mint);
     let err = execute_instruction(&env, ix).await.unwrap_err();
 
     assert!(matches!(
@@ -213,8 +213,7 @@ async fn test_create_rent_pending_ata_zero_balance_rolls_back() {
 }
 
 #[tokio::test]
-async fn test_create_rent_pending_ata_zero_balance_rolls_back_for_privileged_payer(
-) {
+async fn test_create_magic_ata_zero_balance_rolls_back_for_privileged_payer() {
     let env = ExecutionTestEnv::new_with_config(0, 1, false);
     let payer = env.get_payer().pubkey;
     let wallet_owner = Pubkey::new_unique();
@@ -230,7 +229,7 @@ async fn test_create_rent_pending_ata_zero_balance_rolls_back_for_privileged_pay
     payer_acc.set_privileged(true);
     let _ = env.accountsdb.insert_account(&payer, &payer_acc);
 
-    let ix = create_rent_pending_ata_ix(payer, wallet_owner, mint);
+    let ix = create_magic_ata_ix(payer, wallet_owner, mint);
     let err = execute_instruction(&env, ix).await.unwrap_err();
 
     assert!(matches!(
