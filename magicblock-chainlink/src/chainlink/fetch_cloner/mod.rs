@@ -463,6 +463,29 @@ struct CompanionFetchLogContext {
     context_slot: u64,
 }
 
+/// A subscription snapshot with its delegation metadata and source provenance.
+///
+/// Resolution does not submit a clone or prove that the update advances the
+/// bank. A delegation record may be present even when the account is not
+/// delegated locally, for example when its authority is another validator.
+struct ResolvedSubscriptionAccount {
+    account: AccountSharedData,
+    delegation: Option<(DelegationRecord, DelegationActions)>,
+    /// Fetch/projection provenance; otherwise the caller uses the sighting slot.
+    source_slots: Option<CloneSourceSlots>,
+}
+
+impl ResolvedSubscriptionAccount {
+    /// Retains the snapshot unchanged, without resolved delegation metadata.
+    fn plain(account: AccountSharedData) -> Self {
+        Self {
+            account,
+            delegation: None,
+            source_slots: None,
+        }
+    }
+}
+
 fn log_companion_fetch_failure<E: std::fmt::Display + ?Sized>(
     ctx: &CompanionFetchLogContext,
     companion_pubkey: Pubkey,
@@ -1061,44 +1084,49 @@ where
         account.delegated() && !account.undelegating()
     }
 
+    /// Whether local state makes submission unnecessary: it is authoritative,
+    /// newer than the request, or identical at the same slot.
+    ///
+    /// Plain copies are compared with source-data freshness for delegated
+    /// requests; protected copies are compared with the delegation stamp.
     fn local_account_satisfies_clone_request(
         &self,
         request: &AccountCloneRequest,
     ) -> bool {
+        let Some(account) = self.accounts_bank.get_account(&request.pubkey)
+        else {
+            return false;
+        };
         let active_delegation_satisfies_request =
             !request.post_delegation_mode.has_actions()
                 && request.delegated_to_other.is_none()
                 && !request.post_delegation_mode.is_rescue_undelegate();
-        self.accounts_bank
-            .get_account(&request.pubkey)
-            .is_some_and(|account| {
-                let local_slot = account.remote_slot();
-                let request_slot = request.account.remote_slot();
-                // A delegated request carries its delegation slot; a plain
-                // local copy supersedes it only if newer than the request's
-                // source view.
-                let freshness_slot = if request.account.delegated()
-                    && !account.delegated()
-                    && !account.undelegating()
-                {
-                    request
-                        .source_slots
-                        .map_or(request_slot, |slots| slots.data)
-                } else {
-                    request_slot
-                };
-                (active_delegation_satisfies_request
-                    && Self::account_is_actively_delegated(&account))
-                    || local_slot > freshness_slot
-                    || (local_slot == request_slot
-                        && account.eq(&request.account))
-            })
+        if active_delegation_satisfies_request
+            && Self::account_is_actively_delegated(&account)
+        {
+            return true;
+        }
+
+        let local_slot = account.remote_slot();
+        let request_slot = request.account.remote_slot();
+        // A plain copy is compared against the source data, not the
+        // delegation stamp or a projection's companion snapshot.
+        let freshness_slot = if request.account.delegated()
+            && !account.delegated()
+            && !account.undelegating()
+        {
+            request.source_slots().data
+        } else {
+            request_slot
+        };
+        local_slot > freshness_slot
+            || (local_slot == request_slot && account.eq(&request.account))
     }
 
     /// A delegated request is stamped with its delegation slot, which can
     /// trail a plain bank copy the request was built from (or one that landed
     /// while it waited for ownership). Raise the stamp to that copy's slot so
-    /// the clone advances over it, but only when the request's source view is
+    /// the clone advances over it, but only when the request's source data is
     /// at least as fresh; an older projection keeps its slot and is rejected.
     fn raise_delegated_stamp_over_plain(
         &self,
@@ -1112,9 +1140,7 @@ where
             return;
         };
         let plain_slot = in_bank.remote_slot();
-        let source_slot = request
-            .source_slots
-            .map_or(request.account.remote_slot(), |slots| slots.data);
+        let source_slot = request.source_slots().data;
         if !in_bank.delegated()
             && !in_bank.undelegating()
             && plain_slot > request.account.remote_slot()
@@ -1843,8 +1869,8 @@ where
             // Dependencies must be at least as fresh as every input view,
             // not just the delegation slot stamped on the target.
             let dependency_floor = request
-                .source_slots
-                .map_or(0, |slots| slots.view)
+                .source_slots()
+                .view
                 .max(request.account.remote_slot());
             self.ensure_delegation_action_dependencies(
                 request.pubkey,
@@ -2321,14 +2347,20 @@ where
         }
 
         let update_source = update.source;
-        let (resolved_account, deleg_record, delegation_actions, source_slots) =
-            self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                update,
-                &companion_fetch_log_context,
-            )
+        let resolved = self
+            .resolve_subscription_update(update, &companion_fetch_log_context)
             .await;
-        let Some(account) = resolved_account else {
+        let Some(ResolvedSubscriptionAccount {
+            account,
+            delegation,
+            source_slots,
+        }) = resolved
+        else {
             return;
+        };
+        let (deleg_record, delegation_actions) = match delegation {
+            Some((record, actions)) => (Some(record), actions),
+            None => (None, DelegationActions::default()),
         };
         // Resolution may re-fetch at a newer slot than the sighting; order and
         // source the update by that view.
@@ -3172,298 +3204,223 @@ where
         }
     }
 
-    async fn resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+    /// Resolves delegation metadata or ATA projection before bank-order checks.
+    ///
+    /// DLP-owned updates require a companion fetch; unresolvable updates return
+    /// `None`. Normal completion releases temporary record subscriptions even
+    /// when fetching or parsing fails, without releasing owner-program watches.
+    async fn resolve_subscription_update(
         &self,
         update: ForwardedSubscriptionUpdate,
         companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> (
-        Option<AccountSharedData>,
-        Option<DelegationRecord>,
-        DelegationActions,
-        // Chain views behind a resolved delegated account or projection
-        Option<CloneSourceSlots>,
-    ) {
+    ) -> Option<ResolvedSubscriptionAccount> {
         let ForwardedSubscriptionUpdate {
-            pubkey,
-            account,
-            source: _,
+            pubkey, account, ..
         } = update;
         let owned_by_delegation_program =
             account.is_owned_by_delegation_program();
-
-        if let Some(account) = account.fresh_account() {
-            // If the account is owned by the delegation program we need to resolve
-            // its true owner and determine if it is delegated to us
-            if owned_by_delegation_program {
-                let delegation_record_pubkey =
-                    delegation_record_pda_from_delegated_account(&pubkey);
-
-                let acquired_delegation_record_reason = self
-                    .acquire_subscription_reason(
-                        &delegation_record_pubkey,
-                        SubscriptionReason::DelegationRecord,
-                    )
-                    .await
-                    .map(|_| true)
-                    .unwrap_or_else(|err| {
-                        warn!(
-                            pubkey = %delegation_record_pubkey,
-                            error = ?err,
-                            "Failed to acquire delegation record subscription reason"
-                        );
-                        false
-                    });
-
-                match self
-                    .task_to_fetch_with_companion(
-                        pubkey,
-                        delegation_record_pubkey,
-                        account.remote_slot(),
-                        AccountFetchContext::subscription_update(
-                            AccountFetchReason::DelegationRecord,
-                        ),
-                        ChainlinkCompanionFetchKind::DelegationRecord,
-                    )
-                    .await
-                {
-                    Ok(Ok(AccountWithCompanion {
-                        pubkey,
-                        mut account,
-                        companion_pubkey: delegation_record_pubkey,
-                        companion_account: delegation_record,
-                    })) => {
-                        // We may need to remove temporary subscriptions created
-                        // while resolving this update.
-                        let mut subs_to_remove = Vec::new();
-
-                        subs_to_remove.push(SubscriptionRelease::Pubkey {
-                            pubkey: delegation_record_pubkey,
-                            reason: SubscriptionReason::DirectAccount,
-                        });
-                        if acquired_delegation_record_reason {
-                            subs_to_remove.push(SubscriptionRelease::Pubkey {
-                                pubkey: delegation_record_pubkey,
-                                reason: SubscriptionReason::DelegationRecord,
-                            });
-                        }
-
-                        let account = if let Some(delegation_record) =
-                            delegation_record
-                        {
-                            let delegation_record_with_actions = match self
-                                .parse_delegation_record(
-                                    delegation_record.data(),
-                                    delegation_record_pubkey,
-                                ) {
-                                Ok(x) => Some(x),
-                                Err(err) => {
-                                    error!(
-                                        pubkey = %pubkey,
-                                        error = %err,
-                                        "Failed to parse delegation record"
-                                    );
-                                    None
-                                }
-                            };
-
-                            // If the delegation record is valid we set the owner and delegation
-                            // status on the account
-                            if let Some((
-                                delegation_record,
-                                delegation_actions,
-                            )) = delegation_record_with_actions
-                            {
-                                if tracing::enabled!(tracing::Level::TRACE) {
-                                    let delegation_record_display =
-                                        format!("{:?}", delegation_record);
-                                    trace!(
-                                        pubkey = %pubkey,
-                                        slot = account.remote_slot(),
-                                        owner = %delegation_record.owner,
-                                        deleg_record = %delegation_record_display,
-                                        "Resolving delegated account"
-                                    );
-                                }
-
-                                let resolved_slot = account.remote_slot();
-                                self.apply_delegation_record_to_account(
-                                    pubkey,
-                                    &mut account,
-                                    &delegation_record,
-                                );
-
-                                // For accounts delegated to us, subscribe to the original owner
-                                // program for undelegation update resilience.
-                                if account.delegated()
-                                    && !self
-                                        .programs_not_to_subscribe
-                                        .contains(&delegation_record.owner)
-                                {
-                                    // Fire-and-forget to avoid blocking subscription updates.
-                                    let provider =
-                                        self.remote_account_provider.clone();
-                                    let owner = delegation_record.owner;
-                                    tokio::spawn(async move {
-                                        if let Err(err) = provider
-                                            .subscribe_program(owner)
-                                            .await
-                                        {
-                                            warn!(
-                                                "Failed to subscribe to owner program {} for account {}: {}",
-                                                owner, pubkey, err
-                                            );
-                                        }
-                                    });
-                                }
-
-                                (
-                                    Some(account.into_account_shared_data()),
-                                    Some(delegation_record),
-                                    delegation_actions.unwrap_or_default(),
-                                    Some(CloneSourceSlots::single(
-                                        resolved_slot,
-                                    )),
-                                )
-                            } else {
-                                // If the delegation record is invalid we cannot clone the account
-                                // since something is corrupt and we wouldn't know what owner to
-                                // use, etc.
-                                (None, None, DelegationActions::default(), None)
-                            }
-                        } else if let Ok(request) =
-                            UndelegationRequest::try_from_bytes_with_discriminator(
-                                account.data(),
-                            )
-                        {
-                            let observed = ObservedUndelegationRequest {
-                                request_pda: pubkey,
-                                delegated_account: request.delegated_account,
-                                expires_at_slot: request.expires_at_slot,
-                                observed_slot: account.remote_slot(),
-                            };
-                            trace!(
-                                request_pda = %observed.request_pda,
-                                delegated_account = %observed.delegated_account,
-                                expires_at_slot = observed.expires_at_slot,
-                                "Observed DLP undelegation request"
-                            );
-                            if let Err(broadcast::error::SendError(observed)) =
-                                self.undelegation_request_sender.send(observed)
-                            {
-                                warn!(
-                                    request_pda = %observed.request_pda,
-                                    delegated_account = %observed.delegated_account,
-                                    observed_slot = observed.observed_slot,
-                                    expires_at_slot = observed.expires_at_slot,
-                                    drop_reason = "no_active_subscribers",
-                                    "Dropped observed DLP undelegation request because no subscribers are active"
-                                );
-                            }
-                            (
-                                Some(account.into_account_shared_data()),
-                                None,
-                                DelegationActions::default(),
-                                None,
-                            )
-                        } else if is_internal_dlp_account_data(account.data()) {
-                            (
-                                Some(account.into_account_shared_data()),
-                                None,
-                                DelegationActions::default(),
-                                None,
-                            )
-                        } else {
-                            trace!(
-                                pubkey = %pubkey,
-                                "Skipping DLP-owned subscription update without delegation record"
-                            );
-                            (None, None, DelegationActions::default(), None)
-                        };
-
-                        if !subs_to_remove.is_empty() {
-                            release_subs(
-                                &self.remote_account_provider,
-                                subs_to_remove,
-                            )
-                            .await;
-                        }
-                        account
-                    }
-                    // In case of errors fetching the delegation record we cannot clone the account
-                    Ok(Err(err)) => {
-                        log_companion_fetch_failure(
-                            companion_fetch_log_context,
-                            delegation_record_pubkey,
-                            ChainlinkCompanionFetchKind::DelegationRecord,
-                            &err,
-                        );
-                        if acquired_delegation_record_reason {
-                            release_subs(
-                                &self.remote_account_provider,
-                                [SubscriptionRelease::Pubkey {
-                                    pubkey: delegation_record_pubkey,
-                                    reason:
-                                        SubscriptionReason::DelegationRecord,
-                                }],
-                            )
-                            .await;
-                        }
-                        (None, None, DelegationActions::default(), None)
-                    }
-                    Err(err) => {
-                        log_companion_fetch_failure(
-                            companion_fetch_log_context,
-                            delegation_record_pubkey,
-                            ChainlinkCompanionFetchKind::DelegationRecord,
-                            &err,
-                        );
-                        if acquired_delegation_record_reason {
-                            release_subs(
-                                &self.remote_account_provider,
-                                [SubscriptionRelease::Pubkey {
-                                    pubkey: delegation_record_pubkey,
-                                    reason:
-                                        SubscriptionReason::DelegationRecord,
-                                }],
-                            )
-                            .await;
-                        }
-                        (None, None, DelegationActions::default(), None)
-                    }
-                }
-            } else {
-                let ata_slot = account.remote_slot();
-                let (account, deleg_record, eata_slot) = self
-                    .maybe_project_ata_from_subscription_update(
-                        pubkey,
-                        account,
-                        companion_fetch_log_context,
-                    )
-                    .await;
-                if let Some((deleg_record, actions)) = deleg_record {
-                    // The base ATA vouches for the data; the eATA snapshot
-                    // bounds the projection's view.
-                    let source_slots =
-                        eata_slot.map(|eata_slot| CloneSourceSlots {
-                            data: ata_slot,
-                            view: ata_slot.max(eata_slot),
-                        });
-                    (
-                        Some(account),
-                        Some(deleg_record),
-                        actions.unwrap_or_default(),
-                        source_slots,
-                    )
-                } else {
-                    (Some(account), None, DelegationActions::default(), None)
-                }
-            }
-        } else {
-            // This should not happen since we call this method with sub updates which always hold
-            // a fresh remote account
+        let Some(account) = account.fresh_account() else {
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None, DelegationActions::default(), None)
+            return None;
+        };
+        if !owned_by_delegation_program {
+            let resolved =
+                ata_projection::maybe_project_ata_from_subscription_update(
+                    self,
+                    pubkey,
+                    account,
+                    companion_fetch_log_context,
+                )
+                .await;
+            return Some(resolved);
         }
+
+        let delegation_record_pubkey =
+            delegation_record_pda_from_delegated_account(&pubkey);
+        let subscription = self
+            .acquire_subscription_reason(
+                &delegation_record_pubkey,
+                SubscriptionReason::DelegationRecord,
+            )
+            .await;
+        let acquired_delegation_record_reason = match subscription {
+            Ok(()) => true,
+            Err(err) => {
+                warn!(
+                    pubkey = %delegation_record_pubkey,
+                    error = ?err,
+                    "Failed to acquire delegation record subscription reason"
+                );
+                false
+            }
+        };
+
+        let fetch_context = AccountFetchContext::subscription_update(
+            AccountFetchReason::DelegationRecord,
+        );
+        let fetched = self
+            .task_to_fetch_with_companion(
+                pubkey,
+                delegation_record_pubkey,
+                account.remote_slot(),
+                fetch_context,
+                ChainlinkCompanionFetchKind::DelegationRecord,
+            )
+            .await
+            .unwrap_or_else(|err| Err(ChainlinkError::from(err)));
+
+        // Invalid delegation metadata must not bypass direct-reference cleanup
+        // after a successful companion fetch.
+        let (resolved, direct_release) = match fetched {
+            Ok(account) => {
+                let release = SubscriptionRelease::Pubkey {
+                    pubkey: account.companion_pubkey,
+                    reason: SubscriptionReason::DirectAccount,
+                };
+                let resolved =
+                    self.resolve_delegated_subscription_account(account);
+                (resolved, Some(release))
+            }
+            Err(err) => {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    delegation_record_pubkey,
+                    ChainlinkCompanionFetchKind::DelegationRecord,
+                    &err,
+                );
+                (None, None)
+            }
+        };
+        // The explicit record reason must also be released on fetch failure.
+        // Keep direct-before-record ordering and owner-program watches intact.
+        let record_release = acquired_delegation_record_reason.then_some(
+            SubscriptionRelease::Pubkey {
+                pubkey: delegation_record_pubkey,
+                reason: SubscriptionReason::DelegationRecord,
+            },
+        );
+        release_subs(
+            &self.remote_account_provider,
+            direct_release.into_iter().chain(record_release),
+        )
+        .await;
+        resolved
+    }
+
+    /// Interprets a slot-matched DLP account and its optional delegation record.
+    ///
+    /// Invalid records and unrecognized recordless payloads return `None`.
+    /// Recognized internal accounts remain plain; undelegation requests are
+    /// also broadcast. The caller retains responsibility for subscription cleanup.
+    fn resolve_delegated_subscription_account(
+        &self,
+        fetched: AccountWithCompanion,
+    ) -> Option<ResolvedSubscriptionAccount> {
+        let AccountWithCompanion {
+            pubkey,
+            mut account,
+            companion_pubkey: delegation_record_pubkey,
+            companion_account: delegation_record,
+        } = fetched;
+        let Some(delegation_record) = delegation_record else {
+            return self.resolve_internal_subscription_account(pubkey, account);
+        };
+        // Invalid metadata cannot establish the account's owner or authority.
+        let parsed = self.parse_delegation_record(
+            delegation_record.data(),
+            delegation_record_pubkey,
+        );
+        let (delegation_record, actions) = match parsed {
+            Ok(delegation) => delegation,
+            Err(err) => {
+                error!(pubkey = %pubkey, error = %err, "Failed to parse delegation record");
+                return None;
+            }
+        };
+        trace!(
+            pubkey = %pubkey,
+            slot = account.remote_slot(),
+            owner = %delegation_record.owner,
+            deleg_record = ?delegation_record,
+            "Resolving delegated account"
+        );
+
+        // Dependency freshness must survive replacing the fetch context
+        // with the delegation's deduplication stamp.
+        let source_slots = CloneSourceSlots::single(account.remote_slot());
+        self.apply_delegation_record_to_account(
+            pubkey,
+            &mut account,
+            &delegation_record,
+        );
+
+        // Owner-program updates keep undelegation observable without
+        // blocking this update on subscription setup.
+        if account.delegated()
+            && !self
+                .programs_not_to_subscribe
+                .contains(&delegation_record.owner)
+        {
+            let provider = self.remote_account_provider.clone();
+            let owner = delegation_record.owner;
+            tokio::spawn(async move {
+                if let Err(err) = provider.subscribe_program(owner).await {
+                    warn!(
+                        "Failed to subscribe to owner program {} for account {}: {}",
+                        owner, pubkey, err
+                    );
+                }
+            });
+        }
+        let actions = actions.unwrap_or_default();
+        Some(ResolvedSubscriptionAccount {
+            account: account.into_account_shared_data(),
+            delegation: Some((delegation_record, actions)),
+            source_slots: Some(source_slots),
+        })
+    }
+
+    /// Retains recognized DLP-internal payloads without delegation metadata.
+    /// Undelegation requests are also broadcast; unrelated payloads are ignored.
+    fn resolve_internal_subscription_account(
+        &self,
+        pubkey: Pubkey,
+        account: ResolvedAccountSharedData,
+    ) -> Option<ResolvedSubscriptionAccount> {
+        let request = UndelegationRequest::try_from_bytes_with_discriminator(
+            account.data(),
+        );
+        if let Ok(request) = request {
+            let observed = ObservedUndelegationRequest {
+                request_pda: pubkey,
+                delegated_account: request.delegated_account,
+                expires_at_slot: request.expires_at_slot,
+                observed_slot: account.remote_slot(),
+            };
+            trace!(
+                request_pda = %observed.request_pda,
+                delegated_account = %observed.delegated_account,
+                expires_at_slot = observed.expires_at_slot,
+                "Observed DLP undelegation request"
+            );
+            if let Err(broadcast::error::SendError(observed)) =
+                self.undelegation_request_sender.send(observed)
+            {
+                warn!(
+                    request_pda = %observed.request_pda,
+                    delegated_account = %observed.delegated_account,
+                    observed_slot = observed.observed_slot,
+                    expires_at_slot = observed.expires_at_slot,
+                    drop_reason = "no_active_subscribers",
+                    "Dropped observed DLP undelegation request because no subscribers are active"
+                );
+            }
+        } else if !is_internal_dlp_account_data(account.data()) {
+            trace!(pubkey = %pubkey, "Skipping DLP-owned subscription update without delegation record");
+            return None;
+        }
+        let account = account.into_account_shared_data();
+        Some(ResolvedSubscriptionAccount::plain(account))
     }
 
     async fn maybe_build_projected_ata_clone_request_from_subscription_update_with_source(
@@ -3490,25 +3447,6 @@ where
     #[cfg(test)]
     fn is_known_empty_eata(&self, eata_pubkey: &Pubkey) -> bool {
         ata_projection::is_known_empty_eata(self, eata_pubkey)
-    }
-
-    async fn maybe_project_ata_from_subscription_update(
-        &self,
-        ata_pubkey: Pubkey,
-        ata_account: AccountSharedData,
-        companion_fetch_log_context: &CompanionFetchLogContext,
-    ) -> (
-        AccountSharedData,
-        Option<(DelegationRecord, Option<DelegationActions>)>,
-        Option<u64>,
-    ) {
-        ata_projection::maybe_project_ata_from_subscription_update(
-            self,
-            ata_pubkey,
-            ata_account,
-            companion_fetch_log_context,
-        )
-        .await
     }
 
     /// Parses a delegation record from account data bytes.

@@ -1095,19 +1095,16 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, _actions, _) = fetch_cloner
-        .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-            update,
-            &companion_fetch_log_context,
-        )
+    let resolved = fetch_cloner
+        .resolve_subscription_update(update, &companion_fetch_log_context)
         .await;
 
-    let resolved_account = resolved_account.expect("account should resolve");
+    let resolved = resolved.expect("account should resolve");
     let mut expected_account =
         delegated_account_shared_with_owner(&account, account_owner);
     expected_account.set_remote_slot(CURRENT_SLOT);
-    assert_eq!(resolved_account, expected_account);
-    assert!(delegation_record.is_some());
+    assert_eq!(resolved.account, expected_account);
+    assert!(resolved.delegation.is_some());
 
     remote_account_provider
         .release_single_subscription(
@@ -5063,17 +5060,11 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, delegation_actions, _) =
-        fetch_cloner
-            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
-                update,
-                &companion_fetch_log_context,
-            )
-            .await;
+    let resolved = fetch_cloner
+        .resolve_subscription_update(update, &companion_fetch_log_context)
+        .await;
 
-    assert!(resolved_account.is_none());
-    assert!(delegation_record.is_none());
-    assert!(delegation_actions.is_empty());
+    assert!(resolved.is_none());
     assert!(accounts_bank.get_account(&account_pubkey).is_none());
 }
 
