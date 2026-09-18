@@ -2367,7 +2367,9 @@ where
         let non_advancing_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                 let bank_slot = in_bank.remote_slot();
-                let update_slot = account.remote_slot();
+                // A delegated update is stamped with its delegation slot;
+                // order it by the sighting view instead.
+                let update_slot = account.remote_slot().max(update_slot);
                 let same_slot_delegated_refresh = bank_slot == update_slot
                     && account.delegated()
                     && (!in_bank.delegated() || in_bank.undelegating());
@@ -2382,7 +2384,7 @@ where
             });
 
         if let Some(in_bank_slot) = non_advancing_slot {
-            let update_slot = account.remote_slot();
+            let update_slot = account.remote_slot().max(update_slot);
             if in_bank_slot == update_slot {
                 if let Some(projected_ata_clone_request) =
                     projected_ata_clone_request
@@ -2528,7 +2530,7 @@ where
                             raw_delegation_actions,
                         ),
                         delegated_to_other,
-                        source_slot: None,
+                        source_slot: Some(update_slot),
                     },
                     subscription_clone_context.clone(),
                 )

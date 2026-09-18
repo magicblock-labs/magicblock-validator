@@ -303,78 +303,85 @@ where
         } in accounts_fully_resolved.into_iter()
         {
             // If the account is delegated we set the owner and delegation state
-            let (commit_frequency_ms, delegated_to_other, delegation_actions) =
-                if let Some(delegation_record_data) = delegation_record {
-                    // NOTE: failing here is fine when resolving all accounts for a transaction
-                    // since if something is off we better not run it anyways
-                    // However we may consider a different behavior when user is getting
-                    // multiple accounts.
-                    let (delegation_record, delegation_actions) = match this
-                        .parse_delegation_record(
-                            delegation_record_data.data(),
-                            delegation_record_pubkey,
-                        ) {
-                        Ok(x) => x,
-                        Err(err) => {
-                            let releases = owned_by_deleg
-                                .iter()
-                                .map(|(pubkey, _, _)| *pubkey)
-                                .chain(record_subs.iter().copied())
-                                .map(|pubkey| SubscriptionRelease::Pubkey {
+            let (
+                commit_frequency_ms,
+                delegated_to_other,
+                delegation_actions,
+                source_slot,
+            ) = if let Some(delegation_record_data) = delegation_record {
+                // NOTE: failing here is fine when resolving all accounts for a transaction
+                // since if something is off we better not run it anyways
+                // However we may consider a different behavior when user is getting
+                // multiple accounts.
+                let (delegation_record, delegation_actions) = match this
+                    .parse_delegation_record(
+                        delegation_record_data.data(),
+                        delegation_record_pubkey,
+                    ) {
+                    Ok(x) => x,
+                    Err(err) => {
+                        let releases = owned_by_deleg
+                            .iter()
+                            .map(|(pubkey, _, _)| *pubkey)
+                            .chain(record_subs.iter().copied())
+                            .map(|pubkey| SubscriptionRelease::Pubkey {
+                                pubkey,
+                                reason: SubscriptionReason::DirectAccount,
+                            })
+                            .chain(record_subs.iter().copied().map(|pubkey| {
+                                SubscriptionRelease::Pubkey {
                                     pubkey,
-                                    reason: SubscriptionReason::DirectAccount,
-                                })
-                                .chain(record_subs.iter().copied().map(|pubkey| {
-                                    SubscriptionRelease::Pubkey {
-                                        pubkey,
-                                        reason: SubscriptionReason::DelegationRecord,
-                                    }
-                                }))
-                                .collect::<Vec<_>>();
-                            release_subs(
-                                &this.remote_account_provider,
-                                releases,
-                            )
+                                    reason:
+                                        SubscriptionReason::DelegationRecord,
+                                }
+                            }))
+                            .collect::<Vec<_>>();
+                        release_subs(&this.remote_account_provider, releases)
                             .await;
-                            return Err(err);
-                        }
-                    };
-
-                    trace!(pubkey = %pubkey, "Delegation record found");
-
-                    let delegated_to_other =
-                        this.get_delegated_to_other(&delegation_record);
-
-                    let commit_freq = this.apply_delegation_record_to_account(
-                        pubkey,
-                        &mut account,
-                        &delegation_record,
-                    );
-
-                    // Skip high-cardinality owner programs such as SPL Token.
-                    if account.delegated()
-                        && !this
-                            .programs_not_to_subscribe
-                            .contains(&delegation_record.owner)
-                    {
-                        owner_programs_to_subscribe
-                            .insert(delegation_record.owner);
+                        return Err(err);
                     }
-
-                    let delegation_actions = if account.delegated() {
-                        delegation_actions.unwrap_or_default()
-                    } else {
-                        DelegationActions::default()
-                    };
-
-                    (commit_freq, delegated_to_other, delegation_actions)
-                } else if is_internal_dlp_account_data(account.data()) {
-                    (None, None, DelegationActions::default())
-                } else {
-                    missing_delegation_record
-                        .push((pubkey, account.remote_slot()));
-                    (None, None, DelegationActions::default())
                 };
+
+                trace!(pubkey = %pubkey, "Delegation record found");
+
+                let delegated_to_other =
+                    this.get_delegated_to_other(&delegation_record);
+
+                // Fetch slot before the delegation slot is stamped on
+                let source_slot = Some(account.remote_slot());
+                let commit_freq = this.apply_delegation_record_to_account(
+                    pubkey,
+                    &mut account,
+                    &delegation_record,
+                );
+
+                // Skip high-cardinality owner programs such as SPL Token.
+                if account.delegated()
+                    && !this
+                        .programs_not_to_subscribe
+                        .contains(&delegation_record.owner)
+                {
+                    owner_programs_to_subscribe.insert(delegation_record.owner);
+                }
+
+                let delegation_actions = if account.delegated() {
+                    delegation_actions.unwrap_or_default()
+                } else {
+                    DelegationActions::default()
+                };
+
+                (
+                    commit_freq,
+                    delegated_to_other,
+                    delegation_actions,
+                    source_slot,
+                )
+            } else if is_internal_dlp_account_data(account.data()) {
+                (None, None, DelegationActions::default(), None)
+            } else {
+                missing_delegation_record.push((pubkey, account.remote_slot()));
+                (None, None, DelegationActions::default(), None)
+            };
             let cleanup_delegated_subscription = account.delegated();
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
                 && this.accounts_bank.get_account(&pubkey).is_some_and(
@@ -388,7 +395,7 @@ where
                     delegation_actions,
                 ),
                 delegated_to_other,
-                source_slot: None,
+                source_slot,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {
