@@ -141,6 +141,7 @@ fn classify_single_account(
                             commit_frequency_ms: None,
                             post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
+                            source_slot: None,
                         });
                     }
                 }
@@ -387,6 +388,7 @@ where
                     delegation_actions,
                 ),
                 delegated_to_other,
+                source_slot: None,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {

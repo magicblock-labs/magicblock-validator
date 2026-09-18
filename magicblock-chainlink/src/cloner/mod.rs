@@ -101,6 +101,10 @@ pub struct AccountCloneRequest {
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
     pub delegated_to_other: Option<Pubkey>,
+    /// Freshest chain slot the request data was derived from, when it
+    /// differs from `account.remote_slot()`: a delegated clone carries its
+    /// delegation slot, so freshness against a plain bank copy is judged here.
+    pub source_slot: Option<u64>,
 }
 
 #[async_trait]

@@ -1074,12 +1074,52 @@ where
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
                 let request_slot = request.account.remote_slot();
+                // A delegated request carries its delegation slot; a plain
+                // local copy supersedes it only if newer than the request's
+                // source view.
+                let freshness_slot = if request.account.delegated()
+                    && !account.delegated()
+                    && !account.undelegating()
+                {
+                    request.source_slot.unwrap_or(request_slot)
+                } else {
+                    request_slot
+                };
                 (active_delegation_satisfies_request
                     && Self::account_is_actively_delegated(&account))
-                    || local_slot > request_slot
+                    || local_slot > freshness_slot
                     || (local_slot == request_slot
                         && account.eq(&request.account))
             })
+    }
+
+    /// A delegated request is stamped with its delegation slot, which can
+    /// trail a plain bank copy the request was built from (or one that landed
+    /// while it waited for ownership). Raise the stamp to that copy's slot so
+    /// the clone advances over it, but only when the request's source view is
+    /// at least as fresh; an older projection keeps its slot and is rejected.
+    fn raise_delegated_stamp_over_plain(
+        &self,
+        request: &mut AccountCloneRequest,
+    ) {
+        if !request.account.delegated() {
+            return;
+        }
+        let Some(in_bank) = self.accounts_bank.get_account(&request.pubkey)
+        else {
+            return;
+        };
+        let plain_slot = in_bank.remote_slot();
+        let source_slot = request
+            .source_slot
+            .unwrap_or_else(|| request.account.remote_slot());
+        if !in_bank.delegated()
+            && !in_bank.undelegating()
+            && plain_slot > request.account.remote_slot()
+            && plain_slot <= source_slot
+        {
+            request.account.set_remote_slot(plain_slot);
+        }
     }
 
     fn is_empty_placeholder_account(account: &AccountSharedData) -> bool {
@@ -1486,7 +1526,7 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
-                    let Some(owned_request) = request.take() else {
+                    let Some(mut owned_request) = request.take() else {
                         let err = ClonerError::CommittorServiceError(
                             "owner missing request for clone".to_string(),
                         );
@@ -1500,6 +1540,7 @@ where
                             Box::new(err),
                         ));
                     };
+                    self.raise_delegated_stamp_over_plain(&mut owned_request);
                     let active_delegation_satisfies_request =
                         !owned_request.post_delegation_mode.has_actions()
                             && owned_request.delegated_to_other.is_none()
@@ -2487,6 +2528,7 @@ where
                             raw_delegation_actions,
                         ),
                         delegated_to_other,
+                        source_slot: None,
                     },
                     subscription_clone_context.clone(),
                 )
@@ -4630,6 +4672,7 @@ where
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slot: None,
             })
             .await?;
         Ok(())

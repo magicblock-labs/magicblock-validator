@@ -244,7 +244,6 @@ where
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
         this,
-        &ata_pubkey,
         &base_ata,
         eata_account,
         deleg_record,
@@ -258,6 +257,9 @@ where
             delegation_actions.clone(),
         ),
         delegated_to_other: None,
+        source_slot: Some(
+            base_ata.remote_slot().max(eata_account.remote_slot()),
+        ),
     })
 }
 
@@ -416,7 +418,6 @@ where
 
     if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
         this,
-        &ata_pubkey,
         &ata_account,
         &eata_account,
         &deleg_record,
@@ -428,7 +429,6 @@ where
 
 pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
-    ata_pubkey: &Pubkey,
     ata_account: &AccountSharedData,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -461,21 +461,8 @@ where
     };
     // The projection only changes at the delegation slot, so stamp that
     // rather than a fetch context slot: every sighting of one delegation then
-    // carries the same slot. A plain ATA already in the bank raises the floor
-    // so the projection still advances over it, but only when the projection
-    // was built from data at least that fresh; a remote fetch slot never does.
-    let plain_in_bank_slot = this
-        .accounts_bank
-        .get_account(ata_pubkey)
-        .filter(|in_bank| {
-            !in_bank.delegated()
-                && !in_bank.undelegating()
-                && in_bank.remote_slot() <= ata_account.remote_slot()
-        })
-        .map(|in_bank| in_bank.remote_slot())
-        .unwrap_or_default();
-    projected_ata
-        .set_remote_slot(deleg_record.delegation_slot.max(plain_in_bank_slot));
+    // carries the same slot. The source view is kept on the clone request.
+    projected_ata.set_remote_slot(deleg_record.delegation_slot);
     projected_ata.set_delegated(true);
     Some(projected_ata)
 }
@@ -678,6 +665,7 @@ where
         let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
         let mut actions = None;
+        let mut source_slot = None;
 
         if let Some(eata_shared) = &input.eata_shared {
             if let Some(Some(deleg)) = deleg_iter.next() {
@@ -689,12 +677,18 @@ where
                 if let Some(projected_ata) =
                     maybe_project_delegated_ata_from_eata(
                         this,
-                        &input.ata_pubkey,
                         input.ata_account.account_shared_data(),
                         eata_shared,
                         &deleg_record,
                     )
                 {
+                    source_slot = Some(
+                        input
+                            .ata_account
+                            .account_shared_data()
+                            .remote_slot()
+                            .max(eata_shared.remote_slot()),
+                    );
                     account_to_clone = projected_ata;
                     actions = delegation_actions;
                 }
@@ -709,6 +703,7 @@ where
                 actions.unwrap_or_default(),
             ),
             delegated_to_other,
+            source_slot,
         });
     }
 
