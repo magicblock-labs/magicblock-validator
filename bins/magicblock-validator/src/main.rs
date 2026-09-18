@@ -15,6 +15,9 @@ use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tracing::{error, info, instrument};
 
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn init_logger() {
     use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
     init_with_config(LoggingConfig {

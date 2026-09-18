@@ -10,6 +10,9 @@ use replicator::{ReplicationClient, ReplicationDispatcher};
 use tokio::sync::mpsc;
 use tracing::{error, info};
 
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn init_logger() {
     use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
     init_with_config(LoggingConfig {
