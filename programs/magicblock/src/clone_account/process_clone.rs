@@ -66,7 +66,6 @@ pub(crate) fn process_clone_account(
             &mut account,
             &pubkey,
             Some(fields.remote_slot),
-            fields.delegated,
             invoke_context,
         )?;
 

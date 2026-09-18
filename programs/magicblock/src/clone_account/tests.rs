@@ -295,7 +295,7 @@ fn test_clone_account_allows_same_slot_delegated_update_over_plain_account() {
 }
 
 #[test]
-fn test_clone_account_allows_older_slot_delegated_update_over_plain_account() {
+fn test_clone_account_rejects_older_slot_delegated_update_over_plain_account() {
     init_logger!();
     let pubkey = Pubkey::new_unique();
     let accounts = setup_with_account(pubkey, 100, 50);
@@ -314,14 +314,14 @@ fn test_clone_account_allows_older_slot_delegated_update_over_plain_account() {
         &ix.data,
         tx_accounts(accounts, &ix.accounts),
         ix.accounts,
-        Ok(()),
+        Err(MagicBlockProgramError::OutOfOrderUpdate.into()),
     );
     result.drain(0..1);
     let account = result.drain(0..1).next().unwrap();
 
-    assert_eq!(account.lamports(), 200);
-    assert!(account.delegated());
-    assert_eq!(account.remote_slot(), 42);
+    assert_eq!(account.lamports(), 100);
+    assert!(!account.delegated());
+    assert_eq!(account.remote_slot(), 50);
 }
 
 #[test]

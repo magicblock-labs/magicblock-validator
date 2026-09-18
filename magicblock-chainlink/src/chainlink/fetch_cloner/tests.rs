@@ -9565,8 +9565,8 @@ async fn test_delegated_eata_update_projects_existing_plain_ata_in_bank() {
     assert!(projected_ata.delegated());
     assert_eq!(
         projected_ata.remote_slot(),
-        EATA_SLOT,
-        "Projected ATA should carry the delegation slot",
+        PLAIN_ATA_SLOT,
+        "Projected ATA should advance over the plain ATA already in the bank",
     );
 
     let ata_data = projected_ata.data();
@@ -9673,8 +9673,8 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
     assert_eq!(projected_ata.data().len(), expected_len);
     assert_eq!(
         projected_ata.remote_slot(),
-        EATA_SLOT,
-        "Projected ATA should carry the delegation slot",
+        PLAIN_ATA_SLOT,
+        "Projected ATA should advance over the plain ATA already in the bank",
     );
 
     let ata_data = projected_ata.data();

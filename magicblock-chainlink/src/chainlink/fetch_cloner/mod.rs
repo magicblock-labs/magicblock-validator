@@ -1074,12 +1074,9 @@ where
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
                 let request_slot = request.account.remote_slot();
-                let delegation_over_plain = request.account.delegated()
-                    && !account.delegated()
-                    && !account.undelegating();
                 (active_delegation_satisfies_request
                     && Self::account_is_actively_delegated(&account))
-                    || (local_slot > request_slot && !delegation_over_plain)
+                    || local_slot > request_slot
                     || (local_slot == request_slot
                         && account.eq(&request.account))
             })
@@ -2305,12 +2302,10 @@ where
         // The stricter intent is to ignore non-advancing subscription updates: if the bank
         // already has the account at the same slot, then a normal/plain update at that slot is
         // treated as stale/duplicate and should not overwrite local state, with the following
-        // exceptions:
+        // exception:
         //
-        //  - A delegated update carries the delegation slot, which can trail a plain copy
-        //    fetched later; a delegation always overrides a plain version.
-        //  - In the undelegate/redelegate same-slot path, the bank can still hold an
-        //    undelegating version while the subscription update carries the delegated state
+        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
+        //    or undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
         //
         // An actively delegated bank copy is authoritative: drop the update and release the
@@ -2332,11 +2327,13 @@ where
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                 let bank_slot = in_bank.remote_slot();
                 let update_slot = account.remote_slot();
-                // Delegated clones carry the delegation slot, so a delegation
-                // always wins over a plain copy fetched at a later slot.
-                let delegated_refresh = account.delegated()
-                    && (!in_bank.undelegating() || bank_slot == update_slot);
-                if bank_slot >= update_slot && !delegated_refresh {
+                let same_slot_delegated_refresh = bank_slot == update_slot
+                    && account.delegated()
+                    && (!in_bank.delegated() || in_bank.undelegating());
+                if bank_slot > update_slot
+                    || (bank_slot == update_slot
+                        && !same_slot_delegated_refresh)
+                {
                     Some(bank_slot)
                 } else {
                     None
@@ -2676,14 +2673,12 @@ where
         &self,
         candidate: ParkedCollisionCandidate,
     ) {
-        // A pre-delegation bank copy must be force-refreshed; only a
-        // delegated copy at the sighted slot or newer settles the candidate.
+        // A pre-delegation bank copy must be force-refreshed; a delegated copy
+        // (stamped with its delegation slot) settles the candidate.
         let fresh_delegated_in_bank = self
             .accounts_bank
             .get_account(&candidate.pubkey)
-            .is_some_and(|in_bank| {
-                in_bank.delegated() && in_bank.remote_slot() >= candidate.slot
-            });
+            .is_some_and(|in_bank| in_bank.delegated());
         if fresh_delegated_in_bank {
             return;
         }
@@ -2801,9 +2796,7 @@ where
             }
             let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
             let settled = in_bank.as_ref().is_some_and(|in_bank| {
-                in_bank.remote_slot() > candidate.slot
-                    || (in_bank.remote_slot() == candidate.slot
-                        && in_bank.delegated())
+                in_bank.delegated() || in_bank.remote_slot() > candidate.slot
             });
             if settled {
                 return;

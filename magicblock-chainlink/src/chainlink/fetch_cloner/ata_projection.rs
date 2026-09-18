@@ -244,6 +244,7 @@ where
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
         this,
+        &ata_pubkey,
         &base_ata,
         eata_account,
         deleg_record,
@@ -415,6 +416,7 @@ where
 
     if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
         this,
+        &ata_pubkey,
         &ata_account,
         &eata_account,
         &deleg_record,
@@ -426,6 +428,7 @@ where
 
 pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
+    ata_pubkey: &Pubkey,
     ata_account: &AccountSharedData,
     eata_account: &AccountSharedData,
     deleg_record: &DelegationRecord,
@@ -456,10 +459,18 @@ where
             return None;
         }
     };
-    // Delegated to us: the projection only changes at the delegation slot,
-    // so stamp that rather than the fetch context slot (see
-    // `apply_delegation_record_to_account`).
-    projected_ata.set_remote_slot(deleg_record.delegation_slot);
+    // The projection only changes at the delegation slot, so stamp that
+    // rather than a fetch context slot: every sighting of one delegation then
+    // carries the same slot. A plain ATA already in the bank raises the floor
+    // so the projection still advances over it; a remote fetch slot never does.
+    let plain_in_bank_slot = this
+        .accounts_bank
+        .get_account(ata_pubkey)
+        .filter(|in_bank| !in_bank.delegated() && !in_bank.undelegating())
+        .map(|in_bank| in_bank.remote_slot())
+        .unwrap_or_default();
+    projected_ata
+        .set_remote_slot(deleg_record.delegation_slot.max(plain_in_bank_slot));
     projected_ata.set_delegated(true);
     Some(projected_ata)
 }
@@ -673,6 +684,7 @@ where
                 if let Some(projected_ata) =
                     maybe_project_delegated_ata_from_eata(
                         this,
+                        &input.ata_pubkey,
                         input.ata_account.account_shared_data(),
                         eata_shared,
                         &deleg_record,

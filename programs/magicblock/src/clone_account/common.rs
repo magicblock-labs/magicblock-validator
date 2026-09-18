@@ -127,7 +127,6 @@ pub fn validate_remote_slot(
     account: &mut TransactionAccountViewMut<'_>,
     pubkey: &Pubkey,
     incoming_remote_slot: Option<u64>,
-    incoming_delegated: bool,
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
     let Some(incoming) = incoming_remote_slot else {
@@ -135,13 +134,7 @@ pub fn validate_remote_slot(
     };
     let current = account.remote_slot();
 
-    if incoming < current
-        && !delegation_over_plain(
-            incoming_delegated,
-            account.delegated(),
-            account.undelegating(),
-        )
-    {
+    if incoming < current {
         ic_msg!(
             invoke_context,
             "Account {} incoming remote_slot {} is older than current {}; rejected",
@@ -158,16 +151,6 @@ pub fn validate_remote_slot(
     );
 
     Ok(())
-}
-
-/// A delegated clone carries the delegation slot, which can trail a plain
-/// copy fetched later; the delegation is authoritative over a plain target.
-fn delegation_over_plain(
-    incoming_delegated: bool,
-    current_delegated: bool,
-    current_undelegating: bool,
-) -> bool {
-    incoming_delegated && !current_delegated && !current_undelegating
 }
 
 /// Adjusts validator authority lamports by delta.
@@ -483,13 +466,7 @@ pub fn set_account_from_fields(
         return Err(
             MagicBlockProgramError::DuplicateDelegatedAccountClone.into()
         );
-    } else if acc.remote_slot() > fields.remote_slot
-        && !delegation_over_plain(
-            fields.delegated,
-            acc.delegated(),
-            acc.undelegating(),
-        )
-    {
+    } else if acc.remote_slot() > fields.remote_slot {
         return Err(MagicBlockProgramError::OutOfOrderUpdate.into());
     }
 
