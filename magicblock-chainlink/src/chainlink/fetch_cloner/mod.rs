@@ -89,7 +89,7 @@ use crate::{
     },
     cloner::{
         errors::{ClonerError, ClonerResult},
-        AccountCloneRequest, ClonePostDelegationMode, Cloner,
+        AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
         DelegationActions,
     },
     remote_account_provider::{
@@ -1074,12 +1074,54 @@ where
             .is_some_and(|account| {
                 let local_slot = account.remote_slot();
                 let request_slot = request.account.remote_slot();
+                // A delegated request carries its delegation slot; a plain
+                // local copy supersedes it only if newer than the request's
+                // source view.
+                let freshness_slot = if request.account.delegated()
+                    && !account.delegated()
+                    && !account.undelegating()
+                {
+                    request
+                        .source_slots
+                        .map_or(request_slot, |slots| slots.data)
+                } else {
+                    request_slot
+                };
                 (active_delegation_satisfies_request
                     && Self::account_is_actively_delegated(&account))
-                    || local_slot > request_slot
+                    || local_slot > freshness_slot
                     || (local_slot == request_slot
                         && account.eq(&request.account))
             })
+    }
+
+    /// A delegated request is stamped with its delegation slot, which can
+    /// trail a plain bank copy the request was built from (or one that landed
+    /// while it waited for ownership). Raise the stamp to that copy's slot so
+    /// the clone advances over it, but only when the request's source view is
+    /// at least as fresh; an older projection keeps its slot and is rejected.
+    fn raise_delegated_stamp_over_plain(
+        &self,
+        request: &mut AccountCloneRequest,
+    ) {
+        if !request.account.delegated() {
+            return;
+        }
+        let Some(in_bank) = self.accounts_bank.get_account(&request.pubkey)
+        else {
+            return;
+        };
+        let plain_slot = in_bank.remote_slot();
+        let source_slot = request
+            .source_slots
+            .map_or(request.account.remote_slot(), |slots| slots.data);
+        if !in_bank.delegated()
+            && !in_bank.undelegating()
+            && plain_slot > request.account.remote_slot()
+            && plain_slot <= source_slot
+        {
+            request.account.set_remote_slot(plain_slot);
+        }
     }
 
     fn is_empty_placeholder_account(account: &AccountSharedData) -> bool {
@@ -1486,7 +1528,7 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
-                    let Some(owned_request) = request.take() else {
+                    let Some(mut owned_request) = request.take() else {
                         let err = ClonerError::CommittorServiceError(
                             "owner missing request for clone".to_string(),
                         );
@@ -1500,6 +1542,7 @@ where
                             Box::new(err),
                         ));
                     };
+                    self.raise_delegated_stamp_over_plain(&mut owned_request);
                     let active_delegation_satisfies_request =
                         !owned_request.post_delegation_mode.has_actions()
                             && owned_request.delegated_to_other.is_none()
@@ -1797,9 +1840,15 @@ where
         }
 
         let result = async {
+            // Dependencies must be at least as fresh as every input view,
+            // not just the delegation slot stamped on the target.
+            let dependency_floor = request
+                .source_slots
+                .map_or(0, |slots| slots.view)
+                .max(request.account.remote_slot());
             self.ensure_delegation_action_dependencies(
                 request.pubkey,
-                request.account.remote_slot(),
+                dependency_floor,
                 delegation_actions,
                 fetch_context.clone(),
             )
@@ -1889,7 +1938,7 @@ where
                         Arc::clone(&self.pending_clones),
                         pubkey,
                     );
-                    let Some(owned_request) = request.take() else {
+                    let Some(mut owned_request) = request.take() else {
                         let err = ClonerError::CommittorServiceError(
                             "owner missing request for undelegation clone"
                                 .to_string(),
@@ -1912,6 +1961,7 @@ where
                         clone_intent,
                         ChainlinkCloneOutcome::Submitted,
                     );
+                    self.raise_delegated_stamp_over_plain(&mut owned_request);
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -2271,8 +2321,8 @@ where
         }
 
         let update_source = update.source;
-        let (resolved_account, deleg_record, delegation_actions) = self
-            .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
+        let (resolved_account, deleg_record, delegation_actions, source_slots) =
+            self.resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
                 &companion_fetch_log_context,
             )
@@ -2280,6 +2330,11 @@ where
         let Some(account) = resolved_account else {
             return;
         };
+        // Resolution may re-fetch at a newer slot than the sighting; order and
+        // source the update by that view.
+        let source_slots =
+            source_slots.unwrap_or(CloneSourceSlots::single(update_slot));
+        let update_slot = update_slot.max(source_slots.data);
         let subscription_clone_context =
             AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
@@ -2308,10 +2363,27 @@ where
         //    or undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
         //
+        // An actively delegated bank copy is authoritative: drop the update and release the
+        // direct subscription before any slot comparison.
+        //
+        if self
+            .accounts_bank
+            .get_account(&pubkey)
+            .is_some_and(|in_bank| {
+                in_bank.delegated() && !in_bank.undelegating()
+            })
+        {
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
+            return;
+        }
+
         let non_advancing_slot =
             self.accounts_bank.get_account(&pubkey).and_then(|in_bank| {
                 let bank_slot = in_bank.remote_slot();
-                let update_slot = account.remote_slot();
+                // A delegated update is stamped with its delegation slot;
+                // order it by the sighting view instead.
+                let update_slot = account.remote_slot().max(update_slot);
                 let same_slot_delegated_refresh = bank_slot == update_slot
                     && account.delegated()
                     && (!in_bank.delegated() || in_bank.undelegating());
@@ -2326,7 +2398,7 @@ where
             });
 
         if let Some(in_bank_slot) = non_advancing_slot {
-            let update_slot = account.remote_slot();
+            let update_slot = account.remote_slot().max(update_slot);
             if in_bank_slot == update_slot {
                 if let Some(projected_ata_clone_request) =
                     projected_ata_clone_request
@@ -2357,12 +2429,6 @@ where
 
         let mut undelegation_completed_on_chain = false;
         if let Some(in_bank) = self.accounts_bank.get_account(&pubkey) {
-            if in_bank.delegated() && !in_bank.undelegating() {
-                self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                    .await;
-                return;
-            }
-
             if in_bank.undelegating() {
                 debug!(
                     pubkey = %pubkey,
@@ -2478,6 +2544,7 @@ where
                             raw_delegation_actions,
                         ),
                         delegated_to_other,
+                        source_slots: Some(source_slots),
                     },
                     subscription_clone_context.clone(),
                 )
@@ -2665,7 +2732,9 @@ where
         candidate: ParkedCollisionCandidate,
     ) {
         // A pre-delegation bank copy must be force-refreshed; only a
-        // delegated copy at the sighted slot or newer settles the candidate.
+        // delegated copy at the sighted slot or newer settles the candidate
+        // here. A delegated copy stamped with an older delegation slot is
+        // judged against the released record's generation below.
         let fresh_delegated_in_bank = self
             .accounts_bank
             .get_account(&candidate.pubkey)
@@ -2788,10 +2857,13 @@ where
                 return;
             }
             let in_bank = self.accounts_bank.get_account(&candidate.pubkey);
+            // A delegated copy carries its delegation slot: settled only if
+            // it matches or supersedes the released record's generation.
             let settled = in_bank.as_ref().is_some_and(|in_bank| {
                 in_bank.remote_slot() > candidate.slot
-                    || (in_bank.remote_slot() == candidate.slot
-                        && in_bank.delegated())
+                    || (in_bank.delegated()
+                        && in_bank.remote_slot()
+                            >= deleg_record.delegation_slot)
             });
             if settled {
                 return;
@@ -2921,11 +2993,17 @@ where
                         |(missing_pubkey, _)| missing_pubkey != &pubkey,
                     ) =>
             {
-                let bank_slot = self
-                    .accounts_bank
-                    .get_account(&pubkey)
-                    .map(|in_bank| in_bank.remote_slot());
-                if bank_slot.is_none_or(|slot| slot < account.remote_slot()) {
+                let in_bank = self.accounts_bank.get_account(&pubkey);
+                let bank_slot = in_bank.as_ref().map(|acc| acc.remote_slot());
+                // A delegated copy carries its delegation slot, so it is
+                // judged against the record's generation, not the sighting.
+                if in_bank.is_none_or(|acc| {
+                    if acc.delegated() {
+                        acc.remote_slot() < deleg_record.delegation_slot
+                    } else {
+                        acc.remote_slot() < account.remote_slot()
+                    }
+                }) {
                     trace!(
                         pubkey = %pubkey,
                         bank_slot,
@@ -3102,6 +3180,8 @@ where
         Option<AccountSharedData>,
         Option<DelegationRecord>,
         DelegationActions,
+        // Chain views behind a resolved delegated account or projection
+        Option<CloneSourceSlots>,
     ) {
         let ForwardedSubscriptionUpdate {
             pubkey,
@@ -3205,6 +3285,7 @@ where
                                     );
                                 }
 
+                                let resolved_slot = account.remote_slot();
                                 self.apply_delegation_record_to_account(
                                     pubkey,
                                     &mut account,
@@ -3239,12 +3320,15 @@ where
                                     Some(account.into_account_shared_data()),
                                     Some(delegation_record),
                                     delegation_actions.unwrap_or_default(),
+                                    Some(CloneSourceSlots::single(
+                                        resolved_slot,
+                                    )),
                                 )
                             } else {
                                 // If the delegation record is invalid we cannot clone the account
                                 // since something is corrupt and we wouldn't know what owner to
                                 // use, etc.
-                                (None, None, DelegationActions::default())
+                                (None, None, DelegationActions::default(), None)
                             }
                         } else if let Ok(request) =
                             UndelegationRequest::try_from_bytes_with_discriminator(
@@ -3279,19 +3363,21 @@ where
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
+                                None,
                             )
                         } else if is_internal_dlp_account_data(account.data()) {
                             (
                                 Some(account.into_account_shared_data()),
                                 None,
                                 DelegationActions::default(),
+                                None,
                             )
                         } else {
                             trace!(
                                 pubkey = %pubkey,
                                 "Skipping DLP-owned subscription update without delegation record"
                             );
-                            (None, None, DelegationActions::default())
+                            (None, None, DelegationActions::default(), None)
                         };
 
                         if !subs_to_remove.is_empty() {
@@ -3322,7 +3408,7 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                     Err(err) => {
                         log_companion_fetch_failure(
@@ -3342,11 +3428,12 @@ where
                             )
                             .await;
                         }
-                        (None, None, DelegationActions::default())
+                        (None, None, DelegationActions::default(), None)
                     }
                 }
             } else {
-                let (account, deleg_record) = self
+                let ata_slot = account.remote_slot();
+                let (account, deleg_record, eata_slot) = self
                     .maybe_project_ata_from_subscription_update(
                         pubkey,
                         account,
@@ -3354,20 +3441,28 @@ where
                     )
                     .await;
                 if let Some((deleg_record, actions)) = deleg_record {
+                    // The base ATA vouches for the data; the eATA snapshot
+                    // bounds the projection's view.
+                    let source_slots =
+                        eata_slot.map(|eata_slot| CloneSourceSlots {
+                            data: ata_slot,
+                            view: ata_slot.max(eata_slot),
+                        });
                     (
                         Some(account),
                         Some(deleg_record),
                         actions.unwrap_or_default(),
+                        source_slots,
                     )
                 } else {
-                    (Some(account), None, DelegationActions::default())
+                    (Some(account), None, DelegationActions::default(), None)
                 }
             }
         } else {
             // This should not happen since we call this method with sub updates which always hold
             // a fresh remote account
             error!(pubkey = %pubkey, account = ?account, "BUG: Received subscription update without fresh account");
-            (None, None, DelegationActions::default())
+            (None, None, DelegationActions::default(), None)
         }
     }
 
@@ -3405,6 +3500,7 @@ where
     ) -> (
         AccountSharedData,
         Option<(DelegationRecord, Option<DelegationActions>)>,
+        Option<u64>,
     ) {
         ata_projection::maybe_project_ata_from_subscription_update(
             self,
@@ -4610,6 +4706,7 @@ where
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             })
             .await?;
         Ok(())

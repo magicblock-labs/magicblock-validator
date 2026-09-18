@@ -53,6 +53,7 @@ use crate::{
         cloner_stub::ClonerStub,
         deleg::{
             add_delegation_record_for, add_delegation_record_with_actions_for,
+            add_delegation_record_with_slot_for,
             add_invalid_delegation_record_for, delegation_record_to_vec,
         },
         eatas::{
@@ -374,6 +375,7 @@ fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
         commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
+        source_slots: None,
     }
 }
 
@@ -449,33 +451,6 @@ fn clone_classification_treats_action_dependency_as_action_dependency() {
         TestFetchCloner::clone_intent_for_request(&request),
         ChainlinkCloneIntent::ActionDependency
     );
-}
-
-fn add_delegation_record_with_slot_for(
-    rpc_client: &ChainRpcClientMock,
-    pubkey: Pubkey,
-    authority: Pubkey,
-    owner: Pubkey,
-    delegation_slot: u64,
-) -> Pubkey {
-    let deleg_record_pubkey =
-        dlp_api::pda::delegation_record_pda_from_delegated_account(&pubkey);
-    let deleg_record = DelegationRecord {
-        authority,
-        owner,
-        delegation_slot,
-        lamports: 1_000,
-        commit_frequency_ms: 2_000,
-    };
-    rpc_client.add_account(
-        deleg_record_pubkey,
-        Account {
-            owner: dlp_api::id(),
-            data: delegation_record_to_vec(&deleg_record),
-            ..Default::default()
-        },
-    );
-    deleg_record_pubkey
 }
 
 /// Helper function to initialize FetchCloner for tests with subscription updates
@@ -1120,7 +1095,7 @@ async fn test_get_account_releases_delegation_record_direct_ref_when_already_wat
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, _actions) = fetch_cloner
+    let (resolved_account, delegation_record, _actions, _) = fetch_cloner
         .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
             update,
             &companion_fetch_log_context,
@@ -5088,7 +5063,7 @@ async fn test_discovered_dlp_owned_account_without_delegation_record_is_ignored(
         context_slot: update.account.slot(),
     };
 
-    let (resolved_account, delegation_record, delegation_actions) =
+    let (resolved_account, delegation_record, delegation_actions, _) =
         fetch_cloner
             .resolve_account_to_clone_from_forwarded_sub_with_unsubscribe(
                 update,
@@ -6362,11 +6337,12 @@ async fn test_released_collision_candidate_keeps_pending_undelegation_locked() {
     )
     .await;
 
-    add_delegation_record_for(
+    add_delegation_record_with_slot_for(
         &rpc_client,
         account_pubkey,
         validator_pubkey,
         account_owner,
+        1,
     );
     let delegation_record_pubkey =
         dlp_api::pda::delegation_record_pda_from_delegated_account(
@@ -6702,7 +6678,7 @@ async fn test_released_collision_candidate_record_lookup_uses_effective_fetch_sl
         .expect("release must clone the candidate from the effective slot");
     assert!(in_bank.delegated());
     assert_eq!(in_bank.owner(), &account_owner);
-    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT);
+    assert_eq!(in_bank.remote_slot(), CHAIN_SLOT - 10);
 }
 
 // A released collision candidate delegated to another validator must be
@@ -7304,7 +7280,7 @@ async fn test_same_slot_delegated_subscription_update_overrides_undelegating_ban
                 .is_some_and(|account| {
                     account.delegated()
                         && !account.undelegating()
-                        && account.remote_slot() == CURRENT_SLOT
+                        && account.remote_slot() == CURRENT_SLOT + 1
                         && account.owner() == &account_owner
                 });
             if refreshed {
@@ -8129,7 +8105,7 @@ async fn test_ata_subscription_update_projects_eata_when_chain_slot_lags() {
         .get_account(&ata_pubkey)
         .expect("ATA should be projected from delegated eATA");
     assert!(projected_ata.delegated());
-    assert_eq!(projected_ata.remote_slot(), ATA_SLOT);
+    assert_eq!(projected_ata.remote_slot(), EATA_SLOT);
 
     let ata_data = projected_ata.data();
     assert!(
@@ -8334,6 +8310,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8386,6 +8363,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8438,6 +8416,7 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8486,6 +8465,7 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8548,6 +8528,7 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8604,6 +8585,7 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8655,6 +8637,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8747,6 +8730,7 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8868,6 +8852,7 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8951,6 +8936,7 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                         actions.clone(),
                     ),
                     delegated_to_other: None,
+                    source_slots: None,
                 },
                 AccountFetchContext::rpc_get_account(),
             )
@@ -9018,6 +9004,7 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9079,6 +9066,7 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 commit_frequency_ms: None,
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
+                source_slots: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9591,7 +9579,7 @@ async fn test_delegated_eata_update_projects_existing_plain_ata_in_bank() {
     assert_eq!(
         projected_ata.remote_slot(),
         PLAIN_ATA_SLOT,
-        "Projected ATA should preserve the freshest source slot",
+        "Projected ATA should advance over the plain ATA already in the bank",
     );
 
     let ata_data = projected_ata.data();
@@ -9699,7 +9687,7 @@ async fn test_delegated_eata_update_projects_existing_token_2022_ata_in_bank() {
     assert_eq!(
         projected_ata.remote_slot(),
         PLAIN_ATA_SLOT,
-        "Projected ATA should preserve the freshest source slot",
+        "Projected ATA should advance over the plain ATA already in the bank",
     );
 
     let ata_data = projected_ata.data();
@@ -10460,7 +10448,7 @@ async fn test_token_2022_native_ata_projection_normalizes_and_preserves_layout()
     assert_eq!(*projected_ata.owner(), TOKEN_2022_PROGRAM_ID);
     assert_eq!(projected_ata.lamports(), rent_exempt_reserve);
     assert_eq!(projected_ata.data().len(), expected_len);
-    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT);
+    assert_eq!(projected_ata.remote_slot(), CURRENT_SLOT + 1);
 
     let ata_data = projected_ata.data();
     let projected_token_account =

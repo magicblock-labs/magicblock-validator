@@ -21,7 +21,8 @@ use super::{
 };
 use crate::{
     cloner::{
-        AccountCloneRequest, ClonePostDelegationMode, Cloner, DelegationActions,
+        AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
+        DelegationActions,
     },
     remote_account_provider::{
         pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
@@ -257,6 +258,12 @@ where
             delegation_actions.clone(),
         ),
         delegated_to_other: None,
+        // Only the base ATA vouches for the layout data the projection
+        // carries; the eATA sighting still bounds dependency freshness.
+        source_slots: Some(CloneSourceSlots {
+            data: base_ata.remote_slot(),
+            view: base_ata.remote_slot().max(eata_account.remote_slot()),
+        }),
     })
 }
 
@@ -317,6 +324,8 @@ pub(crate) async fn maybe_project_ata_from_subscription_update<T, U, V, C>(
 ) -> (
     AccountSharedData,
     Option<(DelegationRecord, Option<DelegationActions>)>,
+    // Slot of the eATA snapshot a projection was built from
+    Option<u64>,
 )
 where
     T: ChainRpcClient,
@@ -325,13 +334,13 @@ where
     C: Cloner,
 {
     let Some(ata_info) = is_ata(&ata_pubkey, &ata_account) else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let Some((eata_pubkey, _)) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
     else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
@@ -356,7 +365,7 @@ where
 
     // Known-empty eATAs skip the fetch only if the subscription was already live.
     if was_watching && subscribed && is_known_empty_eata(this, &eata_pubkey) {
-        return (ata_account, None);
+        return (ata_account, None, None);
     }
 
     let (eata_account, definitively_not_found) = match this
@@ -396,7 +405,7 @@ where
         if definitively_not_found && subscribed {
             mark_eata_empty(this, eata_pubkey);
         }
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
 
     let deleg_record = delegation::fetch_and_parse_delegation_record(
@@ -409,7 +418,7 @@ where
     .await;
 
     let Some(deleg_record) = deleg_record else {
-        return (ata_account, None);
+        return (ata_account, None, None);
     };
     let (deleg_record, delegation_actions) = deleg_record;
 
@@ -419,9 +428,13 @@ where
         &eata_account,
         &deleg_record,
     ) {
-        return (projected_ata, Some((deleg_record, delegation_actions)));
+        return (
+            projected_ata,
+            Some((deleg_record, delegation_actions)),
+            Some(eata_account.remote_slot()),
+        );
     }
-    (ata_account, Some((deleg_record, delegation_actions)))
+    (ata_account, Some((deleg_record, delegation_actions)), None)
 }
 
 pub(crate) fn maybe_project_delegated_ata_from_eata<T, U, V, C>(
@@ -456,9 +469,10 @@ where
             return None;
         }
     };
-    let projected_slot =
-        ata_account.remote_slot().max(eata_account.remote_slot());
-    projected_ata.set_remote_slot(projected_slot);
+    // The projection only changes at the delegation slot, so stamp that
+    // rather than a fetch context slot: every sighting of one delegation then
+    // carries the same slot. The source view is kept on the clone request.
+    projected_ata.set_remote_slot(deleg_record.delegation_slot);
     projected_ata.set_delegated(true);
     Some(projected_ata)
 }
@@ -661,6 +675,7 @@ where
         let mut commit_frequency_ms = None;
         let mut delegated_to_other = None;
         let mut actions = None;
+        let mut source_slots = None;
 
         if let Some(eata_shared) = &input.eata_shared {
             if let Some(Some(deleg)) = deleg_iter.next() {
@@ -677,6 +692,12 @@ where
                         &deleg_record,
                     )
                 {
+                    let base_slot =
+                        input.ata_account.account_shared_data().remote_slot();
+                    source_slots = Some(CloneSourceSlots {
+                        data: base_slot,
+                        view: base_slot.max(eata_shared.remote_slot()),
+                    });
                     account_to_clone = projected_ata;
                     actions = delegation_actions;
                 }
@@ -691,6 +712,7 @@ where
                 actions.unwrap_or_default(),
             ),
             delegated_to_other,
+            source_slots,
         });
     }
 

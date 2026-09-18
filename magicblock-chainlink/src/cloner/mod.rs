@@ -101,6 +101,29 @@ pub struct AccountCloneRequest {
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
     pub delegated_to_other: Option<Pubkey>,
+    /// Chain views a delegated request was derived from, kept apart from the
+    /// delegation slot stamped on `account`. `None` means the account slot.
+    pub source_slots: Option<CloneSourceSlots>,
+}
+
+/// Chain views behind a delegated clone request.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloneSourceSlots {
+    /// Slot of the data the clone carries (for a projection, the base ATA).
+    /// A plain bank copy newer than this supersedes the request.
+    pub data: u64,
+    /// Freshest input view (for a projection, also the eATA sighting).
+    /// Action dependencies are refreshed at least to this slot.
+    pub view: u64,
+}
+
+impl CloneSourceSlots {
+    pub fn single(slot: u64) -> Self {
+        Self {
+            data: slot,
+            view: slot,
+        }
+    }
 }
 
 #[async_trait]

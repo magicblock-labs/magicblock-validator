@@ -124,6 +124,12 @@ where
 
     if is_delegated_to_us && !is_raw_eata {
         account.set_delegated(true);
+        // An account delegated to us only changes at its delegation slot, so
+        // stamp that instead of a fetch context slot: every sighting of the
+        // same delegation then carries the same slot and dedups as a duplicate.
+        if !is_confined {
+            account.set_remote_slot(delegation_record.delegation_slot);
+        }
     } else {
         account.set_delegated(false);
     }
