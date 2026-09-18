@@ -91,6 +91,10 @@ impl From<DelegationActions> for ClonePostDelegationMode {
     }
 }
 
+/// An account snapshot and the activation work to submit with its clone.
+///
+/// Source freshness is separate from the account's delegation stamp so a later
+/// sighting can refresh dependencies without identifying a new delegation.
 #[derive(Clone)]
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
@@ -106,7 +110,21 @@ pub struct AccountCloneRequest {
     pub source_slots: Option<CloneSourceSlots>,
 }
 
+impl AccountCloneRequest {
+    /// Returns source provenance, using the account slot for both bounds when
+    /// the request has no separate fetch or projection provenance.
+    pub(crate) fn source_slots(&self) -> CloneSourceSlots {
+        match self.source_slots {
+            Some(slots) => slots,
+            None => CloneSourceSlots::single(self.account.remote_slot()),
+        }
+    }
+}
+
 /// Chain views behind a delegated clone request.
+///
+/// These bounds stay on the in-memory request; they do not replace the stored
+/// delegation stamp. `view` must cover `data` and any companion snapshot used.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CloneSourceSlots {
     /// Slot of the data the clone carries (for a projection, the base ATA).
@@ -118,10 +136,19 @@ pub struct CloneSourceSlots {
 }
 
 impl CloneSourceSlots {
+    /// Uses one snapshot for both account-data and dependency freshness.
     pub fn single(slot: u64) -> Self {
         Self {
             data: slot,
             view: slot,
+        }
+    }
+
+    /// The base ATA supplies the layout; both snapshots bound dependency freshness.
+    pub(crate) fn projected(ata: u64, eata: u64) -> Self {
+        Self {
+            data: ata,
+            view: ata.max(eata),
         }
     }
 }
