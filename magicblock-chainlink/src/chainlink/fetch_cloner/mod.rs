@@ -2926,11 +2926,13 @@ where
                         |(missing_pubkey, _)| missing_pubkey != &pubkey,
                     ) =>
             {
-                let bank_slot = self
-                    .accounts_bank
-                    .get_account(&pubkey)
-                    .map(|in_bank| in_bank.remote_slot());
-                if bank_slot.is_none_or(|slot| slot < account.remote_slot()) {
+                let in_bank = self.accounts_bank.get_account(&pubkey);
+                let bank_slot = in_bank.as_ref().map(|acc| acc.remote_slot());
+                // A delegated copy carries its delegation slot, which can
+                // trail the sighting slot; it is materialized regardless.
+                if in_bank.is_none_or(|acc| {
+                    !acc.delegated() && acc.remote_slot() < account.remote_slot()
+                }) {
                     trace!(
                         pubkey = %pubkey,
                         bank_slot,
