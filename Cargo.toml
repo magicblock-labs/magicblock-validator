@@ -116,6 +116,7 @@ light-sdk-types = "0.23.0"
 # Only used in magicblock-ledger for solana_metrics::datapoint_info!
 log = { version = "0.4.34" }
 lru = "0.18.4"
+mimalloc = "0.1.52"
 num-derive = "0.4.2"
 num-format = "0.4.4"
 num-traits = "0.2.19"
