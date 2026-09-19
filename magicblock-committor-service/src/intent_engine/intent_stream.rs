@@ -20,15 +20,15 @@ const POISONED_MSG: &str = "intent backlog mutex poisoned";
 /// because they were scheduled before the backlog entries. If the channel has
 /// nothing ready, the stream immediately pops from backlog instead of waiting.
 #[pin_project]
-pub struct IntentStream<TBacklog> {
-    backlog: Arc<Mutex<TBacklog>>,
+pub struct IntentStream<D> {
+    backlog: Arc<Mutex<D>>,
     #[pin]
     stream: ReceiverStream<OutboxIntentBundle>,
 }
 
-impl<TBacklog: BacklogDB> IntentStream<TBacklog> {
+impl<D: BacklogDB> IntentStream<D> {
     pub fn new(
-        backlog: Arc<Mutex<TBacklog>>,
+        backlog: Arc<Mutex<D>>,
         receiver: Receiver<OutboxIntentBundle>,
     ) -> Self {
         Self {
@@ -38,7 +38,7 @@ impl<TBacklog: BacklogDB> IntentStream<TBacklog> {
     }
 }
 
-impl<TBacklog: BacklogDB> Stream for IntentStream<TBacklog> {
+impl<D: BacklogDB> Stream for IntentStream<D> {
     type Item = Result<OutboxIntentBundle, db::Error>;
 
     fn poll_next(

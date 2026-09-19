@@ -29,33 +29,33 @@ use crate::{
 
 pub type ChainlinkImpl = ProdChainlink;
 
-pub struct IntentExecutionService<TOutbox, TBacklog> {
+pub struct IntentExecutionService<O, D> {
     /// Chainlink for notifying of undelegations
     chainlink: Arc<ChainlinkImpl>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
-    outbox_client: Arc<TOutbox>,
+    outbox_client: Arc<O>,
     /// Processor of accepted intents
-    processor: Arc<CommittorProcessor<TBacklog>>,
+    processor: Arc<CommittorProcessor<D>>,
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
 }
 
-impl<TOutbox, TBacklog: BacklogDB> IntentExecutionService<TOutbox, TBacklog>
+impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
-    TOutbox: OutboxClient,
+    O: OutboxClient,
     // OutboxClient errors should be convertible to Service errors
-    TOutbox::Error: Into<IntentExecutionServiceError>,
+    O::Error: Into<IntentExecutionServiceError>,
     // OutboxClient errors should be convertible into IntentExecutor errors
-    TOutbox::Error: Into<IntentExecutorError>,
+    O::Error: Into<IntentExecutorError>,
     // OutboxReader errors should be convertible to Service errors
-    <TOutbox::OutboxReader as OutboxIntentBundlesReader>::Error:
+    <O::OutboxReader as OutboxIntentBundlesReader>::Error:
         Into<IntentExecutionServiceError>,
 {
     pub fn new(
         chainlink: Arc<ChainlinkImpl>,
-        outbox_client: Arc<TOutbox>,
-        processor: Arc<CommittorProcessor<TBacklog>>,
+        outbox_client: Arc<O>,
+        processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
     ) -> Self {
         Self {
@@ -177,14 +177,14 @@ where
         .await
     }
 
-    async fn process_intent_bundles<TScheduleFn, TScheduleFuture>(
+    async fn process_intent_bundles<F, Fut>(
         &self,
         intent_bundles: Vec<OutboxIntentBundle>,
-        schedule: TScheduleFn,
+        schedule: F,
     ) -> CommittorServiceResult<()>
     where
-        TScheduleFn: FnOnce(Vec<OutboxIntentBundle>) -> TScheduleFuture,
-        TScheduleFuture: Future<Output = CommittorServiceResult<()>>,
+        F: FnOnce(Vec<OutboxIntentBundle>) -> Fut,
+        Fut: Future<Output = CommittorServiceResult<()>>,
     {
         if intent_bundles.is_empty() {
             return Ok(());

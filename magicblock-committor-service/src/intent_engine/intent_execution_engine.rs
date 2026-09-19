@@ -107,30 +107,24 @@ impl Deref for BroadcastedIntentExecutionResult {
     }
 }
 
-pub(crate) struct IntentExecutionEngine<TBacklog, TExecutorBuilder, TPreparator>
-{
-    intent_stream: IntentStream<TBacklog>,
-    executor_builder: Arc<TExecutorBuilder>,
+pub(crate) struct IntentExecutionEngine<D, F, T> {
+    intent_stream: IntentStream<D>,
+    executor_builder: Arc<F>,
 
     scheduler: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     retries_semaphore: Arc<Semaphore>,
-    _phantom_data: PhantomData<TPreparator>,
+    _phantom_data: PhantomData<T>,
 }
 
-impl<TBacklog, TExecutorBuilder, TPreparator>
-    IntentExecutionEngine<TBacklog, TExecutorBuilder, TPreparator>
+impl<D, F, T> IntentExecutionEngine<D, F, T>
 where
-    TBacklog: BacklogDB,
-    TPreparator: TransactionPreparator,
-    TExecutorBuilder:
-        IntentExecutorBuilder<TPreparator> + Send + Sync + 'static,
+    D: BacklogDB,
+    T: TransactionPreparator,
+    F: IntentExecutorBuilder<T> + Send + Sync + 'static,
 {
-    pub fn new(
-        intent_stream: IntentStream<TBacklog>,
-        executor_builder: TExecutorBuilder,
-    ) -> Self {
+    pub fn new(intent_stream: IntentStream<D>, executor_builder: F) -> Self {
         Self {
             intent_stream,
             executor_builder: Arc::new(executor_builder),
@@ -276,7 +270,7 @@ where
 
     /// Returns [`ScheduledIntentBundle`] from external channel
     async fn get_new_intent(
-        intent_stream: &mut IntentStream<TBacklog>,
+        intent_stream: &mut IntentStream<D>,
     ) -> Result<OutboxIntentBundle, IntentScheduleError> {
         intent_stream
             .next()
@@ -290,7 +284,7 @@ where
     /// keeps conflicting intents blocked, preserving per-account commit order.
     #[instrument(skip(executor_factory, intent, scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
-        executor_factory: Arc<TExecutorBuilder>,
+        executor_factory: Arc<F>,
         intent: OutboxIntentBundle,
         scheduler: Arc<Mutex<IntentScheduler>>,
         limits: ExecutionLimits,
@@ -386,7 +380,7 @@ where
     /// execution permit is still held (`None` only if the executors
     /// semaphore closed mid-retry).
     async fn execute_with_retries(
-        executor_factory: Arc<TExecutorBuilder>,
+        executor_factory: Arc<F>,
         intent: &OutboxIntentBundle,
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,

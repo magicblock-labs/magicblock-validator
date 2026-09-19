@@ -41,71 +41,56 @@ use crate::{
 };
 
 #[async_trait]
-pub trait IntentExecutor<TPreparator>: Send + Sync + 'static {
+pub trait IntentExecutor<T>: Send + Sync + 'static {
     /// Executes Message on Base layer
     /// Returns result of intent execution `IntentExecutionResult`
     /// and `CleanupHandle` for cleanup after intent
     async fn execute(
         self: Box<Self>,
         base_intent: ScheduledIntentBundle,
-    ) -> (IntentExecutionResult, CleanupHandle<TPreparator>);
+    ) -> (IntentExecutionResult, CleanupHandle<T>);
 }
 
-pub fn build_stage_intent_executor<
-    TPreparator,
-    TTaskFetcher,
-    TCallbackScheduler,
-    TOutbox,
->(
-    ctx: IntentExecutorCtx<
-        TPreparator,
-        TTaskFetcher,
-        TCallbackScheduler,
-        TOutbox,
-    >,
+pub fn build_stage_intent_executor<T, F, A, O>(
+    ctx: IntentExecutorCtx<T, F, A, O>,
     status: OutboxIntentBundleStatus,
     actions_timeout: Duration,
-) -> Box<dyn IntentExecutor<TPreparator>>
+) -> Box<dyn IntentExecutor<T>>
 where
-    TPreparator: TransactionPreparator,
-    TTaskFetcher: TaskInfoFetcher,
-    TCallbackScheduler: ActionsCallbackScheduler,
-    TOutbox: OutboxClient,
-    TOutbox::Error: Into<IntentExecutorError>,
+    T: TransactionPreparator,
+    F: TaskInfoFetcher,
+    A: ActionsCallbackScheduler,
+    O: OutboxClient,
+    O::Error: Into<IntentExecutorError>,
 {
     match status {
         OutboxIntentBundleStatus::Accepted => {
             Box::new(AcceptedIntentExecutor::new(ctx, actions_timeout))
-                as Box<dyn IntentExecutor<TPreparator> + 'static>
+                as Box<dyn IntentExecutor<T> + 'static>
         }
         OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
             sig,
         )) => {
             Box::new(SingleStageIntentExecutor::new(ctx, actions_timeout, sig))
-                as Box<dyn IntentExecutor<TPreparator> + 'static>
+                as Box<dyn IntentExecutor<T> + 'static>
         }
         OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
             value,
         )) => {
             Box::new(TwoStageIntentExecutor::new(ctx, actions_timeout, value))
-                as Box<dyn IntentExecutor<TPreparator> + 'static>
+                as Box<dyn IntentExecutor<T> + 'static>
         }
     }
 }
 
-pub struct IntentExecutorCtx<
-    TPreparator,
-    TTaskFetcher,
-    TCallbackScheduler,
-    TOutbox,
-> {
+pub struct IntentExecutorCtx<T, F, A, O> {
     /// Base-layer signing identity — the engine's authority keypair.
     pub authority: Keypair,
     pub intent_client: IntentExecutionClient,
-    pub transaction_preparator: TPreparator,
-    pub task_info_fetcher: Arc<CacheTaskInfoFetcher<TTaskFetcher>>,
-    pub outbox_client: Arc<TOutbox>,
-    pub actions_callback_executor: TCallbackScheduler,
+    pub transaction_preparator: T,
+    pub task_info_fetcher: Arc<CacheTaskInfoFetcher<F>>,
+    pub outbox_client: Arc<O>,
+    pub actions_callback_executor: A,
 }
 
 #[derive(Clone, Copy, Debug)]
