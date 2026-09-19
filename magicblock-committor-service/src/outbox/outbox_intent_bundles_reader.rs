@@ -78,16 +78,15 @@ impl InternalOutboxIntentBundlesReader {
 
         let accounts = self.engine.accounts();
         let outbox_candidates_iter =
-            accounts.program(&magicblock_program::ID)?;
+            accounts.program(&magicblock_program::ID, |_, account| {
+                Self::outbox_accounts_filter(account)
+                    .then(|| OutboxIntentBundle::try_from_bytes(account.data()))
+            })?;
 
         // Create iterator that yields valid, unconsumed intents
         let outbox_iter = outbox_candidates_iter
-            .filter(|(_, account)| Self::outbox_accounts_filter(account))
-            .map(|(address, account)| {
-                (address, OutboxIntentBundle::try_from_bytes(account.data()))
-            })
             // Filter out failed deserializations + warn
-            .filter_map(|(pubkey, account_result)| match account_result {
+            .filter_map(|(pubkey, account_result)| match account_result? {
                 Ok(value) => Some(value),
                 Err(err) => {
                     warn!(error = ?err, "Account with OutboxIntentBundle failed to deserialize, pubkey; {}", pubkey);
@@ -176,10 +175,14 @@ impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
         intent_id: u64,
     ) -> Result<Option<OutboxIntentBundle>, Self::Error> {
         let pda = outbox_intent_pda(intent_id);
-        let Some(account) = self.engine.accounts().loader().load(&pda)? else {
+        let Some(outbox_intent) =
+            self.engine.accounts().loader().read(&pda, |account| {
+                OutboxIntentBundle::try_from_bytes(account.data())
+            })?
+        else {
             return Ok(None);
         };
-        Ok(Some(OutboxIntentBundle::try_from_bytes(account.data())?))
+        Ok(Some(outbox_intent?))
     }
 }
 
