@@ -1,7 +1,9 @@
-[profile.release-with-debug]
-debug = true
-inherits = "release"
-split-debuginfo = "packed"
+[profile.dev]
+split-debuginfo = "unpacked"
+
+[profile.dev.package."*"]
+debug = 0     # Strip debug symbols from 3rd-party crates
+opt-level = 0 # Keep dependency compile time fast
 
 [workspace]
 members = [
@@ -72,7 +74,9 @@ v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicbloc
 
 agave-geyser-plugin-interface = { version = "=4.2.2" }
 agave-precompiles = { version = "=4.2.2", features = ["agave-unstable-api"] }
-agave-syscalls = { package = "solana-syscalls", version = "=4.2.2", features = ["agave-unstable-api"] }
+agave-syscalls = { package = "solana-syscalls", version = "=4.2.2", features = [
+    "agave-unstable-api"
+] }
 agave-transaction-view = { version = "=4.2.2", features = ["agave-unstable-api"] }
 anyhow = "1.0.104"
 arc-swap = { version = "1.9.2" }
