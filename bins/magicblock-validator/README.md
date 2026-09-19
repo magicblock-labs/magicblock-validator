@@ -13,12 +13,13 @@ addresses, and supply the configured program executable files.
 From the workspace root:
 
 ```bash
-cargo run --release --locked -p magicblock-validator -- --config config.toml
+cargo run --release --locked -p magicblock-validator -- config.toml
 ```
 
-Command-line options override environment variables, which override the TOML
-file. See [configuration](../../magicblock-config/README.md) for details, or
-append `--help` for available options.
+The configuration path is positional. Command-line setting overrides take
+precedence over environment variables, which override the TOML file. See
+[configuration](../../magicblock-config/README.md) for details, or append
+`--help` for available options.
 
 ## Operating it
 

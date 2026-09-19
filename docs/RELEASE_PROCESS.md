@@ -42,12 +42,15 @@ therefore cause an alignment check to fail after preparation.
 
 ## Validate and publish
 
-Pushes to `release/v*` trigger a dry run of the
-[package publishing workflow](../.github/workflows/publish-packages.yml).
-Running it manually is also a dry run. Publishing a GitHub Release is what
-enables package publication and release-asset uploads.
+Pushes to `release/v*` run version-alignment validation in the
+[package publishing workflow](../.github/workflows/publish-packages.yml), but
+skip the `publish-binaries` and `publish-wrapper-npm-package` jobs. Run the
+workflow manually (`workflow_dispatch`) for a package dry run. Publishing a
+GitHub Release enables actual package publication and release-asset uploads.
 
-1. Wait for the release PR's applicable CI checks and package dry runs to pass.
+1. Run the package publishing workflow manually against `release/vX.Y.Z`, with
+   `release_version` set to `vX.Y.Z`. Wait for that dry run and the release PR's
+   applicable CI checks to pass.
 2. Merge the release PR into `master`.
 3. Create the `vX.Y.Z` tag at the intended release commit on `master` and publish
    its GitHub Release with notes describing changes and migration requirements.

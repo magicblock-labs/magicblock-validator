@@ -21,8 +21,8 @@ Leader settings are applied in this order, highest priority first:
 3. TOML settings.
 4. Defaults.
 
-`--config` selects the TOML file; it does not give that file priority over
-environment variables.
+The leader takes an optional positional TOML path, not a `--config` flag.
+Selecting a file does not give its settings priority over environment variables.
 
 The verifier takes a positional TOML path and uses `MBV_VERIFIER_` environment
 overrides. Both prefixes use `__` between nested keys, for example
@@ -32,6 +32,13 @@ For operator commands, the exact file supplied with `--config` must exist;
 `MBV_` overrides and defaults then apply. The leader can run without a config
 file, but connects to **devnet** by default. It still needs reachable providers,
 the necessary base-chain programs and accounts, and a funded identity.
+
+If `engine.authority.local` is not supplied, the leader uses a publicly embedded
+development keypair. **Do not use that signer in production.** Supply your own
+keypair through `engine.authority.local` in TOML or
+`MBV_ENGINE__AUTHORITY__LOCAL` in the environment. There is no direct identity
+CLI flag.
+
 For a self-contained development chain, use the
 [packaged stack](../.github/packages/npm-package/README.md).
 
