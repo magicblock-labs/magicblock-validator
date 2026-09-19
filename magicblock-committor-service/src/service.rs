@@ -154,7 +154,7 @@ where
                 error!(error = ?err, "Failed to reschedule pending bundles")
             }
 
-            // Check if we've rescheduled intents from Outbox
+            // Check if we've rescheduled intents from outbox
             if read_len != RESCHEDULE_CHUNK_SIZE.get() {
                 return Ok(());
             }
