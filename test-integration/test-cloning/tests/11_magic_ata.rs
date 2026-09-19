@@ -644,6 +644,18 @@ fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
         !ephem_account_is_magic_ata(&ctx, &destination_ata),
         "Magic ATA marker must be gone after projection"
     );
+    // The projection carries the base ATA layout, not the Magic ATA's.
+    let base_lamports = ctx
+        .try_chain_client()
+        .unwrap()
+        .get_account(&destination_ata)
+        .unwrap()
+        .lamports;
+    assert_eq!(
+        ctx.fetch_ephem_account(destination_ata).unwrap().lamports,
+        base_lamports,
+        "projected ATA must take its layout from the base ATA"
+    );
 }
 
 #[test]

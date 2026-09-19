@@ -215,28 +215,37 @@ where
 
     // eATA updates only carry the projected balance fields. The ATA itself is
     // required so the clone preserves the actual token program owner and any
-    // Token-2022 account layout extensions.
+    // Token-2022 account layout extensions. A drained Magic ATA is only a
+    // layout of last resort: the base ATA, when it exists, is the source of
+    // truth for rent, state and extensions.
     let mut ata = None;
+    let mut drained_magic_ata = None;
     for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
         {
-            if is_ata(&candidate_pubkey, &candidate_account).is_some() {
-                ata = Some((candidate_pubkey, candidate_account));
-                break;
+            if is_ata(&candidate_pubkey, &candidate_account).is_none() {
+                continue;
             }
+            if is_drained_magic_ata(&candidate_pubkey, &candidate_account) {
+                drained_magic_ata = Some((candidate_pubkey, candidate_account));
+                continue;
+            }
+            ata = Some((candidate_pubkey, candidate_account));
+            break;
         }
     }
     let (ata_pubkey, ata) = match ata {
         Some(ata) => ata,
         None => {
-            fetch_remote_ata(
+            let remote_ata = fetch_remote_ata(
                 this,
                 &ata_pubkeys,
                 eata_account.remote_slot(),
                 companion_fetch_log_context,
             )
-            .await?
+            .await;
+            remote_ata.or(drained_magic_ata)?
         }
     };
 
