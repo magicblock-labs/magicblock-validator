@@ -226,12 +226,14 @@ pub enum MagicBlockInstruction {
     /// | `2` | Vault. Source of rent refund. | WRITE |
     CloseEphemeralAccount,
 
-    /// Unsed instruction slot.
-    /// -- can be repurposed --
-    /// This variant was originally used for `ScheduleCommitFinalize`, but that
-    /// instruction was removed. It is intentionally left unused so the wire
-    /// discriminant can be repurposed in a future protocol update.
-    Unused,
+    /// Creates or verifies a local Magic ATA.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER, WRITE]` Payer/sponsor
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    /// - **2.** `[]`       Mint
+    /// - **3.** `[]`       Token program
+    CreateMagicAta { wallet_owner: Pubkey },
 
     /// Clone a single account that fits in one transaction (<63KB data).
     ///
@@ -374,6 +376,16 @@ pub enum MagicBlockInstruction {
         authority: Pubkey,
         instructions: Vec<Instruction>,
     },
+
+    /// Closes a drained Magic ATA previously created via
+    /// `CreateMagicAta`. No-op unless the account matches the
+    /// Magic ATA marker for the signing wallet owner and holds zero
+    /// tokens, so it can be appended unconditionally to withdrawal flows.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Wallet owner
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    CloseMagicAta,
 }
 
 impl MagicBlockInstruction {

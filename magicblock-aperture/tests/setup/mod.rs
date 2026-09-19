@@ -118,15 +118,15 @@ impl RpcTestEnv {
 
     /// Creates two v42 accounts and a client-side transfer between them.
     pub fn rpc_transfer(&self, amount: u64) -> (Transaction, Pubkey, Pubkey) {
-        let sender = store_v42(&self.engine, 0, AccountMode::Ephemeral);
-        let recipient = store_v42(&self.engine, 0, AccountMode::Ephemeral);
+        let sender = store_v42(&self.engine, 0, AccountMode::Magic);
+        let recipient = store_v42(&self.engine, 0, AccountMode::Magic);
         let ix = transfer(sender, recipient, amount);
         (self.rpc_transaction(&[ix]), sender, recipient)
     }
 
     /// Executes the standard v42 write used by RPC history and notification tests.
     pub async fn execute_write(&self) -> Signature {
-        let output = store_v42(&self.engine, 0, AccountMode::Ephemeral);
+        let output = store_v42(&self.engine, 0, AccountMode::Magic);
         let (signature, view) =
             signed_view(&self.engine, None, Expr::lit(42).compose(output, &[]));
         self.engine
@@ -140,8 +140,8 @@ impl RpcTestEnv {
     }
 
     pub async fn execute_failing_transfer(&self) -> Signature {
-        let sender = store_v42(&self.engine, 0, AccountMode::Ephemeral);
-        let recipient = store_v42(&self.engine, 0, AccountMode::Ephemeral);
+        let sender = store_v42(&self.engine, 0, AccountMode::Magic);
+        let recipient = store_v42(&self.engine, 0, AccountMode::Magic);
         let amount = load_v42_lamports(&self.engine, sender)
             .expect("stored balance")
             + 1;
@@ -203,7 +203,7 @@ impl RpcTestEnv {
             .lamports(Self::TOKEN_AMOUNT)
             .owner(owner)
             .data(data)
-            .mode(AccountMode::Ephemeral)
+            .mode(AccountMode::Magic)
             .build();
         self.engine
             .accounts()

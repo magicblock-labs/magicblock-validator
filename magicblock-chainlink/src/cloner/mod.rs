@@ -113,6 +113,8 @@ impl From<Option<DelegationActions>> for ClonePostDelegationMode {
     }
 }
 
+/// An account snapshot and its activation work. Fetch freshness remains
+/// separate from the stored delegation stamp.
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountBuilder,
@@ -123,11 +125,46 @@ pub struct AccountCloneRequest {
     /// this contains that validator's pubkey. None if account is not
     /// delegated to another validator.
     pub delegated_to_other: Option<Pubkey>,
+    /// Input snapshots used to resolve a delegated account or ATA projection.
+    /// `None` uses the account slot for both bounds.
+    pub source_slots: Option<CloneSourceSlots>,
+}
+
+impl AccountCloneRequest {
+    pub(crate) fn source_slots(&self) -> CloneSourceSlots {
+        self.source_slots.unwrap_or_else(|| {
+            CloneSourceSlots::single(self.account.read().slot())
+        })
+    }
+}
+
+/// Source provenance, independent of the account's stored delegation stamp.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CloneSourceSlots {
+    /// Account-data snapshot; a newer plain local copy supersedes this input.
+    pub data: u64,
+    /// Freshest input, including companions; bounds action dependency freshness.
+    pub view: u64,
+}
+
+impl CloneSourceSlots {
+    pub fn single(slot: u64) -> Self {
+        Self {
+            data: slot,
+            view: slot,
+        }
+    }
+
+    pub(crate) fn projected(ata: u64, eata: u64) -> Self {
+        Self {
+            data: ata,
+            view: ata.max(eata),
+        }
+    }
 }
 
 enum Materialization {
-    Apply,
-    ApplyReadOnly,
+    Apply { mode: AccountMode, slot: u64 },
     Satisfied(AccountMode),
 }
 
@@ -135,52 +172,59 @@ fn classify_materialization(
     pubkey: Pubkey,
     local: &AccountSharedData,
     desired: &OwnedAccount,
+    source_slot: u64,
 ) -> ClonerResult<Materialization> {
     let invalid = |reason| {
         errors::ClonerError::InvalidAccountMaterialization(pubkey, reason)
     };
     let mode = local.mode();
-    let active_delegation = mode == AccountMode::Delegated
-        && desired.mode() == AccountMode::Delegated;
-    if mode == AccountMode::Ephemeral
-        || active_delegation
-        || local.slot() > desired.slot()
+    let mut desired_mode = desired.mode();
+    // Fresh source data may activate a plain copy without regressing its slot.
+    // A newer companion view alone cannot authorize replacement.
+    let slot = if desired_mode == AccountMode::Delegated
+        && matches!(mode, AccountMode::Uninit | AccountMode::ReadOnly)
+        && local.slot() <= source_slot
     {
+        desired.slot().max(local.slot())
+    } else {
+        desired.slot()
+    };
+    let active_delegation = mode == AccountMode::Delegated
+        && desired_mode == AccountMode::Delegated;
+    // Magic accounts are locally authoritative, including empty Magic ATAs.
+    // Chainlink never replaces them with a remote image based on token balance.
+    if mode == AccountMode::Magic || active_delegation || local.slot() > slot {
         return Ok(Materialization::Satisfied(mode));
     }
     if local == desired {
         return Ok(Materialization::Satisfied(mode));
     }
 
-    let desired_mode = desired.mode();
-    if mode == AccountMode::Transient
-        && desired_mode == AccountMode::Placeholder
-    {
-        // Engine completes undelegation through Transient -> ReadOnly. A
-        // zero-lamport remote image is still immutable, but cannot return
-        // directly to Placeholder through the lifecycle state machine.
-        return Ok(Materialization::ApplyReadOnly);
+    if mode == AccountMode::Transient && desired_mode == AccountMode::Uninit {
+        // Preserve the read-only image used to complete undelegation, even
+        // when the remote account has no lamports.
+        desired_mode = AccountMode::ReadOnly;
     }
-    if local.slot() == desired.slot() {
+    if local.slot() == slot {
         if mode == desired_mode {
             return Err(invalid("conflicting images at the same slot".into()));
         }
-        if !mode.allows_transition(desired_mode, local.slot(), desired.slot()) {
+        if !mode.allows_transition(desired_mode, local.slot(), slot) {
             return Err(invalid(format!(
                 "invalid same-slot mode transition {mode:?} -> {desired_mode:?}"
             )));
         }
-        return Ok(Materialization::Apply);
-    }
-
-    if mode != desired_mode
-        && !mode.allows_transition(desired_mode, local.slot(), desired.slot())
+    } else if mode != desired_mode
+        && !mode.allows_transition(desired_mode, local.slot(), slot)
     {
         return Err(invalid(format!(
             "invalid mode transition {mode:?} -> {desired_mode:?}"
         )));
     }
-    Ok(Materialization::Apply)
+    Ok(Materialization::Apply {
+        mode: desired_mode,
+        slot,
+    })
 }
 
 pub(crate) async fn claim_materialization<'a>(
@@ -188,17 +232,30 @@ pub(crate) async fn claim_materialization<'a>(
     request: &mut AccountCloneRequest,
 ) -> ClonerResult<Option<AccountAccessor<'a>>> {
     let accessor = engine.account(request.pubkey).await;
+    // Reconcile slot and lifecycle from one local read while holding the
+    // materialization lease, including reacquisition before rescue.
     let desired = request.account.read();
     let materialization = accessor
-        .read(|local| classify_materialization(request.pubkey, local, desired))
+        .read(|local| {
+            classify_materialization(
+                request.pubkey,
+                local,
+                desired,
+                request.source_slots().data,
+            )
+        })
         .map_err(errors::ClonerError::from)?
         .transpose()?
-        .unwrap_or(Materialization::Apply);
+        .unwrap_or(Materialization::Apply {
+            mode: desired.mode(),
+            slot: desired.slot(),
+        });
     match materialization {
-        Materialization::Apply => Ok(Some(accessor)),
-        Materialization::ApplyReadOnly => {
-            request.account =
-                mem::take(&mut request.account).mode(AccountMode::ReadOnly);
+        Materialization::Apply { mode, slot } => {
+            if desired.mode() != mode || desired.slot() != slot {
+                request.account =
+                    mem::take(&mut request.account).mode(mode).slot(slot);
+            }
             Ok(Some(accessor))
         }
         Materialization::Satisfied(mode) => {
@@ -292,6 +349,7 @@ pub(crate) fn resolve_program(
         account,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
+        source_slots: None,
     })
 }
 
@@ -425,7 +483,7 @@ mod tests {
             .materialize(
                 AccountBuilder::default()
                     .lamports(1_000_000)
-                    .mode(AccountMode::Ephemeral),
+                    .mode(AccountMode::Magic),
                 None,
             )
             .await

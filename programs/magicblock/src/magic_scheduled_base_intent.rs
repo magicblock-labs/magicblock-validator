@@ -511,20 +511,11 @@ fn validate_commit_type_accounts(
     context: &ConstructionContext<'_, '_, '_>,
 ) -> Result<(), InstructionError> {
     accounts.iter().try_for_each(|(pubkey, account)| {
-        if account.borrow()?.is(AccountMode::Ephemeral) {
+        // Local-only accounts, including Magic ATAs, cannot be committed.
+        if account.borrow()?.is(AccountMode::Magic) {
             ic_msg!(
                 context.invoke_context,
-                "ScheduleCommit ERR: account {} is confined and cannot be committed",
-                pubkey
-            );
-            return Err(InstructionError::InvalidAccountData);
-        }
-
-        // Prevent ephemeral accounts from being committed to base chain
-        if account.borrow()?.is(AccountMode::Ephemeral) {
-            ic_msg!(
-                context.invoke_context,
-                "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                "ScheduleCommit ERR: account {} is local-only and cannot be committed to base chain",
                 pubkey
             );
             return Err(InstructionError::InvalidAccountData);

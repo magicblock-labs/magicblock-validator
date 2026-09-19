@@ -99,7 +99,7 @@ pub(super) fn validate_existing_ephemeral<'a, 'ix_data>(
         accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
     let ep_ref = ephemeral.borrow()?;
 
-    if !ep_ref.is(AccountMode::Ephemeral) {
+    if !ep_ref.is(AccountMode::Magic) {
         return Err(InstructionError::InvalidAccountData);
     }
     if ep_ref.owner() != caller_program_id {

@@ -113,10 +113,10 @@ pub(super) fn apply_record(
     // Delegation state is a single exclusive mode, so it is resolved once here
     // rather than by flipping independent `delegated`/`confined` flags. A
     // confined account is one delegated with no authority to commit back to
-    // chain, which the engine represents as `Ephemeral`; it takes precedence,
+    // chain, which the engine represents as `Magic`; it takes precedence,
     // since losing it would make the account committable.
     let mode = if is_confined {
-        AccountMode::Ephemeral
+        AccountMode::Magic
     } else if is_delegated_to_us && !is_raw_eata {
         AccountMode::Delegated
     } else {
@@ -125,6 +125,10 @@ pub(super) fn apply_record(
     let account = account.owner(delegation_record.owner).mode(mode);
     if is_confined {
         account.lamports(0)
+    } else if mode == AccountMode::Delegated {
+        // Repeated observations carry the same delegation stamp. RPC fetch
+        // freshness is retained separately on the clone request.
+        account.slot(delegation_record.delegation_slot)
     } else {
         account
     }
