@@ -15,7 +15,7 @@ use crate::{
             create_commit_task,
         },
     },
-    transactions::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
+    utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
 /// Checks whether an intent could ever fit on the base layer, so intents

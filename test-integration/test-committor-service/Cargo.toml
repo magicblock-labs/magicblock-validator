@@ -9,12 +9,13 @@ borsh = { workspace = true }
 futures = { workspace = true }
 integration-test-tools = { workspace = true }
 magicblock-committor-program = { workspace = true, features = ["no-entrypoint"] }
-magicblock-committor-service = { workspace = true }
+magicblock-committor-service = { workspace = true, features = ["dev-context-only-utils"] }
 magicblock-core = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true, features = ["randomize_lookup_table_slot"] }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 rand = { workspace = true }
 solana-account = { workspace = true }
@@ -23,6 +24,7 @@ solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+solana-signature = { workspace = true, features = ["rand"] }
 solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true }
 tokio = { workspace = true }

@@ -3,6 +3,7 @@
 pub mod args;
 pub mod compat;
 pub mod instruction;
+pub mod outbox;
 pub mod pda;
 pub mod response;
 
