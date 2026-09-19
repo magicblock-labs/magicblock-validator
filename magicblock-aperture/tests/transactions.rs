@@ -426,10 +426,9 @@ async fn test_simulate_transaction_failure() {
     let env = RpcTestEnv::new().await;
 
     // Test with an instruction that is guaranteed to fail (e.g., insufficient funds).
-    let sender =
-        store_v42(&env.engine, 0, solana_account::AccountMode::Ephemeral);
+    let sender = store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
     let recipient =
-        store_v42(&env.engine, 0, solana_account::AccountMode::Ephemeral);
+        store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
     let amount = load_v42_lamports(&env.engine, sender).unwrap() + 1;
     let failing_tx =
         env.rpc_transaction(&[transfer(sender, recipient, amount)]);

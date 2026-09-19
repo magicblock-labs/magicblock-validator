@@ -242,7 +242,7 @@ mod tests {
             .lamports(0)
             .data(bytes)
             .owner(magicblock_program::OUTBOX_INTENT_PROGRAM_ID)
-            .mode(AccountMode::Ephemeral);
+            .mode(AccountMode::Magic);
         te.account(pubkey)
             .await
             .materialize(account, None)

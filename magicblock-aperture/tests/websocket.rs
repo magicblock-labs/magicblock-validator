@@ -63,7 +63,7 @@ async fn test_unknown_http_and_websocket_methods() {
 #[tokio::test]
 async fn test_account_subscribe() {
     let env = RpcTestEnv::new().await;
-    let account = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let account = store_v42(&env.engine, 0, AccountMode::Magic);
     let balance = load_v42_lamports(&env.engine, account).unwrap();
     let amount = RpcTestEnv::TRANSFER_AMOUNT;
 
@@ -74,7 +74,7 @@ async fn test_account_subscribe() {
         .await
         .expect("failed to subscribe to account");
 
-    let sender = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let sender = store_v42(&env.engine, 0, AccountMode::Magic);
     env.engine
         .execute(&[transfer(sender, account, amount)])
         .await
@@ -133,8 +133,8 @@ async fn test_program_subscribe() {
 #[tokio::test]
 async fn test_signature_subscribe_before_execution() {
     let env = RpcTestEnv::new().await;
-    let sender = store_v42(&env.engine, 0, AccountMode::Ephemeral);
-    let recipient = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let sender = store_v42(&env.engine, 0, AccountMode::Magic);
+    let recipient = store_v42(&env.engine, 0, AccountMode::Magic);
     let (signature, view) = signed_view(
         &env.engine,
         None,
@@ -218,8 +218,8 @@ async fn test_signature_subscribe_after_execution() {
 #[tokio::test]
 async fn test_signature_subscribe_failure() {
     let env = RpcTestEnv::new().await;
-    let sender = store_v42(&env.engine, 0, AccountMode::Ephemeral);
-    let recipient = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let sender = store_v42(&env.engine, 0, AccountMode::Magic);
+    let recipient = store_v42(&env.engine, 0, AccountMode::Magic);
     let amount = load_v42_lamports(&env.engine, sender).unwrap() + 1;
     let (signature, view) =
         signed_view(&env.engine, None, transfer(sender, recipient, amount));

@@ -5,7 +5,7 @@ This crate loads and validates those settings.
 
 Start with the example for the process you want to run:
 
-- [Leader configuration](../config.example.toml): application services, remote
+- [Leader configuration](../config.validator.example.toml): application services, remote
   providers, storage, and replication.
 - [Verifier configuration](../config.verifier.example.toml): upstream replication,
   local storage, identity, and startup programs.

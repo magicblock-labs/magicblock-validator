@@ -30,12 +30,29 @@ pub fn add_delegation_record_for(
     authority: Pubkey,
     owner: Pubkey,
 ) -> Pubkey {
+    add_delegation_record_with_slot_for(
+        rpc_client,
+        pubkey,
+        authority,
+        owner,
+        rpc_client.get_slot(),
+    )
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn add_delegation_record_with_slot_for(
+    rpc_client: &ChainRpcClientMock,
+    pubkey: Pubkey,
+    authority: Pubkey,
+    owner: Pubkey,
+    delegation_slot: u64,
+) -> Pubkey {
     let deleg_record_pubkey =
         delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
         owner,
-        delegation_slot: 1,
+        delegation_slot,
         lamports: 1_000,
         commit_frequency_ms: 2_000,
     };
@@ -63,7 +80,7 @@ pub fn add_delegation_record_with_actions_for(
     let deleg_record = DelegationRecord {
         authority,
         owner,
-        delegation_slot: 1,
+        delegation_slot: rpc_client.get_slot(),
         lamports: 1_000,
         commit_frequency_ms: 2_000,
     };

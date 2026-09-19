@@ -37,7 +37,7 @@ pub(crate) fn process_create_ephemeral_account(
     acc.set_lamports(0);
     acc.set_owner(caller_program_id);
     acc.resize(data_len as usize, 0);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)?;
+    set_account_mode(invoke_context, &mut acc, AccountMode::Magic)?;
 
     ic_msg!(
         invoke_context,
