@@ -1,8 +1,8 @@
 # magicblock-validator
 
-Runs the leader of an Ephemeral Rollup: application RPC, account synchronization,
-settlement, and recurring tasks. Engine provides execution, storage, and
-replication to allowed followers.
+Run a leader to accept application transactions, synchronize accounts with the
+base chain, settle state, and run recurring tasks. It uses Engine to execute
+transactions, store state, and replicate to allowed followers.
 
 ## Run a leader
 
@@ -22,11 +22,16 @@ append `--help` for available options.
 
 ## Operating it
 
-Startup can perform base-chain setup, including fee-vault initialization.
+Fund the signing identity before starting: setup can submit base-chain
+transactions to initialize and delegate fee vaults. Without a configuration
+file, the leader connects to devnet; it does not start a local base chain.
 Domain registration is separate: use the [operator CLI](../magicblock/README.md).
 
-Unexpected managed-service exits stop the process. Use its logs and
-[metrics](../../magicblock-metrics/README.md) to diagnose failures.
+To let a verifier follow this leader, add its local public identity to
+`engine.replication.allowed-followers`. An empty list allows no followers.
+
+If a managed service exits unexpectedly, the process stops. Use its logs and
+[metrics](../../magicblock-metrics/README.md) to investigate before restarting.
 For a replication follower without application services, run the
 [verifier](../magicblock-verifier/README.md).
 
