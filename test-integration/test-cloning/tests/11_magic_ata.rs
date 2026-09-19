@@ -1,4 +1,7 @@
-use std::{thread::sleep, time::Duration};
+use std::{
+    thread::sleep,
+    time::{Duration, Instant},
+};
 
 use dlp_api::pda::{
     delegate_buffer_pda_from_delegated_account_and_owner_program,
@@ -33,6 +36,7 @@ use test_kit::init_logger;
 
 const SOURCE_EATA_BALANCE: u64 = 200;
 const RECEIVE_AMOUNT: u64 = 60;
+const EATA_DEPOSIT: u64 = 45;
 
 // Ephemeral SPL Token program instruction tags used on chain / in the ER.
 const INITIALIZE_EPHEMERAL_ATA: u8 = 0;
@@ -235,9 +239,7 @@ fn close_magic_ata_ix(owner: Pubkey, mint: Pubkey) -> Instruction {
             AccountMeta::new_readonly(owner, true),
             AccountMeta::new(derive_ata(&owner, &mint), false),
         ],
-        data: MagicBlockInstruction::CloseMagicAta
-            .try_to_vec()
-            .unwrap(),
+        data: MagicBlockInstruction::CloseMagicAta.try_to_vec().unwrap(),
     }
 }
 
@@ -533,6 +535,114 @@ fn test_magic_ata_receive_drain_and_close() {
     assert_eq!(
         token_balance_ephem(&ctx, &source_ata),
         Some(SOURCE_EATA_BALANCE)
+    );
+}
+
+/// A Magic ATA drained by a plain transfer stays delegated in the ER until it
+/// is closed. A later eATA delegation for the same wallet must still replace
+/// it with the projected balance instead of being deduplicated away.
+#[test]
+fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
+    init_logger!();
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let (fee_payer, source_authority, mint) = setup_delegated_source(&ctx);
+    let mint = mint.pubkey();
+    let source_ata = derive_ata(&source_authority.pubkey(), &mint);
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+        .unwrap()
+        .pubkey();
+
+    let ephem_payer = Keypair::new();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
+        .unwrap();
+
+    let destination = Keypair::new();
+    let destination_ata = derive_ata(&destination.pubkey(), &mint);
+    receive_into_magic_ata(
+        &ctx,
+        &ephem_payer,
+        &source_authority,
+        &destination.pubkey(),
+        &mint,
+        RECEIVE_AMOUNT,
+    );
+
+    // Drain with a plain transfer and leave the Magic ATA open.
+    let drain_ix = spl_token_ix::transfer(
+        &spl_token::id(),
+        &destination_ata,
+        &source_ata,
+        &destination.pubkey(),
+        &[],
+        RECEIVE_AMOUNT,
+    )
+    .unwrap();
+    let mut tx =
+        Transaction::new_with_payer(&[drain_ix], Some(&ephem_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_ephem(
+            &mut tx,
+            &[&ephem_payer, &destination],
+        )
+        .unwrap();
+    assert!(confirmed, "drain transaction failed");
+    assert_eq!(token_balance_ephem(&ctx, &destination_ata), Some(0));
+    assert!(ephem_account_is_magic_ata(&ctx, &destination_ata));
+
+    // Give the destination a real base ATA and a delegated eATA deposit.
+    let base_ixs = vec![
+        create_associated_token_account_idempotent(
+            &fee_payer.pubkey(),
+            &destination.pubkey(),
+            &mint,
+            &spl_token::id(),
+        ),
+        spl_token_ix::mint_to(
+            &spl_token::id(),
+            &mint,
+            &destination_ata,
+            &source_authority.pubkey(),
+            &[],
+            EATA_DEPOSIT,
+        )
+        .unwrap(),
+        initialize_eata_ix(fee_payer.pubkey(), destination.pubkey(), mint),
+        deposit_spl_tokens_ix(
+            destination.pubkey(),
+            destination.pubkey(),
+            mint,
+            EATA_DEPOSIT,
+        ),
+        delegate_eata_ix(
+            fee_payer.pubkey(),
+            destination.pubkey(),
+            mint,
+            validator,
+        ),
+    ];
+    let mut tx =
+        Transaction::new_with_payer(&base_ixs, Some(&fee_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_chain(
+            &mut tx,
+            &[&fee_payer, &source_authority, &destination],
+        )
+        .unwrap();
+    assert!(confirmed, "base eATA delegation transaction failed");
+
+    // The eATA projection must replace the drained Magic ATA in the ER.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while token_balance_ephem(&ctx, &destination_ata) != Some(EATA_DEPOSIT) {
+        assert!(
+            Instant::now() < deadline,
+            "drained Magic ATA was not replaced by the eATA projection"
+        );
+        sleep(Duration::from_millis(250));
+    }
+    assert!(
+        !ephem_account_is_magic_ata(&ctx, &destination_ata),
+        "Magic ATA marker must be gone after projection"
     );
 }
 

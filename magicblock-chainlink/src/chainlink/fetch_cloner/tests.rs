@@ -12471,3 +12471,91 @@ async fn test_programdata_sweep_detects_upgrade_without_notification() {
     fetch_cloner.sweep_programdata_watches().await;
     assert_eq!(cloner.program_clone_count(), 2);
 }
+
+fn insert_magic_ata_in_bank(
+    accounts_bank: &Arc<AccountsBankStub>,
+    ata_pubkey: Pubkey,
+    wallet_owner: &Pubkey,
+    mint: &Pubkey,
+    amount: u64,
+) {
+    let token_account = SplAccount {
+        mint: *mint,
+        owner: *wallet_owner,
+        amount,
+        delegate: COption::None,
+        state: AccountState::Initialized,
+        is_native: COption::None,
+        delegated_amount: 0,
+        close_authority: COption::Some(
+            magicblock_core::token_programs::MAGIC_ATA_CLOSE_AUTHORITY,
+        ),
+    };
+    let mut account =
+        AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
+    SplAccount::pack(token_account, account.data_as_mut_slice()).unwrap();
+    account.set_delegated(true);
+    account.set_remote_slot(0);
+    accounts_bank.insert(ata_pubkey, account);
+}
+
+/// A drained Magic ATA is delegated locally but must not deduplicate the eATA
+/// projection that replaces it, in any of the clone dedupers.
+#[tokio::test]
+async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        Vec::<(Pubkey, Account)>::new(),
+        CURRENT_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    let mut projected_ata =
+        AccountSharedData::from(create_ata_account(&wallet_owner, &mint));
+    projected_ata.set_delegated(true);
+    projected_ata.set_remote_slot(CURRENT_SLOT);
+    let request = AccountCloneRequest {
+        pubkey: ata_pubkey,
+        account: projected_ata,
+        commit_frequency_ms: None,
+        post_delegation_mode: ClonePostDelegationMode::None,
+        delegated_to_other: None,
+        source_slots: None,
+    };
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        0,
+    );
+    assert!(
+        !fetch_cloner.local_account_satisfies_clone_request(&request),
+        "drained Magic ATA must not deduplicate its eATA projection"
+    );
+    assert!(!fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        7,
+    );
+    assert!(
+        fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA stays authoritative"
+    );
+    assert!(fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+}
