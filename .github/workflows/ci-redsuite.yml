@@ -107,7 +107,7 @@ jobs:
 
       - name: Restore redsuite build
         id: redsuite-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: redsuite-dist
           key: redsuite-bin-${{ env.REDSUITE_REV }}-agave${{ steps.agave.outputs.agave_version }}-${{ runner.os }}-${{ runner.arch }}
@@ -137,7 +137,7 @@ jobs:
         working-directory: redsuite
 
       - name: Download ER + verifier + committor artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: er-debug-bin
           path: magicblock-validator/target
@@ -168,7 +168,7 @@ jobs:
 
       - name: Upload stack logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: redsuite-stack-logs-${{ matrix.suite }}
           path: runroot/target/redsuite-stack/*.log*
@@ -177,7 +177,7 @@ jobs:
 
       - name: Upload scenario reports
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: redsuite-reports-${{ matrix.suite }}
           path: runroot/target/redsuite-reports/

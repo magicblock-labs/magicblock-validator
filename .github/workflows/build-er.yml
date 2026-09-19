@@ -33,7 +33,7 @@ jobs:
 
       - name: Restore prebuilt ER binaries
         id: restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: |
             magicblock-validator/target/debug/magicblock-validator
@@ -43,7 +43,7 @@ jobs:
 
       - name: Upload prebuilt ER binaries
         if: steps.restore.outputs.cache-hit == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: er-debug-bin
           path: |
@@ -70,7 +70,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-build-er-debug-v001"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install lld linker
         run: sudo apt-get update && sudo apt-get install -y lld
@@ -95,7 +94,7 @@ jobs:
         working-directory: magicblock-validator
 
       - name: Save prebuilt ER binaries
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             magicblock-validator/target/debug/magicblock-validator
@@ -104,7 +103,7 @@ jobs:
           key: ${{ needs.probe.outputs.key }}
 
       - name: Upload prebuilt ER binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: er-debug-bin
           path: |
