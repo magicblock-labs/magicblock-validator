@@ -238,14 +238,20 @@ where
     let (ata_pubkey, ata) = match ata {
         Some(ata) => ata,
         None => {
-            let remote_ata = fetch_remote_ata(
+            match fetch_remote_ata(
                 this,
                 &ata_pubkeys,
                 eata_account.remote_slot(),
                 companion_fetch_log_context,
             )
-            .await;
-            remote_ata.or(drained_magic_ata)?
+            .await
+            {
+                RemoteAtaLookup::Found(ata) => ata,
+                // Only a confirmed absence may fall back to the local layout;
+                // a failed fetch keeps the drained account until the next update.
+                RemoteAtaLookup::NotFound => drained_magic_ata?,
+                RemoteAtaLookup::Unavailable => return None,
+            }
         }
     };
 
@@ -283,12 +289,20 @@ where
     })
 }
 
+enum RemoteAtaLookup {
+    Found((Pubkey, AccountSharedData)),
+    /// Every candidate address is confirmed absent on chain.
+    NotFound,
+    /// The fetch failed or returned an unusable snapshot.
+    Unavailable,
+}
+
 async fn fetch_remote_ata<T, U, V, C>(
     this: &FetchCloner<T, U, V, C>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> Option<(Pubkey, AccountSharedData)>
+) -> RemoteAtaLookup
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -319,17 +333,25 @@ where
                     &err,
                 );
             }
-            return None;
+            return RemoteAtaLookup::Unavailable;
         }
     };
 
-    ata_pubkeys.iter().copied().zip(remote_accounts).find_map(
-        |(ata_pubkey, remote_account)| {
-            let account = remote_account.fresh_account()?;
-            is_ata(&ata_pubkey, &account)?;
-            Some((ata_pubkey, account))
-        },
-    )
+    let mut lookup = RemoteAtaLookup::NotFound;
+    for (ata_pubkey, remote_account) in
+        ata_pubkeys.iter().copied().zip(remote_accounts)
+    {
+        if matches!(remote_account, RemoteAccount::NotFound(_)) {
+            continue;
+        }
+        match remote_account.fresh_account() {
+            Some(account) if is_ata(&ata_pubkey, &account).is_some() => {
+                return RemoteAtaLookup::Found((ata_pubkey, account));
+            }
+            _ => lookup = RemoteAtaLookup::Unavailable,
+        }
+    }
+    lookup
 }
 
 /// Projects an ATA update when its companion eATA is valid and delegated to us.
