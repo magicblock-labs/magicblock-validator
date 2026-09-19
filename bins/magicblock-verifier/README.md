@@ -1,8 +1,8 @@
 # magicblock-verifier
 
-Runs a follower that replays an upstream Engine replication stream using the
-same runtime programs as the leader. It does not expose application RPC or run
-account synchronization, settlement, or recurring tasks.
+Follow a leader and replay its transaction stream with the same runtime programs.
+A verifier does not serve applications: RPC, base-chain account synchronization,
+settlement, and recurring tasks run on the leader.
 
 ## Run a verifier
 
@@ -29,8 +29,13 @@ Monitor the process through logs and [metrics](../../magicblock-metrics/README.m
 not the application TUI. A reachable metrics endpoint does not mean replication
 is caught up.
 
-The verifier reopens Engine when a replicated snapshot requires it. It can also
-relay replication to configured downstream followers.
+When applying a replicated snapshot requires a restart, the verifier drains and
+reopens Engine automatically. Metrics remain available during that restart.
+
+To relay the stream to other followers, the verifier must hold the upstream
+authority's private key and use it as its local signer. A verifier with a distinct
+local identity can follow, but Engine disables its replication dispatcher even
+when downstream followers are allowed.
 
 See [recovery guidance](https://github.com/magicblock-labs/knowledge-base/blob/main/system/operations/recovery.md)
 for operational recovery procedures.
