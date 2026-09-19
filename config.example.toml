@@ -108,6 +108,7 @@ lru-capacity = 5000
 
 [engine.blockstore]
 blocktime = "400ms"
+# Slots per superblock; 0 disables periodic sealing.
 superblock = 72000
 
 [engine.ledger]
@@ -230,16 +231,6 @@ request-timeout = "5s"
 # Default: "all-signers"
 # Env: MBV_CHAINLINK__RISK__CHECK_STRATEGY
 check-strategy = "all-signers"
-
-# ==============================================================================
-# Leader Administration (Optional)
-# ==============================================================================
-# This section is optional. Remove it to disable periodic fee claims.
-
-[admin]
-# How often to claim accrued fees from the chain (e.g. "24h").
-# Env: MBV_ADMIN__CLAIM_FEES_FREQUENCY
-claim-fees-frequency = "24h"
 
 # ==============================================================================
 # Internal Task Scheduler

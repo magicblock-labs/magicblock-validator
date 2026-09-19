@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::{io, net::SocketAddr};
 
 pub use error::{ApertureError, RpcError};

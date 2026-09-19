@@ -563,7 +563,7 @@ fn assert_cannot_increase_committee_count(
     let simulation =
         stringify_simulation_result(simulation_result.value, &tx.signatures[0]);
     debug!(
-        "{}\nExpecting ExternalAccountDataModified | ProgramFailedToComplete ({})",
+        "{}\nExpecting Immutable | ExternalAccountDataModified | ProgramFailedToComplete ({})",
         simulation,
         rpc_client.url()
     );
@@ -596,12 +596,16 @@ fn assert_cannot_increase_committee_count(
         assert_is_one_of_instruction_errors(
             tx_err,
             &tx_result_err,
-            InstructionError::ExternalAccountDataModified,
-            // Recently we saw the following when the account is owned by the delegation program
-            // and serialized:
-            //   Program failed: Access violation in input section at address 0x400000060 of size 32
-            //   Error: InstructionError(0, ProgramFailedToComplete)
-            InstructionError::ProgramFailedToComplete,
+            &[
+                // Engine rejects non-mutable modes at the mutation boundary.
+                InstructionError::Immutable,
+                InstructionError::ExternalAccountDataModified,
+                // Recently we saw the following when the account is owned by the delegation program
+                // and serialized:
+                //   Program failed: Access violation in input section at address 0x400000060 of size 32
+                //   Error: InstructionError(0, ProgramFailedToComplete)
+                InstructionError::ProgramFailedToComplete,
+            ],
         );
     } else {
         panic!(

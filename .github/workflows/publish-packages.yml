@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: magicblock-validator
 
@@ -68,14 +68,13 @@ jobs:
 
     steps:
       - name: Checkout this magicblock-validator
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           path: magicblock-validator
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-publish-v000"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install target
         shell: bash
@@ -147,10 +146,8 @@ jobs:
           echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
 
       - name: Build (linux/macos)
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} -p magicblock-validator -p magicblock-verifier -p magicblock -p magicblock-validator-tui
+        shell: bash
+        run: cargo build --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} -p magicblock-validator -p magicblock-verifier -p magicblock -p magicblock-validator-tui
 
       - name: Check versions are aligned
         shell: bash
@@ -248,7 +245,7 @@ jobs:
     needs: publish-binaries
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set DRY_RUN by default
         shell: bash

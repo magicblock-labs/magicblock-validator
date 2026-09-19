@@ -38,7 +38,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-prepare-release-v001"
           rust_toolchain_release: "1.94.1"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Determine release version
         working-directory: magicblock-validator
@@ -171,7 +170,7 @@ jobs:
             echo "No release changes were generated" >&2
             exit 1
           fi
-          git commit -m "release: v${VERSION}"
+          git commit -m "chore(release): prepare v${VERSION}"
           gh auth setup-git
           git push --set-upstream origin "$RELEASE_BRANCH"
 
@@ -184,5 +183,5 @@ jobs:
           gh pr create \
             --base "$RELEASE_BASE_BRANCH" \
             --head "$RELEASE_BRANCH" \
-            --title "release v${VERSION}" \
+            --title "chore(release): prepare v${VERSION}" \
             --body ""

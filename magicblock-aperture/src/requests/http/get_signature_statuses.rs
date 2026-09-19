@@ -31,12 +31,12 @@ impl HttpDispatcher {
         }
         let mut statuses = Vec::with_capacity(signatures.len());
 
-        for signature in signatures.into_iter().map(Into::into) {
+        for signature in &signatures {
             // Level 1: Ask the engine, which owns the recent status cache.
             if let Some(status) = self
                 .engine
                 .transactions()
-                .status(signature)
+                .status(signature.0)
                 .await
                 .map_err(RpcError::internal)?
             {
@@ -47,16 +47,25 @@ impl HttpDispatcher {
                 continue;
             }
 
-            // Level 2: Fall back to the deprecated ledger for historical lookups.
-            let ledger_status =
-                self.ledger.get_transaction_status(signature, Slot::MAX)?;
-            if let Some((slot, meta)) = ledger_status {
-                let status = build_transaction_status(slot, meta.status);
-                statuses.push(Some(status));
-            } else {
-                // The signature was not found in the engine or the ledger.
-                statuses.push(None);
-            }
+            statuses.push(None);
+        }
+
+        // One legacy admission for the batch; engine-only results never wait on it.
+        if statuses.iter().any(Option::is_none) {
+            self.with_ledger(|ledger| {
+                for (signature, status) in signatures.iter().zip(&mut statuses)
+                {
+                    if status.is_none() {
+                        *status = ledger
+                            .get_transaction_status(signature.0, Slot::MAX)?
+                            .map(|(slot, meta)| {
+                                build_transaction_status(slot, meta.status)
+                            });
+                    }
+                }
+                Ok::<_, RpcError>(())
+            })
+            .await?;
         }
 
         let slot = self.engine.blocks().latest().slot;

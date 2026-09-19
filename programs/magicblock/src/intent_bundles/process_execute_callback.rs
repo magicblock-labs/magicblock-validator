@@ -13,7 +13,9 @@ use crate::{
 const VALIDATOR_IDX: u16 = 0;
 const CALLBACK_SIGNER_IDX: u16 = 1;
 
-/// Propagates callback defined by user
+/// Executes a validator-authorized response. The committor checks the destination
+/// against the recorded action source before handing it to the signing service;
+/// a source supplied in this instruction would not independently prove provenance.
 pub(crate) fn process_execute_callback(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
@@ -21,7 +23,7 @@ pub(crate) fn process_execute_callback(
 ) -> Result<(), InstructionError> {
     validate(signers, invoke_context)?;
     validate_callback_accounts(
-        &invoke_context,
+        invoke_context,
         &instruction.accounts,
         "ExecuteCallback ERR",
     )?;

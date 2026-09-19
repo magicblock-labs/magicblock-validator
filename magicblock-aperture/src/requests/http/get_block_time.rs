@@ -27,12 +27,14 @@ impl HttpDispatcher {
         let block_time = if let Some(engine_block) = engine_block {
             engine_block.block().time
         } else {
-            self.ledger.get_block_time(block)?.ok_or_else(|| {
-                let error = format!(
-                    "Slot {block} was skipped, or is not yet available"
-                );
-                RpcError::custom(error, BLOCK_NOT_FOUND)
-            })?
+            self.with_ledger(|ledger| ledger.get_block_time(block))
+                .await?
+                .ok_or_else(|| {
+                    let error = format!(
+                        "Slot {block} was skipped, or is not yet available"
+                    );
+                    RpcError::custom(error, BLOCK_NOT_FOUND)
+                })?
         };
 
         Ok(ResponsePayload::encode_no_context(&request.id, block_time))

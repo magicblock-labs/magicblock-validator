@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 use std::{
     ffi::OsString,
     fmt,
@@ -26,8 +28,8 @@ pub mod types;
 
 use crate::{
     config::{
-        AdminConfig, ChainLinkConfig, CommittorConfig, LedgerConfig,
-        LoadableProgram, TaskSchedulerConfig,
+        ChainLinkConfig, CommittorConfig, LedgerConfig, LoadableProgram,
+        TaskSchedulerConfig,
     },
     types::Remote,
 };
@@ -72,7 +74,6 @@ pub struct LeaderParams {
     pub commit: CommittorConfig,
     pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
-    pub admin: Option<AdminConfig>,
     pub task_scheduler: TaskSchedulerConfig,
     pub programs: Vec<LoadableProgram>,
 }
@@ -120,11 +121,12 @@ impl LeaderParams {
 
     /// Loads a leader config file with the same defaults and environment
     /// overlay used by the leader binary, but without a CLI overlay.
+    /// The exact file must exist; parent directories are not searched.
     pub fn load(
         path: impl AsRef<Path>,
     ) -> Result<Self, Box<figment::error::Error>> {
         let figment = Figment::new()
-            .merge(Toml::file(path.as_ref()).profile(Profile::Default))
+            .merge(Toml::file_exact(path.as_ref()).profile(Profile::Default))
             .merge(
                 Env::prefixed(consts::ENV_VAR_PREFIX)
                     .split("__")
@@ -312,15 +314,7 @@ impl fmt::Display for LeaderParams {
             ),
             (
                 "Services",
-                format!(
-                    "{} programs; admin {}; TUI external",
-                    self.programs.len(),
-                    if self.admin.is_some() {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    },
-                ),
+                format!("{} programs; TUI external", self.programs.len()),
             ),
         ];
         let key_width = rows

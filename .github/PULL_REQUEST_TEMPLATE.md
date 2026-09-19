@@ -10,6 +10,12 @@ Example: `feat: add state replicator crate`
 <!-- Replace ISSUE with the dedicated issue number. -->
 Closes #ISSUE
 
+<!--
+Impact and Reviewer notes are optional. Include only relevant, non-obvious
+information; do not narrate the code. Omit either section when it adds no value,
+including for routine chores such as dependency updates or typo fixes.
+-->
+
 ## Impact
 <!-- Note behavior, API, storage, compatibility, security, or performance effects. -->
 

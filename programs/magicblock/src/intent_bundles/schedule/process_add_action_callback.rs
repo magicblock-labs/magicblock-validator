@@ -72,8 +72,10 @@ pub(crate) fn process_add_action_callback(
         transaction_context,
         invoke_context,
         PAYER_IDX,
-        MAGIC_FEE_VAULT_IDX
-    )?.ok_or(InstructionError::MissingAccount)
+        MAGIC_FEE_VAULT_IDX,
+    )?
+    .0
+    .ok_or(InstructionError::MissingAccount)
     .inspect_err(|_| {
         ic_msg!(
             invoke_context,
@@ -165,7 +167,18 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    // Validate account metas
+    action
+        .validate_callback_destination(&args.destination_program)
+        .inspect_err(|_| {
+            ic_msg!(
+                invoke_context,
+                "AddActionCallback ERR: callback destination {} does not match action source_program {}",
+                args.destination_program,
+                source_program
+            );
+        })?;
+
+    // Validate account metas after checking destination provenance above.
     let accounts_meta: Vec<_> = args
         .accounts
         .iter()
@@ -183,7 +196,7 @@ pub(crate) fn process_add_action_callback(
         )
         .collect();
     validate_callback_accounts(
-        &invoke_context,
+        invoke_context,
         &accounts_meta,
         "AddActionCallback ERR",
     )?;

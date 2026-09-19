@@ -32,7 +32,7 @@ runs:
 
       - name: Cache Solana CLI install
         id: cache-solana
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           # Cache the entire install root. Bumping `v2` whenever the cache
           # layout needs to be invalidated. `runner.arch` keeps x64 and arm64
@@ -45,7 +45,7 @@ runs:
       # into ~/.cache/solana/<tools-version>/ on first use. Cache it so we
       # don't re-fetch it (and so concurrent builds don't race on install).
       - name: Cache cargo-build-sbf platform-tools
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/solana
           key: solana-platform-tools-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.agave_version }}
