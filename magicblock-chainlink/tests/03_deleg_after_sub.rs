@@ -60,7 +60,7 @@ async fn test_deleg_after_subscribe_case2() {
             .read(&pubkey, |account| account.mode())
             .unwrap()
             .unwrap();
-        assert_eq!(mode, AccountMode::Placeholder);
+        assert_eq!(mode, AccountMode::Uninit);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
 

@@ -220,7 +220,7 @@ mod tests {
             data.len(),
             &crate::id(),
         ))
-        .mode(AccountMode::Ephemeral)
+        .mode(AccountMode::Magic)
         .build::<AccountSharedData>();
         pda_account.set_data_from_slice(&data);
 
@@ -232,7 +232,7 @@ mod tests {
             0,
             &crate::id(),
         ))
-        .mode(AccountMode::Ephemeral)
+        .mode(AccountMode::Magic)
         .build::<AccountSharedData>();
         map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
         // Add outbox PDA as existing ephemeral account (created by accept)

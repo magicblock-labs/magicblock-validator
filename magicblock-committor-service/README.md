@@ -19,7 +19,7 @@ Commit-bearing work uses on-chain deduplication, while action-only retries are
 restricted to failures before sending. Optional persistence supports recovery,
 but does not make the database, base chain, and callbacks one atomic operation.
 
-See the [leader configuration](../config.example.toml) for settings and
+See the [leader configuration](../config.validator.example.toml) for settings and
 [settlement delivery](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/settlement-delivery.md)
 for the detailed completion and recovery contract.
 

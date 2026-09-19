@@ -17,7 +17,7 @@ async fn test_get_account_info() {
     let env = RpcTestEnv::new().await;
 
     // Test for an existing account
-    let key = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let key = store_v42(&env.engine, 0, AccountMode::Magic);
     let expected = env.engine.get_account(key).expect("stored account");
     let account = env
         .rpc
@@ -74,7 +74,7 @@ async fn test_get_account_info() {
 async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_hit()
  {
     let env = RpcTestEnv::new().await;
-    let acc = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
     let request = json::json!({
         "jsonrpc": "2.0",
@@ -108,8 +108,8 @@ async fn test_get_multiple_accounts() {
     let env = RpcTestEnv::new().await;
 
     // Test with a list of existing accounts
-    let acc1 = store_v42(&env.engine, 1, AccountMode::Ephemeral);
-    let acc2 = store_v42(&env.engine, 2, AccountMode::Ephemeral);
+    let acc1 = store_v42(&env.engine, 1, AccountMode::Magic);
+    let acc2 = store_v42(&env.engine, 2, AccountMode::Magic);
     let accounts = env
         .rpc
         .get_multiple_accounts(&[acc1, acc2])
@@ -181,8 +181,8 @@ async fn test_get_multiple_accounts() {
 async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_bank_hits()
  {
     let env = RpcTestEnv::new().await;
-    let acc1 = store_v42(&env.engine, 0, AccountMode::Ephemeral);
-    let acc2 = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let acc1 = store_v42(&env.engine, 0, AccountMode::Magic);
+    let acc2 = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
     let request = json::json!({
         "jsonrpc": "2.0",
@@ -216,7 +216,7 @@ async fn test_get_balance() {
     let env = RpcTestEnv::new().await;
 
     // Test balance of an existing account
-    let acc = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let balance = env
         .rpc
         .get_balance(&acc)
@@ -244,7 +244,7 @@ async fn test_get_balance() {
 async fn test_get_balance_emits_remote_account_claims_header_zero_for_bank_hit()
 {
     let env = RpcTestEnv::new().await;
-    let acc = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
     let request = json::json!({
         "jsonrpc": "2.0",
@@ -338,7 +338,7 @@ async fn test_get_token_account_balance_emits_remote_account_claims_header_zero_
 async fn test_get_delegation_status_emits_remote_account_claims_header_zero_for_bank_hit()
  {
     let env = RpcTestEnv::new().await;
-    let acc = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
     let request = json::json!({
         "jsonrpc": "2.0",
@@ -372,8 +372,8 @@ async fn test_get_program_accounts() {
     let env = RpcTestEnv::new().await;
 
     // Test a program with multiple accounts
-    let acc1 = store_v42(&env.engine, 1, AccountMode::Ephemeral);
-    let acc2 = store_v42(&env.engine, 2, AccountMode::Ephemeral);
+    let acc1 = store_v42(&env.engine, 1, AccountMode::Magic);
+    let acc2 = store_v42(&env.engine, 2, AccountMode::Magic);
     let expected_pubkeys: HashSet<Pubkey> = [acc1, acc2].into();
 
     let accounts = env

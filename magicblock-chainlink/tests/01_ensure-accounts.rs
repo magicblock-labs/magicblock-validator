@@ -68,7 +68,7 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
             pubkeys[1],
             AccountBuilder::default()
                 .lamports(1)
-                .mode(AccountMode::Ephemeral)
+                .mode(AccountMode::Magic)
                 .build(),
         ),
         (
@@ -80,9 +80,7 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
         ),
         (
             pubkeys[3],
-            AccountBuilder::default()
-                .mode(AccountMode::Placeholder)
-                .build(),
+            AccountBuilder::default().mode(AccountMode::Uninit).build(),
         ),
     ];
     ctx.bank.accounts().store(&accounts).unwrap();
@@ -129,7 +127,7 @@ async fn write_non_existing_account(ctx: &TestContext) {
         .read(&pubkey, |account| account.mode())
         .unwrap()
         .unwrap();
-    assert_eq!(mode, AccountMode::Placeholder);
+    assert_eq!(mode, AccountMode::Uninit);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
@@ -190,7 +188,7 @@ async fn existing_account_missing_delegation_record(ctx: &TestContext) {
         .read(&pubkey, |account| account.mode())
         .unwrap()
         .unwrap();
-    assert_eq!(mode, AccountMode::Placeholder);
+    assert_eq!(mode, AccountMode::Uninit);
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
 }
 
@@ -272,7 +270,7 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
         .read(&pubkey, |account| account.mode())
         .unwrap()
         .unwrap();
-    assert_eq!(mode, AccountMode::Placeholder);
+    assert_eq!(mode, AccountMode::Uninit);
     assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);

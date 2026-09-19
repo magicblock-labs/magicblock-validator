@@ -226,12 +226,14 @@ pub enum MagicBlockInstruction {
     /// | `2` | Vault. Source of rent refund. | WRITE |
     CloseEphemeralAccount,
 
-    /// Unsed instruction slot.
-    /// -- can be repurposed --
-    /// This variant was originally used for `ScheduleCommitFinalize`, but that
-    /// instruction was removed. It is intentionally left unused so the wire
-    /// discriminant can be repurposed in a future protocol update.
-    Unused,
+    /// Creates or verifies a local Magic ATA.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER, WRITE]` Payer/sponsor
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    /// - **2.** `[]`       Mint
+    /// - **3.** `[]`       Token program
+    CreateMagicAta { wallet_owner: Pubkey },
 
     /// Clone a single account that fits in one transaction (<63KB data).
     ///
@@ -392,7 +394,7 @@ pub enum MagicBlockInstruction {
     /// Validates the associated outbox intent PDA account.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
-    /// ID of the scheduled commit and retrieve the signature from a globally
+    /// intent ID instead of searching for the corresponding intent bundle in the
     /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
     ///
     /// # Account references
@@ -402,6 +404,16 @@ pub enum MagicBlockInstruction {
     /// | `1` | MagicBlock program. Must match the MagicBlock program ID. | - |
     /// | `2` | Outbox intent PDA. Associated intent PDA, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
     ScheduledCommitSent(u64),
+
+    /// Closes a drained Magic ATA previously created via
+    /// `CreateMagicAta`. No-op unless the account matches the
+    /// Magic ATA marker for the signing wallet owner and holds zero
+    /// tokens, so it can be appended unconditionally to withdrawal flows.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Wallet owner
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    CloseMagicAta,
 }
 
 impl MagicBlockInstruction {

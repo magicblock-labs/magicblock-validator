@@ -15,7 +15,7 @@ use magicblock_magic_program_api::{
 };
 use solana_account::{
     AccountBuilder, AccountMode, AccountSharedData, ReadableAccount,
-    create_account_shared_data_for_test,
+    WritableAccount, create_account_shared_data_for_test,
 };
 use solana_clock::Clock;
 use solana_fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
@@ -112,7 +112,7 @@ fn prepare_schedule_accounts(
         &system_program::id(),
     ))
     .mode(if payer_confined {
-        AccountMode::Ephemeral
+        AccountMode::Magic
     } else {
         mode_for(payer_delegated)
     })
@@ -467,8 +467,7 @@ fn assert_accepted_actions(
         let actual = processed_accepted
             .iter()
             .filter(|acc| {
-                acc.owner() == &crate::id()
-                    && acc.mode() == AccountMode::Ephemeral
+                acc.owner() == &crate::id() && acc.mode() == AccountMode::Magic
             })
             .filter_map(|acc| {
                 OutboxIntentBundle::try_from_bytes(acc.data()).ok()
@@ -583,11 +582,13 @@ mod tests {
         create_ata_account, create_token_2022_ata_account,
     };
     use magicblock_core::token_programs::{
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, derive_ata,
-        derive_ata_with_token_program, derive_eata,
+        EATA_PROGRAM_ID, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_2022_PROGRAM_ID,
+        derive_ata, derive_ata_with_token_program, derive_eata,
     };
     use serial_test::serial;
+    use solana_program::{program_option::COption, program_pack::Pack};
     use solana_seed_derivable::SeedDerivable;
+    use spl_token::state::Account as SplAccount;
 
     use super::*;
     use crate::{utils::instruction_utils::InstructionUtils, validator};
@@ -608,6 +609,17 @@ mod tests {
         AccountBuilder::from(create_token_2022_ata_account(owner, mint))
             .mode(AccountMode::Delegated)
             .build()
+    }
+
+    fn make_magic_spl_ata_account(
+        owner: &Pubkey,
+        mint: &Pubkey,
+    ) -> AccountSharedData {
+        let mut acc = make_delegated_spl_ata_account(owner, mint);
+        let mut token = SplAccount::unpack(acc.data()).unwrap();
+        token.close_authority = COption::Some(MAGIC_ATA_CLOSE_AUTHORITY);
+        SplAccount::pack(token, acc.data_as_mut_slice()).unwrap();
+        AccountBuilder::from(acc).mode(AccountMode::Magic).build()
     }
 
     #[test]
@@ -995,6 +1007,46 @@ mod tests {
         assert_eq!(
             scheduled[0].intent_bundle.get_all_committed_pubkeys(),
             vec![eata_pubkey]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rejects_magic_ata() {
+        let payer =
+            Keypair::from_seed(b"schedule_commit_rejects_rent_pend").unwrap();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata_pubkey = derive_ata(&wallet_owner, &mint);
+
+        let (mut account_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(
+                &payer,
+                Pubkey::new_unique(),
+                ata_pubkey,
+            );
+
+        // Magic ATAs are ER-only and must never be committed.
+        account_data.insert(
+            ata_pubkey,
+            make_magic_spl_ata_account(&wallet_owner, &mint),
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
+            &payer.pubkey(),
+            vec![ata_pubkey],
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountData),
         );
     }
 
@@ -1600,12 +1652,12 @@ mod tests {
         account_data.insert(
             committee,
             AccountBuilder::from(committee_account)
-                .mode(AccountMode::Ephemeral)
+                .mode(AccountMode::Magic)
                 .build(),
         );
 
         let committee_account = account_data.get(&committee).unwrap();
-        assert!(committee_account.is(AccountMode::Ephemeral));
+        assert!(committee_account.is(AccountMode::Magic));
 
         // Create ScheduleCommit instruction with confined committee
         let ix = InstructionUtils::schedule_commit_instruction(
@@ -1771,12 +1823,12 @@ mod tests {
         accounts_data.insert(
             committee_dos,
             AccountBuilder::from(committee_account)
-                .mode(AccountMode::Ephemeral)
+                .mode(AccountMode::Magic)
                 .build(),
         );
         let committee_dos_account = accounts_data.get(&committee_dos).unwrap();
         assert!(
-            committee_dos_account.is(AccountMode::Ephemeral),
+            committee_dos_account.is(AccountMode::Magic),
             "Confined account should remain confined"
         );
 

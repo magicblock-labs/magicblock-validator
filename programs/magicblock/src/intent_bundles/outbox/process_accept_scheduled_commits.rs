@@ -228,7 +228,7 @@ fn create_outbox_ephemeral_account(
     acc.set_owner(crate::id());
     acc.resize(data.len(), 0);
     acc.data_as_mut_slice().copy_from_slice(&data);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)?;
+    set_account_mode(invoke_context, &mut acc, AccountMode::Magic)?;
 
     Ok(())
 }

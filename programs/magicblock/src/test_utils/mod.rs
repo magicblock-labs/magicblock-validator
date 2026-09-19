@@ -42,7 +42,7 @@ pub fn ensure_started_validator(
     // Ensure ephemeral vault account exists
     map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
         AccountBuilder::from(AccountSharedData::new(0, 0, &id()))
-            .mode(AccountMode::Ephemeral)
+            .mode(AccountMode::Magic)
             .build()
     });
 
