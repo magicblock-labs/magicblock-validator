@@ -26,7 +26,6 @@ use magicblock_services::{
     undelegation_request_service::UndelegationRequestService,
 };
 use magicblock_task_scheduler::{SchedulerDatabase, TaskSchedulerService};
-use magicblock_validator_admin::claim_fees::{claim_fees, run_claim_fees_loop};
 use nucleus::{
     metrics::EventTimer,
     shutdown::{Service, ShutdownManager, ShutdownReason},
@@ -477,7 +476,6 @@ impl Leader {
         let engine = self.engine.clone();
         let rpc_url = self.config.rpc_url().to_owned();
         let identity = self.engine.authority();
-        let admin = self.config.admin.clone();
 
         let mut shutdown = self.shutdown.handle(Service::OnchainSetup);
         // Ephemeral mode does a non-blocking startup balance check.
@@ -508,18 +506,6 @@ impl Leader {
                 .await?;
                 timer.record("Magic fee vault setup attempt completed");
 
-                if let Some(ref config) = admin
-                    && !config.claim_fees_frequency.is_zero()
-                {
-                    if let Err(err) = claim_fees(&engine, rpc_url.clone()).await
-                    {
-                        error!(
-                            error = ?err,
-                            "Failed to claim validator fees on startup"
-                        );
-                    }
-                    timer.record("Startup fee claim attempt completed");
-                }
                 ApiResult::Ok(())
             };
             let result = tokio::select! {
@@ -552,23 +538,6 @@ impl Leader {
         let shutdown = self.shutdown.handle(Service::UndelegationRequests);
         tokio::spawn(undelegation_request_service.run(shutdown));
         timer.record("Undelegation request service started");
-
-        // Now we are ready to start all services and are ready to accept transactions
-        if let Some(frequency) = self
-            .config
-            .admin
-            .as_ref()
-            .filter(|co| !co.claim_fees_frequency.is_zero())
-            .map(|co| co.claim_fees_frequency)
-        {
-            let engine = self.engine.clone();
-            let rpc_url = self.config.rpc_url().to_owned();
-            let shutdown = self.shutdown.handle(Service::FeeClaim);
-            tokio::spawn(run_claim_fees_loop(
-                engine, shutdown, frequency, rpc_url,
-            ));
-            timer.record("Fee claim task started");
-        }
 
         let intent_execution_service = self
             .intent_execution_service

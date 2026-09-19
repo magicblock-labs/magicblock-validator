@@ -2,9 +2,6 @@ name: 'MagicBlock - Setup Build Env'
 description: 'Checkout repositories and install dependencies'
 
 inputs:
-  github_token:
-    description: "Token used to install protoc, i.e. the secrets.GITHUB_TOKEN"
-    required: true
   rust_toolchain_release:
     description: "Rust toolchain override; defaults to rust-toolchain.toml"
     required: false
@@ -16,15 +13,27 @@ runs:
   using: "composite"
   steps:
   - name: Install Protoc
-    uses: actions-gw/setup-protoc-to-env@v3
-    with:
-      repo-token: ${{ inputs.github_token }}
+    shell: bash
+    run: |
+      # Keep the compiler on the previous installer's 26.x series.
+      version=26.1
+      case "$RUNNER_OS/$RUNNER_ARCH" in
+        Linux/X64) platform=linux-x86_64 ;;
+        Linux/ARM64) platform=linux-aarch_64 ;;
+        macOS/X64) platform=osx-x86_64 ;;
+        macOS/ARM64) platform=osx-aarch_64 ;;
+        *) echo "Unsupported protoc platform: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+      esac
+      install_dir="$(mktemp -d "$RUNNER_TEMP/protoc-$version.XXXXXX")"
+      curl --fail --silent --show-error --location --retry 3 \
+        "https://github.com/protocolbuffers/protobuf/releases/download/v$version/protoc-$version-$platform.zip" \
+        --output "$install_dir/protoc.zip"
+      unzip -q "$install_dir/protoc.zip" -d "$install_dir"
+      echo "$install_dir/bin" >> "$GITHUB_PATH"
+      echo "PROTOC=$install_dir/bin/protoc" >> "$GITHUB_ENV"
   - name: Show Protoc version
     shell: "bash"
     run: protoc --version
-  - name: Set PROTOC env variable
-    shell: "bash"
-    run: echo "PROTOC=$(which protoc)" >> $GITHUB_ENV
 
   - name: Install Rust
     shell: "bash"

@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 // NOTE: from version/src/lib.rs with MagicBlock Validator added
 #![cfg_attr(RUSTC_WITH_SPECIALIZATION, feature(min_specialization))]
 

@@ -16,6 +16,7 @@ humantime = { workspace = true }
 isocountry = { workspace = true }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "64c7c5e3", default-features = false }
 magicblock-config = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 nucleus = { workspace = true, features = ["metrics"] }
 rand = { workspace = true }
 serde = { workspace = true }

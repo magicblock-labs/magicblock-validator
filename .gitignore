@@ -35,6 +35,5 @@ _integration_test_bins/
 # AI related
 **/CLAUDE.md
 .claude/
-.agents/memory/engine-integration.local.md
 
 config.local.toml

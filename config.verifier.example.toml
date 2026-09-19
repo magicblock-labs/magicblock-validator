@@ -15,6 +15,7 @@ lru-capacity = 5000
 
 [engine.blockstore]
 blocktime = "400ms"
+# Followers apply upstream seals independently of this interval.
 superblock = 72000
 
 [engine.ledger]

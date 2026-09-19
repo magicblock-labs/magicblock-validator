@@ -1,3 +1,4 @@
+#![doc = include_str!("../README.md")]
 #![allow(deprecated)]
 #![allow(clippy::result_large_err)]
 pub mod chainlink;

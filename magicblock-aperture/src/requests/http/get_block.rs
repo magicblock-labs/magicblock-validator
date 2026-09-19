@@ -66,19 +66,22 @@ impl HttpDispatcher {
         let encoded_block = if let Some(block) = block {
             Some(encode_engine_block(block, encoding, options)?)
         } else {
-            self.ledger
-                .get_block(slot)?
-                .map(ConfirmedBlock::from)
-                .map(|block| {
-                    block.encode_with_options(encoding, options).map_err(
-                        |error| {
-                            RpcError::internal(format!(
-                                "failed to encode legacy block: {error}"
-                            ))
-                        },
-                    )
-                })
-                .transpose()?
+            self.with_ledger(|ledger| {
+                ledger
+                    .get_block(slot)?
+                    .map(ConfirmedBlock::from)
+                    .map(|block| {
+                        block.encode_with_options(encoding, options).map_err(
+                            |error| {
+                                RpcError::internal(format!(
+                                    "failed to encode legacy block: {error}"
+                                ))
+                            },
+                        )
+                    })
+                    .transpose()
+            })
+            .await?
         };
 
         Ok(ResponsePayload::encode_no_context(

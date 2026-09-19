@@ -15,7 +15,7 @@ use tracing::*;
 // Implements the following flow:
 //
 // ## Account created then fetched, then delegated
-// @docs/flows/deleg-non-existing-after-sub.md
+// Materialization rules: ../README.md#materialization-and-ordering
 
 // NOTE: Flow "Account created then fetched, then delegated"
 #[tokio::test]
@@ -81,8 +81,11 @@ async fn test_deleg_after_subscribe_case2() {
             AccountBuilder::from(AccountSharedData::from(acc.owned()))
                 .mode(AccountMode::ReadOnly)
                 .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey).await;
-        ctx.send_account_update(pubkey, acc).await;
+        let mut local_updates = bank.accounts().subscribe(pubkey);
+        assert!(
+            ctx.send_and_receive_account_update(pubkey, acc, Some(8_000))
+                .await
+        );
         TestContext::wait_for_local_account(
             &bank,
             &pubkey,
@@ -113,8 +116,13 @@ async fn test_deleg_after_subscribe_case2() {
                 .owner(program_pubkey)
                 .mode(AccountMode::Delegated)
                 .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey).await;
-        ctx.send_account_update(pubkey, acc).await;
+        let mut local_updates = bank.accounts().subscribe(pubkey);
+        // Materialization precedes subscription cleanup; wait for both before
+        // asserting that delegation released the subscription.
+        assert!(
+            ctx.send_and_receive_account_update(pubkey, acc, Some(8_000))
+                .await
+        );
         TestContext::wait_for_local_account(
             &bank,
             &pubkey,

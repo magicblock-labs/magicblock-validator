@@ -8,7 +8,8 @@ use magicblock_core::intent::{
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::{
-        ActionArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
+        ActionArgs, AddActionCallbackArgs, BaseActionArgs,
+        MagicIntentBundleArgs, ShortAccountMeta,
     },
     instruction::MagicBlockInstruction,
 };
@@ -37,6 +38,11 @@ use crate::{
     utils::DELEGATION_PROGRAM_ID,
 };
 
+type AccountDataMap = HashMap<Pubkey, AccountSharedData>;
+type TransactionAccounts = Vec<(Pubkey, AccountSharedData)>;
+type PreparedScheduleAccounts =
+    (AccountDataMap, TransactionAccounts, Option<Pubkey>);
+
 // For the scheduling itself and the debit to fund the scheduled transaction
 const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
 
@@ -57,6 +63,240 @@ fn get_clock() -> Clock {
         epoch_start_timestamp: 0,
         epoch: 10,
         leader_schedule_epoch: 10,
+    }
+}
+
+fn action_only_bundle_args(
+    action_account: Pubkey,
+    destination_program: Pubkey,
+) -> MagicIntentBundleArgs {
+    MagicIntentBundleArgs {
+        commit: None,
+        commit_and_undelegate: None,
+        commit_finalize: None,
+        commit_finalize_and_undelegate: None,
+        standalone_actions: vec![BaseActionArgs {
+            args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
+            compute_units: 100_000,
+            escrow_authority: 0,
+            destination_program,
+            accounts: vec![ShortAccountMeta {
+                pubkey: action_account,
+                is_writable: true,
+            }],
+        }],
+    }
+}
+
+fn transaction_accounts_with_clock() -> Vec<(Pubkey, AccountSharedData)> {
+    vec![(
+        clock::id(),
+        create_account_shared_data_for_test(&get_clock()),
+    )]
+}
+
+fn magic_context_account() -> AccountSharedData {
+    AccountSharedData::new(u64::MAX, MagicContext::SIZE, &crate::id())
+}
+
+fn prepare_schedule_accounts(
+    payer: &Keypair,
+    payer_delegated: bool,
+    payer_confined: bool,
+    fee_vault_delegated: Option<bool>,
+) -> PreparedScheduleAccounts {
+    let mut accounts_data = HashMap::new();
+    let payer_acc = AccountBuilder::from(AccountSharedData::new(
+        REQUIRED_TX_COST,
+        0,
+        &system_program::id(),
+    ))
+    .mode(if payer_confined {
+        AccountMode::Ephemeral
+    } else {
+        mode_for(payer_delegated)
+    })
+    .build();
+    accounts_data.insert(payer.pubkey(), payer_acc);
+    accounts_data.insert(MAGIC_CONTEXT_PUBKEY, magic_context_account());
+
+    let fee_vault_pubkey = fee_vault_delegated.map(|is_delegated| {
+        crate::validator::generate_validator_authority_if_needed();
+        let pubkey = magic_fee_vault_pubkey();
+        let vault_acc = AccountBuilder::from(AccountSharedData::new(
+            0,
+            0,
+            &system_program::id(),
+        ))
+        .mode(mode_for(is_delegated))
+        .build();
+        accounts_data.insert(pubkey, vault_acc);
+        pubkey
+    });
+
+    ensure_started_validator(&mut accounts_data, None);
+
+    (
+        accounts_data,
+        transaction_accounts_with_clock(),
+        fee_vault_pubkey,
+    )
+}
+
+fn schedule_action_only_bundle_instruction(
+    payer: &Pubkey,
+    action_account: Pubkey,
+    destination_program: Pubkey,
+    fee_vault: Option<Pubkey>,
+) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    if let Some(fee_vault) = fee_vault {
+        account_metas.push(AccountMeta::new(fee_vault, false));
+    }
+
+    Instruction::new_with_wincode(
+        crate::id(),
+        &MagicBlockInstruction::ScheduleIntentBundle(action_only_bundle_args(
+            action_account,
+            destination_program,
+        )),
+        account_metas,
+    )
+}
+
+fn add_action_callback_instruction(
+    payer: &Pubkey,
+    fee_vault: Option<Pubkey>,
+    destination_program: Pubkey,
+) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    if let Some(fee_vault) = fee_vault {
+        account_metas.push(AccountMeta::new(fee_vault, false));
+    }
+
+    Instruction::new_with_wincode(
+        crate::id(),
+        &MagicBlockInstruction::AddActionCallback(AddActionCallbackArgs {
+            action_index: 0,
+            destination_program,
+            discriminator: vec![],
+            payload: vec![],
+            compute_units: 0,
+            accounts: vec![],
+        }),
+        account_metas,
+    )
+}
+
+#[cfg(test)]
+mod callback_source_tests {
+    use std::sync::Arc;
+
+    use solana_program_runtime::{
+        declare_process_instruction, invoke_context::mock_process_instruction,
+        loaded_programs::ProgramCacheEntry,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
+
+    use super::*;
+    use crate::magicblock_processor::Entrypoint;
+
+    declare_process_instruction!(SchedulingProgram, 0, |invoke_context| {
+        let instructions: Vec<Instruction> = {
+            let context = invoke_context
+                .transaction_context
+                .get_current_instruction_context()?;
+            wincode::deserialize(context.get_instruction_data())
+                .map_err(|_| InstructionError::InvalidInstructionData)?
+        };
+        for instruction in instructions {
+            invoke_context.native_invoke_signed(instruction, &[])?;
+        }
+        Ok(())
+    });
+
+    /// Real CPI provenance permits A-to-A registration but rejects A-to-B,
+    /// while the original base action remains free to target B.
+    #[test]
+    #[serial_test::serial]
+    fn test_callback_destination_bound_to_recorded_source() {
+        let source = Pubkey::new_unique();
+        let other = Pubkey::new_unique();
+        for destination in [source, other] {
+            let payer = Keypair::new();
+            let (mut accounts, mut transaction_accounts, fee_vault) =
+                prepare_schedule_accounts(&payer, true, false, Some(true));
+            let schedule = schedule_action_only_bundle_instruction(
+                &payer.pubkey(),
+                Pubkey::new_unique(),
+                other,
+                fee_vault,
+            );
+            let callback = add_action_callback_instruction(
+                &payer.pubkey(),
+                fee_vault,
+                destination,
+            );
+            let mut outer_accounts = schedule.accounts.clone();
+            outer_accounts.push(AccountMeta::new_readonly(crate::id(), false));
+            accounts.insert(
+                crate::id(),
+                AccountSharedData::new(
+                    0,
+                    0,
+                    &solana_sdk_ids::native_loader::id(),
+                ),
+            );
+            for meta in &outer_accounts {
+                transaction_accounts.push((
+                    meta.pubkey,
+                    accounts.remove(&meta.pubkey).unwrap(),
+                ));
+            }
+            let accepted = destination == source;
+            let result = mock_process_instruction(
+                &source,
+                None,
+                &wincode::serialize(&vec![schedule, callback]).unwrap(),
+                transaction_accounts,
+                outer_accounts,
+                if accepted {
+                    Ok(())
+                } else {
+                    Err(InstructionError::InvalidInstructionData)
+                },
+                (SchedulingProgram::vm, SchedulingProgram::codegen),
+                |context| {
+                    context.program_cache_for_tx_batch.replenish(
+                        crate::id(),
+                        Arc::new(ProgramCacheEntry::new_builtin((
+                            Entrypoint::vm,
+                            Entrypoint::codegen,
+                        ))),
+                    );
+                },
+                |_| {},
+            );
+            let account = find_magic_context_account(&result).unwrap();
+            let mut context =
+                MagicContext::deserialize(account.data()).unwrap();
+            let action = context.scheduled_base_intents[0]
+                .intent_bundle
+                .get_action_mut(0)
+                .unwrap();
+            assert_eq!(action.source_program, Some(source));
+            assert_eq!(action.destination_program, other);
+            assert_eq!(
+                action.callback.as_ref().map(|c| c.destination_program),
+                accepted.then_some(source)
+            );
+        }
     }
 }
 
@@ -474,57 +714,13 @@ mod tests {
         let action_account = Pubkey::new_unique();
         let destination_program = Pubkey::new_unique();
 
-        let mut accounts_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                payer.pubkey(),
-                AccountSharedData::new(
-                    REQUIRED_TX_COST,
-                    0,
-                    &system_program::id(),
-                ),
-            );
-            map.insert(
-                MAGIC_CONTEXT_PUBKEY,
-                AccountSharedData::new(
-                    u64::MAX,
-                    MagicContext::SIZE,
-                    &crate::id(),
-                ),
-            );
-            map
-        };
-        ensure_started_validator(&mut accounts_data, None);
-
-        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> =
-            vec![(
-                clock::id(),
-                create_account_shared_data_for_test(&get_clock()),
-            )];
-
-        let args = MagicIntentBundleArgs {
-            commit: None,
-            commit_and_undelegate: None,
-            commit_finalize: None,
-            commit_finalize_and_undelegate: None,
-            standalone_actions: vec![BaseActionArgs {
-                args: ActionArgs::new(vec![1, 2, 3]).with_escrow_index(0),
-                compute_units: 100_000,
-                escrow_authority: 0,
-                destination_program,
-                accounts: vec![ShortAccountMeta {
-                    pubkey: action_account,
-                    is_writable: true,
-                }],
-            }],
-        };
-        let ix = Instruction::new_with_wincode(
-            crate::id(),
-            &MagicBlockInstruction::ScheduleIntentBundle(args),
-            vec![
-                AccountMeta::new(payer.pubkey(), true),
-                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-            ],
+        let (mut accounts_data, mut transaction_accounts, _) =
+            prepare_schedule_accounts(&payer, false, false, None);
+        let ix = schedule_action_only_bundle_instruction(
+            &payer.pubkey(),
+            action_account,
+            destination_program,
+            None,
         );
 
         extend_transaction_accounts_from_ix(
@@ -538,6 +734,89 @@ mod tests {
             transaction_accounts,
             ix.accounts,
             Err(InstructionError::UnsupportedProgramId),
+        );
+    }
+
+    #[test]
+    #[serial]
+    /// An optional vault must still be delegated when the payer is not charged.
+    fn test_schedule_commit_optional_fee_vault_is_validated() {
+        let payer = Keypair::from_seed(&[33u8; 32]).unwrap();
+        let (mut accounts_data, mut transaction_accounts, fee_vault) =
+            prepare_schedule_accounts(&payer, false, false, Some(false));
+        // Exercise the shared vault checker without bypassing bundle CPI provenance.
+        let ix = instruction_from_account_metas(vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(fee_vault.unwrap(), false),
+        ]);
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IllegalOwner),
+        );
+    }
+
+    #[test]
+    #[serial]
+    /// A delegated callback payer cannot omit the fee vault.
+    fn test_add_action_callback_requires_fee_vault() {
+        let payer = Keypair::from_seed(&[34u8; 32]).unwrap();
+
+        let (mut accounts_data, mut transaction_accounts, _) =
+            prepare_schedule_accounts(&payer, true, false, None);
+        let ix = add_action_callback_instruction(
+            &payer.pubkey(),
+            None,
+            Pubkey::new_unique(),
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
+        );
+    }
+
+    #[test]
+    #[serial]
+    /// An ephemeral payer cannot charge the vault even when it is supplied.
+    fn test_add_action_callback_confined_payer_cannot_charge_fee_vault() {
+        let payer = Keypair::from_seed(&[35u8; 32]).unwrap();
+        let (mut accounts_data, mut transaction_accounts, fee_vault) =
+            prepare_schedule_accounts(&payer, true, true, Some(true));
+        let ix = add_action_callback_instruction(
+            &payer.pubkey(),
+            fee_vault,
+            Pubkey::new_unique(),
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingAccount),
         );
     }
 
@@ -1696,6 +1975,52 @@ mod tests {
                 .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
                     && a.is(AccountMode::Delegated))
         );
+    }
+
+    #[test]
+    #[serial]
+    /// An optional vault is skipped as a committee and is not charged.
+    fn test_schedule_commit_optional_fee_vault_not_required() {
+        let payer =
+            Keypair::from_seed(b"schedule_commit_optional_vault__").unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        let (mut account_data, mut transaction_accounts, fee_vault) =
+            prepare_schedule_accounts(&payer, false, false, Some(true));
+        let committee_acc =
+            AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                .mode(AccountMode::Delegated)
+                .build();
+        account_data.insert(committee, committee_acc);
+
+        let ix = instruction_from_account_metas(vec![
+            AccountMeta::new(payer.pubkey(), true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+            AccountMeta::new(fee_vault.unwrap(), false),
+            AccountMeta::new_readonly(committee, true),
+        ]);
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut account_data,
+            &mut transaction_accounts,
+        );
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        accounts
+            .iter()
+            .find(|account| {
+                account.is(AccountMode::Delegated)
+                    && account.lamports() == 0
+                    && account.owner() == &system_program::id()
+            })
+            .expect("fee vault should be validated but not charged");
     }
 
     #[test]

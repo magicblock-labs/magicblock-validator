@@ -1,7 +1,7 @@
 // Implements the following flow:
 //
 // ## Redelegate an Account that was delegated to us to Other - Separate Slots
-// @docs/flows/deleg-us-redeleg-other.md
+// Materialization rules: ../README.md#materialization-and-ordering
 
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated,
