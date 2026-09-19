@@ -8,10 +8,13 @@ program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-magic-program-api = { workspace = true }
 tracing = { workspace = true }
 test-chainlink = { workspace = true }
 magicblock-delegation-program-api = { workspace = true, features = ["encryption"] }
 solana-loader-v4-interface = { workspace = true, features = ["serde"] }
+solana-commitment-config = { workspace = true }
+solana-transaction-status = { workspace = true }
 solana-sdk = { workspace = true }
 solana-system-interface = { workspace = true }
 spl-associated-token-account-interface = { workspace = true }

@@ -12471,3 +12471,267 @@ async fn test_programdata_sweep_detects_upgrade_without_notification() {
     fetch_cloner.sweep_programdata_watches().await;
     assert_eq!(cloner.program_clone_count(), 2);
 }
+
+fn insert_magic_ata_in_bank(
+    accounts_bank: &Arc<AccountsBankStub>,
+    ata_pubkey: Pubkey,
+    wallet_owner: &Pubkey,
+    mint: &Pubkey,
+    amount: u64,
+) {
+    let token_account = SplAccount {
+        mint: *mint,
+        owner: *wallet_owner,
+        amount,
+        delegate: COption::None,
+        state: AccountState::Initialized,
+        is_native: COption::None,
+        delegated_amount: 0,
+        close_authority: COption::Some(
+            magicblock_core::token_programs::MAGIC_ATA_CLOSE_AUTHORITY,
+        ),
+    };
+    let mut account =
+        AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
+    SplAccount::pack(token_account, account.data_as_mut_slice()).unwrap();
+    account.set_delegated(true);
+    account.set_remote_slot(0);
+    accounts_bank.insert(ata_pubkey, account);
+}
+
+/// A drained Magic ATA is delegated locally but must not deduplicate the eATA
+/// projection that replaces it, in any of the clone dedupers.
+#[tokio::test]
+async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
+    let validator_keypair = Keypair::new();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 100;
+
+    let FetcherTestCtx {
+        accounts_bank,
+        fetch_cloner,
+        ..
+    } = setup(
+        Vec::<(Pubkey, Account)>::new(),
+        CURRENT_SLOT,
+        validator_keypair,
+    )
+    .await;
+
+    let mut projected_ata =
+        AccountSharedData::from(create_ata_account(&wallet_owner, &mint));
+    projected_ata.set_delegated(true);
+    projected_ata.set_remote_slot(CURRENT_SLOT);
+    let request = AccountCloneRequest {
+        pubkey: ata_pubkey,
+        account: projected_ata,
+        commit_frequency_ms: None,
+        post_delegation_mode: ClonePostDelegationMode::None,
+        delegated_to_other: None,
+        source_slots: None,
+    };
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        0,
+    );
+    assert!(
+        !fetch_cloner.local_account_satisfies_clone_request(&request),
+        "drained Magic ATA must not deduplicate its eATA projection"
+    );
+    assert!(!fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        7,
+    );
+    assert!(
+        fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA stays authoritative"
+    );
+    assert!(fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+}
+
+/// The projection that replaces a drained Magic ATA must take its layout from
+/// the base ATA, not from the local Magic ATA it replaces.
+#[tokio::test]
+async fn test_drained_magic_ata_projection_uses_base_ata_layout() {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 101;
+    const AMOUNT: u64 = 777;
+    const BASE_LAMPORTS: u64 = 2_039_280;
+
+    // A frozen base ATA with rent: both differ from the local Magic ATA.
+    let mut base_ata_account = create_ata_account(&wallet_owner, &mint);
+    base_ata_account.lamports = BASE_LAMPORTS;
+    let mut base_token = SplAccount::unpack(&base_ata_account.data).unwrap();
+    base_token.state = AccountState::Frozen;
+    SplAccount::pack(base_token, &mut base_ata_account.data).unwrap();
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [
+            (eata_pubkey, eata_account.clone()),
+            (ata_pubkey, base_ata_account),
+        ],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        0,
+    );
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let projected = accounts_bank
+                .get_account(&ata_pubkey)
+                .is_some_and(|account| account.remote_slot() == CURRENT_SLOT);
+            if projected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the drained Magic ATA to be replaced");
+
+    let projected = accounts_bank.get_account(&ata_pubkey).unwrap();
+    let token = SplAccount::unpack(projected.data()).unwrap();
+    assert!(projected.delegated());
+    assert_eq!(token.amount, AMOUNT);
+    assert_eq!(token.state, AccountState::Frozen);
+    assert_eq!(projected.lamports(), BASE_LAMPORTS);
+    assert_ne!(
+        token.close_authority,
+        COption::Some(
+            magicblock_core::token_programs::MAGIC_ATA_CLOSE_AUTHORITY
+        ),
+        "projection must not keep the Magic ATA marker"
+    );
+}
+
+/// When the base ATA is confirmed absent on chain, the projection that
+/// replaces a drained Magic ATA falls back to the local layout.
+#[tokio::test]
+async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_ata_absent(
+) {
+    init_logger();
+    let validator_keypair = Keypair::new();
+    let validator_pubkey = validator_keypair.pubkey();
+    let wallet_owner = random_pubkey();
+    let mint = random_pubkey();
+    let eata_pubkey = derive_eata(&wallet_owner, &mint);
+    let ata_pubkey = derive_ata(&wallet_owner, &mint);
+    const CURRENT_SLOT: u64 = 101;
+    const AMOUNT: u64 = 555;
+
+    let eata_account = create_eata_account(&wallet_owner, &mint, AMOUNT, true);
+    let FetcherTestCtx {
+        accounts_bank,
+        rpc_client,
+        subscription_tx,
+        ..
+    } = setup(
+        [(eata_pubkey, eata_account.clone())],
+        CURRENT_SLOT,
+        validator_keypair.insecure_clone(),
+    )
+    .await;
+
+    insert_magic_ata_in_bank(
+        &accounts_bank,
+        ata_pubkey,
+        &wallet_owner,
+        &mint,
+        0,
+    );
+    add_delegation_record_for(
+        &rpc_client,
+        eata_pubkey,
+        validator_pubkey,
+        EATA_PROGRAM_ID,
+    );
+
+    subscription_tx
+        .send(ForwardedSubscriptionUpdate {
+            pubkey: eata_pubkey,
+            account: RemoteAccount::from_fresh_account(
+                eata_account,
+                CURRENT_SLOT,
+                RemoteAccountUpdateSource::Subscription,
+            ),
+            source: SubscriptionSource::Program,
+        })
+        .await
+        .unwrap();
+
+    tokio::time::timeout(Duration::from_secs(1), async {
+        loop {
+            let projected = accounts_bank
+                .get_account(&ata_pubkey)
+                .is_some_and(|account| account.remote_slot() == CURRENT_SLOT);
+            if projected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("timed out waiting for the local-layout projection");
+
+    let projected = accounts_bank.get_account(&ata_pubkey).unwrap();
+    let token = SplAccount::unpack(projected.data()).unwrap();
+    assert!(projected.delegated());
+    assert_eq!(token.amount, AMOUNT);
+    assert_eq!(projected.lamports(), 0, "local Magic ATA layout kept");
+    assert_ne!(
+        token.close_authority,
+        COption::Some(
+            magicblock_core::token_programs::MAGIC_ATA_CLOSE_AUTHORITY
+        ),
+    );
+}

@@ -9,7 +9,8 @@ pub use magicblock_core::intent::{
 use magicblock_core::{
     intent::types::CommittedAccount,
     token_programs::{
-        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
+        try_get_magic_ata_info, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID,
+        TOKEN_PROGRAM_ID,
     },
     Slot,
 };
@@ -534,6 +535,22 @@ fn validate_commit_type_accounts(
                 pubkey
             );
             return Err(InstructionError::IllegalOwner)
+        }
+
+        // Magic ATAs are ER-only and have no base delegation to commit
+        // to; funds leave them via the shuttle withdrawal flow instead.
+        if try_get_magic_ata_info(
+            pubkey,
+            &account.to_account_shared_data()?,
+        )
+        .is_some()
+        {
+            ic_msg!(
+                context.invoke_context,
+                "ScheduleCommit ERR: account {} is a Magic ATA and cannot be committed or undelegated; use the shuttle withdrawal flow",
+                pubkey
+            );
+            return Err(InstructionError::InvalidAccountData);
         }
 
         // Accounts larger than 10_240 bytes can't be committed

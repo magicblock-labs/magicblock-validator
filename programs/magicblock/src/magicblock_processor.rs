@@ -16,7 +16,8 @@ use crate::{
         process_finalize_v1_program_from_buffer, process_set_program_authority,
     },
     ephemeral_accounts::{
-        process_close_ephemeral_account, process_create_ephemeral_account,
+        process_close_ephemeral_account, process_close_magic_ata,
+        process_create_ephemeral_account, process_create_magic_ata,
         process_resize_ephemeral_account,
     },
     mutate_accounts::process_mutate_accounts,
@@ -86,12 +87,13 @@ declare_process_instruction!(
                     request_undelegation: true,
                 },
             ),
-            Unused => {
-                solana_log_collector::ic_msg!(
-                    invoke_context,
-                    "MagicBlockInstruction ERR: Unused instruction slot"
-                );
-                Err(InstructionError::InvalidInstructionData)
+            CreateMagicAta { wallet_owner } => process_create_magic_ata(
+                invoke_context,
+                transaction_context,
+                wallet_owner,
+            ),
+            CloseMagicAta => {
+                process_close_magic_ata(invoke_context, transaction_context)
             }
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)

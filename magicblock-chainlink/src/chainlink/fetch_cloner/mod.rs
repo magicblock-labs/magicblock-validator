@@ -1080,8 +1080,24 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
-    fn account_is_actively_delegated(account: &AccountSharedData) -> bool {
-        account.delegated() && !account.undelegating()
+    /// Whether a local delegation is authoritative for `pubkey`. A drained
+    /// Magic ATA is delegated but replaceable: its eATA projection must never
+    /// be deduplicated away, or the stale zero balance would hide later eATA
+    /// deposits. Every clone deduper must go through this check.
+    fn local_delegation_is_authoritative(
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
+    ) -> bool {
+        account.delegated()
+            && !ata_projection::is_drained_magic_ata(pubkey, account)
+    }
+
+    fn account_is_actively_delegated(
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
+    ) -> bool {
+        Self::local_delegation_is_authoritative(pubkey, account)
+            && !account.undelegating()
     }
 
     /// Whether local state makes submission unnecessary: it is authoritative,
@@ -1102,7 +1118,7 @@ where
                 && request.delegated_to_other.is_none()
                 && !request.post_delegation_mode.is_rescue_undelegate();
         if active_delegation_satisfies_request
-            && Self::account_is_actively_delegated(&account)
+            && Self::account_is_actively_delegated(&request.pubkey, &account)
         {
             return true;
         }
@@ -1591,7 +1607,9 @@ where
                         && active_delegation_satisfies_request
                         && self.accounts_bank.get_account(&pubkey).is_some_and(
                             |account| {
-                                Self::account_is_actively_delegated(&account)
+                                Self::account_is_actively_delegated(
+                                    &pubkey, &account,
+                                )
                             },
                         );
                     if reconciled_active_delegation {
@@ -2120,7 +2138,9 @@ where
     fn local_delegated_clone_target_active(&self, pubkey: Pubkey) -> bool {
         self.accounts_bank
             .get_account(&pubkey)
-            .is_some_and(|account| account.delegated())
+            .is_some_and(|account| {
+                Self::local_delegation_is_authoritative(&pubkey, &account)
+            })
     }
 
     pub fn start_subscription_listener(

@@ -13,7 +13,7 @@ use solana_transaction_context::TransactionContext;
 use super::{
     add_pending_clone, adjust_authority_lamports, is_pending_clone,
     set_account_from_fields, validate_and_get_index, validate_authority,
-    validate_mutable, validate_remote_slot,
+    validate_clone_target, validate_remote_slot,
 };
 use crate::errors::MagicBlockProgramError;
 
@@ -73,7 +73,7 @@ pub(crate) fn process_clone_account_init(
     let mut account = transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
     // Prevent overwriting ephemeral or active delegated accounts
-    validate_mutable(&account, &pubkey, invoke_context)?;
+    validate_clone_target(&account, &pubkey, invoke_context)?;
     // Prevent stale updates from overwriting fresher data
     validate_remote_slot(
         &mut account,
