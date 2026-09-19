@@ -60,6 +60,11 @@ pub enum IntentExecutorError {
     EmptyIntentError,
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    /// This doesn't mean permanent failure
+    /// This means that some ancestor failed
+    /// to execute with multiple retries
+    #[error("Intent got poisoned")]
+    PoisonedIntentError,
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("OutboxClientError: {0}")]
@@ -120,6 +125,7 @@ impl IntentExecutorError {
         match self {
             Self::EmptyIntentError
             | Self::FailedToFitError
+            | Self::PoisonedIntentError
             | Self::SignerError(_)
             | Self::OutboxClientError(_)
             // The underlying tx may have already landed; blindly
@@ -162,6 +168,7 @@ impl IntentExecutorError {
             }
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
+            | IntentExecutorError::PoisonedIntentError
             | IntentExecutorError::SignerError(_)
             | IntentExecutorError::OutboxClientError(_)
             | IntentExecutorError::GetPendingSignatureStatusError(_) => None,
