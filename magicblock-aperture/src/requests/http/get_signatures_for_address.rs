@@ -85,15 +85,17 @@ impl HttpDispatcher {
 
         let include_legacy = !until_in_engine;
         let legacy = if include_legacy {
-            self.ledger
-                .get_confirmed_signatures_for_address(
+            self.with_ledger(|ledger| {
+                ledger.get_confirmed_signatures_for_address(
                     address,
                     Slot::MAX,
                     (!before_in_engine).then_some(before).flatten(),
                     (!until_in_engine).then_some(until).flatten(),
                     limit,
-                )?
-                .infos
+                )
+            })
+            .await?
+            .infos
         } else {
             Vec::new()
         };

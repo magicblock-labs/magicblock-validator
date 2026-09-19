@@ -116,7 +116,6 @@ impl From<Option<DelegationActions>> for ClonePostDelegationMode {
 pub struct AccountCloneRequest {
     pub pubkey: Pubkey,
     pub account: AccountBuilder,
-    pub commit_frequency_ms: Option<u64>,
     /// Trusted post-delegation state; kept private to prevent external callers
     /// from constructing requests with unverified invocation provenance.
     pub(crate) post_delegation_mode: ClonePostDelegationMode,
@@ -234,7 +233,7 @@ fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
 
 pub(crate) async fn clone_account(
     engine: &Engine,
-    accessor: &mut AccountAccessor<'_>,
+    accessor: AccountAccessor<'_>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
     if let Some(authority) = request.delegated_to_other {
@@ -291,14 +290,13 @@ pub(crate) fn resolve_program(
     Some(AccountCloneRequest {
         pubkey: program_id,
         account,
-        commit_frequency_ms: None,
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
     })
 }
 
 pub(crate) async fn clone_program(
-    accessor: &mut AccountAccessor<'_>,
+    accessor: AccountAccessor<'_>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
     let program_id = request.pubkey;
@@ -317,15 +315,14 @@ pub(crate) async fn evict_account(
     engine: &Engine,
     pubkey: Pubkey,
 ) -> ClonerResult<()> {
-    let Some(mut accessor) = claim_account_eviction(engine, pubkey).await?
-    else {
+    let Some(accessor) = claim_account_eviction(engine, pubkey).await? else {
         return Ok(());
     };
-    delete_claimed_account(&mut accessor, pubkey).await
+    delete_claimed_account(accessor, pubkey).await
 }
 
 pub(crate) async fn delete_claimed_account(
-    accessor: &mut AccountAccessor<'_>,
+    accessor: AccountAccessor<'_>,
     pubkey: Pubkey,
 ) -> ClonerResult<()> {
     accessor.delete().await.map_err(|err| {

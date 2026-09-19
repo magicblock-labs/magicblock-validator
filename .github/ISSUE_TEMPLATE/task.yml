@@ -1,0 +1,31 @@
+name: Task
+description: Track a concrete, scoped unit of work
+type: Task
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: start with an imperative verb and describe the completed outcome
+        in sentence case, without a category prefix or terminal punctuation.
+        Example: `Configure full Rust CI workflow`
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: >-
+        Add details beyond the outcome only when useful: what needs to change,
+        why, and where it belongs. Introduce new
+        concepts before using them; do not assume familiarity with related work.
+        Link to relevant code or design context when useful.
+    validations:
+      required: false
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: >-
+        Describe the observable result that defines completion, with enough
+        context to understand the task on its own.
+    validations:
+      required: true

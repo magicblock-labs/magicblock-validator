@@ -336,16 +336,9 @@ impl TestContext {
         let delegation_record_pubkey =
             dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
-        let mut local_updates = self.bank.accounts().subscribe(*pubkey).await;
-        self.send_account_update(
+        self.materialize_subscription_update(
             *pubkey,
             AccountSharedData::from(undelegated_acc.owned()),
-        )
-        .await;
-        Self::wait_for_local_account(
-            &self.bank,
-            pubkey,
-            &mut local_updates,
             &undelegated_acc,
         )
         .await;
@@ -353,6 +346,8 @@ impl TestContext {
         Ok(undelegated_acc)
     }
 
+    /// Delegates an existing account and waits for materialization and
+    /// subscription cleanup, which completes after the local account write.
     pub async fn delegate_existing_account_to(
         &self,
         pubkey: &Pubkey,
@@ -383,19 +378,34 @@ impl TestContext {
         .slot(self.rpc_client.get_slot())
         .mode(mode)
         .build();
-        let mut local_updates = self.bank.accounts().subscribe(*pubkey).await;
-        self.send_account_update(*pubkey, delegated_acc).await;
-        Self::wait_for_local_account(
-            &self.bank,
-            pubkey,
-            &mut local_updates,
-            &expected,
-        )
-        .await;
+        self.materialize_subscription_update(*pubkey, delegated_acc, &expected)
+            .await;
 
         Ok(DelegateResult {
             delegation_record_pubkey,
         })
+    }
+
+    /// Waits for both the committed image and subsequent subscription cleanup.
+    async fn materialize_subscription_update(
+        &self,
+        pubkey: Pubkey,
+        remote: AccountSharedData,
+        expected: &AccountSharedData,
+    ) {
+        let mut local_updates = self.bank.accounts().subscribe(pubkey);
+        assert!(
+            self.send_and_receive_account_update(pubkey, remote, Some(8_000))
+                .await,
+            "subscription update and cleanup complete"
+        );
+        Self::wait_for_local_account(
+            &self.bank,
+            &pubkey,
+            &mut local_updates,
+            expected,
+        )
+        .await;
     }
 }
 

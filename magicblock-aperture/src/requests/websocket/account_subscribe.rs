@@ -21,7 +21,7 @@ impl WsDispatcher {
         };
 
         let id = next_subid();
-        let mut rx = self.engine.accounts().subscribe(pubkey).await;
+        let mut rx = self.engine.accounts().subscribe(pubkey);
         let tx = self.chan.tx.clone();
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {

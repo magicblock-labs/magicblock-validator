@@ -33,7 +33,7 @@ pub struct ProgramIdl {
     pub data: Vec<u8>,
 }
 /// The different loader versions that exist on Solana.
-/// See: docs/program-accounts.md
+/// See the crate's [program materialization overview](https://github.com/magicblock-labs/magicblock-validator/blob/dev/magicblock-chainlink/README.md#programs-and-projected-accounts).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RemoteProgramLoader {
     /// Deprecated loader BPFLoader1111111111111111111111111111111111.

@@ -260,7 +260,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     );
                     continue;
                 }
-                let mut accessor =
+                let accessor =
                     match cloner::claim_account_eviction(&engine, pubkey).await
                     {
                         Ok(Some(accessor)) => accessor,
@@ -287,7 +287,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     continue;
                 }
                 if let Err(err) =
-                    cloner::delete_claimed_account(&mut accessor, pubkey).await
+                    cloner::delete_claimed_account(accessor, pubkey).await
                 {
                     warn!(
                         pubkey = %pubkey,
@@ -323,7 +323,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                             let subscription = remote_account_provider
                                 .lock_account_eviction(&pubkey)
                                 .await;
-                            let (mut accessor, ata_info) = match cloner::claim_cached_account_eviction(
+                            let (accessor, ata_info) = match cloner::claim_cached_account_eviction(
                                 &engine,
                                 pubkey,
                                 |account| {
@@ -354,7 +354,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                                 return;
                             }
                             if let Err(err) = cloner::delete_claimed_account(
-                                &mut accessor,
+                                accessor,
                                 pubkey,
                             )
                             .await
@@ -422,9 +422,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let loader = accessor.loader();
             let mut pending = None;
             for pubkey in pubkeys {
-                let mode = loader
-                    .read(pubkey, |account| account.mode())
-                    .map_err(KeeperError::from)?;
+                let mode = loader.mode(pubkey).map_err(KeeperError::from)?;
                 if mode.is_none_or(|mode| mode == AccountMode::Transient) {
                     pending
                         .get_or_insert_with(|| {

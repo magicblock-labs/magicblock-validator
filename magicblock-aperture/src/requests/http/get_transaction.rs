@@ -3,7 +3,9 @@ use ledger::request::{BlockDetails, BlockParams};
 use solana_rpc_client_api::config::{
     RpcEncodingConfigWrapper, RpcTransactionConfig,
 };
-use solana_transaction_status::UiTransactionEncoding;
+use solana_transaction_status::{
+    ConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+};
 
 use super::HandlerResult;
 use crate::{
@@ -27,6 +29,37 @@ impl HttpDispatcher {
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
 
+        let encode =
+            |transaction: Option<ConfirmedTransactionWithStatusMeta>| {
+                let encoding =
+                    config.encoding.unwrap_or(UiTransactionEncoding::Json);
+                // This implementation supports all transaction versions, so we pass a max version number.
+                let max_version = Some(u8::MAX);
+
+                // If the transaction was found, encode it for the RPC response.
+                let encoded_transaction = transaction
+                    .and_then(|tx| tx.encode(encoding, max_version).ok());
+
+                let mut encoded_value = value_from_serializable(
+                    &encoded_transaction,
+                )
+                .ok_or_else(|| {
+                    RpcError::internal(
+                        "failed to serialize getTransaction response",
+                    )
+                })?;
+                normalize_failed_transaction_balance_arrays(&mut encoded_value);
+
+                if encoding == UiTransactionEncoding::JsonParsed {
+                    sanitize_nan_strings(&mut encoded_value);
+                }
+
+                Ok(ResponsePayload::encode_no_context(
+                    &request.id,
+                    encoded_value,
+                ))
+            };
+
         let engine_transaction = self
             .engine
             .transactions()
@@ -47,31 +80,16 @@ impl HttpDispatcher {
                 .map(|block| block.block().time);
             Some(confirmed_transaction(transaction, block_time)?)
         } else {
-            self.ledger.get_complete_transaction(signature, u64::MAX)?
+            return self
+                .with_ledger(|ledger| {
+                    encode(
+                        ledger.get_complete_transaction(signature, u64::MAX)?,
+                    )
+                })
+                .await;
         };
 
-        let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
-        // This implementation supports all transaction versions, so we pass a max version number.
-        let max_version = Some(u8::MAX);
-
-        // If the transaction was found, encode it for the RPC response.
-        let encoded_transaction =
-            transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
-
-        let mut encoded_value = value_from_serializable(&encoded_transaction)
-            .ok_or_else(|| {
-            RpcError::internal("failed to serialize getTransaction response")
-        })?;
-        normalize_failed_transaction_balance_arrays(&mut encoded_value);
-
-        if encoding == UiTransactionEncoding::JsonParsed {
-            sanitize_nan_strings(&mut encoded_value);
-        }
-
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            encoded_value,
-        ))
+        encode(transaction)
     }
 }
 

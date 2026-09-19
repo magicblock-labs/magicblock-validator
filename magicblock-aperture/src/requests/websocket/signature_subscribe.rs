@@ -13,27 +13,12 @@ impl WsDispatcher {
         let id = next_subid();
         let encoder = TransactionResultEncoder;
 
-        // Subscribe first so no update can slip through between the status
-        // check below and task startup.
         let rx = self
             .engine
             .transactions()
             .subscribe_signature(signature)
-            .await;
-
-        if let Some(status) = self
-            .engine
-            .transactions()
-            .status(signature)
             .await
-            .map_err(crate::error::RpcError::internal)?
-        {
-            let slot = context_slot(&self.engine);
-            if let Some(bytes) = encoder.encode(slot, &status.result, id) {
-                let _ = self.chan.tx.send(bytes).await;
-            }
-            return Ok(SubResult::SubId(id));
-        }
+            .map_err(crate::error::RpcError::internal)?;
 
         let tx = self.chan.tx.clone();
         let engine = self.engine.clone();

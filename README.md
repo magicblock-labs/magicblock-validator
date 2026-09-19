@@ -1,207 +1,150 @@
 <div align="center">
   <img height="100" src="https://magicblock-labs.github.io/README/img/magicblock-band.png" alt="MagicBlock Logo" />
-
   <h1>MagicBlock Validator</h1>
-
-  <p>
-    <strong>Blazing Fast SVM Validator for Ephemeral Rollups and Elastic Compute.</strong>
-  </p>
-
+  <p><b>Blazing-fast SVM execution for real-time applications. Powered by Ephemeral Rollups.</b></p>
   <p>
     <a href="https://docs.magicblock.gg"><img alt="Documentation" src="https://img.shields.io/badge/docs-tutorials-blueviolet" /></a>
-    <a href="https://github.com/magicblock-labs/magicblock-validator/blob/main/LICENSE.md"><img alt="License" src="https://img.shields.io/badge/license-BSL--1.1-blue" /></a>
+    <a href="LICENSE.md"><img alt="License BSL-1.1" src="https://img.shields.io/badge/license-BSL--1.1-blue" /></a>
     <a href="https://discord.com/invite/MBkdC3gxcv"><img alt="Discord Chat" src="https://img.shields.io/discord/943797222162726962?color=blueviolet" /></a>
   </p>
+  <p>
+    <a href="https://docs.magicblock.gg">Build with MagicBlock</a> ·
+    <a href="#-try-it-locally">Try it locally</a> ·
+    <a href="bins/magicblock-validator/README.md">Run a validator</a>
+  </p>
 </div>
-
-## 📖 Overview
-
-The **MagicBlock Validator** is a specialized Solana Virtual Machine (SVM) runtime designed to power **Ephemeral Rollups**. It enables seamless scaling by cloning accounts and programs just-in-time from a reference cluster (like Solana Mainnet or Devnet), executing transactions in a high-performance environment, and settling state changes back to the base chain.
-
-### Key Features
-- **Ephemeral Rollups**: Offload compute to a dedicated layer while inheriting Solana's security and state.
-- **Just-in-Time Cloning**: Automatically fetches accounts from a remote cluster when accessed.
-- **State Settlement**: Batches and commits state transitions back to the reference chain.
-- **Developer Friendly**: Can be used as a super-charged development environment compatible with standard Solana tooling.
-
-## API Stability and Security
-
-The Ephemeral Validator remains under active development, but its public, application-facing APIs have matured. Breaking changes to supported APIs are expected to be infrequent and will be clearly communicated in release notes.
-
-The Delegation Program—the on-chain contract governing delegation, settlement, and state commitment—has been independently audited. The validator internals have been battle-tested, but the complete validator codebase and all internal components have not undergone a comprehensive audit. Use at your own risk.
-
-Internal interfaces and lifecycle modes explicitly marked experimental or unsupported may still change.
-
-## Packages
-
-| Package                                                                              | Description                                                    | Version                                                                                                                                                            | Docs                                                                                         |
-|:-------------------------------------------------------------------------------------|:---------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------|
-| `@magicblock-labs/ephemeral-validator`                                               | Released binaries of the ephemeral validator                   | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-validator.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-validator) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-| `ephemeral-rollups-sdk`                                                              | Rust SDK for integrating with the Ephemeral Rollups            | [![Crates.io](https://img.shields.io/crates/v/ephemeral-rollups-sdk?color=blue)](https://crates.io/crates/ephemeral-rollups-sdk)                                   | [![Docs.rs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz/) |
-| `@magicblock-labs/ephemeral-rollups-sdk`                                             | TypeScript helper for preparing transactions (@solana/web3.js) | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-sdk.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-sdk) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-| `@magicblock-labs/ephemeral-rollups-kit`                                             | TypeScript helper for preparing transactions (@solana/kit)     | [![npm](https://img.shields.io/npm/v/@magicblock-labs/ephemeral-rollups-kit.svg?color=blue)](https://www.npmjs.com/package/@magicblock-labs/ephemeral-rollups-kit) | [![Docs](https://img.shields.io/badge/docs-tutorials-blue)](https://docs.magicblock.xyz)     |
-
-## 🚀 Getting Started
-
-### Prerequisites
-- **Rust**: Latest stable and nightly toolchains.
-- **Dependencies**: `solana-cli` (optional), `protobuf-compiler` (for gRPC support).
-
-### Installation
-
-1. **Clone the repository:**
-```bash
-   git clone https://github.com/magicblock-labs/magicblock-validator.git
-   cd magicblock-validator
-```
-
-2. **Build the operator binaries:**
-```bash
-cargo build --release -p mbv-leader -p mbv-verifier -p mbv -p mbv-tui
-```
-
-
-
-## ⚙️ Configuration
-
-The validator is highly configurable via TOML files or environment variables. A comprehensive reference configuration is available in [`config.example.toml`](./config.example.toml).
-
-### Core Operational Modes (`lifecycle`)
-
-The `lifecycle` setting determines how the validator manages state and syncing.
-
-* **`ephemeral`** (**Currently Supported**): Clones accounts on demand from the remote cluster and writes changes only to delegated accounts. This is the primary mode for Ephemeral Rollups.
-* *Note: Other modes (`replica`, `offline`) are present in the codebase but are currently experimental or unsupported.*
-
-### Connecting to a Cluster
-
-Configure the `remotes` list to specify where to fetch state from:
-
-```toml
-# Example: Sync with Solana Devnet
-remotes = ["https://api.devnet.solana.com", "wss://api.devnet.solana.com"]
-
-```
-
-## 🏃 Usage
-
-### Running a leader
-
-The leader binary runs `Engine<Leader>` and the validator service graph:
-
-```bash
-cargo run --release -p mbv-leader -- --config config.example.toml
-```
-
-### Running a verifier
-
-The verifier binary runs only `Engine<Follower>` and its replication client:
-
-```bash
-cargo run --release -p mbv-verifier -- config.verifier.example.toml
-```
-
-Both Engine-hosting binaries expose MBV and Engine Prometheus collectors from
-their configured `/metrics` endpoint. Configure distinct metrics addresses when
-running a leader and verifier on the same host.
-
-### Managing the Magic Domain Program
-
-Domain registration is an explicit operator action and is not part of leader
-startup or shutdown:
-
-```bash
-cargo run --release -p mbv -- domain register \
-  --config config.example.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-
-cargo run --release -p mbv -- domain sync \
-  --config config.example.toml \
-  --country-code US \
-  --fqdn https://validator.example.com
-
-cargo run --release -p mbv -- domain unregister \
-  --config config.example.toml
-```
-
-### Running the TUI
-
-The TUI is an external RPC/websocket client:
-
-```bash
-cargo run --release -p mbv-tui -- \
-  --rpc-url http://127.0.0.1:7799 \
-  --ws-url ws://127.0.0.1:7800
-```
-
-### Using Environment Variables
-
-Leader settings use the `MBV_` prefix. Verifier settings use
-`MBV_VERIFIER_`.
-
-```bash
-# Example: Run as an ephemeral validator syncing from Mainnet
-MBV_LIFECYCLE=ephemeral \
-MBV_LISTEN=0.0.0.0:8899 \
-cargo run --release -p mbv-leader -- --config config.example.toml
-
-```
-
-### Docker
-
-Official Docker images are available for streamlined deployment:
-
-```bash
-docker run -p 8899:8899 -p 8900:8900 magicblocklabs/validator
-
-```
-
-## ☁️ Remote Development Cluster
-
-If you prefer not to run the validator locally, we provide a stable public cluster for development:
-
-* **Endpoint**: `https://devnet.magicblock.app`
-* **Base Cluster**: Solana Devnet
-
-This cluster allows you to test Ephemeral Rollup interactions without local setup.
-
-## 🧪 Testing
-
-The project includes a comprehensive test suite managed via `Makefile`.
-
-* **Run the workspace tests:**
-```bash
-make test
-```
-
-
-
-## ⚖️ Disclaimer
-
-All claims, content, designs, algorithms, estimates, roadmaps, specifications, and performance measurements described in this project are done with MagicBlock Labs, Pte. Ltd. (“ML”) good faith efforts. It is up to the reader to check and validate their accuracy and truthfulness. Furthermore, nothing in this project constitutes a solicitation for investment.
-
-Any content produced by ML or developer resources that ML provides are for educational and inspirational purposes only. ML does not encourage, induce or sanction the deployment, integration or use of any such applications (including the code comprising the MagicBlock blockchain protocol) in violation of applicable laws or regulations and hereby prohibits any such deployment, integration or use.
-
-**Export Controls & Sanctions**
-This includes the use of any such applications by the reader:
-(a) in violation of export control or sanctions laws of the United States or any other applicable jurisdiction;
-(b) if the reader is located in or ordinarily resident in a country or territory subject to comprehensive sanctions administered by the U.S. Office of Foreign Assets Control (OFAC); or
-(c) if the reader is or is working on behalf of a Specially Designated National (SDN) or a person subject to similar blocking or denied party prohibitions.
-
-The reader should be aware that U.S. export control and sanctions laws prohibit U.S. persons (and other persons that are subject to such laws) from transacting with persons in certain countries and territories or that are on the SDN list. Accordingly, there is a risk to individuals that other persons using any of the code contained in this repo, or a derivation thereof, may be sanctioned persons and that transactions with such persons would be a violation of U.S. export controls and sanctions law.
-
-## ❤️ Open Source
-
-Open Source is at the heart of what we do at MagicBlock. We believe building software in the open, with thriving communities, helps leave the world a little better than we found it.
-
-## 📄 License
-
-This project is licensed under the **Business Source License 1.1**. See [LICENSE.md](./LICENSE.md) for details.
-
 
 ---
 
-<div align="center">
-<sub>Built with ❤️ by MagicBlock Labs</sub>
-</div>
+MagicBlock Validator brings **Ephemeral Rollups** to Solana applications. Delegate
+accounts to a rollup, execute against that state, and commit updates back to
+Solana, keeping the Solana program and account model at the center of your app.
+
+Build for interactions that happen continuously: game moves, shared worlds,
+and other stateful experiences. Use the rollup for those interactions while
+keeping your application's state connected to Solana through synchronization
+and settlement.
+
+## ✨ What you can build on
+
+| | |
+| :-- | :-- |
+| **⚡ Solana execution** — run Solana programs on the SVM, powered by [MagicBlock Engine](https://github.com/magicblock-labs/magicblock-engine). | **🔗 Connected state** — bring base-chain accounts into the rollup and commit delegated state back to Solana. |
+| **📡 Live applications** — submit transactions over RPC and follow account changes, logs, and transaction updates over WebSocket. | **⏱️ Recurring actions** — schedule application work to run at intervals, without a client sending every transaction. |
+| **🔁 Replicated execution** — run verifiers that follow and replay a leader's transaction stream. | **🛠️ Tools included** — develop locally with a packaged stack, inspect a running leader in the terminal, and monitor it with Prometheus. |
+
+### Build with both delegated and rollup-local state
+
+Bring existing Solana accounts into the rollup, or create **sponsored ephemeral
+accounts** for state your application needs locally. Programs can create, resize,
+and explicitly close these accounts, with a sponsor funding their backing.
+That gives applications room for session state and intermediate results without
+making every account part of the base-chain settlement flow. See the
+[native program guide](programs/magicblock/README.md) for the available operations.
+
+### Keep the application moving between user interactions
+
+**Recurring tasks** let applications schedule instructions at intervals rather
+than relying on a connected client to submit each transaction. Tasks persist
+across restarts and can be replaced or cancelled by their authority. They suit
+periodic application work, rather than exact wall-clock deadlines.
+
+Applications can also request **base-chain actions and local callbacks**, letting
+rollup logic react to an action's result. The action and callback are separate
+transactions, not one atomic cross-chain operation. Explore
+[scheduled tasks](magicblock-task-scheduler/README.md) and
+[callbacks](magicblock-services/README.md#callbacks).
+
+### Connect clients and stream live activity
+
+Use **Solana-compatible RPC API** to submit or simulate transactions and read accounts
+and transaction history. WebSocket subscriptions keep clients informed of account
+changes, logs, and transaction status without continuous polling.
+
+For deeper integrations, **Geyser plugins** can feed validator notifications into
+external systems such as indexers. Plugins must match the validator's Rust and
+Agave ABI; the available notification fields differ from a full Solana validator.
+See the [RPC and plugin guide](magicblock-aperture/README.md).
+
+## 🌉 From Solana to a rollup and back
+
+**Delegate → Execute → Commit**
+
+Delegation makes selected accounts available for rollup execution. Your app
+submits transactions to the rollup and follows its live state. Commits deliver
+state updates to the base chain; undelegation returns control of those accounts
+to Solana.
+
+Rollup execution and base-chain settlement are separate steps. Start with the
+[developer documentation](https://docs.magicblock.gg) for the application flow;
+the [settlement guide](magicblock-committor-service/README.md) explains completion
+and retry boundaries.
+
+## 🚀 Try it locally
+
+Start a local development stack with the packaged validator. Install
+`solana-test-validator` and make it available on your `PATH`, then run:
+
+```bash
+npx --package @magicblock-labs/ephemeral-validator mb-stack
+```
+
+Connect your application to **http://127.0.0.1:6699** for RPC and
+**ws://127.0.0.1:6700** for subscriptions. The stack starts a local base chain,
+an Ephemeral Rollup validator, and a query-filtering service. Press Ctrl-C to
+stop it.
+
+See the [local stack guide](.github/packages/npm-package/README.md) for custom
+ports, external remotes, and individual services.
+
+## 🧭 Go further
+
+| I want to… | Start here |
+| :-- | :-- |
+| Build an application | [Developer documentation](https://docs.magicblock.gg) |
+| Run a leader from source | [Validator setup](bins/magicblock-validator/README.md) |
+| Follow a leader with a verifier | [Verifier setup](bins/magicblock-verifier/README.md) |
+| Configure a deployment | [Configuration guide](magicblock-config/README.md) |
+| Manage a validator | [Operator CLI](bins/magicblock/README.md) · [Terminal monitor](bins/magicblock-validator-tui/README.md) · [Metrics](magicblock-metrics/README.md) |
+| Understand the system | [Architecture and operations](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md) |
+
+## 🦀 Inside the project
+
+[MagicBlock Engine](https://github.com/magicblock-labs/magicblock-engine) runs
+transactions and stores their results. To explore the surrounding services,
+start with the part of the application flow that interests you:
+
+- **Bring accounts into the rollup:** [Chainlink](magicblock-chainlink/README.md).
+- **Submit transactions and follow updates:** [Aperture](magicblock-aperture/README.md).
+- **Commit state back to Solana:** [Committor](magicblock-committor-service/README.md).
+- **Run recurring actions:** [task scheduler](magicblock-task-scheduler/README.md).
+- **Build rollup instructions:** [native programs](programs/magicblock/README.md)
+  and the [instruction API](magicblock-magic-program-api/README.md).
+
+Want to contribute? Start with [contributing](docs/CONTRIBUTING.md) for development
+setup and checks, or explore the supported [integration tests](test-integration/).
+Maintainers can follow the [release process](docs/RELEASE_PROCESS.md).
+
+## 🔒 API stability and security
+
+The Ephemeral Validator remains under active development, but its public,
+application-facing APIs have matured. Breaking changes to supported APIs are
+expected to be infrequent and will be clearly communicated in release notes.
+
+The Delegation Program, the on-chain contract governing delegation, settlement,
+and state commitment, has been independently audited. The validator internals
+have been battle-tested, but the complete validator codebase and all internal
+components have not undergone a comprehensive audit. Use at your own risk.
+
+Internal interfaces explicitly marked experimental or unsupported may still change.
+
+Report vulnerabilities through the [security policy](docs/SECURITY.md), not public issues.
+
+## 📄 License and disclaimer
+
+Licensed under the **Business Source License 1.1**; see [LICENSE.md](LICENSE.md).
+Read the [disclaimer and export-control terms](docs/DISCLAIMER.md).
+
+---
+
+<p align="center"><sub>Built with ❤️ by MagicBlock Labs</sub></p>

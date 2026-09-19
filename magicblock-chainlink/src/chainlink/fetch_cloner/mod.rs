@@ -485,20 +485,14 @@ where
         pubkey: Pubkey,
         account: &AccountSharedData,
     ) -> DlpProgramUpdateInterest {
-        if let Some((undelegating, delegated)) =
-            self.read_account(&pubkey, |account| {
-                (
-                    account.is(AccountMode::Transient),
-                    account.is(AccountMode::Delegated),
-                )
-            })
-        {
-            if undelegating {
+        match self.account_mode(&pubkey) {
+            Some(AccountMode::Transient) => {
                 return DlpProgramUpdateInterest::ProcessUndelegating;
             }
-            if delegated {
+            Some(AccountMode::Delegated) => {
                 return DlpProgramUpdateInterest::DropLocalDelegatedAuthoritative;
             }
+            _ => {}
         }
 
         if self.remote_account_provider.is_watching(&pubkey) {
@@ -660,6 +654,10 @@ where
             .flatten()
     }
 
+    pub(crate) fn account_mode(&self, pubkey: &Pubkey) -> Option<AccountMode> {
+        self.engine.accounts().loader().mode(pubkey).ok().flatten()
+    }
+
     pub(crate) fn contains_account(&self, pubkey: &Pubkey) -> bool {
         self.engine
             .accounts()
@@ -750,7 +748,7 @@ where
 
     async fn submit_account(
         &self,
-        accessor: &mut engine::AccountAccessor<'_>,
+        accessor: engine::AccountAccessor<'_>,
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ClonerResult<()> {
@@ -772,20 +770,17 @@ where
         );
         let result =
             cloner::clone_account(&self.engine, accessor, request).await;
-        if result.is_ok() {
-            metrics::inc_chainlink_clone_accounts_total_with_context(
-                fetch_context.clone(),
-                remote_result,
-                clone_intent,
-                ChainlinkCloneOutcome::CloneSucceeded,
-            );
-        } else {
-            metrics::inc_chainlink_clone_accounts_total_with_context(
-                fetch_context.clone(),
-                remote_result,
-                clone_intent,
-                ChainlinkCloneOutcome::CloneFailed,
-            );
+        metrics::inc_chainlink_clone_accounts_total_with_context(
+            fetch_context.clone(),
+            remote_result,
+            clone_intent,
+            if result.is_ok() {
+                ChainlinkCloneOutcome::CloneSucceeded
+            } else {
+                ChainlinkCloneOutcome::CloneFailed
+            },
+        );
+        if result.is_err() {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context.clone(),
                 remote_result,
@@ -1034,7 +1029,7 @@ where
                 Ok(ProgramDataWatch::Installed)
             );
 
-        let Some(mut accessor) =
+        let Some(accessor) =
             cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
@@ -1052,10 +1047,9 @@ where
             clone_intent,
             ChainlinkCloneOutcome::Submitted,
         );
-        let result = cloner::clone_program(&mut accessor, request)
+        let result = cloner::clone_program(accessor, request)
             .await
             .map_err(ChainlinkError::from);
-        drop(accessor);
         if result.is_ok() {
             if is_loaderv3 {
                 let _ = self.watch_programdata(program_id).await;
@@ -1086,7 +1080,7 @@ where
         result
     }
 
-    async fn clone_account_with_post_delegation_action_invariants(
+    async fn clone_account(
         &self,
         mut request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
@@ -1111,88 +1105,90 @@ where
         self.normalize_unresolved_dlp_clone_request(&mut request)?;
         Self::normalize_immutable_account(&mut request);
 
-        let ClonePostDelegationMode::ExecuteActions(delegation) =
-            &request.post_delegation_mode
-        else {
-            let Some(mut accessor) =
-                cloner::claim_materialization(&self.engine, &mut request)
-                    .await?
-            else {
-                return Ok(());
-            };
-            return self
-                .submit_account(&mut accessor, request, fetch_context)
-                .await
-                .map_err(Into::into);
+        // Resolve dependencies before claiming the target: dependency cloning
+        // can itself need account ownership. Preserve failures until the target
+        // is reclassified, since another caller may already have activated it.
+        let activation = if let Some(delegation) =
+            request.post_delegation_mode.delegation()
+        {
+            if !request.account.read().is(AccountMode::Delegated) {
+                return Err(ChainlinkError::InvalidDelegationActions(
+                    request.pubkey,
+                    "post-delegation actions attached to non-delegated clone target"
+                        .to_string(),
+                ));
+            }
+            Some((
+                delegation.source_program(),
+                self.ensure_delegation_action_dependencies(
+                    request.pubkey,
+                    request.account.read().slot(),
+                    delegation,
+                    fetch_context.clone(),
+                )
+                .await,
+            ))
+        } else {
+            None
         };
 
-        if !request.account.read().is(AccountMode::Delegated) {
-            return Err(ChainlinkError::InvalidDelegationActions(
-                request.pubkey,
-                "post-delegation actions attached to non-delegated clone target"
-                    .to_string(),
-            ));
-        }
-        let source_program = delegation.source_program();
-
-        let dependency_error = self
-            .ensure_delegation_action_dependencies(
-                request.pubkey,
-                request.account.read().slot(),
-                delegation,
-                fetch_context.clone(),
-            )
-            .await
-            .err();
-
-        let Some(mut accessor) =
+        let Some(accessor) =
             cloner::claim_materialization(&self.engine, &mut request).await?
         else {
             return Ok(());
         };
-        if let Some(err) = dependency_error {
-            request.post_delegation_mode =
-                ClonePostDelegationMode::RescueUndelegate(source_program);
+        let Some((source_program, dependencies)) = activation else {
             return self
-                .rescue_failed_activation(
-                    &mut accessor,
-                    request,
-                    fetch_context,
-                    err,
-                )
+                .submit_account(accessor, request, fetch_context)
+                .await
+                .map_err(Into::into);
+        };
+        let actions = mem::replace(
+            &mut request.post_delegation_mode,
+            ClonePostDelegationMode::RescueUndelegate(source_program),
+        );
+        if let Err(err) = dependencies {
+            drop(actions);
+            return self
+                .rescue_failed_activation(accessor, request, fetch_context, err)
                 .await;
         }
-        // Keep the shared account buffer for fallback without cloning the
-        // action instructions that move into the activation attempt.
-        let rescue = AccountCloneRequest {
-            pubkey: request.pubkey,
+        // Retain the rescue request and share its account buffer; only the
+        // original action bundle moves into the activation attempt.
+        let activation = AccountCloneRequest {
             account: request.account.clone(),
-            commit_frequency_ms: request.commit_frequency_ms,
-            post_delegation_mode: ClonePostDelegationMode::RescueUndelegate(
-                source_program,
-            ),
-            delegated_to_other: request.delegated_to_other,
+            post_delegation_mode: actions,
+            ..request
         };
-        match self
-            .submit_account(&mut accessor, request, fetch_context.clone())
+        let err = match self
+            .submit_account(accessor, activation, fetch_context.clone())
             .await
         {
-            Ok(()) => Ok(()),
-            Err(err) => {
-                self.rescue_failed_activation(
-                    &mut accessor,
-                    rescue,
-                    fetch_context,
-                    err.into(),
-                )
-                .await
-            }
-        }
+            Ok(()) => return Ok(()),
+            Err(err) if err.allows_rescue() => err,
+            Err(err) => return Err(err.into()),
+        };
+        // Engine retains ownership even if the caller cancels its wait;
+        // cancellation does not authorize another mutation. Reacquire and
+        // reclassify before fallback so a concurrent materialization
+        // cannot be overwritten or have its actions replayed.
+        let Some(accessor) =
+            cloner::claim_materialization(&self.engine, &mut request).await?
+        else {
+            return Ok(());
+        };
+        self.rescue_failed_activation(
+            accessor,
+            request,
+            fetch_context,
+            err.into(),
+        )
+        .await
     }
 
     async fn rescue_failed_activation(
         &self,
-        accessor: &mut engine::AccountAccessor<'_>,
+        accessor: engine::AccountAccessor<'_>,
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
         err: ChainlinkError,
@@ -1653,74 +1649,80 @@ where
         }
 
         // Determine if delegated to another validator
-        let delegated_to_other = deleg_record
-            .as_ref()
-            .and_then(|dr| self.get_delegated_to_other(dr));
+        let delegated_to_other = deleg_record.as_ref().and_then(|dr| {
+            delegation::delegated_to_other(&self.validator_pubkey, dr)
+        });
 
-        // Delegated subscription cleanup is limited to direct subscription/pubsub tracking
-        // ownership here; undelegation tracking owns protected subscriptions
-        // until undelegation is explicitly complete.
-        if undelegation_completed_on_chain {
-            if !account.read().is(AccountMode::Delegated) {
-                self.ensure_direct_subscription_for_completed_account(pubkey)
-                    .await;
-            }
-            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
-                .await;
-        }
-        if account.read().is(AccountMode::Delegated) {
-            self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                .await;
-        }
-
+        let delegated = account.read().is(AccountMode::Delegated);
+        let slot = account.read().slot();
         if account.read().flags().contains(StateFlags::EXECUTABLE) {
+            self.cleanup_completed_subscription_update(
+                pubkey,
+                delegated,
+                undelegation_completed_on_chain,
+            )
+            .await;
             self.handle_executable_sub_update(
                 pubkey,
                 account,
                 &companion_fetch_log_context,
             )
             .await;
-        } else {
-            let commit_frequency_ms = deleg_record.as_ref().and_then(|dr| {
-                dr.authority
-                    .eq(&self.validator_pubkey)
-                    .then_some(dr.commit_frequency_ms)
-            });
-            if let Err(err) = self
-                .clone_account_with_post_delegation_action_invariants(
-                    AccountCloneRequest {
-                        pubkey,
-                        account,
-                        commit_frequency_ms,
-                        post_delegation_mode: ClonePostDelegationMode::from(
-                            delegation_actions,
-                        ),
-                        delegated_to_other,
-                    },
-                    subscription_clone_context.clone(),
+            return;
+        }
+
+        if let Err(err) = self
+            .clone_account(
+                AccountCloneRequest {
+                    pubkey,
+                    account,
+                    post_delegation_mode: ClonePostDelegationMode::from(
+                        delegation_actions,
+                    ),
+                    delegated_to_other,
+                },
+                subscription_clone_context.clone(),
+            )
+            .await
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clone account into bank"
+            );
+            return;
+        }
+
+        // A successful clone call can leave a rescued account Transient.
+        // Retain recovery subscriptions until the local image actually
+        // reflects completion, not merely a newer on-chain delegation.
+        if self.read_account(&pubkey, |local| {
+            local.slot() >= slot
+                && !local.is(AccountMode::Transient)
+                && local.is(AccountMode::Delegated) == delegated
+        }) == Some(true)
+        {
+            self.cleanup_completed_subscription_update(
+                pubkey,
+                delegated,
+                undelegation_completed_on_chain,
+            )
+            .await;
+        }
+
+        if let Some(projected_ata_clone_request) = projected_ata_clone_request
+            && let Err(err) = self
+                .clone_projected_ata_request(
+                    projected_ata_clone_request,
+                    subscription_clone_context,
                 )
                 .await
-            {
-                error!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone account into bank"
-                );
-            } else if let Some(projected_ata_clone_request) =
-                projected_ata_clone_request
-                && let Err(err) = self
-                    .clone_projected_ata_request(
-                        projected_ata_clone_request,
-                        subscription_clone_context,
-                    )
-                    .await
-            {
-                error!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone projected ATA from delegated eATA update"
-                );
-            }
+        {
+            error!(
+                pubkey = %pubkey,
+                error = %err,
+                "Failed to clone projected ATA from delegated eATA update"
+            );
         }
     }
 
@@ -1859,13 +1861,11 @@ where
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
-        if let Some(true) = self.read_account(&request.pubkey, |account| {
-            account.is(AccountMode::Transient)
-        }) {
+        if self.account_mode(&request.pubkey) == Some(AccountMode::Transient) {
             return Ok(());
         }
 
-        self.clone_account_with_post_delegation_action_invariants(
+        self.clone_account(
             request,
             fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )
@@ -2265,6 +2265,27 @@ where
         }
     }
 
+    /// Releases only subscription reasons whose lifecycle work has completed.
+    async fn cleanup_completed_subscription_update(
+        &self,
+        pubkey: Pubkey,
+        delegated: bool,
+        undelegation_completed: bool,
+    ) {
+        if undelegation_completed {
+            if !delegated {
+                self.ensure_direct_subscription_for_completed_account(pubkey)
+                    .await;
+            }
+            self.cleanup_undelegation_tracking_for_completed_account(pubkey)
+                .await;
+        }
+        if delegated {
+            self.cleanup_direct_subscription_for_delegated_account(pubkey)
+                .await;
+        }
+    }
+
     async fn ensure_direct_subscription_for_completed_account(
         &self,
         pubkey: Pubkey,
@@ -2413,13 +2434,12 @@ where
                                     );
                                 }
 
-                                let account = self
-                                    .apply_delegation_record_to_account(
-                                        pubkey,
-                                        account,
-                                        &delegation_record,
-                                    )
-                                    .0;
+                                let account = delegation::apply_record(
+                                    &self.validator_pubkey,
+                                    pubkey,
+                                    account,
+                                    &delegation_record,
+                                );
 
                                 // For accounts delegated to us, subscribe to the original owner
                                 // program for undelegation update resilience.
@@ -2633,33 +2653,6 @@ where
             delegation_record_pubkey,
             self.validator_keypair.as_ref(),
         )
-    }
-
-    /// Applies delegation record settings to an account: sets the owner,
-    /// delegation status, and confined status based on the delegation
-    /// record's authority field.
-    /// Returns commit frequency if account is delegated to us
-    fn apply_delegation_record_to_account(
-        &self,
-        account_pubkey: Pubkey,
-        account: AccountBuilder,
-        delegation_record: &DelegationRecord,
-    ) -> (AccountBuilder, Option<u64>) {
-        delegation::apply_delegation_record_to_account(
-            self,
-            account_pubkey,
-            account,
-            delegation_record,
-        )
-    }
-
-    /// Returns the pubkey of another validator if account is delegated to them,
-    /// None if delegated to us or delegated to the system program (confined).
-    fn get_delegated_to_other(
-        &self,
-        delegation_record: &DelegationRecord,
-    ) -> Option<Pubkey> {
-        delegation::get_delegated_to_other(self, delegation_record)
     }
 
     /// Fetches and parses the delegation record for an account, returning the

@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 mod app;
 mod events;
 mod state;

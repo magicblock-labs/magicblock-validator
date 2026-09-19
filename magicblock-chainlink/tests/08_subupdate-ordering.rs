@@ -61,7 +61,7 @@ async fn test_subs_receive_out_of_order_updates() {
         .expect("Account should be cloned");
     assert!(initial_matches);
 
-    let mut local_updates = bank.accounts().subscribe(pubkey).await;
+    let mut local_updates = bank.accounts().subscribe(pubkey);
 
     // 2. Simulate update 3 arriving before update 2 because the latter is slow
     rpc_client.set_slot(3);
