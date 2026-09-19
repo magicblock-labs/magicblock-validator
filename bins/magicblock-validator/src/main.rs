@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 mod errors;
 mod leader;
 mod ledger;
@@ -12,6 +14,9 @@ use nucleus::shutdown::ShutdownReason;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tracing::{error, info, instrument};
+
+#[global_allocator]
+static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn init_logger() {
     use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};

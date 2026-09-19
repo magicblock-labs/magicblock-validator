@@ -15,6 +15,7 @@ magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-runtime = { workspace = true }
+mimalloc = { workspace = true }
 nucleus = { workspace = true }
 replicator = { workspace = true }
 tokio = { workspace = true }

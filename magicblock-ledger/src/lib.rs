@@ -1,9 +1,4 @@
-//! Read-only access to the legacy ledger.
-//!
-//! The engine owns block production and its own ledger; this crate is retained
-//! only to read data written by earlier validator versions, and is consumed by
-//! `magicblock-aperture` as a fallback for RPC reads the engine's ledger cannot
-//! serve. It is expected to be removed once the transition completes.
+#![doc = include_str!("../README.md")]
 
 pub use database::{
     meta::PerfSample,

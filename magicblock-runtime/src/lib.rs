@@ -1,4 +1,4 @@
-//! Shared construction of the exact engine image used by MBV roles.
+#![doc = include_str!("../README.md")]
 
 mod accounts;
 

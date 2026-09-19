@@ -1,28 +1,16 @@
+# magicblock-ledger-deprecated
 
-# Summary
+Keeps history from earlier validator versions accessible by reading their
+RocksDB ledgers. New history is stored by Engine.
 
-Stores all types of chain information in key-value stores: signatures, statuses, metas, slots.
-This is basically a massive optimized and serialized `HashMap<Column, OrderedHashMap<Key, Value>>`.
-Uses rocksdb library internally as a fancy storage datastructure that automatically saves to file.
+[Aperture](../magicblock-aperture/README.md) uses it for history missing from
+Engine and merges older signature history when the requested range reaches the
+legacy ledger. Engine errors are reported rather than hidden by fallback.
 
-# Details
+## Compatibility
 
-*Important symbols:*
+Changes must keep existing records readable; their schemas and conversions are
+in [storage-proto](../storage-proto/README.md). This crate reads old history but
+does not write live records or migrate them into Engine.
 
-- `Ledger` struct
-  - Depends on a `Database`
-  - Contains a bunch of `LedgeColumn`, one for each stored data type
-  - Implements all the fetching/putting/serialization logic for each stored data type
-
-- `Database` struct
-  - Depends on a `Rocks` which depends on `rocksdb::DB`
-  - Just a fast column (namespace) and key-value (ordered-hash-map) database
-  - Allows fetching generic deserialized datastructure directly
-
-- `LedgerColumn` struct
-  - Represent a single key-value store (or namespace) in the rocksdb
-  - Expose get/put/iter/delete (with optionally protobuf) rocksdb's methods
-
-# Notes
-
-N/A
+[Back to workspace](../README.md)

@@ -1,45 +1,27 @@
-# Task Scheduler API
+# magicblock-task-scheduler
 
-## Architecture
+Stores and runs recurring application tasks on the leader. Applications schedule
+work through the [native Magic programs](../programs/magicblock/README.md);
+the scheduler persists it and submits due transactions to Engine.
 
-### Components
+## Task behavior
 
-1. **TaskContext Account**: Stores tasks and cancellation requests on-chain
-2. **Task Scheduler Service**: Runs alongside the validator to execute scheduled tasks
-3. **Database**: SQLite database for efficient task storage and retrieval
-4. **Geyser Integration**: Monitors TaskContext account changes
+Tasks belong to an authority. Replacing or cancelling one requires that same
+authority, and cancellation does not undo work already running.
 
-### Data Flow
-
-1. User schedules task via program instruction
-2. Task is stored in TaskContext account
-3. Task Scheduler Service monitors TaskContext periodically
-4. Service adds task to local database
-5. Service executes tasks at scheduled intervals
-6. Service updates task state after execution
+Intervals are subject to a configured minimum and are not exact wall-clock
+guarantees. Persisted tasks resume after restart. Execution and progress recording
+are separate operations, so applications should tolerate re-execution after a
+crash.
 
 ## Configuration
 
-The task scheduler can be configured via the validator configuration:
+Use the `[task-scheduler]` section of the
+[leader configuration](../config.example.toml) for timing and retention settings.
+The `reset` option deletes the task database; leave it disabled for normal
+restarts.
 
-```toml
-[task-scheduler]
-reset = false
-min-interval = "10ms"
-failed-task-retention = "7d"
-failed-task-cleanup-interval = "1h"
-```
+See [scheduled tasks](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/scheduled-tasks.md)
+for detailed authority and recovery constraints.
 
-Failed task execution records and failed scheduling records older than
-`failed-task-retention` are deleted every `failed-task-cleanup-interval`.
-
-## Security Considerations
-
-- Only task authorities can cancel their own tasks
-- Database is protected by file system permissions
-
-## Performance Considerations
-
-- Same-tick delay-queue draining; crank sends parallelize `send_transaction` (consider bounding concurrency under heavy load).
-- `Arc` for stored instructions; configurable `RpcSendTransactionConfig` for crank sends.
-- SQLite: WAL journal, `NORMAL` synchronous mode, enlarged page cache; after each crank RPC batch completes, success/failure persistence uses one transaction (`apply_crank_batch_completion`) instead of one commit per task.
+[Back to workspace](../README.md)

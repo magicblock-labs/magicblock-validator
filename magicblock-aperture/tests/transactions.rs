@@ -121,7 +121,7 @@ async fn test_send_and_confirm_transaction_success() {
     );
 }
 
-/// Verifies Engine rejects an invalid blockhash and records its final status.
+/// Verifies an invalid blockhash is rejected without retaining an execution status.
 #[tokio::test]
 async fn test_send_transaction_with_invalid_blockhash() {
     let env = RpcTestEnv::new().await;
@@ -130,19 +130,21 @@ async fn test_send_transaction_with_invalid_blockhash() {
     transfer_tx.sign(&[env.engine.signer()], blockhash);
     let signature = transfer_tx.signatures[0];
 
-    let result = env.rpc.send_transaction(&transfer_tx).await;
+    let error = env
+        .rpc
+        .send_transaction(&transfer_tx)
+        .await
+        .expect_err("transaction with an invalid blockhash should fail");
 
     assert!(
-        result.is_err(),
-        "transaction with an invalid blockhash should fail"
+        error
+            .to_string()
+            .contains(&TransactionError::BlockhashNotFound.to_string()),
+        "expected a blockhash rejection, got {error}"
     );
     assert!(
-        matches!(
-            env.engine.transactions().status(signature).await,
-            Ok(Some(status))
-                if status.result == Err(TransactionError::BlockhashNotFound)
-        ),
-        "dropped transaction should record its blockhash error"
+        matches!(env.engine.transactions().status(signature).await, Ok(None)),
+        "admission rejection should not retain an execution status"
     );
 }
 

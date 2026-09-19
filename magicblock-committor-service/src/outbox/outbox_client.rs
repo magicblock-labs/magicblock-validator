@@ -52,7 +52,6 @@ impl InternalOutboxClient {
         backoff_config: ExponentialBackoff,
         tx: &impl SerializableTransaction,
     ) -> Result<(), client_error::Error> {
-        let signature = tx.get_signature();
         retry(backoff_config, || async {
             self.rpc_client
                 .send_and_confirm_transaction(tx)

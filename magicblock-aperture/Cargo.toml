@@ -17,6 +17,7 @@ hyper-util = { workspace = true, features = ["http1", "http2", "server"] }
 # runtime
 futures = { workspace = true }
 libloading = { workspace = true }
+num_cpus = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 

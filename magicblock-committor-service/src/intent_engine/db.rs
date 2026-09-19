@@ -71,14 +71,14 @@ impl BacklogDB for AccountsDbIntentBacklog {
         drop(queue);
 
         let intent_pda = outbox_intent_pda(id);
-        let account = self
+        let outbox_intent = self
             .engine
             .accounts()
             .loader()
-            .load(&intent_pda)?
-            .ok_or(Error::IntentNotFoundError(id))?;
-
-        let outbox_intent = OutboxIntentBundle::try_from_bytes(account.data())?;
+            .read(&intent_pda, |account| {
+                OutboxIntentBundle::try_from_bytes(account.data())
+            })?
+            .ok_or(Error::IntentNotFoundError(id))??;
         Ok(Some(outbox_intent))
     }
 

@@ -492,6 +492,21 @@ pub struct BaseAction {
     pub callback: Option<BaseActionCallback>,
 }
 
+impl BaseAction {
+    /// Responses may only return to the authenticated scheduling source.
+    /// Legacy actions without a recorded source cannot authorize callbacks.
+    pub fn validate_callback_destination(
+        &self,
+        destination: &Pubkey,
+    ) -> Result<(), InstructionError> {
+        if self.source_program == Some(*destination) {
+            Ok(())
+        } else {
+            Err(InstructionError::InvalidInstructionData)
+        }
+    }
+}
+
 /// A callback that is execution with result of BaseAction
 #[derive(
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,

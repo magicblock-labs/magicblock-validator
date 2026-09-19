@@ -18,6 +18,15 @@ use v42_calculator_interface::{ID as V42_ID, builder::transfer};
 
 const CURRENT_SLOT: u64 = 11;
 
+fn remote_account() -> Account {
+    Account {
+        lamports: 1_000_000,
+        data: 10_i64.to_le_bytes().to_vec(),
+        owner: dlp_api::id(),
+        ..Default::default()
+    }
+}
+
 fn add_increment_action(
     ctx: &TestContext,
     pubkey: Pubkey,
@@ -70,7 +79,7 @@ fn add_increment_action(
     record_pubkey
 }
 
-fn seed_output(ctx: &TestContext, output: Pubkey) {
+fn seed_output(ctx: &TestContext, output: Pubkey, slot: u64) {
     ctx.bank
         .accounts()
         .store(&[(
@@ -80,6 +89,7 @@ fn seed_output(ctx: &TestContext, output: Pubkey) {
                 .data(0_i64.to_le_bytes().to_vec())
                 .owner(V42_ID)
                 .mode(AccountMode::Ephemeral)
+                .slot(slot)
                 .build(),
         )])
         .unwrap();
@@ -107,17 +117,12 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
 
     let account_pubkey = Pubkey::new_unique();
     let output = Pubkey::new_unique();
-    seed_output(&ctx, output);
-    let remote_account = Account {
-        lamports: 1_000_000,
-        data: 10_i64.to_le_bytes().to_vec(),
-        owner: dlp_api::id(),
-        ..Default::default()
-    };
+    seed_output(&ctx, output, 0);
+    let remote_account = remote_account();
     rpc_client.add_account(account_pubkey, remote_account.clone());
     let deleg_record_pubkey =
         add_increment_action(&ctx, account_pubkey, output);
-    let mut updates = bank.accounts().subscribe(account_pubkey).await;
+    let mut updates = bank.accounts().subscribe(account_pubkey);
     let blocker = bank.account(account_pubkey).await;
 
     let requested = [account_pubkey];
@@ -164,7 +169,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
     let pubkey = Pubkey::new_unique();
     let output = Pubkey::new_unique();
-    seed_output(&ctx, output);
+    seed_output(&ctx, output, 0);
     ctx.bank
         .accounts()
         .store(&[(
@@ -181,12 +186,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
     ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
 
     let slot = ctx.rpc_client.set_slot(CURRENT_SLOT + 11);
-    let remote = Account {
-        lamports: 1_000_000,
-        data: 10_i64.to_le_bytes().to_vec(),
-        owner: dlp_api::id(),
-        ..Default::default()
-    };
+    let remote = remote_account();
     ctx.rpc_client.add_account(pubkey, remote.clone());
     let record = add_increment_action(&ctx, pubkey, output);
 
@@ -202,4 +202,83 @@ async fn transient_redelegation_subscription_executes_action_once() {
         "redelegation action executes exactly once"
     );
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
+}
+
+/// Proves dropping an activation wait cannot authorize rescue or a newer-slot
+/// replacement while Engine still owns the submitted same-generation activation.
+#[tokio::test]
+async fn timed_out_activation_completes_once_before_newer_refetch() {
+    const PENDING: Duration = Duration::from_millis(100);
+    const COMPLETION: Duration = Duration::from_secs(8);
+    let ctx = TestContext::init(CURRENT_SLOT).await;
+    let pubkey = Pubkey::new_unique();
+    let output = Pubkey::new_unique();
+    let newer_slot = CURRENT_SLOT + 11;
+    // Preseed writable dependencies at the newer observation slot so neither
+    // request can stall on an unrelated dependency mutation behind the barrier.
+    seed_output(&ctx, output, newer_slot);
+    ctx.rpc_client.add_account(pubkey, remote_account());
+    add_increment_action(&ctx, pubkey, output);
+    let before = ctx.test_engine.get_account(pubkey);
+    let mut processed = ctx.bank.transactions().subscribe_processed().unwrap();
+    let barrier = ctx.bank.barrier().await.unwrap();
+
+    // Passing by value drops the caller's wait, not Engine's submitted work or
+    // its mutation ownership. Cancellation alone cannot authorize another write.
+    assert!(
+        tokio::time::timeout(PENDING, ctx.ensure_account(&pubkey))
+            .await
+            .is_err()
+    );
+    ctx.rpc_client.set_slot(newer_slot);
+    // Do not replace the delegation record: only the observation slot advances.
+    let fetches = ctx.rpc_client.multi_account_fetches();
+    let mut newer = std::pin::pin!(ctx.ensure_account(&pubkey));
+    assert!(
+        tokio::time::timeout(PENDING, &mut newer).await.is_err(),
+        "newer observation must wait for the pending activation"
+    );
+    assert!(
+        ctx.rpc_client.multi_account_fetches() > fetches,
+        "the waiter must refetch at the newer mock slot before barrier release"
+    );
+    assert_eq!(ctx.test_engine.get_account(pubkey), before);
+    assert_eq!(account_value(&ctx, output), 0);
+    assert!(
+        processed.try_recv().is_err(),
+        "execution remains behind the barrier"
+    );
+    drop(barrier);
+
+    let completed = tokio::time::timeout(COMPLETION, processed.recv())
+        .await
+        .expect("activation completes")
+        .expect("processed stream remains open");
+    assert!(
+        completed
+            .execution
+            .result
+            .as_ref()
+            .expect("activation executes")
+            .execution_details
+            .status
+            .is_ok()
+    );
+    tokio::time::timeout(COMPLETION, newer)
+        .await
+        .expect("newer request completes")
+        .expect("newer observation is satisfied by the original activation");
+    // The original slot distinguishes completion of the timed-out submission
+    // from a replacement submitted by the newer observation.
+    assert_cloned_as_delegated!(ctx.bank, &[pubkey], CURRENT_SLOT, V42_ID);
+    assert_eq!(
+        (account_value(&ctx, pubkey), account_value(&ctx, output)),
+        (9, 1)
+    );
+    assert!(
+        tokio::time::timeout(PENDING, processed.recv())
+            .await
+            .is_err(),
+        "no rescue, replacement, or replay may follow activation"
+    );
 }

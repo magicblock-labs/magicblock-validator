@@ -1,64 +1,64 @@
-# MagicBlock Configuration
+# magicblock-config
 
-Typed configuration for the MagicBlock leader and verifier binaries.
+Configure a leader, verifier, or operator command using TOML files and overrides.
+This crate loads and validates those settings.
 
-## Leader
+Start with the example for the process you want to run:
 
-`LeaderParams::try_new` merges configuration in this precedence order:
+- [Leader configuration](../config.example.toml): application services, remote
+  providers, storage, and replication.
+- [Verifier configuration](../config.verifier.example.toml): upstream replication,
+  local storage, identity, and startup programs.
 
-1. command-line arguments;
-2. `MBV_` environment variables;
-3. the TOML file passed with `--config`;
-4. defaults.
+Replace sample identities, credentials, addresses, and program paths before use.
 
-Environment nesting uses `__`, for example
-`MBV_ENGINE__LEDGER__SIZE_LIMIT`.
+## Overrides
 
-```rust
-use magicblock_config::LeaderParams;
+Leader settings are applied in this order, highest priority first:
 
-let config = LeaderParams::try_new(std::env::args_os())?;
-```
+1. Explicit command-line setting overrides.
+2. `MBV_` environment variables.
+3. TOML settings.
+4. Defaults.
 
-[`config.example.toml`](../config.example.toml) documents the complete leader
-configuration. `LeaderParams::load` loads the same file and environment layers
-without parsing process arguments; operator tools use it to share the leader's
-RPC endpoint and signing authority.
+The leader takes an optional positional TOML path, not a `--config` flag.
+Selecting a file does not give its settings priority over environment variables.
 
-The optional `[admin]` section controls periodic administrative work:
+The verifier takes a positional TOML path and uses `MBV_VERIFIER_` environment
+overrides. Both prefixes use `__` between nested keys, for example
+`MBV_METRICS__ADDRESS=127.0.0.1:9090`.
 
-```toml
-[admin]
-claim-fees-frequency = 300
-```
+For operator commands, the exact file supplied with `--config` must exist;
+`MBV_` overrides and defaults then apply. The leader can run without a config
+file, but connects to **devnet** by default. It still needs reachable providers,
+the necessary base-chain programs and accounts, and a funded identity.
 
-Magic Domain Program registration is intentionally not a lifecycle setting.
-Use the `mbv domain` commands to register, synchronize, or unregister a leader.
+If `engine.authority.local` is not supplied, the leader uses a publicly embedded
+development keypair. **Do not use that signer in production.** Supply your own
+keypair through `engine.authority.local` in TOML or
+`MBV_ENGINE__AUTHORITY__LOCAL` in the environment. There is no direct identity
+CLI flag.
 
-## Verifier
+For a self-contained development chain, use the
+[packaged stack](../.github/packages/npm-package/README.md).
 
-`VerifierParams::try_new` loads the required positional TOML path and overlays
-`MBV_VERIFIER_` environment variables. The verifier accepts only follower
-engine settings and derives the engine's remote authority from the configured
-replication upstream.
+Fee claiming is an [explicit operator command](../bins/magicblock/README.md#fee-claims),
+not a validator service. Remove legacy `[admin]` configuration and `MBV_ADMIN__*`
+overrides and schedule claims externally if needed.
 
-See
-[`config.verifier.example.toml`](../config.verifier.example.toml) for the
-minimal follower configuration.
+## Running both roles
 
-## Shared engine configuration
+Give each process its own identity, storage, and listener addresses. The
+verifier's upstream authority identifies the leader it follows, not its own
+signing identity. Set it through `engine.replication.upstream-authority`, not
+`engine.authority.remote`: the verifier fills in the latter automatically and
+rejects an explicit value. Leaders also reject `engine.authority.remote`.
 
-`EngineConfig<R>` owns identity, AccountsDB, ledger, block production, and
-role-specific replication configuration:
+Supply matching program IDs and executable files to both. A verifier with a
+distinct signing identity can follow but cannot relay; see the
+[verifier relay restriction](../bins/magicblock-verifier/README.md#monitoring-and-recovery).
 
-- `EngineConfig<LeaderReplication>` is embedded by `LeaderParams`;
-- `EngineConfig<FollowerReplication>` is embedded by `VerifierParams`.
+See the [leader](../bins/magicblock-validator/README.md) and
+[verifier](../bins/magicblock-verifier/README.md) guides for launch commands.
 
-Both process roles use the same `magicblock-runtime` image builder, so builtins,
-loadable programs, and genesis accounts stay identical.
-
-## Validation
-
-```bash
-cargo test -p magicblock-config
-```
+[Back to workspace](../README.md)
