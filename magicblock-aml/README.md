@@ -13,6 +13,6 @@ separately. A failed request is not a safe verdict.
 Remote endpoints require HTTPS; HTTP is supported only on loopback addresses.
 Passing a risk check does not grant permission to modify an account.
 
-See the [leader configuration](../config.example.toml) for settings.
+See the [leader configuration](../config.validator.example.toml) for settings.
 
 [Back to workspace](../README.md)

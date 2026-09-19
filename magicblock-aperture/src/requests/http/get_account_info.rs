@@ -18,7 +18,7 @@ use crate::{
 
 impl HttpDispatcher {
     pub(super) fn account_is_visible(account: &AccountSharedData) -> bool {
-        !account.is(AccountMode::Placeholder)
+        !account.is(AccountMode::Uninit)
     }
 
     pub(super) async fn read_account_with_ensure<R>(

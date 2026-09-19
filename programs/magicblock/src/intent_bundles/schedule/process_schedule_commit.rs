@@ -109,13 +109,11 @@ pub(crate) fn process_schedule_commit(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
-        // Prevent accounts that exist only inside the ER from being committed
-        // to base chain. This covers what used to be two separate checks, for
-        // ephemeral and for confined accounts, which are now the same mode.
-        if acc.borrow()?.is(AccountMode::Ephemeral) {
+        // Local-only accounts, including Magic ATAs, cannot be committed.
+        if acc.borrow()?.is(AccountMode::Magic) {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: account {} is ephemeral and cannot be committed to base chain",
+                "ScheduleCommit ERR: account {} is local-only and cannot be committed to base chain",
                 acc_pubkey
             );
             return Err(InstructionError::InvalidAccountData);

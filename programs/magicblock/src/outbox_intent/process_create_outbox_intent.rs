@@ -102,5 +102,5 @@ fn create_ephemeral_outbox_account(
     acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);
     acc.resize(data.len(), 0);
     acc.data_as_mut_slice().copy_from_slice(&data);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Ephemeral)
+    set_account_mode(invoke_context, &mut acc, AccountMode::Magic)
 }

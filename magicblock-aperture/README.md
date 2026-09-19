@@ -9,7 +9,7 @@ Engine to execute transactions. Verifiers do not run this service.
 
 ## Configuration and plugins
 
-Use the [leader configuration](../config.example.toml) for listener addresses,
+Use the [leader configuration](../config.validator.example.toml) for listener addresses,
 request limits, and Geyser plugin settings. The WebSocket listener uses the port
 immediately after the HTTP port.
 

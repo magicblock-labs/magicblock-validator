@@ -6,7 +6,7 @@ transactions, store state, and replicate to allowed followers.
 
 ## Run a leader
 
-Prepare a configuration using the [leader example](../../config.example.toml).
+Prepare a configuration using the [leader example](../../config.validator.example.toml).
 Replace sample identities and provider credentials, choose storage and listener
 addresses, and supply the configured program executable files.
 

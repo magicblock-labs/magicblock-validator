@@ -15,13 +15,16 @@ use tokio::task::JoinSet;
 use tracing::*;
 
 use super::{
-    CompanionFetchLogContext, FetchCloner, delegation,
-    log_companion_fetch_failure,
+    CompanionFetchLogContext, FetchCloner, ResolvedSubscriptionAccount,
+    delegation, log_companion_fetch_failure,
     subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::AccountWithCompanion,
 };
 use crate::{
-    cloner::{AccountCloneRequest, ClonePostDelegationMode, DelegationActions},
+    cloner::{
+        AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots,
+        DelegationActions,
+    },
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         SubscriptionReason, pubsub_common::SubscriptionSource,
@@ -241,16 +244,19 @@ where
         }
     };
 
-    if base_ata.read().is(AccountMode::Delegated)
-        || base_ata.read().is(AccountMode::Transient)
-    {
+    // A local Magic ATA stays authoritative even when empty. Its owner must
+    // close it before a base-chain delegation can supply the local ATA image.
+    if base_ata.read().mode().authoritative() {
         return None;
     }
-    let projected_ata = maybe_project_delegated_ata_from_eata(
-        this,
+    let source_slots = CloneSourceSlots::projected(
+        base_ata.read().slot(),
+        eata_account.read().slot(),
+    );
+    let projected_ata = project_delegated_ata(
+        &this.validator_pubkey,
         base_ata,
         eata_account.read().data(),
-        eata_account.read().slot(),
         deleg_record,
     )?;
 
@@ -261,6 +267,7 @@ where
             delegation_actions.cloned(),
         ),
         delegated_to_other: None,
+        source_slots: Some(source_slots),
     })
 }
 
@@ -311,15 +318,12 @@ where
     )
 }
 
-pub(crate) async fn maybe_project_ata_from_subscription_update<T, U>(
+pub(super) async fn maybe_project_ata_from_subscription_update<T, U>(
     this: &FetchCloner<T, U>,
     ata_pubkey: Pubkey,
     ata_account: AccountBuilder,
     companion_fetch_log_context: &CompanionFetchLogContext,
-) -> (
-    AccountBuilder,
-    Option<(DelegationRecord, Option<DelegationActions>)>,
-)
+) -> ResolvedSubscriptionAccount
 where
     T: ChainRpcClient,
     U: ChainPubsubClient,
@@ -329,13 +333,13 @@ where
         ata_account.read().owner(),
         ata_account.read().data(),
     ) else {
-        return (ata_account, None);
+        return ResolvedSubscriptionAccount::plain(ata_account);
     };
 
     let Some((eata_pubkey, _)) =
         try_derive_eata_address_and_bump(&ata_info.owner, &ata_info.mint)
     else {
-        return (ata_account, None);
+        return ResolvedSubscriptionAccount::plain(ata_account);
     };
 
     let was_watching = this.remote_account_provider.is_watching(&eata_pubkey);
@@ -359,7 +363,7 @@ where
 
     // Known-empty eATAs skip the fetch only if the subscription was already live.
     if was_watching && subscribed && is_known_empty_eata(this, &eata_pubkey) {
-        return (ata_account, None);
+        return ResolvedSubscriptionAccount::plain(ata_account);
     }
 
     let (eata_account, definitively_not_found) = match this
@@ -399,7 +403,7 @@ where
         if definitively_not_found && subscribed {
             mark_eata_empty(this, eata_pubkey);
         }
-        return (ata_account, None);
+        return ResolvedSubscriptionAccount::plain(ata_account);
     };
 
     let deleg_record = delegation::fetch_and_parse_delegation_record(
@@ -412,57 +416,53 @@ where
     .await;
 
     let Some(deleg_record) = deleg_record else {
-        return (ata_account, None);
+        return ResolvedSubscriptionAccount::plain(ata_account);
     };
     let (deleg_record, delegation_actions) = deleg_record;
 
-    if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
-        this,
+    if let Some(projected_ata) = project_delegated_ata(
+        &this.validator_pubkey,
         ata_account.clone(),
         eata_account.data(),
-        eata_account.slot(),
         &deleg_record,
     ) {
-        return (projected_ata, Some((deleg_record, delegation_actions)));
+        return ResolvedSubscriptionAccount {
+            source_slots: Some(CloneSourceSlots::projected(
+                ata_account.read().slot(),
+                eata_account.slot(),
+            )),
+            account: projected_ata,
+            delegation: Some((deleg_record, delegation_actions)),
+        };
     }
-    (ata_account, Some((deleg_record, delegation_actions)))
+    ResolvedSubscriptionAccount {
+        account: ata_account,
+        delegation: Some((deleg_record, delegation_actions)),
+        source_slots: None,
+    }
 }
 
-pub(crate) fn maybe_project_delegated_ata_from_eata<T, U>(
-    this: &FetchCloner<T, U>,
+fn project_delegated_ata(
+    validator: &Pubkey,
     ata_account: AccountBuilder,
     eata_data: &[u8],
-    eata_slot: u64,
     deleg_record: &DelegationRecord,
-) -> Option<AccountBuilder>
-where
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
-{
-    if deleg_record.authority != this.validator_pubkey {
+) -> Option<AccountBuilder> {
+    if deleg_record.authority != *validator
+        || deleg_record.owner != EATA_PROGRAM_ID
+    {
         return None;
     }
 
     // Projecting from eATA must preserve the base ATA's owner and data length.
     // That is what keeps Token-2022 accounts from being rebuilt as legacy SPL
     // Token accounts when the eATA itself only stores owner, mint, and amount.
-    let projected_from_base_ata = if deleg_record.owner == EATA_PROGRAM_ID {
-        EphemeralAta::try_from_account_data(eata_data)
-            .and_then(|eata| eata.project_into_ata_account(ata_account))
-    } else {
-        None
-    };
-
-    let projected_ata = match projected_from_base_ata {
-        Some(projected_ata) => projected_ata,
-        None => {
-            return None;
-        }
-    };
-    let projected_slot = projected_ata.read().slot().max(eata_slot);
+    let projected_ata = EphemeralAta::try_from_account_data(eata_data)?
+        .project_into_ata_account(ata_account)?;
+    // The delegation identifies the stored image; input freshness stays on the request.
     Some(
         projected_ata
-            .slot(projected_slot)
+            .slot(deleg_record.delegation_slot)
             .mode(AccountMode::Delegated),
     )
 }
@@ -660,6 +660,7 @@ where
         let mut account_to_clone = input.ata_account;
         let mut delegated_to_other = None;
         let mut actions = None;
+        let mut source_slots = None;
 
         if let Some(eata_shared) = &input.eata_shared
             && let Some(Some(deleg)) = deleg_iter.next()
@@ -670,13 +671,16 @@ where
                 &deleg_record,
             );
 
-            if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
-                this,
+            if let Some(projected_ata) = project_delegated_ata(
+                &this.validator_pubkey,
                 account_to_clone.clone(),
                 eata_shared.read().data(),
-                eata_shared.read().slot(),
                 &deleg_record,
             ) {
+                source_slots = Some(CloneSourceSlots::projected(
+                    account_to_clone.read().slot(),
+                    eata_shared.read().slot(),
+                ));
                 account_to_clone = projected_ata;
                 actions = delegation_actions;
             }
@@ -687,6 +691,7 @@ where
             account: account_to_clone,
             post_delegation_mode: ClonePostDelegationMode::from(actions),
             delegated_to_other,
+            source_slots,
         });
     }
 

@@ -96,7 +96,7 @@ async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetc
 #[tokio::test]
 async fn test_mixed_batch_requests_emit_remote_account_claims_header_zero() {
     let env = RpcTestEnv::new().await;
-    let account = store_v42(&env.engine, 0, AccountMode::Ephemeral);
+    let account = store_v42(&env.engine, 0, AccountMode::Magic);
     let batch_request = json::json!([
         {"jsonrpc": "2.0", "method": "getVersion", "id": 1},
         {

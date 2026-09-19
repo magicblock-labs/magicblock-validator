@@ -20,7 +20,7 @@ synchronization APIs rather than adding a separate remote-to-local write path.
 ## Configuration
 
 Start with the remote providers and Chainlink settings in the
-[leader configuration](../config.example.toml). Account loading depends on remote
+[leader configuration](../config.validator.example.toml). Account loading depends on remote
 RPC availability, and program loading needs the corresponding executable data.
 
 For cross-chain behavior and recovery constraints, see

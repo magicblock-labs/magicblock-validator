@@ -470,7 +470,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn fake_plugin_receives_engine_metadata_and_monotonic_writes() {
         let mut te = TestEngine::new().await;
-        let output = store_v42(&te, 0, AccountMode::Ephemeral);
+        let output = store_v42(&te, 0, AccountMode::Magic);
         let events = Arc::new(StdMutex::new(Events::default()));
         let manager =
             Arc::new(GeyserPluginManager::from_plugins(vec![Box::new(

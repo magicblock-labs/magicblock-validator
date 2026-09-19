@@ -190,7 +190,7 @@ fn invalid_aperture_port_is_rejected() {
 #[parallel]
 fn example_configuration_parses() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../config.example.toml");
+        .join("../config.validator.example.toml");
 
     let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
 

@@ -28,7 +28,7 @@ pub(crate) fn initial_accounts(
     let vault = AccountBuilder::default()
         .lamports(Rent::default().minimum_balance(0))
         .owner(magic_program::ID)
-        .mode(AccountMode::Ephemeral)
+        .mode(AccountMode::Magic)
         .build();
     accounts.insert(magic_program::EPHEMERAL_VAULT_PUBKEY, vault);
 
@@ -51,7 +51,7 @@ pub(crate) fn initial_accounts(
     let healthcheck = AccountBuilder::default()
         .data(vec![0; size_of::<i64>()])
         .owner(v42_calculator_interface::ID)
-        .mode(AccountMode::Ephemeral)
+        .mode(AccountMode::Magic)
         .build();
     accounts.insert(HEALTHCHECK_ACCOUNT_PUBKEY, healthcheck);
 
