@@ -5,7 +5,8 @@ use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::{Pubkey, pubkey};
 use spl_token::state::Account as SplAccount;
 use spl_token_2022::{
-    extension::StateWithExtensionsMut, state::Account as Token2022Account,
+    extension::{StateWithExtensions, StateWithExtensionsMut},
+    state::Account as Token2022Account,
 };
 
 // Shared program IDs and helper functions for SPL Token, Associated Token, and eATA programs.
@@ -26,8 +27,34 @@ pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
 pub const EATA_PROGRAM_ID: Pubkey =
     pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
 
+// Marker written into a Magic ATA's close authority. It is a data
+// marker only, never a signer grant: the sysvar cannot sign, so these
+// accounts are closed exclusively via the Magic Program.
+pub const MAGIC_ATA_CLOSE_AUTHORITY: Pubkey = solana_program::sysvar::rent::ID;
+
 pub const EPHEMERAL_ATA_LEN: usize = 80;
 const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
+
+/// A validator-created ER-only token account at the canonical ATA address,
+/// letting a wallet receive tokens before its ATA exists anywhere.
+/// It remains locally authoritative, even when empty, until explicitly closed.
+/// Chainlink must not replace it with a base-chain delegation while it exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MagicAtaInfo {
+    pub ata_pubkey: Pubkey,
+    pub token_program: Pubkey,
+    pub wallet_owner: Pubkey,
+    pub mint: Pubkey,
+    pub amount: u64,
+}
+
+struct TokenAccountCommon {
+    mint: Pubkey,
+    owner: Pubkey,
+    amount: u64,
+    is_native: COption<u64>,
+    close_authority: COption<Pubkey>,
+}
 
 /// Private WSOL is represented locally by the token amount that maps to eATA,
 /// not by claimable lamports on the projected ATA.
@@ -411,6 +438,82 @@ pub fn try_remap_ata_to_eata(
     Some((eata_pubkey, eata))
 }
 
+/// Recognizes a local Magic-mode ATA by its token layout, address and close marker.
+pub fn try_get_magic_ata_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<MagicAtaInfo> {
+    if !account.is(AccountMode::Magic) {
+        return None;
+    }
+
+    let token_program = account.owner();
+    let token_account =
+        parse_token_account_for_magic_ata(token_program, account.data())?;
+    if token_account.close_authority != COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
+        || token_account.is_native.is_some()
+    {
+        return None;
+    }
+    // Degenerate default keys never classify as a Magic ATA.
+    if token_account.owner == Pubkey::default()
+        || token_account.mint == Pubkey::default()
+    {
+        return None;
+    }
+
+    let expected_ata = derive_ata_with_token_program(
+        &token_account.owner,
+        &token_account.mint,
+        token_program,
+    );
+    if expected_ata != *pubkey {
+        return None;
+    }
+
+    Some(MagicAtaInfo {
+        ata_pubkey: *pubkey,
+        token_program: *token_program,
+        wallet_owner: token_account.owner,
+        mint: token_account.mint,
+        amount: token_account.amount,
+    })
+}
+
+pub fn is_supported_token_program(token_program: &Pubkey) -> bool {
+    *token_program == TOKEN_PROGRAM_ID
+        || *token_program == TOKEN_2022_PROGRAM_ID
+}
+
+fn parse_token_account_for_magic_ata(
+    token_program: &Pubkey,
+    data: &[u8],
+) -> Option<TokenAccountCommon> {
+    if *token_program == TOKEN_PROGRAM_ID {
+        let account = SplAccount::unpack(data).ok()?;
+        Some(TokenAccountCommon {
+            mint: account.mint,
+            owner: account.owner,
+            amount: account.amount,
+            is_native: account.is_native,
+            close_authority: account.close_authority,
+        })
+    } else if *token_program == TOKEN_2022_PROGRAM_ID {
+        let account = StateWithExtensions::<Token2022Account>::unpack(data)
+            .ok()?
+            .base;
+        Some(TokenAccountCommon {
+            mint: account.mint,
+            owner: account.owner,
+            amount: account.amount,
+            is_native: account.is_native,
+            close_authority: account.close_authority,
+        })
+    } else {
+        None
+    }
+}
+
 // ---------------- eATA -> ATA projection helpers ----------------
 
 /// Minimal ephemeral representation of an SPL token account used to build
@@ -501,6 +604,7 @@ impl From<EphemeralAta> for Account {
 
 #[cfg(test)]
 mod tests {
+    use solana_account::WritableAccount;
     use spl_token::state::AccountState;
 
     use super::*;
@@ -660,5 +764,110 @@ mod tests {
             projected_token.close_authority,
             COption::Some(Pubkey::default())
         );
+    }
+
+    #[test]
+    fn magic_ata_uses_rent_sysvar_close_authority() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let token_account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount: 9,
+            delegate: COption::None,
+            state: AccountState::Initialized,
+            is_native: COption::None,
+            delegated_amount: 0,
+            close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
+        };
+
+        let mut data = vec![0u8; SplAccount::LEN];
+        SplAccount::pack(token_account, &mut data).unwrap();
+        let account = AccountSharedData::from(Account {
+            owner: TOKEN_PROGRAM_ID,
+            data,
+            lamports: 0,
+            executable: false,
+            ..Default::default()
+        });
+        let account = AccountBuilder::from(account)
+            .mode(AccountMode::Magic)
+            .build();
+
+        let info = try_get_magic_ata_info(&ata, &account)
+            .expect("Magic ATA should be detected");
+        assert_eq!(info.ata_pubkey, ata);
+        assert_eq!(info.token_program, TOKEN_PROGRAM_ID);
+        assert_eq!(info.wallet_owner, wallet_owner);
+        assert_eq!(info.mint, mint);
+        assert_eq!(info.amount, 9);
+
+        let mut default_close_authority = account.clone();
+        let mut token =
+            SplAccount::unpack(default_close_authority.data()).unwrap();
+        token.close_authority = COption::Some(Pubkey::default());
+        SplAccount::pack(token, default_close_authority.data_as_mut_slice())
+            .unwrap();
+        assert!(
+            try_get_magic_ata_info(&ata, &default_close_authority).is_none()
+        );
+
+        for mode in [
+            AccountMode::Uninit,
+            AccountMode::ReadOnly,
+            AccountMode::System,
+            AccountMode::Delegated,
+            AccountMode::Transient,
+            AccountMode::Closed,
+        ] {
+            let other_mode =
+                AccountBuilder::from(account.clone()).mode(mode).build();
+            assert!(try_get_magic_ata_info(&ata, &other_mode).is_none());
+        }
+
+        let mut wrong_owner = account.clone();
+        wrong_owner.set_owner(Pubkey::new_unique());
+        assert!(try_get_magic_ata_info(&ata, &wrong_owner).is_none());
+
+        let mut native_account = account.clone();
+        let mut token = SplAccount::unpack(native_account.data()).unwrap();
+        token.is_native = COption::Some(0);
+        SplAccount::pack(token, native_account.data_as_mut_slice()).unwrap();
+        assert!(try_get_magic_ata_info(&ata, &native_account).is_none());
+    }
+
+    #[test]
+    fn magic_ata_rejects_default_owner_and_mint() {
+        for (wallet_owner, mint) in [
+            (Pubkey::default(), Pubkey::new_unique()),
+            (Pubkey::new_unique(), Pubkey::default()),
+        ] {
+            let ata = derive_ata(&wallet_owner, &mint);
+            let token_account = SplAccount {
+                mint,
+                owner: wallet_owner,
+                amount: 9,
+                delegate: COption::None,
+                state: AccountState::Initialized,
+                is_native: COption::None,
+                delegated_amount: 0,
+                close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
+            };
+            let mut data = vec![0u8; SplAccount::LEN];
+            SplAccount::pack(token_account, &mut data).unwrap();
+            let account = AccountSharedData::from(Account {
+                owner: TOKEN_PROGRAM_ID,
+                data,
+                lamports: 0,
+                executable: false,
+                ..Default::default()
+            });
+            let account = AccountBuilder::from(account)
+                .mode(AccountMode::Magic)
+                .build();
+
+            assert!(try_get_magic_ata_info(&ata, &account).is_none());
+        }
     }
 }

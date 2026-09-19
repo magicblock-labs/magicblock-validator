@@ -25,7 +25,7 @@ use super::{
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
-    cloner::{AccountCloneRequest, ClonePostDelegationMode},
+    cloner::{AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
         ResolvedAccount, SubscriptionReason,
@@ -129,6 +129,7 @@ fn classify_single_account(
                             account,
                             post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
+                            source_slots: None,
                         });
                     }
                 }
@@ -278,6 +279,7 @@ where
             companion_account: delegation_record,
         } in accounts_fully_resolved.into_iter()
         {
+            let source_slots = CloneSourceSlots::single(account.read().slot());
             // If the account is delegated we set the owner and delegation state
             let (delegated_to_other, delegation_actions) =
                 if let Some(record_data) = delegation_record {
@@ -371,6 +373,7 @@ where
                     delegation_actions,
                 ),
                 delegated_to_other,
+                source_slots: Some(source_slots),
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {

@@ -18,6 +18,6 @@ scheduling work and retries transient failures, but the subscription channel is
 not a durable queue.
 
 See the [committor service](../magicblock-committor-service/README.md) for settlement
-delivery and the [leader configuration](../config.example.toml) for settings.
+delivery and the [leader configuration](../config.validator.example.toml) for settings.
 
 [Back to workspace](../README.md)

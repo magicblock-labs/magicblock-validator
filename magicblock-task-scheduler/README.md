@@ -17,7 +17,7 @@ crash.
 ## Configuration
 
 Use the `[task-scheduler]` section of the
-[leader configuration](../config.example.toml) for timing and retention settings.
+[leader configuration](../config.validator.example.toml) for timing and retention settings.
 The `reset` option deletes the task database; leave it disabled for normal
 restarts.
 

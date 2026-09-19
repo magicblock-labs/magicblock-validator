@@ -88,7 +88,7 @@ fn seed_output(ctx: &TestContext, output: Pubkey, slot: u64) {
                 .lamports(1_000_000)
                 .data(0_i64.to_le_bytes().to_vec())
                 .owner(V42_ID)
-                .mode(AccountMode::Ephemeral)
+                .mode(AccountMode::Magic)
                 .slot(slot)
                 .build(),
         )])
