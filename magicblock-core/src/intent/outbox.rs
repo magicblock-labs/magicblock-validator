@@ -17,7 +17,7 @@ pub fn outbox_intent_pda(id: u64) -> Pubkey {
 pub fn outbox_intent_pda_with_bump(id: u64) -> (Pubkey, u8) {
     Pubkey::find_program_address(
         &[OUTBOX_INTENT_SEED, &id.to_le_bytes()],
-        &magicblock_magic_program_api::ID,
+        &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID,
     )
 }
 
@@ -27,7 +27,7 @@ pub fn outbox_intent_pda_with_bump(id: u64) -> (Pubkey, u8) {
 pub fn verify_outbox_intent_pda(id: u64, bump: u8, candidate: &Pubkey) -> bool {
     Pubkey::create_program_address(
         &[OUTBOX_INTENT_SEED, &id.to_le_bytes(), &[bump]],
-        &magicblock_magic_program_api::ID,
+        &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID,
     )
     .is_ok_and(|derived| derived == *candidate)
 }

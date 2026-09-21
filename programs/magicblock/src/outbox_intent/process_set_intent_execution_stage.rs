@@ -9,7 +9,7 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use crate::{
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },

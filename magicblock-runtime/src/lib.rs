@@ -8,6 +8,7 @@ use keeper::builder::KeeperBuilder;
 use magicblock_config::config::{EngineConfig, LoadableProgram};
 use magicblock_program::magicblock_processor::{
     CallbackEntrypoint, CrankEntrypoint, Entrypoint, EphemeralSystemEntrypoint,
+    OutboxIntentEntrypoint,
 };
 use solana_program_runtime::{
     invoke_context::BuiltinFunctionWithContext,
@@ -71,6 +72,10 @@ fn builtins() -> HashMap<Pubkey, BuiltinFunctionWithContext> {
             EphemeralSystemEntrypoint::vm,
             EphemeralSystemEntrypoint::codegen,
         ),
+    );
+    builtins.insert(
+        magicblock_program::OUTBOX_INTENT_PROGRAM_ID,
+        (OutboxIntentEntrypoint::vm, OutboxIntentEntrypoint::codegen),
     );
     builtins
 }

@@ -22,16 +22,11 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::transaction::TransactionContext;
 
-pub use crate::intent_bundles::outbox::process_scheduled_commit_sent::{
-    SentCommit, process_scheduled_commit_sent, register_scheduled_commit_sent,
-};
 pub(crate) use crate::intent_bundles::{
-    outbox::{
-        process_accept_scheduled_commits::*,
-        process_close_outbox_intent::process_close_outbox_intent,
-        process_set_intent_execution_stage::process_set_intent_execution_stage,
-    },
-    process_execute_callback::*,
+    process_accept_scheduled_commits::*, process_execute_callback::*,
+};
+pub use crate::outbox_intent::process_scheduled_commit_sent::{
+    SentCommit, register_scheduled_commit_sent,
 };
 use crate::{
     magic_sys::{
