@@ -184,10 +184,10 @@ where
 }
 
 #[async_trait]
-impl<T, C, A, O> IntentExecutor<T> for AcceptedIntentExecutor<T, C, A, O>
+impl<T, F, A, O> IntentExecutor<T> for AcceptedIntentExecutor<T, F, A, O>
 where
     T: TransactionPreparator,
-    C: TaskInfoFetcher,
+    F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,

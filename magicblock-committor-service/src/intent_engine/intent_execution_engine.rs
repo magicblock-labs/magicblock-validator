@@ -21,10 +21,11 @@ use tracing::{error, info, instrument, trace, warn};
 #[cfg(feature = "dev-context-only-utils")]
 use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
+    error::IntentScheduleError,
     intent_engine::{
         db::BacklogDB,
-        intent_channel::{IntentScheduleError, IntentStream},
-        intent_scheduler::{IntentScheduler, POISONED_INNER_MSG},
+        intent_scheduler::{IntentScheduler, POISONED_SCHEDULER_MSG},
+        intent_stream::IntentStream,
     },
     intent_executor::{
         ExecutionOutput, IntentExecutionResult,
@@ -106,23 +107,11 @@ impl Deref for BroadcastedIntentExecutionResult {
     }
 }
 
-/// Struct that exposes only `subscribe` method of `broadcast::Sender` for better isolation
-pub struct ResultSubscriber(
-    broadcast::Sender<BroadcastedIntentExecutionResult>,
-);
-impl ResultSubscriber {
-    pub fn subscribe(
-        &self,
-    ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
-        self.0.subscribe()
-    }
-}
-
 pub(crate) struct IntentExecutionEngine<D, F, T> {
     intent_stream: IntentStream<D>,
     executor_builder: Arc<F>,
 
-    inner: Arc<Mutex<IntentScheduler>>,
+    scheduler: Arc<Mutex<IntentScheduler>>,
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     retries_semaphore: Arc<Semaphore>,
@@ -144,17 +133,17 @@ where
                 MAX_EXECUTORS as usize,
             )),
             retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
-            inner: Arc::new(Mutex::new(IntentScheduler::new())),
+            scheduler: Arc::new(Mutex::new(IntentScheduler::new())),
             _phantom_data: PhantomData,
         }
     }
 
-    /// Spawns `main_loop` and return `Receiver` listening to results
-    pub fn spawn(self) -> ResultSubscriber {
+    /// Spawns `main_loop` and returns a sender that can create result subscriptions.
+    pub fn spawn(self) -> broadcast::Sender<BroadcastedIntentExecutionResult> {
         let (result_sender, _) = broadcast::channel(100);
         tokio::spawn(self.main_loop(result_sender.clone()));
 
-        ResultSubscriber(result_sender)
+        result_sender
     }
 
     /// Main loop that:
@@ -197,7 +186,7 @@ where
 
             // Spawn executor
             let executor_factory = self.executor_builder.clone();
-            let inner = self.inner.clone();
+            let scheduler = self.scheduler.clone();
             let limits = ExecutionLimits {
                 executors: self.executors_semaphore.clone(),
                 retries: self.retries_semaphore.clone(),
@@ -206,7 +195,7 @@ where
             let handle = tokio::spawn(Self::execute(
                 executor_factory,
                 intent,
-                inner,
+                scheduler,
                 limits,
                 permit,
                 result_sender.clone(),
@@ -229,9 +218,9 @@ where
 
         let can_receive = || {
             let num_blocked_intents = self
-                .inner
+                .scheduler
                 .lock()
-                .expect(POISONED_INNER_MSG)
+                .expect(POISONED_SCHEDULER_MSG)
                 .intents_blocked();
             if num_blocked_intents < SCHEDULER_CAPACITY {
                 true
@@ -251,11 +240,11 @@ where
                     error!(error = ?err, "Executor failed");
                 };
                 trace!("Worker executed intent bundle, fetching new available one");
-                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
+                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).pop_next_scheduled_intent()
             },
             result = Self::get_new_intent(intent_stream), if can_receive() => {
                 let intent = result?;
-                self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
+                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).schedule(intent)
             },
             else => {
                 // Shouldn't be possible:
@@ -293,11 +282,11 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, intent, scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
     async fn execute(
         executor_factory: Arc<F>,
         intent: OutboxIntentBundle,
-        inner_scheduler: Arc<Mutex<IntentScheduler>>,
+        scheduler: Arc<Mutex<IntentScheduler>>,
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
@@ -318,7 +307,7 @@ where
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
 
-        let mut scheduler = inner_scheduler.lock().expect(POISONED_INNER_MSG);
+        let mut scheduler = scheduler.lock().expect(POISONED_SCHEDULER_MSG);
         if is_err {
             // Poison this intent's pubkeys and evict any successor that's
             // reachable from them, so a terminal failure can't leave the
@@ -506,14 +495,17 @@ mod tests {
     use solana_signature::Signature;
     use solana_signer::SignerError;
     use solana_transaction_error::TransactionError;
-    use tokio::time::{sleep, timeout};
+    use tokio::{
+        sync::mpsc::{self, Sender},
+        time::{sleep, timeout},
+    };
 
     use super::*;
     use crate::{
         intent_engine::{
             db::{BacklogDB, DummyDB},
-            intent_channel::{IntentScheduleHandle, channel},
-            intent_scheduler::{create_test_intent, create_test_intent_bundle},
+            intent_scheduler::create_test_intent_bundle,
+            intent_stream::IntentStream,
         },
         intent_executor::{
             IntentExecutionResult, IntentExecutor,
@@ -562,7 +554,7 @@ mod tests {
     fn setup_engine(
         should_fail: bool,
     ) -> (
-        IntentScheduleHandle<DummyDB>,
+        Sender<OutboxIntentBundle>,
         MockIntentExecutionEngine,
         Arc<Mutex<DummyDB>>,
     ) {
@@ -577,14 +569,15 @@ mod tests {
     fn setup_engine_with_factory(
         executor_factory: MockIntentExecutorFactory,
     ) -> (
-        IntentScheduleHandle<DummyDB>,
+        Sender<OutboxIntentBundle>,
         MockIntentExecutionEngine,
         Arc<Mutex<DummyDB>>,
     ) {
         test_utils::init_test_logger();
 
         let db = Arc::new(Mutex::new(DummyDB::new()));
-        let (handle, intent_stream) = channel(&db, 1000);
+        let (handle, receiver) = mpsc::channel(1000);
+        let intent_stream = IntentStream::new(db.clone(), receiver);
         let worker =
             IntentExecutionEngine::new(intent_stream, executor_factory);
 
@@ -598,12 +591,12 @@ mod tests {
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg.clone()]).unwrap();
+        sender.try_send(msg.clone()).unwrap();
 
         // Verify the message was processed
         let result = result_receiver.recv().await.unwrap();
@@ -619,11 +612,11 @@ mod tests {
 
         // Send two conflicting messages
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
-        let msg1 = create_test_intent(1, &[pubkey], false);
-        let msg2 = create_test_intent(2, &[pubkey], false);
+        let msg1 = create_test_intent_bundle(1, &[pubkey], &[]);
+        let msg2 = create_test_intent_bundle(2, &[pubkey], &[]);
 
-        sender.schedule(vec![msg1.clone()]).unwrap();
-        sender.schedule(vec![msg2.clone()]).unwrap();
+        sender.try_send(msg1.clone()).unwrap();
+        sender.try_send(msg2.clone()).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -646,10 +639,10 @@ mod tests {
         let a = pubkey!("1111111111111111111111111111111111111111111");
         let b = pubkey!("21111111111111111111111111111111111111111111");
         let msg1 = create_test_intent_bundle(1, &[a], &[b]);
-        let msg2 = create_test_intent(2, &[a], false);
+        let msg2 = create_test_intent_bundle(2, &[a], &[]);
 
-        sender.schedule(vec![msg1.clone()]).unwrap();
-        sender.schedule(vec![msg2.clone()]).unwrap();
+        sender.try_send(msg1.clone()).unwrap();
+        sender.try_send(msg2.clone()).unwrap();
 
         // First message should be processed immediately
         let result1 = result_receiver.recv().await.unwrap();
@@ -669,12 +662,12 @@ mod tests {
         let mut result_receiver = result_subscriber.subscribe();
 
         // Send a test message that will fail
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg.clone()]).unwrap();
+        sender.try_send(msg.clone()).unwrap();
 
         // Verify the failure was properly reported
         let result = result_receiver.recv().await.unwrap();
@@ -695,10 +688,10 @@ mod tests {
         let (_sender, worker, db) = setup_engine(false);
 
         // Add a message to the DB
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
         db.lock().unwrap().store_intent_bundle(msg.clone()).unwrap();
 
@@ -730,12 +723,12 @@ mod tests {
 
         // Send a flood of messages
         for i in 0..NUM_MESSAGES {
-            let msg = create_test_intent(
+            let msg = create_test_intent_bundle(
                 i as u64,
                 &[pubkey!("1111111111111111111111111111111111111111111")],
-                false,
+                &[],
             );
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         // Process results and verify constraints
@@ -774,8 +767,8 @@ mod tests {
         const NUM_FAILURES: usize = 10;
         let pubkey = pubkey!("1111111111111111111111111111111111111111111");
         for i in 0..NUM_FAILURES {
-            let msg = create_test_intent(i as u64, &[pubkey], false);
-            sender.schedule(vec![msg]).unwrap();
+            let msg = create_test_intent_bundle(i as u64, &[pubkey], &[]);
+            sender.try_send(msg).unwrap();
         }
 
         let mut results = Vec::with_capacity(NUM_FAILURES);
@@ -830,10 +823,10 @@ mod tests {
 
         let poisoned_pubkey =
             pubkey!("1111111111111111111111111111111111111111111");
-        let head = create_test_intent(0, &[poisoned_pubkey], false);
-        let successor = create_test_intent(1, &[poisoned_pubkey], false);
-        sender.schedule(vec![head]).unwrap();
-        sender.schedule(vec![successor]).unwrap();
+        let head = create_test_intent_bundle(0, &[poisoned_pubkey], &[]);
+        let successor = create_test_intent_bundle(1, &[poisoned_pubkey], &[]);
+        sender.try_send(head).unwrap();
+        sender.try_send(successor).unwrap();
 
         // Head fails for real, successor is voided by the cascade.
         for _ in 0..2 {
@@ -848,8 +841,8 @@ mod tests {
         // A brand new intent on the now-poisoned pubkey is rejected at
         // admission - it never reaches an executor, so no broadcast for
         // it ever arrives.
-        let rejected = create_test_intent(2, &[poisoned_pubkey], false);
-        sender.schedule(vec![rejected]).unwrap();
+        let rejected = create_test_intent_bundle(2, &[poisoned_pubkey], &[]);
+        sender.try_send(rejected).unwrap();
         let silence =
             timeout(Duration::from_millis(300), result_receiver.recv()).await;
         assert!(
@@ -861,8 +854,8 @@ mod tests {
         // and still executes (and fails for real, not as poisoned).
         let unrelated_pubkey =
             pubkey!("21111111111111111111111111111111111111111111");
-        let unrelated = create_test_intent(3, &[unrelated_pubkey], false);
-        sender.schedule(vec![unrelated]).unwrap();
+        let unrelated = create_test_intent_bundle(3, &[unrelated_pubkey], &[]);
+        sender.try_send(unrelated).unwrap();
         let result = timeout(Duration::from_secs(5), result_receiver.recv())
             .await
             .expect("must not hang")
@@ -887,12 +880,12 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_ok());
@@ -908,12 +901,12 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -932,12 +925,12 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -954,12 +947,12 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let msg = create_test_intent(
+        let msg = create_test_intent_bundle(
             1,
             &[pubkey!("1111111111111111111111111111111111111111111")],
-            false,
+            &[],
         );
-        sender.schedule(vec![msg]).unwrap();
+        sender.try_send(msg).unwrap();
 
         let result = result_receiver.recv().await.unwrap();
         assert!(result.is_err());
@@ -985,10 +978,10 @@ mod tests {
         let mut received_ids = HashSet::new();
         for i in 0..NUM_MESSAGES {
             let unique_pubkey = Pubkey::new_unique(); // Each message gets unique key
-            let msg = create_test_intent(i, &[unique_pubkey], false);
+            let msg = create_test_intent_bundle(i, &[unique_pubkey], &[]);
 
             received_ids.insert(i);
-            sender.schedule(vec![msg]).unwrap();
+            sender.try_send(msg).unwrap();
         }
 
         // Process results
@@ -1051,8 +1044,8 @@ mod tests {
                 vec![Pubkey::new_unique()]
             };
 
-            let msg = create_test_intent(i as u64, &pubkeys, false);
-            sender.schedule(vec![msg]).unwrap();
+            let msg = create_test_intent_bundle(i as u64, &pubkeys, &[]);
+            sender.try_send(msg).unwrap();
         }
 
         // Process results
