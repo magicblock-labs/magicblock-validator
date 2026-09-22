@@ -61,14 +61,23 @@ use solana_rpc_client::{
     rpc_client::RpcClientConfig,
     rpc_sender::{RpcSender, RpcTransportStats},
 };
-use solana_rpc_client_api::{client_error, request::RpcRequest};
+use solana_rpc_client_api::{
+    client_error,
+    request::{RpcError, RpcRequest},
+};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
+
+const ALREADY_PROCESSED_MESSAGE: &str =
+    "This transaction has already been processed";
+const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration =
+    Duration::from_millis(200);
+const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
@@ -158,6 +167,69 @@ impl TestEnv {
             RpcClientConfig::with_commitment(self.ctx.commitment),
         ));
         IntentExecutionClient::new(MagicblockRpcClient::new(rpc_client))
+    }
+}
+
+fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
+    match err.kind() {
+        client_error::ErrorKind::TransactionError(
+            TransactionError::AlreadyProcessed,
+        ) => true,
+        client_error::ErrorKind::RpcError(RpcError::RpcResponseError {
+            message,
+            ..
+        }) => message.contains(ALREADY_PROCESSED_MESSAGE),
+        _ => false,
+    }
+}
+
+async fn wait_for_signature_success(
+    rpc: &AsyncRpcClient,
+    signature: Signature,
+) -> Result<(), InternalOutboxClientError> {
+    let start = tokio::time::Instant::now();
+    loop {
+        let status = rpc
+            .get_signature_statuses(&[signature])
+            .await
+            .map_err(InternalOutboxClientError::RpcClientError)?
+            .value
+            .into_iter()
+            .next()
+            .flatten();
+
+        if let Some(status) = status {
+            return match status.err {
+                Some(err) => {
+                    Err(InternalOutboxClientError::TransactionError(err))
+                }
+                None => Ok(()),
+            };
+        }
+
+        if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
+            return Err(InternalOutboxClientError::RpcClientError(
+                client_error::ErrorKind::Custom(format!(
+                    "transaction {signature} was already processed but its status did not resolve"
+                ))
+                .into(),
+            ));
+        }
+
+        tokio::time::sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
+    }
+}
+
+async fn send_and_confirm_outbox_transaction(
+    rpc: &AsyncRpcClient,
+    tx: &Transaction,
+) -> Result<(), InternalOutboxClientError> {
+    match rpc.send_and_confirm_transaction(tx).await {
+        Ok(_) => Ok(()),
+        Err(err) if is_already_processed_rpc_error(&err) => {
+            wait_for_signature_success(rpc, tx.signatures[0]).await
+        }
+        Err(err) => Err(InternalOutboxClientError::RpcClientError(err)),
     }
 }
 
@@ -1056,15 +1128,14 @@ impl OutboxClient for TestOutboxClient {
         let tx = InstructionUtils::set_intent_execution_stage(
             blockhash, intent_id, stage,
         );
-        self.ephem_rpc
-            .send_and_confirm_transaction(&tx)
+        send_and_confirm_outbox_transaction(self.ephem_rpc.as_ref(), &tx)
             .await
             .map_err(|err| {
                 println!(
                     "set_intent_execution_stage failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
                     tx.signatures[0]
                 );
-                InternalOutboxClientError::RpcClientError(err)
+                err
             })?;
         Ok(())
     }
@@ -1100,15 +1171,14 @@ impl OutboxClient for TestOutboxClient {
             .await
             .map_err(InternalOutboxClientError::RpcClientError)?;
         let tx = InstructionUtils::close_outbox_intent(intent_id, blockhash);
-        self.ephem_rpc
-            .send_and_confirm_transaction(&tx)
+        send_and_confirm_outbox_transaction(self.ephem_rpc.as_ref(), &tx)
             .await
             .map_err(|err| {
                 println!(
                     "close_intent failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
                     tx.signatures[0]
                 );
-                InternalOutboxClientError::RpcClientError(err)
+                err
             })?;
 
         self.close_calls.lock().unwrap().push(intent_id);

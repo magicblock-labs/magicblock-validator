@@ -15,8 +15,11 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error, client_error::ErrorKind as RpcClientErrorKind,
+    request::RpcError,
 };
+use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
+use tokio::time::{Instant, sleep};
 use tracing::{debug, error, warn};
 
 use crate::{
@@ -29,6 +32,12 @@ use crate::{
         utils::build_sent_commit,
     },
 };
+
+const ALREADY_PROCESSED_MESSAGE: &str =
+    "This transaction has already been processed";
+const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration =
+    Duration::from_millis(200);
+const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// Implementation of `OutboxClient` that uses ER internals.
 ///
@@ -53,19 +62,87 @@ impl InternalOutboxClient {
         tx: &impl SerializableTransaction,
     ) -> Result<(), client_error::Error> {
         retry(backoff_config, || async {
-            self.rpc_client
-                .send_and_confirm_transaction(tx)
-                .await
-                .map_err(|err| match err.kind() {
-                    RpcClientErrorKind::TransactionError(_) => {
-                        backoff::Error::Permanent(err)
-                    }
-                    _ => backoff::Error::transient(err),
-                })
+            match self.rpc_client.send_and_confirm_transaction(tx).await {
+                Ok(_) => Ok(()),
+                Err(err) if is_already_processed_rpc_error(&err) => {
+                    self.wait_for_rpc_signature_success(*tx.get_signature())
+                        .await
+                }
+                Err(err) => Err(err),
+            }
+            .map_err(|err| match err.kind() {
+                RpcClientErrorKind::TransactionError(_) => {
+                    backoff::Error::Permanent(err)
+                }
+                _ => backoff::Error::transient(err),
+            })
         })
         .await?;
 
         Ok(())
+    }
+
+    async fn wait_for_rpc_signature_success(
+        &self,
+        signature: Signature,
+    ) -> Result<(), client_error::Error> {
+        let start = Instant::now();
+        loop {
+            let status = self
+                .rpc_client
+                .get_signature_statuses(&[signature])
+                .await?
+                .value
+                .into_iter()
+                .next()
+                .flatten();
+
+            if let Some(status) = status {
+                return match status.err {
+                    Some(err) => {
+                        Err(RpcClientErrorKind::TransactionError(err).into())
+                    }
+                    None => Ok(()),
+                };
+            }
+
+            if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
+                return Err(RpcClientErrorKind::Custom(format!(
+                    "transaction {signature} was already processed but its status did not resolve"
+                ))
+                .into());
+            }
+
+            sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
+        }
+    }
+
+    async fn wait_for_engine_signature_success(
+        &self,
+        signature: Signature,
+    ) -> Result<(), InternalOutboxClientError> {
+        let start = Instant::now();
+        loop {
+            if let Some(status) = self
+                .engine
+                .transactions()
+                .status(signature)
+                .await
+                .map_err(EngineError::from)?
+            {
+                return status.result.map_err(Into::into);
+            }
+
+            if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
+                return Err(
+                    InternalOutboxClientError::TransactionStatusMissing(
+                        signature,
+                    ),
+                );
+            }
+
+            sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
+        }
     }
 
     /// Submits `transaction` directly through the engine, signed with the
@@ -74,8 +151,15 @@ impl InternalOutboxClient {
         &self,
         transaction: T,
     ) -> Result<(), InternalOutboxClientError> {
-        self.engine.transaction(transaction)?.execute().await??;
-        Ok(())
+        let transaction = transaction.compose(&self.engine)?;
+        let signature = transaction.signatures()[0];
+        match self.engine.transaction(transaction)?.execute().await? {
+            Ok(()) => Ok(()),
+            Err(TransactionError::AlreadyProcessed) => {
+                self.wait_for_engine_signature_success(signature).await
+            }
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Sends `AcceptScheduledCommits` transactions to the ER, moving scheduled
@@ -130,6 +214,61 @@ impl InternalOutboxClient {
             self.engine.blockhash(),
         );
         self.execute_via_engine(tx).await
+    }
+}
+
+fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
+    match err.kind() {
+        RpcClientErrorKind::TransactionError(
+            TransactionError::AlreadyProcessed,
+        ) => true,
+        RpcClientErrorKind::RpcError(RpcError::RpcResponseError {
+            message,
+            ..
+        }) => message.contains(ALREADY_PROCESSED_MESSAGE),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_rpc_client_api::request::RpcResponseErrorData;
+
+    use super::*;
+
+    #[test]
+    fn detects_already_processed_transaction_error() {
+        let err: client_error::Error =
+            TransactionError::AlreadyProcessed.into();
+
+        assert!(is_already_processed_rpc_error(&err));
+    }
+
+    #[test]
+    fn detects_already_processed_rpc_response_message() {
+        let err: client_error::Error = RpcError::RpcResponseError {
+            code: -32002,
+            message: format!(
+                "transaction verification error: {ALREADY_PROCESSED_MESSAGE}"
+            ),
+            data: RpcResponseErrorData::Empty,
+        }
+        .into();
+
+        assert!(is_already_processed_rpc_error(&err));
+    }
+
+    #[test]
+    fn ignores_unrelated_rpc_response_message() {
+        let err: client_error::Error = RpcError::RpcResponseError {
+            code: -32002,
+            message: "transaction verification error: blockhash not found"
+                .to_string(),
+            data: RpcResponseErrorData::Empty,
+        }
+        .into();
+
+        assert!(!is_already_processed_rpc_error(&err));
     }
 }
 
@@ -278,6 +417,8 @@ pub enum InternalOutboxClientError {
     WincodeError(#[from] wincode::ReadError),
     #[error("AccountsDbError: {0}")]
     AccountsDbError(#[from] AccountsDBError),
+    #[error("TransactionStatusMissing: {0}")]
+    TransactionStatusMissing(Signature),
 }
 
 pub type InternalOutboxClientResult<T> = Result<T, InternalOutboxClientError>;
