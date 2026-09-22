@@ -1,3 +1,11 @@
+use std::time::Duration;
+
+use engine::{
+    pacemaker::ExternalBlock,
+    testkit::{Pacing, TestEngine},
+};
+use keeper::testkit::{Dirs, block, keeper_builder};
+use nucleus::runtime::BlockInput;
 use setup::RpcTestEnv;
 use solana_pubkey::Pubkey;
 
@@ -147,21 +155,65 @@ async fn test_get_genesis_hash() {
     );
 }
 
-/// Verifies the mocked `getEpochInfo` RPC method.
+/// Verifies slot-derived epoch progress across boundaries and skipped slots,
+/// including the fallback schedule and seals that do not advance the slot.
 #[tokio::test]
 async fn test_get_epoch_info() {
-    let env = RpcTestEnv::new().await;
-    let epoch_info = env
-        .rpc
-        .get_epoch_info()
-        .await
-        .expect("get_epoch_info request failed");
+    for (superblock, slots) in [(7, 7), (0, 432_000)] {
+        let dirs = Dirs::default();
+        let mut builder = keeper_builder(&dirs);
+        builder.blockstore.superblock = superblock;
+        let engine =
+            TestEngine::from_builder(dirs, builder, Pacing::External).await;
+        let mut env = RpcTestEnv::with_engine(engine).await;
+        let schedule = env.rpc.get_epoch_schedule().await.unwrap();
+        assert_eq!(schedule, *env.engine.epoch_schedule());
+        assert_eq!(schedule.slots_per_epoch, slots);
+        assert_eq!(schedule.leader_schedule_slot_offset, slots);
 
-    assert_eq!(epoch_info.epoch, 0, "epoch should be 0");
-    assert_eq!(epoch_info.absolute_slot, env.engine.blocks().latest().slot);
+        for slot in [0, slots - 1, slots, slots + 1, 3 * slots + 2] {
+            let clock = env.engine.clock(env.engine.blocks().latest());
+            if slot != 0 {
+                let (boundary, submitted) =
+                    ExternalBlock::new(BlockInput::Production(block(slot)));
+                env.engine.pacer().send(boundary).await.unwrap();
+                tokio::time::timeout(Duration::from_secs(4), submitted)
+                    .await
+                    .unwrap()
+                    .unwrap();
+            }
+            let info = env.rpc.get_epoch_info().await.unwrap();
+            assert_eq!(info.absolute_slot, slot);
+            assert_eq!(info.epoch, slot / slots);
+            assert_eq!(info.slot_index, slot % slots);
+            assert_eq!(info.slots_in_epoch, slots);
+            // Clock describes the executing slot, which RPC reports only once completed.
+            if clock.slot == info.absolute_slot {
+                assert_eq!(info.epoch, clock.epoch);
+            }
+        }
+
+        if superblock == 0 {
+            let before = env.rpc.get_epoch_info().await.unwrap();
+            // External pacing is idle; the barrier excludes execution during the snapshot.
+            let guard = env.engine.barrier().await.unwrap();
+            let sealed = env.engine.finalize_superblock(None).unwrap();
+            tokio::time::timeout(Duration::from_secs(4), sealed)
+                .await
+                .unwrap()
+                .unwrap();
+            drop(guard);
+            let after = env.rpc.get_epoch_info().await.unwrap();
+            assert_eq!(
+                after, before,
+                "sealing must not advance epoch progress"
+            );
+        }
+        env.engine.shutdown().terminate().await;
+    }
 }
 
-/// Verifies the mocked `getEpochSchedule` RPC method.
+/// Verifies every schedule field matches the schedule exposed by Engine.
 #[tokio::test]
 async fn test_get_epoch_schedule() {
     let env = RpcTestEnv::new().await;
@@ -171,10 +223,7 @@ async fn test_get_epoch_schedule() {
         .await
         .expect("get_epoch_schedule request failed");
 
-    assert_eq!(
-        schedule.slots_per_epoch, 432_000,
-        "slots_per_epoch should be the same as solana's"
-    );
+    assert_eq!(schedule, *env.engine.epoch_schedule());
     assert!(!schedule.warmup, "warmup should be false");
 }
 
