@@ -87,18 +87,21 @@ pub enum MagicBlockInstruction {
     /// | `3..n` | Outbox intent PDAs. One PDA per accepted intent, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
     AcceptScheduleCommits,
 
-    /// Closes the outbox intent PDA on successful execution of the intent.
-    /// Deterministic and mode-independent: runs identically on replicas
-    /// replaying the same transaction, unlike `ScheduledCommitSent` which
-    /// only logs on the validator that actually executed the intent.
+    /// Records the attempt to realize a scheduled commit on chain.
+    /// Validates the associated outbox intent PDA account.
+    ///
+    /// The signature of this transaction can be pre-calculated since we pass
+    /// the intent ID instead of searching for the corresponding intent bundle
+    /// in the stored hashmap. The bump is retained to preserve the serialized
+    /// instruction ABI and keep repeated transactions unique.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
-    /// | `0` | Validator Authority. Authorizes closing the intent. | WRITE, SIGNER |
+    /// | `0` | Validator Authority. Must match the validator identity. | WRITE, SIGNER |
     /// | `1` | MagicBlock program. Must match the MagicBlock program ID. | - |
-    /// | `2` | Outbox intent PDA. Account to close, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
-    CloseOutboxIntent(u64),
+    /// | `2` | Outbox intent PDA. Associated intent PDA, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
+    ScheduledCommitSent((u64, u64)),
 
     /// Schedules execution of a single *base intent*.
     ///
@@ -377,6 +380,29 @@ pub enum MagicBlockInstruction {
         instructions: Vec<Instruction>,
     },
 
+    /// Closes a drained Magic ATA previously created via
+    /// `CreateMagicAta`. No-op unless the account matches the
+    /// Magic ATA marker for the signing wallet owner and holds zero
+    /// tokens, so it can be appended unconditionally to withdrawal flows.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Wallet owner
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    CloseMagicAta,
+
+    /// Closes the outbox intent PDA on successful execution of the intent.
+    /// Deterministic and mode-independent: runs identically on replicas
+    /// replaying the same transaction, unlike `ScheduledCommitSent` which
+    /// only logs on the validator that actually executed the intent.
+    ///
+    /// # Account references
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Validator Authority. Authorizes closing the intent. | WRITE, SIGNER |
+    /// | `1` | MagicBlock program. Must match the MagicBlock program ID. | - |
+    /// | `2` | Outbox intent PDA. Account to close, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
+    CloseOutboxIntent(u64),
+
     /// Sets or advances the execution stage of an outbox intent.
     /// Must be called before sending the L1 transaction.
     ///
@@ -389,31 +415,6 @@ pub enum MagicBlockInstruction {
         intent_id: u64,
         stage: ExecutionStage,
     },
-
-    /// Records the attempt to realize a scheduled commit on chain.
-    /// Validates the associated outbox intent PDA account.
-    ///
-    /// The signature of this transaction can be pre-calculated since we pass the
-    /// intent ID instead of searching for the corresponding intent bundle in the
-    /// stored hashmap. Transaction uniqueness is guaranteed by the per-intent PDA.
-    ///
-    /// # Account references
-    /// | Index | Account | Access |
-    /// | --- | --- | --- |
-    /// | `0` | Validator Authority. Must match the validator identity. | WRITE, SIGNER |
-    /// | `1` | MagicBlock program. Must match the MagicBlock program ID. | - |
-    /// | `2` | Outbox intent PDA. Associated intent PDA, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
-    ScheduledCommitSent(u64),
-
-    /// Closes a drained Magic ATA previously created via
-    /// `CreateMagicAta`. No-op unless the account matches the
-    /// Magic ATA marker for the signing wallet owner and holds zero
-    /// tokens, so it can be appended unconditionally to withdrawal flows.
-    ///
-    /// # Account references
-    /// - **0.** `[SIGNER]` Wallet owner
-    /// - **1.** `[WRITE]`  Canonical ATA PDA
-    CloseMagicAta,
 }
 
 impl MagicBlockInstruction {

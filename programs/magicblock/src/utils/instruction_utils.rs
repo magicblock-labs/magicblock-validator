@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
     CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, args::ScheduleTaskArgs,
@@ -139,6 +141,7 @@ impl InstructionUtils {
     pub(crate) fn scheduled_commit_sent_instruction(
         scheduled_commit_id: u64,
     ) -> Instruction {
+        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
             AccountMeta::new(validator_authority_id(), true),
             AccountMeta::new_readonly(crate::id(), false),
@@ -146,7 +149,10 @@ impl InstructionUtils {
         ];
         Instruction::new_with_wincode(
             crate::id(),
-            &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
+            &MagicBlockInstruction::ScheduledCommitSent((
+                scheduled_commit_id,
+                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
+            )),
             account_metas,
         )
     }

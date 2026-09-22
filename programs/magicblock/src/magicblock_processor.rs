@@ -109,7 +109,7 @@ declare_process_instruction!(
                     stage,
                 )
             }
-            ScheduledCommitSent(id) => {
+            ScheduledCommitSent((id, _bump)) => {
                 process_scheduled_commit_sent(signers, invoke_context, id)
             }
             CloseOutboxIntent(id) => {
