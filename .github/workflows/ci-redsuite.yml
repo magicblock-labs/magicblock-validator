@@ -165,6 +165,9 @@ jobs:
         env:
           REDSUITE_CLONE_URL: ${{ secrets.REDSUITE_CLONE_URL }}
           TARGETS: ${{ matrix.targets }}
+          REDSUITE_VERBOSE: "1"
+          RUST_BACKTRACE: "1"
+          RUST_LOG: "info,magicblock_ledger=debug,ledger=debug,keeper=debug,engine=debug,nucleus=debug,accountsdb=debug,magicblock_chainlink=debug"
 
       - name: Upload stack logs
         if: always()
