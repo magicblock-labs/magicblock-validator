@@ -148,6 +148,13 @@ declare_process_instruction!(
             EvictAccount { .. } => {
                 composition_removed(invoke_context, "EvictAccount")
             }
+            _ExecuteCrank => {
+                solana_log_collector::ic_msg!(
+                    invoke_context,
+                    "ExecuteCrank is no longer supported: crank execution is handled by hydra"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             Noop(_) => Ok(()),
             CloneAccount { .. } => {
                 composition_removed(invoke_context, "CloneAccount")

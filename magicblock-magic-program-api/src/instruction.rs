@@ -364,6 +364,11 @@ pub enum MagicBlockInstruction {
     /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
 
+    /// Reserved: crank execution moved to hydra. The variant is kept so
+    /// `CloseMagicAta` retains its wire discriminant for existing clients
+    /// (MagicRoot / eSPL).
+    _ExecuteCrank,
+
     /// Closes a drained Magic ATA previously created via
     /// `CreateMagicAta`. No-op unless the account matches the
     /// Magic ATA marker for the signing wallet owner and holds zero
