@@ -125,7 +125,7 @@ impl TaskBuilderImpl {
         let commit_nonces =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+            tracing::warn!(intent_id = intent_bundle.intent_id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
         });
 

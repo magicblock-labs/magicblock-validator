@@ -181,7 +181,7 @@ impl InternalOutboxClient {
             let chunk_size = CHUNK_SIZE.min(remaining.len());
             let tx = InstructionUtils::accept_scheduled_commits(
                 self.engine.blockhash(),
-                remaining[..chunk_size].iter().map(|i| i.id),
+                remaining[..chunk_size].iter().map(|i| i.intent_id),
             );
             let backoff_config = ExponentialBackoff {
                 max_elapsed_time: Some(Duration::from_secs(25)),
@@ -193,7 +193,7 @@ impl InternalOutboxClient {
                 Err(err) => {
                     error!(
                         signature = ?tx.get_signature(),
-                        intent_ids = ?remaining[..chunk_size].iter().map(|i| i.id).collect::<Vec<_>>(),
+                        intent_ids = ?remaining[..chunk_size].iter().map(|i| i.intent_id).collect::<Vec<_>>(),
                         error = ?err,
                         "Failed to accept scheduled intents"
                     );

@@ -112,8 +112,12 @@ declare_process_instruction!(
                 stage,
                 recovery_commit_nonces,
             ),
-            ScheduledCommitSent((id, _bump)) => {
-                process_scheduled_commit_sent(signers, invoke_context, id)
+            ScheduledCommitSent((intent_id, _bump)) => {
+                process_scheduled_commit_sent(
+                    signers,
+                    invoke_context,
+                    intent_id,
+                )
             }
             CloseOutboxIntent(id) => {
                 process_close_outbox_intent(signers, invoke_context, id)

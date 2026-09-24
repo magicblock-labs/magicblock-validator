@@ -90,7 +90,9 @@ type CommitAccountRef<'a, 'ix_data> =
     Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
 )]
 pub struct ScheduledIntentBundle {
-    pub id: u64,
+    /// Monotonic intent identifier assigned by `MagicContext`.
+    /// This is distinct from per-account DLP commit nonces.
+    pub intent_id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
     pub sent_transaction: Transaction,
@@ -102,7 +104,7 @@ pub struct ScheduledIntentBundle {
 impl ScheduledIntentBundle {
     pub fn try_new(
         args: MagicIntentBundleArgs,
-        commit_id: u64,
+        intent_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &mut ConstructionContext<'_, '_, '_>,
@@ -110,10 +112,10 @@ impl ScheduledIntentBundle {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
         let sent_transaction =
-            InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
+            InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
 
         Ok(ScheduledIntentBundle {
-            id: commit_id,
+            intent_id,
             slot,
             blockhash,
             sent_transaction,
@@ -776,7 +778,7 @@ mod tests {
         let pk3 = Pubkey::new_unique();
 
         let bundle = ScheduledIntentBundle {
-            id: 0,
+            intent_id: 0,
             slot: 0,
             blockhash: Hash::default(),
             sent_transaction: Transaction::default(),

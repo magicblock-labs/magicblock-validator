@@ -399,7 +399,7 @@ async fn commit_single_account(
     };
 
     let intent = ScheduledIntentBundle {
-        id: 0,
+        intent_id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
         sent_transaction: Default::default(),
@@ -479,7 +479,7 @@ async fn commit_book_order_account(
     };
 
     let intent = ScheduledIntentBundle {
-        id: 0,
+        intent_id: 0,
         slot: 10,
         blockhash: Hash::new_unique(),
         sent_transaction: Default::default(),
@@ -937,7 +937,7 @@ async fn commit_multiple_accounts(
         })
         .enumerate()
         .map(|(id, base_intent)| ScheduledIntentBundle {
-            id: id as u64,
+            intent_id: id as u64,
             slot: 0,
             blockhash: Hash::new_unique(),
             sent_transaction: Default::default(),
@@ -1000,7 +1000,7 @@ async fn execute_intent_bundle(
 
     // Create intent for each bundle
     let intent_bundle = ScheduledIntentBundle {
-        id: 0,
+        intent_id: 0,
         slot: 0,
         blockhash: Hash::new_unique(),
         sent_transaction: Default::default(),
@@ -1052,7 +1052,7 @@ async fn ix_commit_local(
     let outbox_bundles = intent_bundles
         .iter()
         .map(|b| {
-            let bump = outbox_intent_pda_with_bump(b.id).1;
+            let bump = outbox_intent_pda_with_bump(b.intent_id).1;
             OutboxIntentBundle::accepted(b.clone(), bump)
         })
         .collect::<Vec<_>>();

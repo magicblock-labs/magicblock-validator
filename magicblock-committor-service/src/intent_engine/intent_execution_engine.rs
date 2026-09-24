@@ -273,7 +273,7 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.intent_id))]
     async fn execute(
         executor_factory: Arc<F>,
         intent: OutboxIntentBundle,
@@ -294,11 +294,11 @@ where
 
         // Report
         let is_err = result.inner.as_ref().inspect_err(|err| {
-            error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
+            error!(intent_id = intent.intent_id, error = ?err, "Failed to execute intent bundle");
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
         let broadcasted_result =
-            BroadcastedIntentExecutionResult::new(intent.id, result);
+            BroadcastedIntentExecutionResult::new(intent.intent_id, result);
         if let Err(err) = result_sender.send(broadcasted_result) {
             warn!(error = ?err, "No result listeners");
         }
@@ -372,19 +372,19 @@ where
             // bounded; without a free retry slot the failure is terminal
             let Ok(retry_permit) = limits.retries.clone().try_acquire_owned()
             else {
-                warn!(intent_id = intent.id, "Retry capacity exhausted");
+                warn!(intent_id = intent.intent_id, "Retry capacity exhausted");
                 break result;
             };
 
             if let Err(err) = &result.inner {
-                warn!(intent_id = intent.id, attempt, error = ?err, "Transient intent failure, retrying");
+                warn!(intent_id = intent.intent_id, attempt, error = ?err, "Transient intent failure, retrying");
             }
 
             // Release the executor slot during backoff so unrelated intents
             // keep executing while this one waits out the outage.
             // Per-intent jitter decorrelates synchronized retry bursts when
             // many intents fail together during an outage
-            let jitter = Duration::from_millis((intent.id % 8) * 125);
+            let jitter = Duration::from_millis((intent.intent_id % 8) * 125);
             drop(execution_permit.take());
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit =

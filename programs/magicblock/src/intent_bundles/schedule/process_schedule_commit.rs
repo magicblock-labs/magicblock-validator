@@ -272,7 +272,7 @@ pub(crate) fn process_schedule_commit(
     })?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
-        id: intent_id,
+        intent_id,
         slot: clock.slot,
         blockhash,
         sent_transaction,

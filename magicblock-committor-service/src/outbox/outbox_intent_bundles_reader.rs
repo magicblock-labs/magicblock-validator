@@ -18,7 +18,7 @@ use tracing::warn;
 pub trait OutboxIntentBundlesReader: Send + 'static {
     type Error: Send;
 
-    /// Returns up to `n` outbox intents sorted ascending by `ScheduledIntentBundle::id`.
+    /// Returns up to `n` outbox intents sorted ascending by `ScheduledIntentBundle::intent_id`.
     /// If `Vec::len() < n`, no more intents are available.
     async fn read(
         &mut self,
@@ -62,7 +62,7 @@ impl InternalOutboxIntentBundlesReader {
         impl Eq for OrderedIntent {}
         impl PartialEq for OrderedIntent {
             fn eq(&self, other: &Self) -> bool {
-                self.inner.id.eq(&other.inner.id)
+                self.inner.intent_id.eq(&other.inner.intent_id)
             }
         }
         impl PartialOrd for OrderedIntent {
@@ -72,7 +72,7 @@ impl InternalOutboxIntentBundlesReader {
         }
         impl Ord for OrderedIntent {
             fn cmp(&self, other: &Self) -> Ordering {
-                self.inner.id.cmp(&other.inner.id)
+                self.inner.intent_id.cmp(&other.inner.intent_id)
             }
         }
 
@@ -95,7 +95,7 @@ impl InternalOutboxIntentBundlesReader {
             })
             // Filter out already consumed intents
             .filter(|outbox_intent| if let Some(last_consumed_id) = self.last_consumed_id {
-                outbox_intent.id > last_consumed_id
+                outbox_intent.intent_id > last_consumed_id
             } else {
                 true
             });
@@ -123,9 +123,9 @@ impl InternalOutboxIntentBundlesReader {
                 v.capacity(),
             )
         };
-        items.sort_unstable_by_key(|b| b.id);
+        items.sort_unstable_by_key(|b| b.intent_id);
         self.last_consumed_id =
-            items.last().map(|b| b.id).or(self.last_consumed_id);
+            items.last().map(|b| b.intent_id).or(self.last_consumed_id);
         self.buffer.extend(items);
         Ok(())
     }
@@ -140,7 +140,7 @@ impl InternalOutboxIntentBundlesReader {
 impl OutboxIntentBundlesReader for InternalOutboxIntentBundlesReader {
     type Error = OutboxIntentBundlesReaderError;
 
-    /// Returns up to `n` outbox intents sorted ascending by `ScheduledIntentBundle::id`.
+    /// Returns up to `n` outbox intents sorted ascending by `ScheduledIntentBundle::intent_id`.
     /// If `Vec::len() < n`, no more intents are available.
     ///
     /// When the internal buffer runs low, triggers a full program-owned-accounts
@@ -222,7 +222,7 @@ mod tests {
 
     fn make_bundle(id: u64) -> OutboxIntentBundle {
         let inner = ScheduledIntentBundle {
-            id,
+            intent_id: id,
             slot: 0,
             blockhash: Hash::default(),
             sent_transaction: Transaction::default(),
@@ -235,7 +235,7 @@ mod tests {
 
     async fn insert_bundle(te: &TestEngine, bundle: &OutboxIntentBundle) {
         let bytes = bundle.try_to_bytes().expect("serialize");
-        let pubkey = outbox_intent_pda(bundle.inner.id);
+        let pubkey = outbox_intent_pda(bundle.inner.intent_id);
         let account = AccountBuilder::default()
             .lamports(0)
             .data(bytes)
@@ -261,9 +261,9 @@ mod tests {
         );
         let result = reader.read(3).await.unwrap();
         assert_eq!(result.len(), 3);
-        assert_eq!(result[0].inner.id, 1);
-        assert_eq!(result[1].inner.id, 4);
-        assert_eq!(result[2].inner.id, 9);
+        assert_eq!(result[0].inner.intent_id, 1);
+        assert_eq!(result[1].inner.intent_id, 4);
+        assert_eq!(result[2].inner.intent_id, 9);
 
         te.close().await;
     }
@@ -279,7 +279,7 @@ mod tests {
         );
         let result = reader.read(5).await.unwrap();
         assert_eq!(result.len(), 1);
-        assert_eq!(result[0].inner.id, 3);
+        assert_eq!(result[0].inner.intent_id, 3);
 
         te.close().await;
     }
@@ -297,7 +297,7 @@ mod tests {
         );
         let result = reader.read(3).await.unwrap();
         assert_eq!(
-            result.iter().map(|b| b.inner.id).collect::<Vec<_>>(),
+            result.iter().map(|b| b.inner.intent_id).collect::<Vec<_>>(),
             vec![1, 3, 5]
         );
 
@@ -330,8 +330,10 @@ mod tests {
         let first = reader.read(3).await.unwrap();
         let second = reader.read(3).await.unwrap();
 
-        let first_ids: Vec<_> = first.iter().map(|b| b.inner.id).collect();
-        let second_ids: Vec<_> = second.iter().map(|b| b.inner.id).collect();
+        let first_ids: Vec<_> =
+            first.iter().map(|b| b.inner.intent_id).collect();
+        let second_ids: Vec<_> =
+            second.iter().map(|b| b.inner.intent_id).collect();
         assert_eq!(first_ids, vec![1, 2, 3]);
         assert_eq!(second_ids, vec![4, 5, 6]);
 

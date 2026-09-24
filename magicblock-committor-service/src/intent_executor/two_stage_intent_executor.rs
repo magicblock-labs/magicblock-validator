@@ -93,7 +93,7 @@ where
         .await?;
 
         let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
-            .then_some(intent_bundle.id);
+            .then_some(intent_bundle.intent_id);
 
         // As strategy was chosen build two stage
         let TwoStageExecutionMode {
@@ -147,7 +147,7 @@ where
             TwoStageStrategyExecutor::committed(
                 committed_state,
                 self.authority.insecure_clone(),
-                intent.id,
+                intent.intent_id,
                 self.ctx.intent_client.clone(),
                 self.ctx.outbox_client.clone(),
                 self.ctx.actions_callback_executor.clone(),
@@ -199,7 +199,7 @@ where
         Ok(current_commit_nonces
             .values()
             .any(|commit_nonce| *commit_nonce <= 1)
-            .then_some(intent.id))
+            .then_some(intent.intent_id))
     }
 
     async fn execute_inner(

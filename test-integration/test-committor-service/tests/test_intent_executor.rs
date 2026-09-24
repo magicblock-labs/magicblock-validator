@@ -1486,7 +1486,7 @@ async fn create_two_stage_executor<'a>(
     TwoStageStrategyExecutor::new(
         state,
         fixture.authority.insecure_clone(),
-        intent.id,
+        intent.intent_id,
         IntentExecutionClient::new(fixture.rpc_client.clone()),
         Arc::new(MockOutboxClient),
         callback_executor.clone(),
@@ -1702,7 +1702,7 @@ fn create_scheduled_intent_from_bundle(
     static INTENT_ID: AtomicU64 = AtomicU64::new(0);
 
     ScheduledIntentBundle {
-        id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
+        intent_id: INTENT_ID.fetch_add(1, Ordering::Relaxed),
         slot: 10,
         blockhash: Hash::new_unique(),
         sent_transaction: Default::default(),

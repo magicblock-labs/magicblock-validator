@@ -66,7 +66,7 @@ where
 
     let mut single_stage_executor = SingleStageStrategyExecutor::new(
         authority.insecure_clone(),
-        intent_bundle.id,
+        intent_bundle.intent_id,
         ctx.intent_client.clone(),
         ctx.task_info_fetcher.clone(),
         ctx.outbox_client.clone(),
@@ -159,7 +159,7 @@ where
     let mut executor = TwoStageStrategyExecutor::new(
         state,
         authority.insecure_clone(),
-        intent_bundle.id,
+        intent_bundle.intent_id,
         ctx.intent_client.clone(),
         ctx.outbox_client.clone(),
         ctx.actions_callback_executor.clone(),

@@ -88,7 +88,7 @@ where
             let strategy = TaskStrategist::build_strategy(
                 commit_tasks,
                 &self.authority.pubkey(),
-                Some(intent_bundle.id),
+                Some(intent_bundle.intent_id),
             )?;
             return self
                 .single_stage_execution_flow(
@@ -107,7 +107,7 @@ where
         .await?;
 
         let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
-            .then_some(intent_bundle.id);
+            .then_some(intent_bundle.intent_id);
 
         // Build execution strategy
         match TaskStrategist::build_execution_strategy(

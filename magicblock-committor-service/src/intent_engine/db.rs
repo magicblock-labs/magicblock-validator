@@ -45,7 +45,7 @@ impl BacklogDB for AccountsDbIntentBacklog {
         intent_bundle: OutboxIntentBundle,
     ) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
-        queue.push_back(intent_bundle.inner.id);
+        queue.push_back(intent_bundle.inner.intent_id);
 
         metrics::set_committor_intents_backlog_count(queue.len() as i64);
         Ok(())
@@ -56,7 +56,7 @@ impl BacklogDB for AccountsDbIntentBacklog {
         intent_bundles: Vec<OutboxIntentBundle>,
     ) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
-        queue.extend(intent_bundles.into_iter().map(|el| el.inner.id));
+        queue.extend(intent_bundles.into_iter().map(|el| el.inner.intent_id));
 
         metrics::set_committor_intents_backlog_count(queue.len() as i64);
         Ok(())

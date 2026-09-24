@@ -354,13 +354,13 @@ mod tests {
         test_utils::{ensure_started_validator, process_instruction},
     };
 
-    fn single_acc_commit(commit_id: u64) -> SentCommit {
+    fn single_acc_commit(intent_id: u64) -> SentCommit {
         let slot = 10;
         let sig = Signature::default();
         let payer = Pubkey::new_unique();
         let acc = Pubkey::new_unique();
         SentCommit {
-            message_id: commit_id,
+            message_id: intent_id,
             slot,
             blockhash: Hash::default(),
             payer,
@@ -499,7 +499,7 @@ mod tests {
         let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
         let bundle = OutboxIntentBundle::accepted(
             ScheduledIntentBundle {
-                id: commit.message_id,
+                intent_id: commit.message_id,
                 slot: 0,
                 blockhash: Hash::default(),
                 sent_transaction: Transaction::default(),

@@ -99,14 +99,14 @@ where
             match self
                 .outbox_client
                 .outbox_reader()
-                .fetch_outbox_intent(intent.id)
+                .fetch_outbox_intent(intent.intent_id)
                 .await
             {
                 Ok(Some(bundle)) => bundle,
                 Ok(None) => intent.clone(),
                 Err(_) => {
                     warn!(
-                        intent_id = intent.id,
+                        intent_id = intent.intent_id,
                         "Failed to reconcile outbox intent before retry"
                     );
                     intent.clone()

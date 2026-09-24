@@ -101,7 +101,7 @@ where
                     [commit_tasks, finalize_tasks].concat();
                 let uniqueness_nonce =
                     requires_uniqueness_nonce(&single_stage_tasks)
-                        .then_some(intent_bundle.id);
+                        .then_some(intent_bundle.intent_id);
                 let transaction_strategy = TaskStrategist::build_strategy(
                     single_stage_tasks,
                     &self.authority.pubkey(),

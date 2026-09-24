@@ -462,7 +462,7 @@ fn assert_accepted_actions(
     assert_eq!(accepted_intents.len(), expected_accepted_count);
 
     for intent in &accepted_intents {
-        let bump = outbox_intent_pda_with_bump(intent.id).1;
+        let bump = outbox_intent_pda_with_bump(intent.intent_id).1;
         let expected = OutboxIntentBundle::accepted(intent.clone(), bump);
         let actual = processed_accepted
             .iter()
@@ -472,11 +472,11 @@ fn assert_accepted_actions(
             .filter_map(|acc| {
                 OutboxIntentBundle::try_from_bytes(acc.data()).ok()
             })
-            .find(|bundle| bundle.inner.id == intent.id)
+            .find(|bundle| bundle.inner.intent_id == intent.intent_id)
             .unwrap_or_else(|| {
                 panic!(
                     "outbox PDA for intent {} not found in processed_accepted",
-                    intent.id
+                    intent.intent_id
                 )
             });
         assert_eq!(actual, expected);
@@ -542,7 +542,7 @@ fn assert_first_commit(
     assert_matches!(
         scheduled_base_intent,
         ScheduledIntentBundle {
-            id,
+            intent_id: id,
             slot,
             payer: actual_payer,
             blockhash: _,
@@ -678,7 +678,7 @@ mod tests {
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
-                    .map(|i| i.id)
+                    .map(|i| i.intent_id)
                     .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
@@ -888,7 +888,7 @@ mod tests {
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
-                    .map(|i| i.id)
+                    .map(|i| i.intent_id)
                     .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
@@ -977,7 +977,7 @@ mod tests {
             .unwrap()
             .scheduled_base_intents
             .into_iter()
-            .map(|i| i.id)
+            .map(|i| i.intent_id)
             .collect::<Vec<_>>();
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             intent_ids.into_iter(),
@@ -1148,7 +1148,7 @@ mod tests {
             .unwrap()
             .scheduled_base_intents
             .into_iter()
-            .map(|i| i.id)
+            .map(|i| i.intent_id)
             .collect::<Vec<_>>();
         let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
             intent_ids.into_iter(),
@@ -1264,7 +1264,7 @@ mod tests {
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
-                    .map(|i| i.id)
+                    .map(|i| i.intent_id)
                     .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),
@@ -1387,7 +1387,7 @@ mod tests {
                     .unwrap()
                     .scheduled_base_intents
                     .into_iter()
-                    .map(|i| i.id)
+                    .map(|i| i.intent_id)
                     .collect::<Vec<_>>();
             let ix = InstructionUtils::accept_scheduled_commits_instruction(
                 intent_ids.into_iter(),

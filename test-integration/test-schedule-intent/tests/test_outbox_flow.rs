@@ -406,7 +406,7 @@ async fn test_pickup_executed_intent() {
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda])
     });
-    let intent_id = outbox_bundle.inner.id;
+    let intent_id = outbox_bundle.inner.intent_id;
 
     // Execute intent. Force the terminal outbox notification to fail so the
     // outbox record survives execution, simulating a validator crash after the
@@ -507,7 +507,7 @@ async fn test_pickup_failed_intent() {
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda])
     });
-    let intent_id = outbox_bundle.id;
+    let intent_id = outbox_bundle.intent_id;
 
     // Create executor that will fail before chain execution
     let mut failing_outbox = test_env.outbox_client();
@@ -805,7 +805,7 @@ async fn test_pickup_after_committing() {
     let outbox_bundle = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(outbox_bundle.inner.intent_id)
         .await
         .expect("fetch succeeded")
         .expect("outbox bundle present");
@@ -850,7 +850,7 @@ async fn test_pickup_after_committing() {
     let closed = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(outbox_bundle.inner.intent_id)
         .await
         .expect("fetch succeeded");
     assert!(
@@ -890,7 +890,7 @@ async fn test_pickup_after_finalizing() {
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas)
     });
-    let intent_id = outbox_bundle.inner.id;
+    let intent_id = outbox_bundle.inner.intent_id;
 
     // Run to completion, but force the terminal outbox notification to fail so
     // the outbox record survives execution - simulating a validator crash

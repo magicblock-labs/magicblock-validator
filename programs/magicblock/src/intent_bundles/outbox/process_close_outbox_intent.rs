@@ -195,7 +195,7 @@ mod tests {
         stage: Option<ExecutionStage>,
     ) -> Vec<u8> {
         let inner = ScheduledIntentBundle {
-            id: intent_id,
+            intent_id,
             slot: 0,
             blockhash: Hash::default(),
             sent_transaction: Transaction::default(),

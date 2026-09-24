@@ -153,10 +153,10 @@ impl<D: BacklogDB> CommittorProcessor<D> {
 
             for intent in &intent_bundles {
                 let (sender, receiver) = oneshot::channel();
-                match result_listeners.entry(intent.id) {
+                match result_listeners.entry(intent.intent_id) {
                     Entry::Vacant(vacant) => {
                         vacant.insert(sender);
-                        inserted_ids.push(intent.id);
+                        inserted_ids.push(intent.intent_id);
                         receivers.push(receiver);
                     }
                     Entry::Occupied(_) => {
@@ -165,7 +165,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
                         }
                         return Err(
                             CommittorServiceError::RepeatingMessageError(
-                                intent.id,
+                                intent.intent_id,
                             ),
                         );
                     }

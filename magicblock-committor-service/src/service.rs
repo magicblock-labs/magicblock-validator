@@ -108,7 +108,8 @@ where
                     });
 
                     let intent_bundles = intent_bundles.into_iter().map(|bundle| {
-                        let bump = outbox_intent_pda_with_bump(bundle.id).1;
+                        let bump =
+                            outbox_intent_pda_with_bump(bundle.intent_id).1;
                         OutboxIntentBundle::accepted(bundle, bump)
                     }).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
@@ -259,7 +260,7 @@ where
             Ok(sessions) => sessions,
             Err(err) => {
                 error!(
-                    intent_id = bundle.id,
+                    intent_id = bundle.intent_id,
                     error = ?err,
                     "Skipping outbox recovery after delegation session lookup failed"
                 );
@@ -271,7 +272,7 @@ where
             |(recovered, current)| {
                 let Some(current) = current else {
                     error!(
-                        intent_id = bundle.id,
+                        intent_id = bundle.intent_id,
                         pubkey = %recovered.pubkey,
                         "Skipping outbox recovery because committed account is missing locally"
                     );
@@ -282,7 +283,7 @@ where
                         || recovered.remote_slot == current.remote_slot);
                 if !same_session {
                     error!(
-                        intent_id = bundle.id,
+                        intent_id = bundle.intent_id,
                         pubkey = %recovered.pubkey,
                         recovered_slot = recovered.remote_slot,
                         current_slot = current.remote_slot,
@@ -322,7 +323,7 @@ where
             Ok(nonces) => nonces,
             Err(err) => {
                 error!(
-                    intent_id = bundle.id,
+                    intent_id = bundle.intent_id,
                     error = ?err,
                     "Skipping outbox recovery after commit nonce lookup failed"
                 );
@@ -336,7 +337,7 @@ where
                 let Some(current_commit_nonce) = current_nonces.get(pubkey)
                 else {
                     error!(
-                        intent_id = bundle.id,
+                        intent_id = bundle.intent_id,
                         %pubkey,
                         "Skipping outbox recovery because current commit nonce is missing"
                     );
@@ -345,7 +346,7 @@ where
                 let valid = recovery_commit_nonce >= current_commit_nonce;
                 if !valid {
                     error!(
-                        intent_id = bundle.id,
+                        intent_id = bundle.intent_id,
                         %pubkey,
                         recovery_commit_nonce,
                         current_commit_nonce,
