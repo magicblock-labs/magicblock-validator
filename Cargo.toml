@@ -28,7 +28,7 @@ members = [
     "magicblock-task-scheduler",
     "magicblock-version",
     "programs/magicblock",
-    "storage-proto"
+    "storage-proto",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -47,9 +47,7 @@ version = "0.15.4"
 magicblock-aml = { path = "magicblock-aml" }
 magicblock-aperture = { path = "magicblock-aperture" }
 magicblock-chainlink = { path = "magicblock-chainlink" }
-magicblock-committor-program = { path = "magicblock-committor-program", features = [
-    "no-entrypoint"
-] }
+magicblock-committor-program = { path = "magicblock-committor-program", features = ["no-entrypoint"] }
 magicblock-committor-service = { path = "magicblock-committor-service" }
 magicblock-config = { path = "magicblock-config" }
 magicblock-core = { path = "magicblock-core" }
@@ -104,6 +102,7 @@ git-version = "0.3.9"
 helius-laserstream = { git = "https://github.com/magicblock-labs/laserstream-sdk.git", branch = "mbv-4.0+conn-fix" }
 http-body-util = "0.1.5"
 humantime = { version = "1.1.1", package = "humantime-serde" }
+hydra-api = "0.2"
 hyper = "1.11.1"
 hyper-util = "0.1.20"
 isocountry = "0.3.2"
@@ -186,12 +185,8 @@ solana-instructions-sysvar = { version = "4.0" }
 solana-keypair = { version = "3.1" }
 solana-loader-v3-interface = { version = "7.0" }
 solana-loader-v4-interface = { version = "3.1" }
-solana-log-collector = { package = "solana-svm-log-collector", version = "=4.2.2", features = [
-    "agave-unstable-api"
-] }
-solana-measure = { package = "solana-svm-measure", version = "=4.2.2", features = [
-    "agave-unstable-api"
-] }
+solana-log-collector = { package = "solana-svm-log-collector", version = "=4.2.2", features = ["agave-unstable-api"] }
+solana-measure = { package = "solana-svm-measure", version = "=4.2.2", features = ["agave-unstable-api"] }
 solana-message = { version = ">=4.2.3,<4.5.0" }
 solana-metrics = { version = "=4.2.2", features = ["agave-unstable-api"] }
 solana-native-token = { version = "3.0" }
