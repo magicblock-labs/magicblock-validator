@@ -4,8 +4,8 @@
 //! Solana JSON-RPC API.
 //!
 //! These handlers are designed for a magicblock validator that does not track the
-//! extensive state required to fully answer these queries (e.g., epoch schedules,
-//! full supply details). They ensure API compatibility with standard tools by
+//! extensive state required to fully answer these queries (e.g., full supply
+//! details). They ensure API compatibility with standard tools by
 //! returning default or empty responses, rather than 'method not found' errors.
 
 use solana_account_decoder::parse_token::UiTokenAmount;
@@ -22,7 +22,6 @@ use crate::{
     },
     server::http::dispatch::HttpDispatcher,
 };
-const SLOTS_IN_EPOCH: u64 = 432_000;
 
 impl HttpDispatcher {
     /// Handles the `getSlotLeader` RPC request.
@@ -134,16 +133,18 @@ impl HttpDispatcher {
     }
 
     /// Handles the `getEpochInfo` RPC request.
-    /// This is a **mocked implementation** that returns a default epoch info object.
+    /// Derives epoch progress from Engine's schedule at the latest completed slot.
     pub(crate) fn get_epoch_info(
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
         let slot = self.engine.blocks().latest().slot;
+        let schedule = self.engine.epoch_schedule();
+        let (epoch, slot_index) = schedule.get_epoch_and_slot_index(slot);
         let info = json::json! {{
-            "epoch": slot / SLOTS_IN_EPOCH,
-            "slotIndex": slot % SLOTS_IN_EPOCH,
-            "slotsInEpoch": SLOTS_IN_EPOCH,
+            "epoch": epoch,
+            "slotIndex": slot_index,
+            "slotsInEpoch": schedule.get_slots_in_epoch(epoch),
             "absoluteSlot": slot,
             "blockHeight": slot,
             "transactionCount": Some(0),
@@ -152,19 +153,15 @@ impl HttpDispatcher {
     }
 
     /// Handles the `getEpochSchedule` RPC request.
-    /// This is a **mocked implementation** that returns a default epoch schedule object.
+    /// Returns the same local schedule used by Engine's runtime sysvars.
     pub(crate) fn get_epoch_schedule(
         &self,
         request: &JsonRequest,
     ) -> HandlerResult {
-        let schedule = json::json! {{
-            "firstNormalEpoch": 0,
-            "firstNormalSlot": 0,
-            "leaderScheduleSlotOffset": 0,
-            "slotsPerEpoch": SLOTS_IN_EPOCH,
-            "warmup": false
-        }};
-        Ok(ResponsePayload::encode_no_context(&request.id, schedule))
+        Ok(ResponsePayload::encode_no_context(
+            &request.id,
+            self.engine.epoch_schedule(),
+        ))
     }
 
     /// Handles the `getBlockCommitment` RPC request.
