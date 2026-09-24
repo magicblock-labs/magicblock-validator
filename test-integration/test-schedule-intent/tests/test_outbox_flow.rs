@@ -320,13 +320,17 @@ fn fetch_outbox_bundle_after_accept(
     let start = Instant::now();
     loop {
         match ctx.fetch_ephem_account_data(pda) {
-            Ok(data) => return OutboxIntentBundle::try_from_bytes(&data).unwrap(),
+            Ok(data) => {
+                return OutboxIntentBundle::try_from_bytes(&data).unwrap()
+            }
             Err(err) if start.elapsed() < ACCEPT_FETCH_TIMEOUT => {
                 println!("outbox intent {intent_id} not visible yet: {err}");
                 std::thread::sleep(ACCEPT_FETCH_POLL_INTERVAL);
             }
             Err(err) => {
-                panic!("failed to fetch accepted outbox intent {intent_id}: {err}")
+                panic!(
+                    "failed to fetch accepted outbox intent {intent_id}: {err}"
+                )
             }
         }
     }
@@ -343,11 +347,9 @@ fn schedule_and_accept<T>(
     for attempt in 1..=MAX_ATTEMPTS {
         let intent_id = read_next_intent_id(ctx);
         let mut attempt_tx = schedule(ctx);
-        attempt_tx
-            .instructions
-            .push(InstructionUtils::accept_scheduled_commits_instruction([
-                intent_id,
-            ]));
+        attempt_tx.instructions.push(
+            InstructionUtils::accept_scheduled_commits_instruction([intent_id]),
+        );
 
         let validator_keypair = ensure_validator_authority();
         if !attempt_tx
@@ -362,8 +364,7 @@ fn schedule_and_accept<T>(
             &attempt_tx.instructions,
             Some(&attempt_tx.payer),
         );
-        let signer_refs =
-            attempt_tx.signers.iter().collect::<Vec<&Keypair>>();
+        let signer_refs = attempt_tx.signers.iter().collect::<Vec<&Keypair>>();
         match ctx.send_and_confirm_transaction_ephem(&mut tx, &signer_refs) {
             Ok((sig, true)) => {
                 println!("schedule_and_accept sig: {}", sig);
