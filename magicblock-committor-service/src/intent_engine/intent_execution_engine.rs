@@ -342,13 +342,18 @@ where
 
         let mut attempt = 0;
         let mut execution_permit = Some(execution_permit);
+        let mut current_intent = intent.clone();
         let result = loop {
             attempt += 1;
-            // TODO(edwin): reconcile intent on retry in the future
-            let executor =
-                executor_factory.create_instance(intent.status().clone());
+            if attempt > 1 {
+                current_intent =
+                    executor_factory.reconcile_intent(&current_intent).await;
+            }
+
+            let executor = executor_factory
+                .create_instance(current_intent.status().clone());
             let (result, cleanup_handle) =
-                executor.execute(intent.inner.clone()).await;
+                executor.execute(current_intent.inner.clone()).await;
 
             tokio::spawn(async move {
                 if let Err(err) = cleanup_handle.clean().await {

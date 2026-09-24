@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_chainlink::ProdChainlink;
+use magicblock_chainlink::{AccountFetchEntrypoint, ProdChainlink};
 use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
@@ -25,6 +25,7 @@ use crate::{
             OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
         },
     },
+    tasks::task_info_fetcher::AccountSnapshot,
 };
 
 pub type ChainlinkImpl = ProdChainlink;
@@ -144,6 +145,9 @@ where
             });
 
             let read_len = intent_bundles_chunk.len();
+            let intent_bundles_chunk = self
+                .retain_recoverable_outbox_intents(intent_bundles_chunk)
+                .await;
             // Schedule  without initial persistence as bundle already exists in db
             let result = self
                 .process_intent_bundles(intent_bundles_chunk, |bundles| {
@@ -205,6 +209,151 @@ where
             .await;
 
         schedule(intent_bundles).await
+    }
+
+    async fn retain_recoverable_outbox_intents(
+        &self,
+        intent_bundles: Vec<OutboxIntentBundle>,
+    ) -> Vec<OutboxIntentBundle> {
+        let mut recoverable = Vec::with_capacity(intent_bundles.len());
+        for bundle in intent_bundles {
+            if self.is_outbox_intent_recoverable(&bundle).await {
+                recoverable.push(bundle);
+            }
+        }
+        recoverable
+    }
+
+    async fn is_outbox_intent_recoverable(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        if !self.is_same_delegation_session(bundle).await {
+            return false;
+        }
+
+        self.has_valid_recovery_nonces(bundle).await
+    }
+
+    async fn is_same_delegation_session(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        let recovered_accounts = bundle.get_all_committed_accounts();
+        if recovered_accounts.is_empty() {
+            return true;
+        }
+
+        let pubkeys = recovered_accounts
+            .iter()
+            .map(|account| account.pubkey)
+            .collect::<Vec<_>>();
+        let current_sessions = match self
+            .chainlink
+            .account_delegation_sessions(
+                &pubkeys,
+                AccountFetchEntrypoint::Internal,
+            )
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(err) => {
+                error!(
+                    intent_id = bundle.id,
+                    error = ?err,
+                    "Skipping outbox recovery after delegation session lookup failed"
+                );
+                return false;
+            }
+        };
+
+        recovered_accounts.iter().zip(current_sessions).all(
+            |(recovered, current)| {
+                let Some(current) = current else {
+                    error!(
+                        intent_id = bundle.id,
+                        pubkey = %recovered.pubkey,
+                        "Skipping outbox recovery because committed account is missing locally"
+                    );
+                    return false;
+                };
+                let same_session = current.locally_protected
+                    && (recovered.remote_slot == 0
+                        || recovered.remote_slot == current.remote_slot);
+                if !same_session {
+                    error!(
+                        intent_id = bundle.id,
+                        pubkey = %recovered.pubkey,
+                        recovered_slot = recovered.remote_slot,
+                        current_slot = current.remote_slot,
+                        locally_protected = current.locally_protected,
+                        "Skipping outbox recovery because delegation session changed"
+                    );
+                }
+                same_session
+            },
+        )
+    }
+
+    async fn has_valid_recovery_nonces(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        let recovery_nonces = bundle.recovery_commit_nonces();
+        if recovery_nonces.is_empty() {
+            return true;
+        }
+
+        let committed_accounts = bundle
+            .get_all_committed_accounts()
+            .into_iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect::<Vec<AccountSnapshot>>();
+        let min_context_slot = committed_accounts
+            .iter()
+            .map(|(_, slot)| *slot)
+            .max()
+            .unwrap_or_default();
+        let current_nonces = match self
+            .processor
+            .fetch_current_commit_nonces(&committed_accounts, min_context_slot)
+            .await
+        {
+            Ok(nonces) => nonces,
+            Err(err) => {
+                error!(
+                    intent_id = bundle.id,
+                    error = ?err,
+                    "Skipping outbox recovery after commit nonce lookup failed"
+                );
+                return false;
+            }
+        };
+
+        recovery_nonces
+            .iter()
+            .all(|(pubkey, recovery_commit_nonce)| {
+                let Some(current_commit_nonce) = current_nonces.get(pubkey)
+                else {
+                    error!(
+                        intent_id = bundle.id,
+                        %pubkey,
+                        "Skipping outbox recovery because current commit nonce is missing"
+                    );
+                    return false;
+                };
+                let valid = recovery_commit_nonce >= current_commit_nonce;
+                if !valid {
+                    error!(
+                        intent_id = bundle.id,
+                        %pubkey,
+                        recovery_commit_nonce,
+                        current_commit_nonce,
+                        "Skipping stale outbox recovery because chain nonce has advanced"
+                    );
+                }
+                valid
+            })
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {

@@ -225,14 +225,20 @@ impl InstructionUtils {
         recent_blockhash: Hash,
         intent_id: u64,
         stage: outbox::ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Transaction {
-        let ix = Self::set_intent_execution_stage_instruction(intent_id, stage);
+        let ix = Self::set_intent_execution_stage_instruction(
+            intent_id,
+            stage,
+            recovery_commit_nonces,
+        );
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     pub(crate) fn set_intent_execution_stage_instruction(
         intent_id: u64,
         stage: outbox::ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Instruction {
         let account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
@@ -243,6 +249,7 @@ impl InstructionUtils {
             &MagicBlockInstruction::SetIntentExecutionStage {
                 intent_id,
                 stage,
+                recovery_commit_nonces,
             },
             account_metas,
         )

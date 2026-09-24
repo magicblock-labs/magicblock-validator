@@ -19,7 +19,8 @@ use crate::{
             patcher::{CommitStagePatcher, FinalizeStagePatcher},
             two_stage::sealed::Sealed,
             utils::{
-                ExecutionState, handle_actions_result, stage_execution_loop,
+                ExecutionState, committing_pending, finalizing_pending,
+                handle_actions_result, stage_execution_loop,
             },
         },
     },
@@ -174,6 +175,7 @@ where
                     pending_tx,
                 ))
             },
+            committing_pending,
             IntentExecutorError::FailedCommitPreparationError,
             execution_state,
         )
@@ -339,6 +341,7 @@ where
                     finalize: pending_tx,
                 })
             },
+            finalizing_pending,
             IntentExecutorError::FailedFinalizePreparationError,
             execution_state,
         )

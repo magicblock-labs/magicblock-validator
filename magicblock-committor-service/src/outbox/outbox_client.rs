@@ -10,6 +10,7 @@ use magicblock_program::{
     register_scheduled_commit_sent,
 };
 use solana_account::ReadableAccount;
+use solana_keypair::Address as Pubkey;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -304,11 +305,13 @@ impl OutboxClient for InternalOutboxClient {
         &self,
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), Self::Error> {
         let tx = InstructionUtils::set_intent_execution_stage(
             self.engine.blockhash(),
             intent_id,
             stage,
+            recovery_commit_nonces,
         );
 
         self.send_with_backoff(

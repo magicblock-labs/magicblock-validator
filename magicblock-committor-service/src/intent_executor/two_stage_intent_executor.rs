@@ -30,8 +30,8 @@ use crate::{
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
-        task_info_fetcher::{ResetType, TaskInfoFetcher},
+        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
+        task_info_fetcher::{AccountSnapshot, ResetType, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TwoStageExecutionMode},
     },
     transaction_preparator::TransactionPreparator,
@@ -131,12 +131,14 @@ where
             &intent,
         )
         .await?;
+        let uniqueness_nonce =
+            self.finalizing_uniqueness_nonce(&intent).await?;
 
         // Build strategy for finalize tasks
         let finalize_strategy = TaskStrategist::build_strategy(
             finalize_tasks,
             &self.authority.pubkey(),
-            None,
+            uniqueness_nonce,
         )?;
 
         let committed_state =
@@ -167,6 +169,37 @@ where
             commit_signature: finalized_stage.commit_signature,
             finalize_signature: finalized_stage.finalize_signature,
         })
+    }
+
+    async fn finalizing_uniqueness_nonce(
+        &self,
+        intent: &ScheduledIntentBundle,
+    ) -> IntentExecutorResult<Option<u64>> {
+        let committed_accounts = intent
+            .get_all_committed_accounts()
+            .into_iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect::<Vec<AccountSnapshot>>();
+        if committed_accounts.is_empty() {
+            return Ok(None);
+        }
+
+        let min_context_slot = committed_accounts
+            .iter()
+            .map(|(_, slot)| *slot)
+            .max()
+            .unwrap_or_default();
+        let current_commit_nonces = self
+            .ctx
+            .task_info_fetcher
+            .fetch_current_commit_nonces(&committed_accounts, min_context_slot)
+            .await
+            .map_err(TaskBuilderError::CommitTasksBuildError)?;
+
+        Ok(current_commit_nonces
+            .values()
+            .any(|commit_nonce| *commit_nonce <= 1)
+            .then_some(intent.id))
     }
 
     async fn execute_inner(

@@ -414,6 +414,7 @@ pub enum MagicBlockInstruction {
     SetIntentExecutionStage {
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     },
 }
 

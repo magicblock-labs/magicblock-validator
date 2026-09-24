@@ -6,6 +6,7 @@ use magicblock_magic_program_api::outbox::{
 };
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
+use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use wincode::{SchemaRead, SchemaWrite};
 
@@ -17,6 +18,7 @@ use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
     status: OutboxIntentBundleStatus,
+    recovery_commit_nonces: Vec<(Pubkey, u64)>,
     bump: u8,
 }
 
@@ -25,6 +27,7 @@ impl OutboxIntentBundle {
         Self {
             inner: intent_bundle,
             status: OutboxIntentBundleStatus::Accepted,
+            recovery_commit_nonces: Vec::new(),
             bump,
         }
     }
@@ -35,6 +38,10 @@ impl OutboxIntentBundle {
 
     pub fn bump(&self) -> u8 {
         self.bump
+    }
+
+    pub fn recovery_commit_nonces(&self) -> &[(Pubkey, u64)] {
+        &self.recovery_commit_nonces
     }
 
     /// Whether execution has reached its last stage.
@@ -53,7 +60,11 @@ impl OutboxIntentBundle {
     pub(crate) fn apply_stage_transition(
         &mut self,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), OutboxStageTransitionError> {
+        if !recovery_commit_nonces.is_empty() {
+            self.recovery_commit_nonces = recovery_commit_nonces;
+        }
         self.status.apply_stage_transition(stage)
     }
 
@@ -77,6 +88,15 @@ impl OutboxIntentBundle {
             + wincode::serialized_size(
                 &OutboxIntentBundleStatus::max_size_variant(),
             )?
+            + wincode::serialized_size(&vec![
+                (
+                    Pubkey::default(),
+                    u64::default()
+                );
+                self.inner
+                    .get_all_committed_pubkeys()
+                    .len()
+            ])?
             + wincode::serialized_size(&self.bump)?)
             as usize;
 

@@ -204,7 +204,7 @@ mod tests {
         };
         let mut bundle = OutboxIntentBundle::accepted(inner, bump);
         if let Some(stage) = stage {
-            bundle.apply_stage_transition(stage).unwrap();
+            bundle.apply_stage_transition(stage, Vec::new()).unwrap();
         }
         bundle.try_to_bytes().unwrap()
     }

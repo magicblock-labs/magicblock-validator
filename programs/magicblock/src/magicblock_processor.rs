@@ -101,14 +101,17 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            SetIntentExecutionStage { intent_id, stage } => {
-                process_set_intent_execution_stage(
-                    signers,
-                    invoke_context,
-                    intent_id,
-                    stage,
-                )
-            }
+            SetIntentExecutionStage {
+                intent_id,
+                stage,
+                recovery_commit_nonces,
+            } => process_set_intent_execution_stage(
+                signers,
+                invoke_context,
+                intent_id,
+                stage,
+                recovery_commit_nonces,
+            ),
             ScheduledCommitSent((id, _bump)) => {
                 process_scheduled_commit_sent(signers, invoke_context, id)
             }

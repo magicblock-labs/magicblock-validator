@@ -39,6 +39,7 @@ pub trait OutboxClient: Send + Sync + 'static {
         &self,
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), Self::Error>;
 
     /// Registers the result payload and submits its notification on the ER.

@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use magicblock_core::traits::{
     ActionError, ActionResult, ActionsCallbackScheduler,
 };
-use magicblock_program::outbox::{ExecutionStage, PendingTransaction};
+use magicblock_program::{
+    outbox::{ExecutionStage, PendingTransaction},
+    outbox_intent_bundles::OutboxIntentBundleStatus,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -12,7 +15,7 @@ use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
 use tokio::time::{sleep, timeout};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::{
     intent_executor::{
@@ -26,7 +29,9 @@ use crate::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
         },
     },
-    outbox::OutboxClient,
+    outbox::{
+        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+    },
     tasks::{
         BaseTaskImpl,
         task_builder::TaskBuilderError,
@@ -60,6 +65,9 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     mut patcher: P,
     intent_id: u64,
     make_outbox_stage: impl Fn(PendingTransaction) -> ExecutionStage,
+    recover_outbox_pending: fn(
+        &OutboxIntentBundleStatus,
+    ) -> Option<PendingTransaction>,
     map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
     state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
@@ -69,7 +77,18 @@ where
     O::Error: Into<IntentExecutorError>,
     P: Patcher,
 {
+    let mut reconciled_outbox = false;
     loop {
+        if state.pending_transaction.is_none() && !reconciled_outbox {
+            reconciled_outbox = true;
+            *state.pending_transaction = recover_pending_from_outbox(
+                outbox_client,
+                intent_id,
+                recover_outbox_pending,
+            )
+            .await;
+        }
+
         if let &mut Some(ref pending) = state.pending_transaction {
             if resolve_pending_signature(intent_client, pending).await? {
                 break Ok(Ok(pending.signature));
@@ -94,8 +113,14 @@ where
             signature: *prepared_transaction.get_signature(),
             blockhash: *prepared_transaction.get_recent_blockhash(),
         };
+        let recovery_commit_nonces =
+            recovery_commit_nonces(&state.transaction_strategy.optimized_tasks);
         outbox_client
-            .set_intent_execution_stage(intent_id, make_outbox_stage(pending))
+            .set_intent_execution_stage(
+                intent_id,
+                make_outbox_stage(pending),
+                recovery_commit_nonces,
+            )
             .await
             .map_err(Into::into)?;
 
@@ -140,6 +165,83 @@ where
             state.execution_report.add_patched_error(execution_err);
         }
     }
+}
+
+async fn recover_pending_from_outbox<O>(
+    outbox_client: &O,
+    intent_id: u64,
+    recover_outbox_pending: fn(
+        &OutboxIntentBundleStatus,
+    ) -> Option<PendingTransaction>,
+) -> Option<PendingTransaction>
+where
+    O: OutboxClient,
+{
+    let reader = outbox_client.outbox_reader();
+    match reader.fetch_outbox_intent(intent_id).await {
+        Ok(Some(bundle)) => recover_outbox_pending(bundle.status()),
+        Ok(None) => None,
+        Err(_) => {
+            warn!(
+                intent_id,
+                "Failed to reconcile pending transaction from outbox"
+            );
+            None
+        }
+    }
+}
+
+pub(in crate::intent_executor) fn single_stage_pending(
+    status: &OutboxIntentBundleStatus,
+) -> Option<PendingTransaction> {
+    match status {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
+            pending,
+        )) => Some(*pending),
+        _ => None,
+    }
+}
+
+pub(in crate::intent_executor) fn committing_pending(
+    status: &OutboxIntentBundleStatus,
+) -> Option<PendingTransaction> {
+    match status {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
+            magicblock_program::outbox::TwoStageProgress::Committing(pending),
+        )) => Some(*pending),
+        _ => None,
+    }
+}
+
+pub(in crate::intent_executor) fn finalizing_pending(
+    status: &OutboxIntentBundleStatus,
+) -> Option<PendingTransaction> {
+    match status {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
+            magicblock_program::outbox::TwoStageProgress::Finalizing {
+                finalize,
+                ..
+            },
+        )) => Some(*finalize),
+        _ => None,
+    }
+}
+
+pub(in crate::intent_executor) fn recovery_commit_nonces(
+    tasks: &[BaseTaskImpl],
+) -> Vec<(Pubkey, u64)> {
+    tasks
+        .iter()
+        .filter_map(|task| match task {
+            BaseTaskImpl::Commit(task) => {
+                Some((task.committed_account.pubkey, task.commit_id))
+            }
+            BaseTaskImpl::CommitFinalize(task) => {
+                Some((task.committed_account.pubkey, task.commit_id))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 pub async fn prepare_transaction<T: TransactionPreparator>(

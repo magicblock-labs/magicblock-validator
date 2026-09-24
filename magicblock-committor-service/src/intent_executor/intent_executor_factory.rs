@@ -1,10 +1,13 @@
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::outbox_intent_bundles::OutboxIntentBundleStatus;
+use magicblock_program::outbox_intent_bundles::{
+    OutboxIntentBundle, OutboxIntentBundleStatus,
+};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
+use tracing::warn;
 
 use crate::{
     ComputeBudgetConfig,
@@ -13,16 +16,31 @@ use crate::{
         error::IntentExecutorError,
         intent_execution_client::IntentExecutionClient,
     },
-    outbox::OutboxClient,
+    outbox::{
+        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+    },
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
 };
+
+pub type ReconcileIntentFuture<'a> =
+    Pin<Box<dyn Future<Output = OutboxIntentBundle> + Send + 'a>>;
 
 pub trait IntentExecutorBuilder<T> {
     fn create_instance(
         &self,
         status: OutboxIntentBundleStatus,
     ) -> Box<dyn IntentExecutor<T>>;
+
+    fn reconcile_intent<'a>(
+        &'a self,
+        intent: &'a OutboxIntentBundle,
+    ) -> ReconcileIntentFuture<'a>
+    where
+        Self: Sync,
+    {
+        Box::pin(async move { intent.clone() })
+    }
 }
 
 pub struct ExecutorConfig {
@@ -71,5 +89,29 @@ where
             status,
             self.executor_config.actions_timeout,
         )
+    }
+
+    fn reconcile_intent<'a>(
+        &'a self,
+        intent: &'a OutboxIntentBundle,
+    ) -> ReconcileIntentFuture<'a> {
+        Box::pin(async move {
+            match self
+                .outbox_client
+                .outbox_reader()
+                .fetch_outbox_intent(intent.id)
+                .await
+            {
+                Ok(Some(bundle)) => bundle,
+                Ok(None) => intent.clone(),
+                Err(_) => {
+                    warn!(
+                        intent_id = intent.id,
+                        "Failed to reconcile outbox intent before retry"
+                    );
+                    intent.clone()
+                }
+            }
+        })
     }
 }

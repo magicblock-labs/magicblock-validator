@@ -11,6 +11,7 @@ use crate::{
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
+            error::TransactionStrategyExecutionError,
             single_stage::SingleStageStrategyExecutor,
             two_stage,
             two_stage::TwoStageStrategyExecutor,
@@ -193,8 +194,9 @@ where
     })
 }
 
-/// Reports the outcome of an intent execution attempt and, only if it
-/// succeeded, closes its outbox record.
+/// Reports terminal intent execution outcomes. The `ScheduledCommitSent`
+/// instruction closes the outbox record atomically with the report, so
+/// retryable lifecycle failures intentionally leave the outbox account open.
 /// Note: we consider failed reporting to Outbox as overall intent failure
 /// as it is part of intent execution lifecycle.
 pub(in crate::intent_executor) async fn report_and_close_intent<O>(
@@ -207,18 +209,45 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    let intent_id = meta.id;
+    if !should_report_to_outbox(&result) {
+        return result;
+    }
+
     outbox_client
         .notify_commit_sent(meta, &result, execution_report)
         .await
         .map_err(Into::into)?;
 
-    if result.is_ok() {
-        outbox_client
-            .close_intent(intent_id)
-            .await
-            .map_err(Into::into)?;
-    }
-
     result
+}
+
+fn should_report_to_outbox(
+    result: &IntentExecutorResult<ExecutionOutput>,
+) -> bool {
+    match result {
+        Ok(_) => true,
+        Err(err) => is_terminal_execution_error(err),
+    }
+}
+
+fn is_terminal_execution_error(err: &IntentExecutorError) -> bool {
+    match err {
+        IntentExecutorError::OutboxClientError(_)
+        | IntentExecutorError::GetPendingSignatureStatusError(_)
+        | IntentExecutorError::PendingSignatureResolutionError(_)
+        | IntentExecutorError::FailedCommitPreparationError(_)
+        | IntentExecutorError::FailedFinalizePreparationError(_) => false,
+        IntentExecutorError::FailedToCommitError { err, .. }
+        | IntentExecutorError::FailedToFinalizeError { err, .. } => {
+            is_terminal_strategy_error(err)
+        }
+        IntentExecutorError::TaskBuilderError(err) => !err.is_transient(),
+        IntentExecutorError::EmptyIntentError
+        | IntentExecutorError::FailedToFitError
+        | IntentExecutorError::SignerError(_) => true,
+    }
+}
+
+fn is_terminal_strategy_error(err: &TransactionStrategyExecutionError) -> bool {
+    !err.is_transient()
 }

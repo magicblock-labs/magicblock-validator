@@ -5,27 +5,27 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::intent::outbox::verify_outbox_intent_pda;
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
     intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    utils::{
+        account_actions::set_account_mode,
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
     },
     validator::authority,
 };
-
-/// Error code returned when an intent execution failed.
-/// This indicates the intent could not be successfully executed despite patching attempts.
-const INTENT_FAILED_CODE: u32 = 0x7461636F;
 
 #[derive(Default, Debug, Clone)]
 pub struct SentCommit {
@@ -157,9 +157,7 @@ pub fn process_scheduled_commit_sent(
 
     // Log data
     log_sent_commit(invoke_context, &commit);
-    commit.error_message.map_or(Ok(()), |_| {
-        Err(InstructionError::Custom(INTENT_FAILED_CODE))
-    })
+    close_outbox_ephemeral_account(invoke_context)
 }
 
 fn validate(
@@ -251,6 +249,24 @@ fn validate(
         );
         return Err(InstructionError::InvalidArgument);
     }
+
+    Ok(())
+}
+
+fn close_outbox_ephemeral_account(
+    invoke_context: &InvokeContext,
+) -> Result<(), InstructionError> {
+    const CLOSING_PDA_IDX: u16 = 2;
+
+    let transaction_context = &*invoke_context.transaction_context;
+    let pda =
+        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+
+    let mut acc = pda.borrow_mut()?;
+    acc.set_lamports(0);
+    acc.set_owner(system_program::id());
+    acc.resize(0, 0);
+    set_account_mode(invoke_context, &mut acc, AccountMode::Closed)?;
 
     Ok(())
 }
