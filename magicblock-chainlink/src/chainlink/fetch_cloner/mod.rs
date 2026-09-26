@@ -2744,7 +2744,7 @@ where
                 min_context_slot,
             )
             .await
-            .map_err(|err| {
+            .inspect_err(|_| {
                 for _ in pubkeys {
                     metrics::inc_chainlink_clone_accounts_total_with_context(
                         fetch_context.clone(),
@@ -2753,7 +2753,6 @@ where
                         ChainlinkCloneOutcome::Skipped,
                     );
                 }
-                err
             })?;
 
         if tracing::enabled!(tracing::Level::TRACE) {
@@ -3270,6 +3269,29 @@ where
             )
             .await?;
         }
+        Ok(fetch_context.remote_account_claims_value())
+    }
+
+    /// Rechecks present Transient accounts against their delegation records
+    /// before fetching an image that may complete undelegation.
+    pub(crate) async fn refresh_transient_requested_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_origin: AccountFetchEntrypoint,
+    ) -> ChainlinkResult<u64> {
+        if pubkeys.is_empty() {
+            return Ok(0);
+        }
+        let fetch_context = AccountFetchContext::from(fetch_origin);
+        self.fetch_and_clone_accounts_with_dedup_forced_refresh(
+            pubkeys,
+            Some(pubkeys),
+            None,
+            fetch_context.clone(),
+            &HashSet::new(),
+            None,
+        )
+        .await?;
         Ok(fetch_context.remote_account_claims_value())
     }
 

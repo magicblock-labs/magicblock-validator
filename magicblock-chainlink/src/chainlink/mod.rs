@@ -6,6 +6,7 @@ use std::{
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
+use keeper::error::KeeperError;
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
 use magicblock_core::token_programs::{
@@ -403,8 +404,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures absent accounts are materialized locally. Present accounts,
-    /// including Transient ones, are left to their subscription updates.
+    /// Ensures absent accounts are materialized locally and refreshes Transient
+    /// accounts whose undelegation completed without a subscription update.
     /// Missing remote accounts are represented as placeholders.
     /// Returns the number of requested remote accounts claimed by this call.
     /// If we're offline and not syncing accounts then this is a no-op.
@@ -418,17 +419,40 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         };
 
         tokio::time::timeout(ENSURE_ACCOUNTS_TIMEOUT, async {
+            let transients = {
+                let accounts = self.engine.accounts();
+                let loader = accounts.loader();
+                let mut transients = Vec::new();
+                for &pubkey in pubkeys {
+                    if loader
+                        .read(&pubkey, |account| account.mode())
+                        .map_err(KeeperError::from)?
+                        == Some(AccountMode::Transient)
+                    {
+                        transients.push(pubkey);
+                    }
+                }
+                transients
+            };
             let pending = self
                 .engine
                 .missing_accounts(pubkeys)
                 .await
                 .map_err(cloner::errors::ClonerError::from)?;
-            if pending.is_empty() {
-                return Ok(0);
-            }
-            fetch_cloner
-                .fetch_and_clone_requested_accounts(pending, fetch_origin)
-                .await
+            let claimed = if pending.is_empty() {
+                0
+            } else {
+                fetch_cloner
+                    .fetch_and_clone_requested_accounts(pending, fetch_origin)
+                    .await?
+            };
+            Ok(claimed
+                + fetch_cloner
+                    .refresh_transient_requested_accounts(
+                        &transients,
+                        fetch_origin,
+                    )
+                    .await?)
         })
         .await
         .unwrap_or_else(|_| {

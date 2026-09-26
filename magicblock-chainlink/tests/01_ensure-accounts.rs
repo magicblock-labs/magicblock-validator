@@ -14,7 +14,7 @@ const CURRENT_SLOT: u64 = 11;
 #[tokio::test]
 async fn ensure_account_scenarios() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
-    resident_accounts_skip_remote_resolution(&ctx).await;
+    resident_accounts_reconcile_by_mode(&ctx).await;
     write_non_existing_account(&ctx).await;
     existing_account_undelegated(&ctx).await;
     existing_account_missing_delegation_record(&ctx).await;
@@ -23,7 +23,7 @@ async fn ensure_account_scenarios() {
     write_existing_account_invalid_delegation_record(&ctx).await;
 }
 
-async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
+async fn resident_accounts_reconcile_by_mode(ctx: &TestContext) {
     let pubkeys = [
         Pubkey::new_unique(),
         Pubkey::new_unique(),
@@ -70,7 +70,7 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
     let claims = ctx
         .chainlink
         .ensure_accounts(
-            &pubkeys,
+            &pubkeys[..4],
             AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
@@ -78,7 +78,20 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
 
     assert_eq!(claims, 0);
     assert_eq!(ctx.chainlink.fetch_count().unwrap(), fetches);
-    assert_not_subscribed!(ctx.chainlink, &pubkeys);
+    assert_not_subscribed!(ctx.chainlink, &pubkeys[..4]);
+
+    let transient = pubkeys[4];
+    let claims = ctx
+        .chainlink
+        .ensure_accounts(
+            &[transient],
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
+        )
+        .await
+        .unwrap();
+    assert_eq!(claims, 1);
+    assert_cloned_as_empty_placeholder!(ctx.bank, &[transient]);
+    assert_subscribed_without_delegation_record!(ctx.chainlink, &[&transient]);
 }
 
 // NOTE: Case comments refer to the case studies in the relevant tabs of draw.io document, i.e. Fetch
