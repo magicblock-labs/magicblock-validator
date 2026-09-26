@@ -5,19 +5,22 @@ ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
 RUST_LOG ?= 'info'
 
+FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
 COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program
 
+FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SECURITY_SRC := $(shell find $(SCHEDULECOMMIT_SECURITY_DIR) -name '*.rs' -o -name '*.toml')
 COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
 
+FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
 SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
 COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
-PROGRAMS_SO := $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
+PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 COMMITTOR_IX_SINGLE_TESTS := committor,committor_single_large
 COMMITTOR_BUNDLE_TESTS := committor_bundles,committor_bundles_undelegate,committor_bundles_8
 COMMITTOR_BUNDLE_HEAVY_TESTS := committor_bundles_heavy,committor_bundles_heavy_tail
@@ -204,6 +207,9 @@ setup-task-scheduler-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
+$(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
+	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml \
+		--sbf-out-dir $(DEPLOY_DIR) --quiet
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml \
 		--sbf-out-dir $(DEPLOY_DIR) --quiet
@@ -213,6 +219,13 @@ $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 $(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
 	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml \
 	--sbf-out-dir $(ROOT_DEPLOY_DIR)/ --quiet
+
+deploy-flexi-counter: $(FLEXI_COUNTER_SO)
+	solana program deploy \
+		-u localhost \
+		--keypair $(DIR)/target/deploy/program_flexi_counter-keypair.json \
+		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
+		$(DIR)/target/deploy/program_flexi_counter.so
 
 fmt:
 	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
@@ -231,6 +244,7 @@ ci-lint:
 	ci-fmt \
 	lint \
 	ci-lint \
+	deploy-flexi-counter \
 	fmt \
 	list \
 	list-programs \

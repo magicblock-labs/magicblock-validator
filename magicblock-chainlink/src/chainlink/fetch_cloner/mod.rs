@@ -1516,15 +1516,15 @@ where
         let Some(resolved) = resolved else {
             return;
         };
-        let source_slots = resolved
+        let mut source_slots = resolved
             .source_slots
             .unwrap_or(CloneSourceSlots::single(update_slot));
-        let update_slot = update_slot.max(source_slots.data);
+        let mut update_slot = update_slot.max(source_slots.data);
         let (deleg_record, delegation_actions) = resolved
             .delegation
             .map(|(record, actions)| (Some(record), actions))
             .unwrap_or_default();
-        let account = resolved.account;
+        let mut account = resolved.account;
         let subscription_clone_context =
             AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
@@ -1540,70 +1540,6 @@ where
             )
             .await;
 
-        // Active delegation remains authoritative regardless of observation freshness.
-        if self.account_mode(&pubkey) == Some(AccountMode::Delegated) {
-            self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                .await;
-            return;
-        }
-
-        //
-        // Ensure that the subscription update isn't out of order, i.e.
-        // we already hold a newer version of the account in our bank.
-        //
-        // The stricter intent is to ignore non-advancing subscription updates: if the bank
-        // already has the account at the same slot, then a normal/plain update at that slot is
-        // treated as stale/duplicate and should not overwrite local state, with the following
-        // exception:
-        //
-        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
-        //    or undelegating version while the subscription update carries the delegated state
-        //    at the same slot, so we must allow that update.
-        //
-        let reader = |in_bank: &AccountSharedData| {
-            let bank_slot = in_bank.slot();
-            let update_slot = account.read().slot().max(update_slot);
-            let same_slot_delegated_refresh = bank_slot == update_slot
-                && account.read().is(AccountMode::Delegated)
-                && (!in_bank.is(AccountMode::Delegated)
-                    || in_bank.is(AccountMode::Transient));
-            if bank_slot > update_slot
-                || (bank_slot == update_slot && !same_slot_delegated_refresh)
-            {
-                Some(bank_slot)
-            } else {
-                None
-            }
-        };
-        let non_advancing_slot = self.read_account(&pubkey, reader).flatten();
-
-        if let Some(in_bank_slot) = non_advancing_slot {
-            let update_slot = account.read().slot().max(update_slot);
-            if in_bank_slot == update_slot
-                && let Some(projected_ata_clone_request) =
-                    projected_ata_clone_request
-                && let Err(err) = self
-                    .clone_projected_ata_request(
-                        projected_ata_clone_request,
-                        subscription_clone_context,
-                    )
-                    .await
-            {
-                warn!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone projected ATA from out-of-order delegated eATA update"
-                );
-            }
-            trace!(
-                pubkey = %pubkey,
-                bank_slot = in_bank_slot,
-                update_slot,
-                "Ignoring out-of-order subscription update"
-            );
-            return;
-        }
-
         let mut undelegation_completed_on_chain = false;
         let reader = |in_bank: &AccountSharedData| {
             (
@@ -1613,9 +1549,9 @@ where
                 in_bank.slot(),
             )
         };
-        if let Some((delegated, transient, owner, slot)) =
-            self.read_account(&pubkey, reader)
-        {
+        let local_state = self.read_account(&pubkey, reader);
+        let mut completed_transient_replacement = false;
+        if let Some((delegated, transient, owner, slot)) = local_state {
             if delegated && !transient {
                 self.cleanup_direct_subscription_for_delegated_account(pubkey)
                     .await;
@@ -1662,12 +1598,24 @@ where
                     &pubkey,
                     account.read().is(AccountMode::Delegated),
                     slot,
-                    deleg_record,
+                    deleg_record.as_ref().copied(),
                     &self.validator_pubkey,
                 ) {
                     return;
                 }
                 undelegation_completed_on_chain = true;
+                if !account.read().is(AccountMode::Delegated) {
+                    completed_transient_replacement = true;
+                    let replacement_slot = account.read().slot().max(slot);
+                    if replacement_slot != account.read().slot() {
+                        account = account.slot(replacement_slot);
+                        source_slots = CloneSourceSlots {
+                            data: source_slots.data.max(replacement_slot),
+                            view: source_slots.view.max(replacement_slot),
+                        };
+                        update_slot = update_slot.max(replacement_slot);
+                    }
+                }
             } else if !delegated && account.read().is(AccountMode::Delegated) {
                 undelegation_completed_on_chain = true;
             } else if owner == dlp_api::id() {
@@ -1683,6 +1631,71 @@ where
             );
             if account.read().is(AccountMode::Delegated) {
                 undelegation_completed_on_chain = true;
+            }
+        }
+
+        //
+        // Ensure that the subscription update isn't out of order, i.e.
+        // we already hold a newer version of the account in our bank.
+        //
+        // The stricter intent is to ignore non-advancing subscription updates: if the bank
+        // already has the account at the same slot, then a normal/plain update at that slot is
+        // treated as stale/duplicate and should not overwrite local state, with the following
+        // exceptions:
+        //
+        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
+        //    or undelegating version while the subscription update carries the delegated state
+        //    at the same slot, so we must allow that update.
+        //  - A completed undelegation replaces a local Transient image with
+        //    base-chain state. That base image can have an older observed slot
+        //    than the local transient while still being the lifecycle-completing
+        //    authority.
+        //
+        if !completed_transient_replacement {
+            let reader = |in_bank: &AccountSharedData| {
+                let bank_slot = in_bank.slot();
+                let update_slot = account.read().slot().max(update_slot);
+                let same_slot_delegated_refresh = bank_slot == update_slot
+                    && account.read().is(AccountMode::Delegated)
+                    && (!in_bank.is(AccountMode::Delegated)
+                        || in_bank.is(AccountMode::Transient));
+                if bank_slot > update_slot
+                    || (bank_slot == update_slot
+                        && !same_slot_delegated_refresh)
+                {
+                    Some(bank_slot)
+                } else {
+                    None
+                }
+            };
+            let non_advancing_slot =
+                self.read_account(&pubkey, reader).flatten();
+
+            if let Some(in_bank_slot) = non_advancing_slot {
+                let update_slot = account.read().slot().max(update_slot);
+                if in_bank_slot == update_slot
+                    && let Some(projected_ata_clone_request) =
+                        projected_ata_clone_request
+                    && let Err(err) = self
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                            subscription_clone_context,
+                        )
+                        .await
+                {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = %err,
+                        "Failed to clone projected ATA from out-of-order delegated eATA update"
+                    );
+                }
+                trace!(
+                    pubkey = %pubkey,
+                    bank_slot = in_bank_slot,
+                    update_slot,
+                    "Ignoring out-of-order subscription update"
+                );
+                return;
             }
         }
 

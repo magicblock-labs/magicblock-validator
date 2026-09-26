@@ -57,9 +57,10 @@ impl PubsubClientConfig {
 pub enum SubscriptionSource {
     Account,
     Program,
-    /// Provider-initiated replay of a subscription result that was consumed
-    /// to resolve a fetch which subsequently failed. Must be processed
-    /// regardless of the account's watch state.
+    /// Provider-initiated replay or catch-up. Used for subscription results
+    /// consumed by a failed fetch and for targeted RPC refreshes of accounts
+    /// whose pubsub stream may have missed an update during reconnect.
+    /// Must be processed regardless of the account's watch state.
     Replay,
 }
 

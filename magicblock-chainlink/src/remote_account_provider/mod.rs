@@ -98,6 +98,7 @@ use crate::{
 };
 
 const ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS: u64 = 60_000;
+const UNDELEGATION_TRACKING_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const DEFAULT_SUBSCRIPTION_RETRIES: usize = 5;
 pub(crate) type ProdRemoteAccountProvider =
     RemoteAccountProvider<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>;
@@ -616,8 +617,12 @@ pub struct RemoteAccountProvider<T: ChainRpcClient, U: ChainPubsubClient> {
     replay_notify: Arc<Notify>,
 
     /// Task that periodically reconciles subscriptions and updates the
-    /// active subscriptions gauge
+    /// active subscriptions gauge.
     _active_subscriptions_task_handle: Option<task::JoinHandle<()>>,
+    /// Task that periodically catches up undelegation-tracked accounts from
+    /// RPC. Pubsub reconnects can restore the subscription without replaying
+    /// account changes missed during the gap.
+    _undelegation_tracking_refresh_task_handle: Option<task::JoinHandle<()>>,
 }
 
 impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
@@ -627,6 +632,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> Drop
         // The reconciler loops forever; abort it so a dropped provider
         // doesn't leak the task and the state it holds
         if let Some(handle) = &self._active_subscriptions_task_handle {
+            handle.abort();
+        }
+        if let Some(handle) = &self._undelegation_tracking_refresh_task_handle {
             handle.abort();
         }
     }
@@ -801,6 +809,29 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         })
     }
 
+    fn start_undelegation_tracking_refresher(
+        rpc_client: T,
+        subscription_ownership: SubscriptionOwnershipMap,
+        subscription_forwarder: Arc<mpsc::Sender<ForwardedSubscriptionUpdate>>,
+    ) -> task::JoinHandle<()> {
+        task::spawn(async move {
+            loop {
+                tokio::time::sleep(UNDELEGATION_TRACKING_REFRESH_INTERVAL)
+                    .await;
+
+                if !Self::refresh_undelegation_tracking_accounts_once(
+                    &rpc_client,
+                    &subscription_ownership,
+                    subscription_forwarder.as_ref(),
+                )
+                .await
+                {
+                    return;
+                }
+            }
+        })
+    }
+
     /// Creates a new instance of the remote account provider
     /// By the time this method returns the current chain slot was resolved and
     /// a subscription setup to keep it up to date.
@@ -818,6 +849,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             Arc::new(AsyncMutex::new(HashMap::new()));
         let subscription_ownership: SubscriptionOwnershipMap =
             Arc::new(AsyncMutex::new(HashMap::new()));
+        let subscription_forwarder = Arc::new(subscription_forwarder);
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
@@ -829,6 +861,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 subscription_key_locks.clone(),
                 subscription_ownership.clone(),
                 config.enable_subscription_metrics(),
+            ));
+        let undelegation_tracking_refresh_task_handle =
+            Some(Self::start_undelegation_tracking_refresher(
+                rpc_client.clone(),
+                subscription_ownership.clone(),
+                subscription_forwarder.clone(),
             ));
 
         let me = Self {
@@ -844,10 +882,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             subscribed_accounts,
             stale_account_tx,
             stale_account_rx: Mutex::new(Some(stale_account_rx)),
-            subscription_forwarder: Arc::new(subscription_forwarder),
+            subscription_forwarder,
             replay_outbox: Arc::default(),
             replay_notify: Arc::new(Notify::new()),
             _active_subscriptions_task_handle: active_subscriptions_updater,
+            _undelegation_tracking_refresh_task_handle:
+                undelegation_tracking_refresh_task_handle,
         };
 
         let updates = me.pubsub_client.take_updates();
@@ -1559,6 +1599,84 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         });
     }
 
+    async fn undelegation_tracking_pubkeys(
+        subscription_ownership: &SubscriptionOwnershipMap,
+    ) -> Vec<Pubkey> {
+        subscription_ownership
+            .lock()
+            .await
+            .iter()
+            .filter_map(|(pubkey, ownership)| {
+                ownership
+                    .contains(SubscriptionReason::UndelegationTracking)
+                    .then_some(*pubkey)
+            })
+            .collect()
+    }
+
+    async fn refresh_undelegation_tracking_accounts_once(
+        rpc_client: &T,
+        subscription_ownership: &SubscriptionOwnershipMap,
+        subscription_forwarder: &mpsc::Sender<ForwardedSubscriptionUpdate>,
+    ) -> bool {
+        let pubkeys =
+            Self::undelegation_tracking_pubkeys(subscription_ownership).await;
+        if pubkeys.is_empty() {
+            return true;
+        }
+
+        for chunk in balanced_chunks(pubkeys) {
+            let fetch_context = AccountFetchContext::internal(
+                AccountFetchReason::UndelegatingRefresh,
+            );
+            let accounts = match Self::fetch_multi_rpc_only_with_client(
+                rpc_client,
+                &chunk,
+                0,
+                fetch_context,
+            )
+            .await
+            {
+                Ok(accounts) => accounts,
+                Err(err) => {
+                    warn!(
+                        pubkey_count = chunk.len(),
+                        pubkeys = %pubkeys_str(&chunk),
+                        error = %err,
+                        "Failed to refresh undelegation-tracked accounts"
+                    );
+                    continue;
+                }
+            };
+
+            for (pubkey, account) in chunk.into_iter().zip(accounts) {
+                let slot = account.slot();
+                if subscription_forwarder
+                    .send(ForwardedSubscriptionUpdate {
+                        pubkey,
+                        account,
+                        source: SubscriptionSource::Replay,
+                    })
+                    .await
+                    .is_err()
+                {
+                    debug!(
+                        "Stopping undelegation tracking refresh; subscription \
+                         pipeline closed"
+                    );
+                    return false;
+                }
+                trace!(
+                    pubkey = %pubkey,
+                    slot,
+                    "Forwarded refreshed undelegation-tracked account"
+                );
+            }
+        }
+
+        true
+    }
+
     /// Gets the accounts for the given pubkeys by fetching from RPC.
     /// Always fetches fresh data. FetchCloner handles request deduplication.
     /// Subscribes first to catch any updates that arrive during fetch.
@@ -1775,6 +1893,21 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         min_context_slot: u64,
         fetch_context: AccountFetchContext,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        Self::fetch_multi_rpc_only_with_client(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            fetch_context,
+        )
+        .await
+    }
+
+    async fn fetch_multi_rpc_only_with_client(
+        rpc_client: &T,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        fetch_context: AccountFetchContext,
+    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         // This must stay a single wire call so all results share one
         // response slot (the slot-match contract callers verify);
         // slot-consistent sets must fit within the RPC limit.
@@ -1785,7 +1918,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             MAX_MULTIPLE_ACCOUNTS_PER_REQUEST
         );
         let config = RpcAccountInfoConfig {
-            commitment: Some(self.rpc_client.commitment()),
+            commitment: Some(rpc_client.commitment()),
             min_context_slot: Some(min_context_slot),
             encoding: Some(UiAccountEncoding::Base64Zstd),
             data_slice: None,
@@ -1793,7 +1926,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
 
         metrics::inc_remote_account_provider_a_count();
         let response = tokio::time::timeout(RPC_FETCH_TIMEOUT, async {
-            self.rpc_client
+            rpc_client
                 .get_multiple_accounts_with_config(pubkeys, config)
                 .await
         })
