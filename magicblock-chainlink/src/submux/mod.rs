@@ -153,6 +153,11 @@ where
     /// Number of currently connected clients that activate subscriptions immediately when
     /// requested.
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
+    /// Signals reconnect/disconnect events that can create a subscription
+    /// freshness gap for accounts with no remaining live coverage.
+    reconnect_reconciliation_tx: mpsc::Sender<HashSet<Pubkey>>,
+    reconnect_reconciliation_rx:
+        Arc<Mutex<Option<mpsc::Receiver<HashSet<Pubkey>>>>>,
     /// Whether take_updates() has started the per-client forwarders.
     forwarders_started: Arc<AtomicBool>,
     /// Token cancelled on drop to stop background tasks
@@ -173,6 +178,16 @@ struct ForwarderParams {
     debounce_interval: Duration,
     detection_window: Duration,
     allowed_count: usize,
+}
+
+struct ReconnectorParams<T, U> {
+    all_clients: Arc<Mutex<Vec<Arc<T>>>>,
+    subscribed_accounts_tracker: Arc<U>,
+    program_subs: Arc<Mutex<HashSet<Pubkey>>>,
+    connected_client_ids: Arc<Mutex<HashSet<usize>>>,
+    connected_clients: Arc<AtomicU16>,
+    connected_clients_subscribing_immediately: Arc<AtomicU16>,
+    reconnect_reconciliation_tx: mpsc::Sender<HashSet<Pubkey>>,
 }
 
 impl<T> SubMuxClient<T>
@@ -210,6 +225,8 @@ where
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
         let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
         let debounce_states = Arc::new(Mutex::new(HashMap::new()));
+        let (reconnect_reconciliation_tx, reconnect_reconciliation_rx) =
+            mpsc::channel(16);
         let dedup_window = Duration::from_millis(
             config.dedupe_window_millis.unwrap_or(DEDUP_WINDOW_MILLIS),
         );
@@ -263,19 +280,26 @@ where
             .iter()
             .map(|(client, _)| client.clone())
             .collect::<Vec<_>>();
+        let clients_arc = Arc::new(Mutex::new(clients_only));
 
         Self::spawn_reconnectors(
             clients,
-            subscribed_accounts_tracker,
-            program_subs.clone(),
-            connected_client_ids.clone(),
-            connected_clients.clone(),
-            connected_clients_subscribing_immediately.clone(),
+            ReconnectorParams {
+                all_clients: clients_arc.clone(),
+                subscribed_accounts_tracker,
+                program_subs: program_subs.clone(),
+                connected_client_ids: connected_client_ids.clone(),
+                connected_clients: connected_clients.clone(),
+                connected_clients_subscribing_immediately:
+                    connected_clients_subscribing_immediately.clone(),
+                reconnect_reconciliation_tx: reconnect_reconciliation_tx
+                    .clone(),
+            },
         );
 
         let shutdown_token = CancellationToken::new();
         let me = Self {
-            clients: Arc::new(Mutex::new(clients_only)),
+            clients: clients_arc,
             out_tx,
             out_rx: Arc::new(Mutex::new(out_rx)),
             dedup_cache: dedup_cache.clone(),
@@ -288,6 +312,10 @@ where
             connected_client_ids,
             connected_clients,
             connected_clients_subscribing_immediately,
+            reconnect_reconciliation_tx,
+            reconnect_reconciliation_rx: Arc::new(Mutex::new(Some(
+                reconnect_reconciliation_rx,
+            ))),
             forwarders_started: Arc::new(AtomicBool::new(false)),
             shutdown_token,
             cancel_on_drop: true,
@@ -310,20 +338,19 @@ where
     // -----------------
     fn spawn_reconnectors<U: SubscribedAccountsTracker>(
         clients: Vec<(Arc<T>, mpsc::Receiver<()>)>,
-        subscribed_accounts_tracker: Arc<U>,
-        program_subs: Arc<Mutex<HashSet<Pubkey>>>,
-        connected_client_ids: Arc<Mutex<HashSet<usize>>>,
-        connected_clients: Arc<AtomicU16>,
-        connected_clients_subscribing_immediately: Arc<AtomicU16>,
+        params: ReconnectorParams<T, U>,
     ) {
         for (client, mut abort_rx) in clients.into_iter() {
+            let all_clients = params.all_clients.clone();
             let subscribed_accounts_tracker =
-                subscribed_accounts_tracker.clone();
-            let program_subs = program_subs.clone();
-            let connected_client_ids = connected_client_ids.clone();
-            let connected_clients = connected_clients.clone();
+                params.subscribed_accounts_tracker.clone();
+            let program_subs = params.program_subs.clone();
+            let connected_client_ids = params.connected_client_ids.clone();
+            let connected_clients = params.connected_clients.clone();
             let connected_clients_subscribing_immediately =
-                connected_clients_subscribing_immediately.clone();
+                params.connected_clients_subscribing_immediately.clone();
+            let reconnect_reconciliation_tx =
+                params.reconnect_reconciliation_tx.clone();
             tokio::spawn(async move {
                 while (abort_rx.recv().await).is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -358,6 +385,14 @@ where
                         }
                     }
                     metrics::set_pubsub_client_uptime(client.id(), false);
+                    let uncovered = Self::accounts_without_live_coverage(
+                        &all_clients,
+                        &connected_client_ids,
+                        subscribed_accounts_tracker.subscribed_accounts(),
+                    );
+                    if !uncovered.is_empty() {
+                        let _ = reconnect_reconciliation_tx.try_send(uncovered);
+                    }
 
                     Self::reconnect_client_with_backoff(
                         client.clone(),
@@ -375,6 +410,35 @@ where
 
     fn clients_snapshot(&self) -> Vec<Arc<T>> {
         self.clients_lock().clone()
+    }
+
+    fn accounts_without_live_coverage(
+        clients: &Arc<Mutex<Vec<Arc<T>>>>,
+        connected_client_ids: &Arc<Mutex<HashSet<usize>>>,
+        account_subs: HashSet<Pubkey>,
+    ) -> HashSet<Pubkey> {
+        if account_subs.is_empty() {
+            return HashSet::new();
+        }
+
+        let clients = clients.lock().clone();
+        let connected_ids = connected_client_ids.lock();
+        let connected_clients = clients
+            .iter()
+            .filter(|client| connected_ids.contains(&Self::client_key(client)))
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut covered = HashSet::new();
+        for client in connected_clients {
+            if let Some(snapshot) =
+                client.subscription_reconciliation_snapshot()
+            {
+                covered.extend(snapshot.union);
+            }
+        }
+
+        account_subs.difference(&covered).copied().collect()
     }
 
     fn client_key(client: &Arc<T>) -> usize {
@@ -469,11 +533,20 @@ where
 
         Self::spawn_reconnectors(
             vec![(client.clone(), abort_rx)],
-            subscribed_accounts_tracker.clone(),
-            self.program_subs.clone(),
-            self.connected_client_ids.clone(),
-            self.connected_clients.clone(),
-            self.connected_clients_subscribing_immediately.clone(),
+            ReconnectorParams {
+                all_clients: self.clients.clone(),
+                subscribed_accounts_tracker: subscribed_accounts_tracker
+                    .clone(),
+                program_subs: self.program_subs.clone(),
+                connected_client_ids: self.connected_client_ids.clone(),
+                connected_clients: self.connected_clients.clone(),
+                connected_clients_subscribing_immediately: self
+                    .connected_clients_subscribing_immediately
+                    .clone(),
+                reconnect_reconciliation_tx: self
+                    .reconnect_reconciliation_tx
+                    .clone(),
+            },
         );
 
         // Catch-up pass, mirroring reconnect_client: subscriptions added
@@ -1040,6 +1113,12 @@ where
             connected_clients_subscribing_immediately: self
                 .connected_clients_subscribing_immediately
                 .clone(),
+            reconnect_reconciliation_tx: self
+                .reconnect_reconciliation_tx
+                .clone(),
+            reconnect_reconciliation_rx: self
+                .reconnect_reconciliation_rx
+                .clone(),
             forwarders_started: self.forwarders_started.clone(),
             shutdown_token: self.shutdown_token.clone(),
             cancel_on_drop: false,
@@ -1209,6 +1288,12 @@ where
             union,
             intersection,
         })
+    }
+
+    fn take_reconnect_reconciliation_rx(
+        &self,
+    ) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+        self.reconnect_reconciliation_rx.lock().take()
     }
 
     /// Returns true if any inner client subscribes immediately

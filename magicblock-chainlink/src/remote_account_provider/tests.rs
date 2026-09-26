@@ -1064,6 +1064,79 @@ async fn test_lock_aware_reconciler_resubscribes_tracked_missing_pubsub() {
 }
 
 #[tokio::test]
+async fn test_reconnect_gap_invalidates_uncovered_direct_subscription() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut stale_rx = provider.try_get_stale_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    assert!(provider.is_watching(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
+
+    pubsub_client.remove_subscription(&pubkey);
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+
+    assert_eq!(evicted, 1);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!provider.subscribed_accounts.contains(&pubkey));
+    assert_eq!(stale_rx.try_recv(), Ok(pubkey));
+}
+
+#[tokio::test]
+async fn test_reconnect_gap_keeps_uncovered_undelegation_tracking() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut stale_rx = provider.try_get_stale_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::UndelegationTracking)
+        .await
+        .unwrap();
+    assert!(provider.is_watching(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
+
+    pubsub_client.remove_subscription(&pubkey);
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+
+    assert_eq!(evicted, 0);
+    assert!(provider.is_watching(&pubkey));
+    assert!(provider.subscribed_accounts.contains(&pubkey));
+    assert!(matches!(
+        stale_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
+
+#[tokio::test]
 async fn test_try_get_multi_owner_success_cleans_up_pending_entry() {
     let _metrics_guard =
         crate::testing::pending_metric_test_lock().lock().await;
@@ -2145,6 +2218,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             &self.subscribed_accounts,
             &self.pubsub_client,
             &internally_managed,
+            &self.stale_account_tx,
+            Some(&self.subscription_key_locks),
+            Some(&self.subscription_ownership),
+        )
+        .await
+    }
+
+    async fn evict_uncovered_subscriptions_once_for_test(&self) -> usize {
+        subscription_reconciler::evict_uncovered_subscriptions(
+            &self.subscribed_accounts,
+            &self.pubsub_client,
+            None,
             &self.stale_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),

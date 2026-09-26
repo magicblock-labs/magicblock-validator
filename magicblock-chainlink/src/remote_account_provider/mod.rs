@@ -209,6 +209,27 @@ fn collect_connected_pubsubs(
         .collect()
 }
 
+async fn reconcile_active_subscriptions_once<
+    PubsubClient: ChainPubsubClient,
+>(
+    subscribed_accounts: &SubscribedAccounts,
+    pubsub_client: &PubsubClient,
+    internally_managed: &[Pubkey],
+    stale_account_tx: &mpsc::Sender<Pubkey>,
+    subscription_key_locks: &SubscriptionKeyLocks,
+    subscription_ownership: &SubscriptionOwnershipMap,
+) -> usize {
+    subscription_reconciler::reconcile_subscriptions(
+        subscribed_accounts,
+        pubsub_client,
+        internally_managed,
+        stale_account_tx,
+        Some(subscription_key_locks),
+        Some(subscription_ownership),
+    )
+    .await
+}
+
 #[allow(clippy::too_many_arguments)]
 fn spawn_deferred_pubsub_clients(
     endpoints: Vec<Endpoint>,
@@ -780,6 +801,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         stale_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
         subscription_ownership: SubscriptionOwnershipMap,
+        reconnect_reconciliation_rx: Option<mpsc::Receiver<HashSet<Pubkey>>>,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -787,23 +809,66 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 ACTIVE_SUBSCRIPTIONS_UPDATE_INTERVAL_MS,
             ));
             let internally_managed = subscribed_accounts.internally_managed();
+            let mut reconnect_reconciliation_rx = reconnect_reconciliation_rx;
 
             loop {
-                interval.tick().await;
-                let pubsub_total =
-                    subscription_reconciler::reconcile_subscriptions(
-                        &subscribed_accounts,
-                        pubsub_client.as_ref(),
-                        &internally_managed,
-                        &stale_account_tx,
-                        Some(&subscription_key_locks),
-                        Some(&subscription_ownership),
-                    )
-                    .await;
+                tokio::select! {
+                    _ = interval.tick() => {
+                        let pubsub_total = reconcile_active_subscriptions_once(
+                            &subscribed_accounts,
+                            pubsub_client.as_ref(),
+                            &internally_managed,
+                            &stale_account_tx,
+                            &subscription_key_locks,
+                            &subscription_ownership,
+                        )
+                        .await;
 
-                debug!(count = pubsub_total, "Updating active subscriptions");
-                if emit_metrics {
-                    set_monitored_accounts_count(pubsub_total);
+                        debug!(count = pubsub_total, "Updating active subscriptions");
+                        if emit_metrics {
+                            set_monitored_accounts_count(pubsub_total);
+                        }
+                    }
+                    event = async {
+                        match reconnect_reconciliation_rx.as_mut() {
+                            Some(rx) => rx.recv().await,
+                            None => std::future::pending().await,
+                        }
+                    }, if reconnect_reconciliation_rx.is_some() => {
+                        let Some(gap_candidates) = event else {
+                            reconnect_reconciliation_rx = None;
+                            continue;
+                        };
+
+                        let evicted =
+                            subscription_reconciler::evict_uncovered_subscriptions(
+                                &subscribed_accounts,
+                                pubsub_client.as_ref(),
+                                Some(gap_candidates),
+                                &stale_account_tx,
+                                Some(&subscription_key_locks),
+                                Some(&subscription_ownership),
+                            )
+                            .await;
+                        if evicted > 0 {
+                            debug!(evicted, "Invalidated accounts after reconnect coverage loss");
+                        }
+
+                        let pubsub_total = reconcile_active_subscriptions_once(
+                            &subscribed_accounts,
+                            pubsub_client.as_ref(),
+                            &internally_managed,
+                            &stale_account_tx,
+                            &subscription_key_locks,
+                            &subscription_ownership,
+                        )
+                        .await;
+
+                        debug!(count = pubsub_total, "Updating active subscriptions after reconnect");
+                        if emit_metrics {
+                            set_monitored_accounts_count(pubsub_total);
+                        }
+                    }
                 }
             }
         })
@@ -850,6 +915,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let subscription_ownership: SubscriptionOwnershipMap =
             Arc::new(AsyncMutex::new(HashMap::new()));
         let subscription_forwarder = Arc::new(subscription_forwarder);
+        let reconnect_reconciliation_rx =
+            pubsub_client.take_reconnect_reconciliation_rx();
 
         // The reconciler always runs: partial resubscriptions rely on it for
         // repair. The config flag only gates the metrics emission.
@@ -860,6 +927,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 stale_account_tx.clone(),
                 subscription_key_locks.clone(),
                 subscription_ownership.clone(),
+                reconnect_reconciliation_rx,
                 config.enable_subscription_metrics(),
             ));
         let undelegation_tracking_refresh_task_handle =
