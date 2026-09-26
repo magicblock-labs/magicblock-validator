@@ -243,6 +243,7 @@ mod tests {
             .mode(AccountMode::Magic);
         te.account(pubkey)
             .await
+            .expect("open account accessor")
             .materialize(account, None)
             .await
             .expect("insert outbox account");

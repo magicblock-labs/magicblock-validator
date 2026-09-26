@@ -24,9 +24,6 @@ pub enum ClonerError {
     #[error("engine error: {0}")]
     Engine(#[from] EngineError),
 
-    #[error("account materialization rejected for {0}: {1}")]
-    InvalidAccountMaterialization(Pubkey, String),
-
     #[error(
         "Clone transaction for account {pubkey} is too large: {size} bytes (max {max_size} bytes)"
     )]

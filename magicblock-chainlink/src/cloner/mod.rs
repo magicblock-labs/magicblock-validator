@@ -1,7 +1,8 @@
-use std::{iter, mem};
+use std::iter;
 
 use engine::{AccountAccessor, Engine, PostFinalize};
 use errors::ClonerResult;
+use keeper::error::KeeperError;
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
     args::{
@@ -10,9 +11,7 @@ use magicblock_magic_program_api::{
     },
     instruction::MagicBlockInstruction,
 };
-use solana_account::{
-    AccountBuilder, AccountMode, AccountSharedData, OwnedAccount,
-};
+use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_pubkey::Pubkey;
@@ -163,106 +162,17 @@ impl CloneSourceSlots {
     }
 }
 
-enum Materialization {
-    Apply { mode: AccountMode, slot: u64 },
-    Satisfied(AccountMode),
-}
-
-fn classify_materialization(
-    pubkey: Pubkey,
-    local: &AccountSharedData,
-    desired: &OwnedAccount,
-    source_slot: u64,
-) -> ClonerResult<Materialization> {
-    let invalid = |reason| {
-        errors::ClonerError::InvalidAccountMaterialization(pubkey, reason)
-    };
-    let mode = local.mode();
-    let mut desired_mode = desired.mode();
-    // Fresh source data may activate a plain copy without regressing its slot.
-    // A newer companion view alone cannot authorize replacement.
-    let slot = if desired_mode == AccountMode::Delegated
-        && matches!(mode, AccountMode::Uninit | AccountMode::ReadOnly)
-        && local.slot() <= source_slot
-    {
-        desired.slot().max(local.slot())
-    } else {
-        desired.slot()
-    };
-    let active_delegation = mode == AccountMode::Delegated
-        && desired_mode == AccountMode::Delegated;
-    // Magic accounts are locally authoritative, including empty Magic ATAs.
-    // Chainlink never replaces them with a remote image based on token balance.
-    if mode == AccountMode::Magic || active_delegation || local.slot() > slot {
-        return Ok(Materialization::Satisfied(mode));
-    }
-    if local == desired {
-        return Ok(Materialization::Satisfied(mode));
-    }
-
-    if mode == AccountMode::Transient && desired_mode == AccountMode::Uninit {
-        // Preserve the read-only image used to complete undelegation, even
-        // when the remote account has no lamports.
-        desired_mode = AccountMode::ReadOnly;
-    }
-    if local.slot() == slot {
-        if mode == desired_mode {
-            return Err(invalid("conflicting images at the same slot".into()));
-        }
-        if !mode.allows_transition(desired_mode, local.slot(), slot) {
-            return Err(invalid(format!(
-                "invalid same-slot mode transition {mode:?} -> {desired_mode:?}"
-            )));
-        }
-    } else if mode != desired_mode
-        && !mode.allows_transition(desired_mode, local.slot(), slot)
-    {
-        return Err(invalid(format!(
-            "invalid mode transition {mode:?} -> {desired_mode:?}"
-        )));
-    }
-    Ok(Materialization::Apply {
-        mode: desired_mode,
-        slot,
-    })
-}
-
+/// Claims a remote image unless local Magic state owns the key. Engine handles
+/// slot deduplication and validates lifecycle transitions under the lease.
 pub(crate) async fn claim_materialization<'a>(
     engine: &'a Engine,
-    request: &mut AccountCloneRequest,
+    pubkey: Pubkey,
 ) -> ClonerResult<Option<AccountAccessor<'a>>> {
-    let accessor = engine.account(request.pubkey).await;
-    // Reconcile slot and lifecycle from one local read while holding the
-    // materialization lease, including reacquisition before rescue.
-    let desired = request.account.read();
-    let materialization = accessor
-        .read(|local| {
-            classify_materialization(
-                request.pubkey,
-                local,
-                desired,
-                request.source_slots().data,
-            )
-        })
-        .map_err(errors::ClonerError::from)?
-        .transpose()?
-        .unwrap_or(Materialization::Apply {
-            mode: desired.mode(),
-            slot: desired.slot(),
-        });
-    match materialization {
-        Materialization::Apply { mode, slot } => {
-            if desired.mode() != mode || desired.slot() != slot {
-                request.account =
-                    mem::take(&mut request.account).mode(mode).slot(slot);
-            }
-            Ok(Some(accessor))
-        }
-        Materialization::Satisfied(mode) => {
-            accessor.satisfy(mode).await;
-            Ok(None)
-        }
+    let accessor = engine.account(pubkey).await?;
+    if matches!(accessor.observed(), Some((AccountMode::Magic, _))) {
+        return Ok(None);
     }
+    Ok(Some(accessor))
 }
 
 fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
@@ -390,20 +300,23 @@ pub(crate) async fn delete_claimed_account(
 
 /// Claims an account displaced from Engine recency, unless a later completion
 /// retained it again or changed it to an authoritative lifecycle mode. The
-/// returned value is projected from the same protected account read.
+/// returned value is read under the accepted lease for ATA projection.
 pub(crate) async fn claim_cached_account_eviction<R>(
     engine: &Engine,
     pubkey: Pubkey,
     inspect: impl Fn(&AccountSharedData) -> R,
 ) -> ClonerResult<Option<(AccountAccessor<'_>, R)>> {
-    let Some((accessor, mode, value)) =
-        claim_account_eviction_inner(engine, pubkey, inspect).await?
-    else {
+    let accessor = engine.account(pubkey).await?;
+    let Some(accessor) = accessor.into_cached_eviction() else {
         return Ok(None);
     };
-    Ok(accessor
-        .into_cached_eviction(mode)
-        .map(|accessor| (accessor, value)))
+    let value = engine
+        .accounts()
+        .loader()
+        .read(&pubkey, inspect)
+        .map_err(KeeperError::from)
+        .map_err(engine::EngineError::from)?;
+    Ok(value.map(|value| (accessor, value)))
 }
 
 /// Claims a requested account eviction unless the current state is absent or
@@ -412,32 +325,7 @@ pub(crate) async fn claim_account_eviction(
     engine: &Engine,
     pubkey: Pubkey,
 ) -> ClonerResult<Option<AccountAccessor<'_>>> {
-    let Some((accessor, mode, ())) =
-        claim_account_eviction_inner(engine, pubkey, |_| ()).await?
-    else {
-        return Ok(None);
-    };
-    Ok((!mode.authoritative()).then_some(accessor))
-}
-
-async fn claim_account_eviction_inner<R>(
-    engine: &Engine,
-    pubkey: Pubkey,
-    inspect: impl Fn(&AccountSharedData) -> R,
-) -> ClonerResult<Option<(AccountAccessor<'_>, AccountMode, R)>> {
-    let accessor = engine.account(pubkey).await;
-    let state = accessor
-        .read(|account| (account.mode(), inspect(account)))
-        .map_err(|err| {
-            errors::ClonerError::FailedToEvictAccount(
-                pubkey,
-                Box::new(err.into()),
-            )
-        })?;
-    let Some((mode, value)) = state else {
-        return Ok(None);
-    };
-    Ok(Some((accessor, mode, value)))
+    Ok(engine.account(pubkey).await?.into_eviction())
 }
 
 #[cfg(test)]
@@ -455,6 +343,7 @@ mod tests {
         engine
             .account(pubkey)
             .await
+            .unwrap()
             .materialize(
                 AccountBuilder::default()
                     .lamports(1_000_000)
@@ -480,6 +369,7 @@ mod tests {
         engine
             .account(authoritative)
             .await
+            .unwrap()
             .materialize(
                 AccountBuilder::default()
                     .lamports(1_000_000)

@@ -18,7 +18,7 @@ use dlp_api::{
         discriminator::AccountDiscriminator,
     },
 };
-use engine::Engine;
+use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;
 use lru::LruCache;
 use magicblock_aml::RiskService;
@@ -90,7 +90,7 @@ use crate::{
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ForwardedSubscriptionUpdate,
         MatchSlotsConfig, RemoteAccount, RemoteAccountProvider,
-        ResolvedAccount, SubscriptionReason,
+        SubscriptionReason,
         program_account::{
             LOADER_V3, LoadedProgram, RemoteProgramLoader,
             get_loaderv3_get_program_data_address,
@@ -654,10 +654,6 @@ where
         Ok(requests)
     }
 
-    pub(crate) fn engine(&self) -> &Engine {
-        &self.engine
-    }
-
     pub(crate) fn read_account<R>(
         &self,
         pubkey: &Pubkey,
@@ -672,7 +668,13 @@ where
     }
 
     pub(crate) fn account_mode(&self, pubkey: &Pubkey) -> Option<AccountMode> {
-        self.engine.accounts().loader().mode(pubkey).ok().flatten()
+        self.engine
+            .accounts()
+            .loader()
+            .lifecycle(pubkey)
+            .ok()
+            .flatten()
+            .map(|(mode, _)| mode)
     }
 
     pub(crate) fn contains_account(&self, pubkey: &Pubkey) -> bool {
@@ -1031,7 +1033,7 @@ where
         let is_loaderv3 = matches!(program.loader, RemoteProgramLoader::V3);
         let remote_result = ChainlinkCloneRemoteResult::Found;
         let clone_intent = ChainlinkCloneIntent::ProgramData;
-        let Some(mut request) = cloner::resolve_program(program) else {
+        let Some(request) = cloner::resolve_program(program) else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
                 remote_result,
@@ -1047,7 +1049,7 @@ where
             );
 
         let Some(accessor) =
-            cloner::claim_materialization(&self.engine, &mut request).await?
+            cloner::claim_materialization(&self.engine, request.pubkey).await?
         else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
@@ -1153,7 +1155,7 @@ where
         };
 
         let Some(accessor) =
-            cloner::claim_materialization(&self.engine, &mut request).await?
+            cloner::claim_materialization(&self.engine, request.pubkey).await?
         else {
             return Ok(());
         };
@@ -1193,7 +1195,7 @@ where
         // reclassify before fallback so a concurrent materialization
         // cannot be overwritten or have its actions replayed.
         let Some(accessor) =
-            cloner::claim_materialization(&self.engine, &mut request).await?
+            cloner::claim_materialization(&self.engine, request.pubkey).await?
         else {
             return Ok(());
         };
@@ -2686,31 +2688,17 @@ where
         slot: Option<u64>,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<FetchAndCloneBatchResult> {
-        let accs = match self
+        let accs = self
             .fetch_accounts(
                 pubkeys,
                 mark_empty_if_not_found,
                 slot,
                 fetch_context.clone(),
             )
-            .await
-        {
-            Ok(accs) => accs,
-            Err(err) => {
-                for _ in pubkeys {
-                    metrics::inc_chainlink_clone_accounts_total_with_context(
-                        fetch_context.clone(),
-                        ChainlinkCloneRemoteResult::Failed,
-                        ChainlinkCloneIntent::Unknown,
-                        ChainlinkCloneOutcome::Skipped,
-                    );
-                }
-                return Err(err);
-            }
-        };
+            .await?;
         self.clone_accounts(
             pubkeys,
-            accs,
+            pipeline::classify_remote_accounts(accs, pubkeys),
             mark_empty_if_not_found,
             slot,
             fetch_context,
@@ -2748,10 +2736,20 @@ where
             .try_get_multi(
                 pubkeys,
                 mark_empty_if_not_found,
-                fetch_context,
+                fetch_context.clone(),
                 min_context_slot,
             )
-            .await?;
+            .await
+            .inspect_err(|_| {
+                for _ in pubkeys {
+                    metrics::inc_chainlink_clone_accounts_total_with_context(
+                        fetch_context.clone(),
+                        ChainlinkCloneRemoteResult::Failed,
+                        ChainlinkCloneIntent::Unknown,
+                        ChainlinkCloneOutcome::Skipped,
+                    );
+                }
+            })?;
 
         if tracing::enabled!(tracing::Level::TRACE) {
             let accs_count = accs.len();
@@ -2760,11 +2758,11 @@ where
         Ok(accs)
     }
 
-    #[instrument(skip(self, pubkeys, accs), fields(tx_sig = tracing::field::Empty))]
+    #[instrument(skip(self, pubkeys, classified), fields(tx_sig = tracing::field::Empty))]
     async fn clone_accounts(
         &self,
         pubkeys: &[Pubkey],
-        accs: Vec<RemoteAccount>,
+        classified: ClassifiedAccounts,
         mark_empty_if_not_found: Option<&[Pubkey]>,
         slot: Option<u64>,
         fetch_context: AccountFetchContext,
@@ -2772,8 +2770,6 @@ where
         if let Some(sig) = fetch_context.signature() {
             tracing::Span::current().record("tx_sig", sig.to_string());
         }
-
-        // Keep resolution fetches aligned with the freshest observed slot.
         let min_context_slot = slot.map(|subscription_slot| {
             subscription_slot.max(self.remote_account_provider.chain_slot())
         });
@@ -2784,7 +2780,7 @@ where
             owned_by_deleg,
             programs,
             atas,
-        } = pipeline::classify_remote_accounts(accs, pubkeys);
+        } = classified;
 
         if tracing::enabled!(tracing::Level::TRACE) {
             let not_found = not_found
@@ -3214,14 +3210,85 @@ where
         RefreshDecision::No
     }
 
-    /// Fetches requested accounts while the engine serializes target mutations.
+    /// Fetches absent requested accounts under their Engine leases.
     /// Returns the number of requested remote accounts claimed by this call.
-    #[instrument(skip(self, pubkeys))]
+    #[instrument(skip(self, accessors))]
     pub(crate) async fn fetch_and_clone_requested_accounts(
+        &self,
+        accessors: Vec<AccountAccessor<'_>>,
+        fetch_origin: AccountFetchEntrypoint,
+    ) -> ChainlinkResult<u64> {
+        let fetch_context = AccountFetchContext::from(fetch_origin);
+        let pubkeys = accessors
+            .iter()
+            .map(|accessor| accessor.pubkey())
+            .collect::<Vec<_>>();
+        let accs = self
+            .fetch_accounts(
+                &pubkeys,
+                Some(&pubkeys),
+                None,
+                fetch_context.clone(),
+            )
+            .await?;
+        let mut classified = ClassifiedAccounts::default();
+        let mut plain = Vec::new();
+        let mut complex = Vec::new();
+        let mut images = accs.into_iter();
+        for accessor in accessors {
+            let pubkey = accessor.pubkey();
+            match images
+                .next()
+                .and_then(|acc| classified.classify(acc, pubkey))
+            {
+                Some(request) => plain.push((accessor, request)),
+                None => complex.push(pubkey),
+            }
+        }
+
+        // Plain images have no companion dependencies. Complex leases were
+        // dropped above.
+        let mut plain_error = None;
+        for (accessor, mut request) in plain {
+            Self::normalize_immutable_account(&mut request);
+            if let Err(err) = self
+                .submit_account(accessor, request, fetch_context.clone())
+                .await
+            {
+                plain_error.get_or_insert(ChainlinkError::from(err));
+            }
+        }
+
+        let complex_result = if !complex.is_empty() {
+            self.clone_accounts(
+                &complex,
+                classified,
+                Some(&complex),
+                None,
+                fetch_context.clone(),
+            )
+            .await
+            .map(|_| ())
+        } else {
+            Ok(())
+        };
+        if let Some(err) = plain_error {
+            return Err(err);
+        }
+        complex_result?;
+        Ok(fetch_context.remote_account_claims_value())
+    }
+
+    /// Rechecks present Transient accounts against their delegation records
+    /// before fetching an image that may complete undelegation.
+    pub(crate) async fn refresh_transient_requested_accounts(
         &self,
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<u64> {
+        if pubkeys.is_empty() {
+            return Ok(0);
+        }
         let fetch_context = AccountFetchContext::from(fetch_origin);
         self.fetch_and_clone_accounts_with_dedup_forced_refresh(
             pubkeys,
@@ -3470,7 +3537,6 @@ where
         companion_fetch_kind: ChainlinkCompanionFetchKind,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let provider = self.remote_account_provider.clone();
-        let engine = self.engine.clone();
         let fetch_count = self.fetch_count.clone();
         task::spawn(async move {
             trace!(
@@ -3509,7 +3575,6 @@ where
                 })
                 .and_then(|(acc, deleg)| {
                     Self::resolve_account_with_companion(
-                        &engine,
                         pubkey,
                         companion_pubkey,
                         acc,
@@ -3520,27 +3585,14 @@ where
     }
 
     fn resolve_account_with_companion(
-        engine: &Engine,
         pubkey: Pubkey,
         companion_pubkey: Pubkey,
         acc: RemoteAccount,
         companion: RemoteAccount,
     ) -> ChainlinkResult<AccountWithCompanion> {
         use RemoteAccount::*;
-        let accessor = engine.accounts();
-        let loader = accessor.loader();
-        let resolve = |account: &ResolvedAccount| match account {
-            ResolvedAccount::Fresh(account) => Some(AccountBuilder::from(
-                AccountSharedData::from(account.owned()),
-            )),
-            ResolvedAccount::Bank((pubkey, _)) => loader
-                .read(pubkey, |account| {
-                    AccountBuilder::from(AccountSharedData::from(
-                        account.owned(),
-                    ))
-                })
-                .ok()
-                .flatten(),
+        let resolve = |account: &AccountSharedData| {
+            AccountBuilder::from(AccountSharedData::from(account.owned()))
         };
         match (acc, companion) {
             // Account not found even though we found it previously - this is invalid,
@@ -3553,42 +3605,21 @@ where
                 // In case of delegation record fetch the account is either invalid
                 // or a delegation record itself.
                 // Clone it as is (without changing the owner or flagging as delegated)
-                match resolve(&acc.account) {
-                    Some(account) => Ok(AccountWithCompanion {
-                        pubkey,
-                        account,
-                        companion_pubkey,
-                        companion_account: None,
-                    }),
-                    None => Err(
-                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                            pubkey,
-                        ),
-                    ),
-                }
+                Ok(AccountWithCompanion {
+                    pubkey,
+                    account: resolve(&acc.account),
+                    companion_pubkey,
+                    companion_account: None,
+                })
             }
             (Found(acc), Found(comp)) => {
                 // Found the delegation record, we include it so that the caller can
                 // use it to add metadata to the account and use it for decision making
-                let Some(comp_account) = resolve(&comp.account) else {
-                    return Err(
-                        ChainlinkError::ResolvedCompanionAccountCouldNoLongerBeFound(
-                            companion_pubkey,
-                        ),
-                    );
-                };
-                let Some(account) = resolve(&acc.account) else {
-                    return Err(
-                        ChainlinkError::ResolvedAccountCouldNoLongerBeFound(
-                            pubkey,
-                        ),
-                    );
-                };
                 Ok(AccountWithCompanion {
                     pubkey,
-                    account,
+                    account: resolve(&acc.account),
                     companion_pubkey,
-                    companion_account: Some(comp_account),
+                    companion_account: Some(resolve(&comp.account)),
                 })
             }
         }
