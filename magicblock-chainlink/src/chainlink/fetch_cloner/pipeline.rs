@@ -56,88 +56,63 @@ pub(crate) fn classify_remote_accounts(
     accs: Vec<RemoteAccount>,
     pubkeys: &[Pubkey],
 ) -> ClassifiedAccounts {
-    let mut not_found = Vec::new();
-    let mut plain = Vec::new();
-    let mut owned_by_deleg = Vec::new();
-    let mut programs = Vec::new();
-    let mut atas = Vec::new();
+    let mut classified = ClassifiedAccounts::default();
 
     for (acc, &pubkey) in accs.into_iter().zip(pubkeys) {
-        classify_single_account(
-            acc,
-            pubkey,
-            &mut not_found,
-            &mut plain,
-            &mut owned_by_deleg,
-            &mut programs,
-            &mut atas,
-        );
+        if let Some(request) = classified.classify(acc, pubkey) {
+            classified.plain.push(request);
+        }
     }
 
-    ClassifiedAccounts {
-        not_found,
-        plain,
-        owned_by_deleg,
-        programs,
-        atas,
-    }
+    classified
 }
 
-/// Helper function to classify a single remote account
-#[inline]
-fn classify_single_account(
-    acc: RemoteAccount,
-    pubkey: Pubkey,
-    not_found: &mut Vec<(Pubkey, u64)>,
-    plain: &mut Vec<AccountCloneRequest>,
-    owned_by_deleg: &mut Vec<(Pubkey, AccountBuilder, u64)>,
-    programs: &mut Vec<(Pubkey, AccountBuilder, u64)>,
-    atas: &mut Vec<(
-        Pubkey,
-        AccountBuilder,
-        magicblock_core::token_programs::AtaInfo,
-        u64,
-    )>,
-) {
-    use RemoteAccount::*;
-    match acc {
-        NotFound(slot) => {
-            not_found.push((pubkey, slot));
-        }
-        Found(remote_account_state) => {
-            match remote_account_state.account {
-                ResolvedAccount::Fresh(account) => {
-                    let slot = account.slot();
-                    let account = AccountBuilder::from(account);
-                    let state = account.read();
-
-                    if state.owner() == dlp_api::id() {
-                        // Account owned by delegation program
-                        owned_by_deleg.push((pubkey, account, slot));
-                    } else if state.flags().contains(StateFlags::EXECUTABLE) {
-                        // Executable program account
-                        classify_program(pubkey, account, slot, programs);
-                    } else if let Some(ata) =
-                        is_ata(&pubkey, state.owner(), state.data())
-                    {
-                        // Associated Token Account
-                        atas.push((pubkey, account, ata, slot));
-                    } else {
-                        // Plain account
-                        plain.push(AccountCloneRequest {
-                            pubkey,
-                            account,
-                            post_delegation_mode: ClonePostDelegationMode::None,
-                            delegated_to_other: None,
-                            source_slots: None,
-                        });
-                    }
-                }
-                ResolvedAccount::Bank((pubkey, slot)) => {
-                    error!(pubkey = %pubkey, slot = slot, "BUG: Should not be fetching accounts already in bank");
-                }
+impl ClassifiedAccounts {
+    /// Returns a dependency-free request and retains companion targets for
+    /// resolution by the batch pipeline.
+    #[inline]
+    pub(crate) fn classify(
+        &mut self,
+        acc: RemoteAccount,
+        pubkey: Pubkey,
+    ) -> Option<AccountCloneRequest> {
+        let remote = match acc {
+            RemoteAccount::Found(remote) => remote,
+            RemoteAccount::NotFound(slot) => {
+                self.not_found.push((pubkey, slot));
+                return None;
             }
+        };
+        let account = match remote.account {
+            ResolvedAccount::Fresh(account) => account,
+            ResolvedAccount::Bank((pubkey, slot)) => {
+                error!(pubkey = %pubkey, slot = slot, "BUG: Should not be fetching accounts already in bank");
+                return None;
+            }
+        };
+        let slot = account.slot();
+        let account = AccountBuilder::from(account);
+        let state = account.read();
+
+        if state.owner() == dlp_api::id() {
+            self.owned_by_deleg.push((pubkey, account, slot));
+            return None;
         }
+        if state.flags().contains(StateFlags::EXECUTABLE) {
+            classify_program(pubkey, account, slot, &mut self.programs);
+            return None;
+        }
+        if let Some(ata) = is_ata(&pubkey, state.owner(), state.data()) {
+            self.atas.push((pubkey, account, ata, slot));
+            return None;
+        }
+        Some(AccountCloneRequest {
+            pubkey,
+            account,
+            post_delegation_mode: ClonePostDelegationMode::None,
+            delegated_to_other: None,
+            source_slots: None,
+        })
     }
 }
 

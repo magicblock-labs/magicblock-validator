@@ -106,8 +106,8 @@ fn account_value(ctx: &TestContext, pubkey: Pubkey) -> i64 {
         .unwrap()
 }
 
-/// Proves a forced fetch racing the greedy-discovery subscription path submits
-/// one account mutation and executes its post-delegation action exactly once.
+/// Proves an update sent while ensure waits for its target lease cannot cause
+/// a second materialization or replay its post-delegation action.
 #[tokio::test]
 async fn fetch_and_discovery_subscription_race_materializes_once() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
@@ -123,26 +123,20 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     let deleg_record_pubkey =
         add_increment_action(&ctx, account_pubkey, output);
     let mut updates = bank.accounts().subscribe(account_pubkey);
-    let blocker = bank.account(account_pubkey).await;
+    let blocker = bank.account(account_pubkey).await.unwrap();
 
     let requested = [account_pubkey];
     let ensure = chainlink.ensure_accounts(
         &requested,
         AccountFetchEntrypoint::RpcGetMultipleAccounts,
     );
-    let subscription = ctx.send_and_receive_account_update(
-        account_pubkey,
-        remote_account,
-        Some(8_000),
-    );
+    let subscription = ctx.send_account_update(account_pubkey, remote_account);
     let release = async move {
         tokio::task::yield_now().await;
         drop(blocker);
     };
-    let (ensure_result, subscription_completed, ()) =
-        tokio::join!(ensure, subscription, release);
+    let (ensure_result, (), ()) = tokio::join!(ensure, subscription, release);
     ensure_result.expect("ensure succeeds");
-    assert!(subscription_completed, "subscription update completes");
 
     assert_cloned_as_delegated!(bank, &[account_pubkey], CURRENT_SLOT, V42_ID);
     let target_value = account_value(&ctx, account_pubkey);

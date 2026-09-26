@@ -307,6 +307,7 @@ impl TestContext {
         self.bank
             .account(*pubkey)
             .await
+            .expect("acquire account lease")
             .materialize(account, None)
             .await
             .expect("mark account undelegating through engine");

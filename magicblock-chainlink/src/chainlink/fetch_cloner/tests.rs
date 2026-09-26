@@ -113,9 +113,8 @@ fn post_delegation_dependency_fetch_policy() {
 }
 
 /// Proves a newer request waiting behind an older materialization re-reads the
-/// bank and applies its own image instead of inheriting the older result.
-/// Delegated activation uses source-data freshness without regressing its stamp;
-/// a newer companion view cannot make stale source data eligible.
+/// bank and applies its own image instead of inheriting the older result, while
+/// Engine skips an older image without changing the local account.
 #[tokio::test]
 async fn waiter_applies_newer_account_image() {
     let ctx = TestContext::init(11).await;
@@ -138,7 +137,7 @@ async fn waiter_applies_newer_account_image() {
     };
     let older = build(11, 1);
     let newer = build(12, 2);
-    let accessor = ctx.bank.account(pubkey).await;
+    let accessor = ctx.bank.account(pubkey).await.unwrap();
     let older = fetch.submit_account(
         accessor,
         older,
@@ -161,7 +160,6 @@ async fn waiter_applies_newer_account_image() {
 
     let mut stale = build(10, 3);
     stale.account = stale.account.mode(AccountMode::Delegated);
-    stale.source_slots = Some(CloneSourceSlots { data: 11, view: 99 });
     fetch
         .clone_account(stale, AccountFetchContext::rpc_get_multiple_accounts())
         .await
@@ -176,26 +174,6 @@ async fn waiter_applies_newer_account_image() {
         .unwrap()
         .unwrap();
     assert_eq!(state, (AccountMode::ReadOnly, 12, vec![2]));
-
-    let mut fresh = build(10, 4);
-    fresh.account = fresh.account.mode(AccountMode::Delegated);
-    fresh.source_slots = Some(CloneSourceSlots { data: 13, view: 99 });
-    fetch
-        .clone_account(fresh, AccountFetchContext::rpc_get_multiple_accounts())
-        .await
-        .expect("fresh source activates the plain local account");
-    let state = ctx
-        .bank
-        .accounts()
-        .loader()
-        .read(&pubkey, |account| {
-            (account.mode(), account.slot(), account.data().to_vec())
-        })
-        .unwrap()
-        .unwrap();
-    // Preserve monotonic storage slots without using companion freshness as
-    // either the account image's stamp or its source-data evidence.
-    assert_eq!(state, (AccountMode::Delegated, 12, vec![4]));
 }
 
 mod aml_check_strategy {
