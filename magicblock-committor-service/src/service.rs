@@ -42,6 +42,16 @@ pub struct IntentExecutionService<O, D> {
     slot_interval: Duration,
 }
 
+fn collect_undelegated_pubkeys(
+    intent_bundles: &[OutboxIntentBundle],
+) -> Vec<Pubkey> {
+    let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
+    intent_bundles.iter().for_each(|intent| {
+        pubkeys_being_undelegated.extend(intent.get_undelegated_pubkeys());
+    });
+    pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
+}
+
 impl<O, D: BacklogDB> IntentExecutionService<O, D>
 where
     O: OutboxClient,
@@ -195,16 +205,8 @@ where
             return Ok(());
         }
 
-        let pubkeys_being_undelegated = {
-            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-            intent_bundles.iter().for_each(|intent| {
-                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
-                {
-                    pubkeys_being_undelegated.extend(undelegate);
-                }
-            });
-            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
-        };
+        let pubkeys_being_undelegated =
+            collect_undelegated_pubkeys(&intent_bundles);
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
@@ -403,4 +405,83 @@ pub enum IntentExecutionServiceError {
     OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
     #[error("IntentExecutorError: {0}")]
     IntentExecutorError(#[from] Box<IntentExecutorError>),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use magicblock_core::intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
+    };
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_account::Account;
+    use solana_hash::Hash;
+
+    use super::*;
+
+    fn committed_account(pubkey: Pubkey) -> CommittedAccount {
+        CommittedAccount {
+            pubkey,
+            account: Account::default(),
+            remote_slot: Default::default(),
+        }
+    }
+
+    fn accepted_bundle(
+        intent_id: u64,
+        intent_bundle: MagicIntentBundle,
+    ) -> OutboxIntentBundle {
+        let intent = ScheduledIntentBundle {
+            intent_id,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Default::default(),
+            payer: Pubkey::default(),
+            intent_bundle,
+        };
+        let bump = outbox_intent_pda_with_bump(intent_id).1;
+        OutboxIntentBundle::accepted(intent, bump)
+    }
+
+    #[test]
+    fn collect_undelegated_pubkeys_includes_commit_finalize_and_undelegate() {
+        let committed_only = Pubkey::new_unique();
+        let commit_and_undelegate = Pubkey::new_unique();
+        let commit_finalize_and_undelegate = Pubkey::new_unique();
+
+        let intent_bundle = MagicIntentBundle {
+            commit: Some(CommitType::Standalone(vec![committed_account(
+                committed_only,
+            )])),
+            commit_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![committed_account(
+                    commit_and_undelegate,
+                )]),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            commit_finalize_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![committed_account(
+                    commit_finalize_and_undelegate,
+                )]),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            ..Default::default()
+        };
+
+        let actual =
+            collect_undelegated_pubkeys(&[accepted_bundle(1, intent_bundle)])
+                .into_iter()
+                .collect::<HashSet<_>>();
+
+        assert_eq!(
+            actual,
+            HashSet::from([
+                commit_and_undelegate,
+                commit_finalize_and_undelegate
+            ])
+        );
+        assert!(!actual.contains(&committed_only));
+    }
 }
