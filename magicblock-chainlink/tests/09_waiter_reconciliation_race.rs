@@ -106,8 +106,8 @@ fn account_value(ctx: &TestContext, pubkey: Pubkey) -> i64 {
         .unwrap()
 }
 
-/// Proves a forced fetch racing the greedy-discovery subscription path submits
-/// one account mutation and executes its post-delegation action exactly once.
+/// Proves an update sent while ensure waits for its target lease cannot cause
+/// a second materialization or replay its post-delegation action.
 #[tokio::test]
 async fn fetch_and_discovery_subscription_race_materializes_once() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
@@ -123,26 +123,20 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     let deleg_record_pubkey =
         add_increment_action(&ctx, account_pubkey, output);
     let mut updates = bank.accounts().subscribe(account_pubkey);
-    let blocker = bank.account(account_pubkey).await;
+    let blocker = bank.account(account_pubkey).await.unwrap();
 
     let requested = [account_pubkey];
     let ensure = chainlink.ensure_accounts(
         &requested,
         AccountFetchEntrypoint::RpcGetMultipleAccounts,
     );
-    let subscription = ctx.send_and_receive_account_update(
-        account_pubkey,
-        remote_account,
-        Some(8_000),
-    );
+    let subscription = ctx.send_account_update(account_pubkey, remote_account);
     let release = async move {
         tokio::task::yield_now().await;
         drop(blocker);
     };
-    let (ensure_result, subscription_completed, ()) =
-        tokio::join!(ensure, subscription, release);
+    let (ensure_result, (), ()) = tokio::join!(ensure, subscription, release);
     ensure_result.expect("ensure succeeds");
-    assert!(subscription_completed, "subscription update completes");
 
     assert_cloned_as_delegated!(bank, &[account_pubkey], CURRENT_SLOT, V42_ID);
     let target_value = account_value(&ctx, account_pubkey);
@@ -204,18 +198,18 @@ async fn transient_redelegation_subscription_executes_action_once() {
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
 }
 
-/// Proves dropping an activation wait cannot authorize rescue or a newer-slot
-/// replacement while Engine still owns the submitted same-generation activation.
+/// Proves dropping an activation wait cannot authorize a refetch or replacement
+/// while Engine still owns the submitted same-generation activation.
 #[tokio::test]
-async fn timed_out_activation_completes_once_before_newer_refetch() {
+async fn timed_out_activation_satisfies_waiter_without_refetch() {
     const PENDING: Duration = Duration::from_millis(100);
     const COMPLETION: Duration = Duration::from_secs(8);
     let ctx = TestContext::init(CURRENT_SLOT).await;
     let pubkey = Pubkey::new_unique();
     let output = Pubkey::new_unique();
     let newer_slot = CURRENT_SLOT + 11;
-    // Preseed writable dependencies at the newer observation slot so neither
-    // request can stall on an unrelated dependency mutation behind the barrier.
+    // Preseed writable dependencies so the first activation cannot stall on
+    // an unrelated dependency mutation behind the barrier.
     seed_output(&ctx, output, newer_slot);
     ctx.rpc_client.add_account(pubkey, remote_account());
     add_increment_action(&ctx, pubkey, output);
@@ -238,9 +232,10 @@ async fn timed_out_activation_completes_once_before_newer_refetch() {
         tokio::time::timeout(PENDING, &mut newer).await.is_err(),
         "newer observation must wait for the pending activation"
     );
-    assert!(
-        ctx.rpc_client.multi_account_fetches() > fetches,
-        "the waiter must refetch at the newer mock slot before barrier release"
+    assert_eq!(
+        ctx.rpc_client.multi_account_fetches(),
+        fetches,
+        "the waiter must acquire the lease before fetching"
     );
     assert_eq!(ctx.test_engine.get_account(pubkey), before);
     assert_eq!(account_value(&ctx, output), 0);
@@ -268,6 +263,11 @@ async fn timed_out_activation_completes_once_before_newer_refetch() {
         .await
         .expect("newer request completes")
         .expect("newer observation is satisfied by the original activation");
+    assert_eq!(
+        ctx.rpc_client.multi_account_fetches(),
+        fetches,
+        "the completed activation leaves nothing to refetch"
+    );
     // The original slot distinguishes completion of the timed-out submission
     // from a replacement submitted by the newer observation.
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], CURRENT_SLOT, V42_ID);

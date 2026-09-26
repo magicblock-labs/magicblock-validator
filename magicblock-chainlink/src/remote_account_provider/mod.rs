@@ -88,7 +88,6 @@ use magicblock_metrics::{
         set_monitored_accounts_count,
     },
 };
-pub use remote_account::ResolvedAccount;
 
 use crate::{
     remote_account_provider::{

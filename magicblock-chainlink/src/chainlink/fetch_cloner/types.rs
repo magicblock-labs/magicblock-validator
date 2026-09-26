@@ -21,6 +21,7 @@ pub(crate) enum RefreshDecision {
     YesAndMarkEmptyIfNotFound,
 }
 
+#[derive(Default)]
 pub(crate) struct ClassifiedAccounts {
     pub(crate) not_found: Vec<(Pubkey, u64)>,
     pub(crate) plain: Vec<AccountCloneRequest>,
