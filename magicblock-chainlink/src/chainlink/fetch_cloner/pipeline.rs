@@ -28,7 +28,7 @@ use crate::{
     cloner::{AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots},
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        ResolvedAccount, SubscriptionReason,
+        SubscriptionReason,
         program_account::{
             LOADER_V3, ProgramAccountResolver,
             get_loaderv3_get_program_data_address,
@@ -83,13 +83,7 @@ impl ClassifiedAccounts {
                 return None;
             }
         };
-        let account = match remote.account {
-            ResolvedAccount::Fresh(account) => account,
-            ResolvedAccount::Bank((pubkey, slot)) => {
-                error!(pubkey = %pubkey, slot = slot, "BUG: Should not be fetching accounts already in bank");
-                return None;
-            }
-        };
+        let account = remote.account;
         let slot = account.slot();
         let account = AccountBuilder::from(account);
         let state = account.read();
@@ -511,7 +505,6 @@ where
                     let account_data = account_pair[1].clone();
                     let result =
                         FetchCloner::<T, U>::resolve_account_with_companion(
-                            this.engine(),
                             pubkey,
                             program_data_pubkey,
                             account_program,

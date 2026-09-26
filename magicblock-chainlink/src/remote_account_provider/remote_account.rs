@@ -1,4 +1,3 @@
-use engine::Engine;
 use solana_account::{
     Account, AccountBuilder, AccountSharedData, ReadableAccount,
 };
@@ -12,36 +11,19 @@ pub enum RemoteAccountUpdateSource {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ResolvedAccount {
-    /// The most recent remote state of the account that is not stored in the bank yet.
-    /// The account maybe in our bank at this point, but with a stale remote state.
-    /// The only accounts that are always more fresh than the remote version are accounts
-    /// delegated to us.
-    /// Therefore we never fetch them again or subscribe to them once we cloned them into
-    /// our bank once.
-    /// The committor service will let us know once they are being undelegated at which point
-    /// we subscribe to them and fetch the latest state.
-    Fresh(AccountSharedData),
-    /// Most _fresh_ accounts are stored in the bank before the transaction needing
-    /// them proceeds. Delegation records are not stored.
-    Bank((Pubkey, Slot)),
+pub struct RemoteAccountState {
+    /// The most recent remote image, not necessarily materialized locally.
+    pub account: AccountSharedData,
+    pub source: RemoteAccountUpdateSource,
 }
 
-impl Clone for ResolvedAccount {
+impl Clone for RemoteAccountState {
     fn clone(&self) -> Self {
-        match self {
-            Self::Fresh(account) => {
-                Self::Fresh(AccountSharedData::from(account.owned()))
-            }
-            Self::Bank(account) => Self::Bank(*account),
+        Self {
+            account: AccountSharedData::from(self.account.owned()),
+            source: self.source.clone(),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RemoteAccountState {
-    pub account: ResolvedAccount,
-    pub source: RemoteAccountUpdateSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,46 +47,13 @@ impl RemoteAccount {
         source: RemoteAccountUpdateSource,
     ) -> Self {
         RemoteAccount::Found(RemoteAccountState {
-            account: ResolvedAccount::Fresh(account.build()),
+            account: account.build(),
             source,
         })
     }
-    /// Returns the fresh remote account if it was just updated, otherwise tries the bank
-    pub fn account(&self, engine: &Engine) -> Option<AccountBuilder> {
-        match self {
-            // Fresh remote account, not in the bank yet
-            RemoteAccount::Found(RemoteAccountState {
-                account: ResolvedAccount::Fresh(remote_account),
-                ..
-            }) => Some(AccountBuilder::from(AccountSharedData::from(
-                remote_account.owned(),
-            ))),
-            // Most up to date version of account from the bank
-            RemoteAccount::Found(RemoteAccountState {
-                account: ResolvedAccount::Bank((pubkey, _)),
-                ..
-            }) => engine
-                .accounts()
-                .loader()
-                .read(pubkey, |account| {
-                    AccountBuilder::from(AccountSharedData::from(
-                        account.owned(),
-                    ))
-                })
-                .ok()
-                .flatten(),
-            // Account not fetched/subbed nor in the bank
-            RemoteAccount::NotFound(_) => None,
-        }
-    }
     pub fn slot(&self) -> u64 {
         match self {
-            RemoteAccount::Found(RemoteAccountState { account, .. }) => {
-                match account {
-                    ResolvedAccount::Fresh(account) => account.slot(),
-                    ResolvedAccount::Bank((_, slot)) => *slot,
-                }
-            }
+            RemoteAccount::Found(state) => state.account.slot(),
             RemoteAccount::NotFound(slot) => *slot,
         }
     }
@@ -123,20 +72,14 @@ impl RemoteAccount {
 
     pub fn fresh_account(&self) -> Option<&AccountSharedData> {
         match self {
-            RemoteAccount::Found(RemoteAccountState {
-                account: ResolvedAccount::Fresh(account),
-                ..
-            }) => Some(account),
+            RemoteAccount::Found(state) => Some(&state.account),
             _ => None,
         }
     }
 
     pub fn into_fresh_account(self) -> Option<AccountSharedData> {
         match self {
-            RemoteAccount::Found(RemoteAccountState {
-                account: ResolvedAccount::Fresh(account),
-                ..
-            }) => Some(account),
+            RemoteAccount::Found(state) => Some(state.account),
             _ => None,
         }
     }
