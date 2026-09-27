@@ -7,6 +7,7 @@ version = "0.1.0"
 anyhow = { workspace = true }
 chrono = { workspace = true }
 cleanass = { workspace = true }
+hydra-api = { workspace = true, features = ["client"] }
 integration-test-tools = { workspace = true }
 magicblock-config = { path = "../../magicblock-config" }
 magicblock-program = { path = "../../programs/magicblock" }

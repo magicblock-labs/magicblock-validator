@@ -7,7 +7,7 @@ use std::{collections::HashMap, fs, path::PathBuf};
 use keeper::builder::KeeperBuilder;
 use magicblock_config::config::{EngineConfig, LoadableProgram};
 use magicblock_program::magicblock_processor::{
-    CallbackEntrypoint, CrankEntrypoint, Entrypoint, EphemeralSystemEntrypoint,
+    CallbackEntrypoint, Entrypoint, EphemeralSystemEntrypoint,
     OutboxIntentEntrypoint,
 };
 use solana_program_runtime::{
@@ -57,10 +57,6 @@ fn builtins() -> HashMap<Pubkey, BuiltinFunctionWithContext> {
     builtins.insert(
         magicblock_program::ID,
         (Entrypoint::vm, Entrypoint::codegen),
-    );
-    builtins.insert(
-        magicblock_program::CRANK_PROGRAM_ID,
-        (CrankEntrypoint::vm, CrankEntrypoint::codegen),
     );
     builtins.insert(
         magicblock_program::CALLBACK_PROGRAM_ID,

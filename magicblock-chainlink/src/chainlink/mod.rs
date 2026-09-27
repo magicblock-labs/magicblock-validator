@@ -404,8 +404,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures requested accounts are materialized locally. Missing remote
-    /// accounts are represented as placeholders.
+    /// Ensures absent accounts are materialized locally and refreshes Transient
+    /// accounts whose undelegation completed without a subscription update.
+    /// Missing remote accounts are represented as placeholders.
     /// Returns the number of requested remote accounts claimed by this call.
     /// If we're offline and not syncing accounts then this is a no-op.
     pub async fn ensure_accounts(
@@ -417,31 +418,42 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             return Ok(0);
         };
 
-        let pending = {
-            let accessor = self.engine.accounts();
-            let loader = accessor.loader();
-            let mut pending = None;
-            for pubkey in pubkeys {
-                let mode = loader.mode(pubkey).map_err(KeeperError::from)?;
-                if mode.is_none_or(|mode| mode == AccountMode::Transient) {
-                    pending
-                        .get_or_insert_with(|| {
-                            Vec::with_capacity(pubkeys.len())
-                        })
-                        .push(*pubkey);
+        tokio::time::timeout(ENSURE_ACCOUNTS_TIMEOUT, async {
+            let transients = {
+                let accounts = self.engine.accounts();
+                let loader = accounts.loader();
+                let mut transients = Vec::new();
+                for &pubkey in pubkeys {
+                    if loader
+                        .read(&pubkey, |account| account.mode())
+                        .map_err(KeeperError::from)?
+                        == Some(AccountMode::Transient)
+                    {
+                        transients.push(pubkey);
+                    }
                 }
-            }
-            pending
-        };
-        let Some(pending) = pending else {
-            return Ok(0);
-        };
-
-        tokio::time::timeout(
-            ENSURE_ACCOUNTS_TIMEOUT,
-            fetch_cloner
-                .fetch_and_clone_requested_accounts(&pending, fetch_origin),
-        )
+                transients
+            };
+            let pending = self
+                .engine
+                .missing_accounts(pubkeys)
+                .await
+                .map_err(cloner::errors::ClonerError::from)?;
+            let claimed = if pending.is_empty() {
+                0
+            } else {
+                fetch_cloner
+                    .fetch_and_clone_requested_accounts(pending, fetch_origin)
+                    .await?
+            };
+            Ok(claimed
+                + fetch_cloner
+                    .refresh_transient_requested_accounts(
+                        &transients,
+                        fetch_origin,
+                    )
+                    .await?)
+        })
         .await
         .unwrap_or_else(|_| {
             Err(ChainlinkError::EnsureAccountsTimeout(

@@ -181,7 +181,7 @@ mod tests {
         stage: Option<ExecutionStage>,
     ) -> Vec<u8> {
         let inner = ScheduledIntentBundle {
-            id: intent_id,
+            intent_id,
             slot: 0,
             blockhash: Hash::default(),
             sent_transaction: Transaction::default(),
@@ -190,7 +190,7 @@ mod tests {
         };
         let mut bundle = OutboxIntentBundle::accepted(inner, bump);
         if let Some(stage) = stage {
-            bundle.apply_stage_transition(stage).unwrap();
+            bundle.apply_stage_transition(stage, Vec::new()).unwrap();
         }
         bundle.try_to_bytes().unwrap()
     }

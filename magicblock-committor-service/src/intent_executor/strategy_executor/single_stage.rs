@@ -16,7 +16,8 @@ use crate::{
         strategy_executor::{
             patcher::SingleStagePatcher,
             utils::{
-                ExecutionState, handle_actions_result, stage_execution_loop,
+                ExecutionState, handle_actions_result, single_stage_pending,
+                stage_execution_loop,
             },
         },
     },
@@ -109,6 +110,7 @@ where
             patcher,
             self.intent_id,
             ExecutionStage::SingleStage,
+            single_stage_pending,
             IntentExecutorError::FailedFinalizePreparationError,
             execution_state,
         )

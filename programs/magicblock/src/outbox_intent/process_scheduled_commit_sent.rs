@@ -5,27 +5,30 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::intent::outbox::verify_outbox_intent_pda;
-use solana_account::ReadableAccount;
+use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_clock::Slot;
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    utils::{
+        account_actions::set_account_mode,
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
     },
     validator::authority,
 };
 
-/// Error code returned when an intent execution failed.
-/// This indicates the intent could not be successfully executed despite patching attempts.
-const INTENT_FAILED_CODE: u32 = 0x7461636F;
+const VALIDATOR_IDX: u16 = 0;
+const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct SentCommit {
@@ -157,9 +160,7 @@ pub fn process_scheduled_commit_sent(
 
     // Log data
     log_sent_commit(invoke_context, &commit);
-    commit.error_message.map_or(Ok(()), |_| {
-        Err(InstructionError::Custom(INTENT_FAILED_CODE))
-    })
+    close_outbox_ephemeral_account(invoke_context)
 }
 
 fn validate(
@@ -167,9 +168,6 @@ fn validate(
     invoke_context: &InvokeContext,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    const VALIDATOR_IDX: u16 = 0;
-    const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
-
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
@@ -236,6 +234,22 @@ fn validate(
         );
         return Err(InstructionError::InvalidArgument);
     }
+
+    Ok(())
+}
+
+fn close_outbox_ephemeral_account(
+    invoke_context: &InvokeContext,
+) -> Result<(), InstructionError> {
+    let transaction_context = &*invoke_context.transaction_context;
+    let pda =
+        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+
+    let mut acc = pda.borrow_mut()?;
+    acc.set_lamports(0);
+    acc.set_owner(system_program::id());
+    acc.resize(0, 0);
+    set_account_mode(invoke_context, &mut acc, AccountMode::Closed)?;
 
     Ok(())
 }
@@ -327,13 +341,13 @@ mod tests {
         },
     };
 
-    fn single_acc_commit(commit_id: u64) -> SentCommit {
+    fn single_acc_commit(intent_id: u64) -> SentCommit {
         let slot = 10;
         let sig = Signature::default();
         let payer = Pubkey::new_unique();
         let acc = Pubkey::new_unique();
         SentCommit {
-            message_id: commit_id,
+            message_id: intent_id,
             slot,
             blockhash: Hash::default(),
             payer,
@@ -437,7 +451,7 @@ mod tests {
         let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
         let bundle = OutboxIntentBundle::accepted(
             ScheduledIntentBundle {
-                id: commit.message_id,
+                intent_id: commit.message_id,
                 slot: 0,
                 blockhash: Hash::default(),
                 sent_transaction: Transaction::default(),

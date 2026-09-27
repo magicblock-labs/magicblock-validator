@@ -35,7 +35,7 @@ struct IntentMeta {
 ///
 /// 2. On intent completion:
 ///     - Pop 1st el-t from corresponding to Intent `blocked_keys` queues,
-///       Note: `blocked_keys[msg.keys]` == msg.id
+///       Note: `blocked_keys[msg.keys]` == msg.intent_id
 ///     - This moves forward other intents that were blocked by this one.
 ///
 /// 3. On popping next intent to be executed:
@@ -80,7 +80,7 @@ impl IntentScheduler {
         &mut self,
         intent_bundle: OutboxIntentBundle,
     ) -> Option<OutboxIntentBundle> {
-        let intent_id = intent_bundle.id;
+        let intent_id = intent_bundle.intent_id;
 
         // To check duplicate scheduling its enough to check:
         // 1. currently blocked
@@ -151,7 +151,7 @@ impl IntentScheduler {
         intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
-        let intent_id = intent_bundle.id;
+        let intent_id = intent_bundle.intent_id;
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             // This means BaseAction, it doesn't have to be scheduled
@@ -862,7 +862,7 @@ pub(crate) fn create_test_intent(
     use solana_hash::Hash;
 
     let mut intent = ScheduledIntentBundle {
-        id,
+        intent_id: id,
         slot: 0,
         blockhash: Hash::default(),
         sent_transaction: Default::default(),
@@ -922,7 +922,7 @@ pub(crate) fn create_test_intent_bundle(
     };
 
     let mut intent = ScheduledIntentBundle {
-        id,
+        intent_id: id,
         slot: 0,
         blockhash: Hash::default(),
         sent_transaction: Default::default(),
