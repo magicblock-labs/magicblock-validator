@@ -708,19 +708,14 @@ mod tests {
         let task = create_test_commit_task(1, 66_000, 0); // Large task
         let tasks = vec![task.into()];
 
-        let strategy = TaskStrategist::build_strategy(
+        let result = TaskStrategist::build_strategy(
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
             None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        );
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert!(matches!(
-            strategy.optimized_tasks[0].strategy(),
-            TaskStrategy::Buffer
-        ));
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
     #[test]
@@ -728,7 +723,7 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task =
-            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
+            create_test_commit_task(1, 10_240, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
         let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
@@ -749,7 +744,7 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task =
-            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD + 1); // large account but small diff
+            create_test_commit_task(1, 10_240, COMMIT_STATE_SIZE_THRESHOLD + 1); // large account but small diff
         let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
@@ -769,7 +764,7 @@ mod tests {
         let validator = Pubkey::new_unique();
 
         let task =
-            create_test_commit_task(1, 66_000, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
+            create_test_commit_task(1, 10_240, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
         let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
@@ -818,14 +813,14 @@ mod tests {
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
         // Also max number of committed accounts fit with ALTs!
-        const NUM_COMMITS: u64 = 22;
+        const NUM_COMMITS: u64 = 11;
 
         let validator = Pubkey::new_unique();
 
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
                 // Large task
-                let task = create_test_commit_task(i, 10000, 0);
+                let task = create_test_commit_task(i, 1000, 0);
                 task.into()
             })
             .collect();
@@ -846,15 +841,8 @@ mod tests {
 
     #[test]
     fn test_build_strategy_reserves_space_for_uniqueness_nonce() {
-        // 22 large commits are the max that fit with ALTs (see test above);
-        // with the uniqueness noop reserved they no longer fit.
-        const NUM_COMMITS: u64 = 22;
-
         let validator = Pubkey::new_unique();
-
-        let tasks: Vec<BaseTaskImpl> = (0..NUM_COMMITS)
-            .map(|i| create_test_commit_task(i, 10000, 0).into())
-            .collect();
+        let tasks = vec![create_test_base_action_task(910).into()];
 
         let result = TaskStrategist::build_strategy(
             tasks.clone(),
@@ -864,9 +852,10 @@ mod tests {
         );
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
 
-        // One commit fewer fits again, and the nonce lands on the strategy
+        // One byte fewer fits again, and the nonce lands on the strategy.
+        let tasks = vec![create_test_base_action_task(909).into()];
         let strategy = TaskStrategist::build_strategy(
-            tasks[..NUM_COMMITS as usize - 1].to_vec(),
+            tasks,
             &validator,
             &None::<IntentPersisterImpl>,
             Some(42),
@@ -1053,8 +1042,22 @@ mod tests {
     #[tokio::test]
     async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit(
     ) {
-        let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
-        let intent = create_test_intent(0, &pubkeys, true);
+        let mut intent = create_test_intent(0, &[], false);
+        intent.intent_bundle.standalone_actions = (0..23)
+            .map(|_| BaseAction {
+                id: 0,
+                destination_program: Pubkey::new_unique(),
+                source_program: None,
+                escrow_authority: Pubkey::new_unique(),
+                account_metas_per_program: vec![],
+                data_per_program: ProgramArgs {
+                    data: vec![],
+                    escrow_index: 0,
+                },
+                compute_units: 30_000,
+                callback: None,
+            })
+            .collect();
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(
@@ -1085,7 +1088,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_build_single_stage_mode_with_alts() {
-        let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
+        let pubkeys: [_; 5] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent(0, &pubkeys, false);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());

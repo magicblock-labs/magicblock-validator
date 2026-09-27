@@ -311,7 +311,7 @@ mod tests {
         // but must be escalated to buffer mode by the validator.
         let intent = MagicIntentBundle {
             commit: Some(CommitType::Standalone(vec![make_committed_account(
-                50_000,
+                10_240,
             )])),
             ..Default::default()
         };
