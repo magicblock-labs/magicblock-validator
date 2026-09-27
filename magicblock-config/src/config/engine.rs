@@ -104,6 +104,7 @@ impl<R: fmt::Debug> fmt::Debug for EngineConfig<R> {
             .field("accountsdb_lru_capacity", &self.accountsdb.lru_capacity)
             .field("blocktime", &self.blockstore.blocktime)
             .field("superblock", &self.blockstore.superblock)
+            .field("checkpoint", &self.blockstore.checkpoint)
             .field("ledger_directory", &self.ledger.directory)
             .field("ledger_size_limit", &self.ledger.size_limit)
             .field("replication", &self.replication)
@@ -122,6 +123,7 @@ fn default_blockstore() -> BlockstoreParams {
     BlockstoreParams {
         blocktime: blockstore::default_blocktime(),
         superblock: blockstore::default_superblock(),
+        checkpoint: 0,
     }
 }
 
@@ -173,6 +175,9 @@ mod blockstore {
         /// Slots per superblock; zero disables periodic sealing.
         #[serde(default = "default_superblock")]
         superblock: u64,
+        /// Slots between checksum checkpoints; zero disables them.
+        #[serde(default)]
+        checkpoint: u64,
     }
 
     pub(super) fn default_blocktime() -> Duration {

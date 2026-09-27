@@ -113,9 +113,8 @@ fn post_delegation_dependency_fetch_policy() {
 }
 
 /// Proves a newer request waiting behind an older materialization re-reads the
-/// bank and applies its own image instead of inheriting the older result.
-/// Delegated activation uses source-data freshness without regressing its stamp;
-/// a newer companion view cannot make stale source data eligible.
+/// bank and applies its own image instead of inheriting the older result, while
+/// Engine skips an older image without changing the local account.
 #[tokio::test]
 async fn waiter_applies_newer_account_image() {
     let ctx = TestContext::init(11).await;
@@ -138,7 +137,7 @@ async fn waiter_applies_newer_account_image() {
     };
     let older = build(11, 1);
     let newer = build(12, 2);
-    let accessor = ctx.bank.account(pubkey).await;
+    let accessor = ctx.bank.account(pubkey).await.unwrap();
     let older = fetch.submit_account(
         accessor,
         older,
@@ -161,7 +160,6 @@ async fn waiter_applies_newer_account_image() {
 
     let mut stale = build(10, 3);
     stale.account = stale.account.mode(AccountMode::Delegated);
-    stale.source_slots = Some(CloneSourceSlots { data: 11, view: 99 });
     fetch
         .clone_account(stale, AccountFetchContext::rpc_get_multiple_accounts())
         .await
@@ -176,26 +174,76 @@ async fn waiter_applies_newer_account_image() {
         .unwrap()
         .unwrap();
     assert_eq!(state, (AccountMode::ReadOnly, 12, vec![2]));
+}
 
-    let mut fresh = build(10, 4);
-    fresh.account = fresh.account.mode(AccountMode::Delegated);
-    fresh.source_slots = Some(CloneSourceSlots { data: 13, view: 99 });
-    fetch
-        .clone_account(fresh, AccountFetchContext::rpc_get_multiple_accounts())
-        .await
-        .expect("fresh source activates the plain local account");
-    let state = ctx
-        .bank
+#[tokio::test]
+async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
+    let ctx = TestContext::init(10).await;
+    let pubkey = Pubkey::new_unique();
+    let owner = system_program::id();
+    let remote_account = |data| Account {
+        lamports: 1_000_000,
+        data: vec![data],
+        owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let transient = AccountBuilder::from(remote_account(7))
+        .owner(dlp_api::id())
+        .mode(AccountMode::Transient)
+        .slot(100)
+        .build();
+    ctx.bank
         .accounts()
-        .loader()
-        .read(&pubkey, |account| {
-            (account.mode(), account.slot(), account.data().to_vec())
-        })
-        .unwrap()
-        .unwrap();
-    // Preserve monotonic storage slots without using companion freshness as
-    // either the account image's stamp or its source-data evidence.
-    assert_eq!(state, (AccountMode::Delegated, 12, vec![4]));
+        .store(&[(pubkey, transient)])
+        .expect("seed transient account");
+    ctx.chainlink
+        .undelegation_requested(pubkey)
+        .await
+        .expect("watch undelegating account");
+
+    ctx.rpc_client.set_slot(10);
+    assert!(
+        ctx.send_and_receive_account_update(
+            pubkey,
+            remote_account(7),
+            Some(8_000),
+        )
+        .await,
+        "completion update should be processed"
+    );
+    assert_eq!(
+        ctx.bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| {
+                (account.mode(), account.slot(), account.data().to_vec())
+            })
+            .expect("read completed account"),
+        Some((AccountMode::ReadOnly, 100, vec![7]))
+    );
+
+    ctx.rpc_client.set_slot(11);
+    assert!(
+        ctx.send_and_receive_account_update(
+            pubkey,
+            remote_account(9),
+            Some(8_000),
+        )
+        .await,
+        "follow-up base update should be processed"
+    );
+    assert_eq!(
+        ctx.bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| {
+                (account.mode(), account.slot(), account.data().to_vec())
+            })
+            .expect("read refreshed account"),
+        Some((AccountMode::ReadOnly, 101, vec![9]))
+    );
 }
 
 mod aml_check_strategy {

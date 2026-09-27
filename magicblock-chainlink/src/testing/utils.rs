@@ -9,8 +9,8 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
 
 use crate::remote_account_provider::{
-    RemoteAccount, RemoteAccountUpdateSource, ResolvedAccount,
-    SubscribedAccounts, config::RemoteAccountProviderConfig,
+    RemoteAccount, RemoteAccountUpdateSource, SubscribedAccounts,
+    config::RemoteAccountProviderConfig,
 };
 
 pub const PUBSUB_URL: &str = "ws://localhost:7800";
@@ -47,10 +47,7 @@ pub async fn sleep_ms(millis: u64) {
 
 pub fn remote_account_lamports(acc: &RemoteAccount) -> u64 {
     match acc {
-        RemoteAccount::Found(state) => match &state.account {
-            ResolvedAccount::Fresh(account) => account.lamports(),
-            ResolvedAccount::Bank(_) => 0,
-        },
+        RemoteAccount::Found(state) => state.account.lamports(),
         RemoteAccount::NotFound(_) => 0,
     }
 }

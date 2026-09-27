@@ -1,14 +1,5 @@
 use crate::Pubkey;
 
-pub const CRANK_SEED: &[u8] = b"crank-executor";
-pub fn crank_signer_pda(authority: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[CRANK_SEED, authority.as_ref()],
-        &crate::CRANK_PROGRAM_ID,
-    )
-    .0
-}
-
 /// Callback signer PDA info
 pub const CALLBACK_SEED: &[u8] = b"callback-executor";
 const CALLBACK_SIGNER_PDA: ([u8; 32], u8) =

@@ -43,7 +43,7 @@ struct IntentMeta {
 ///
 /// 2. On intent completion:
 ///     - Pop 1st el-t from corresponding to Intent `blocked_keys` queues,
-///       Note: `blocked_keys[msg.keys]` == msg.id
+///       Note: `blocked_keys[msg.keys]` == msg.intent_id
 ///     - This moves forward other intents that were blocked by this one.
 ///
 /// 3. On popping next intent to be executed:
@@ -103,7 +103,7 @@ impl IntentScheduler {
         &mut self,
         intent_bundle: OutboxIntentBundle,
     ) -> Option<OutboxIntentBundle> {
-        let intent_id = intent_bundle.id;
+        let intent_id = intent_bundle.intent_id;
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             return Some(intent_bundle);
@@ -249,7 +249,7 @@ impl IntentScheduler {
         intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<()> {
         // Release data for completed intent
-        let intent_id = intent_bundle.id;
+        let intent_id = intent_bundle.intent_id;
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             // This means BaseAction, it doesn't have to be scheduled
@@ -333,7 +333,7 @@ impl IntentScheduler {
     ///
     /// ## "Lemma": reachable intents are ID-ordered
     ///
-    /// *If `B` is reachable from `A`, then `A.id < B.id`.*
+    /// *If `B` is reachable from `A`, then `A.intent_id < B.intent_id`.*
     ///
     /// **Handwaving Proof.** It's enough to show this for one dependency edge
     /// (`A -> B` directly); the general case follows by chaining edges,
@@ -342,10 +342,10 @@ impl IntentScheduler {
     /// sorted ascending by id. `B` depends on `A` means `B` was scheduled
     /// while `A` already occupied their shared pubkey's queue — i.e. `B`
     /// arrived, and therefore was assigned its id, *after* `A` did. Were it
-    /// the other way around (`B.id < A.id`), `B` would have been admitted
+    /// the other way around (`B.intent_id < A.intent_id`), `B` would have been admitted
     /// to that queue first, and `A` — arriving later — would have had to
     /// queue behind `B` instead, contradicting `B` depending on `A`. So
-    /// `A.id < B.id`. ∎
+    /// `A.intent_id < B.intent_id`. ∎
     ///
     /// This is what makes the worklist walk in `failed()` well-founded: it
     /// only ever looks *forward* (`drain(pos..)`, never backward) through a
@@ -441,7 +441,7 @@ impl IntentScheduler {
         intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<Vec<OutboxIntentBundle>> {
         // Release data for completed intent
-        let intent_id = intent_bundle.id;
+        let intent_id = intent_bundle.intent_id;
         let pubkeys = intent_bundle.get_all_committed_pubkeys();
         if pubkeys.is_empty() {
             // This means Action only intent, it can't poison anything
@@ -1166,11 +1166,11 @@ mod poisoned_test {
         assert!(scheduler.schedule(y.clone()).is_none());
 
         let poisoned = scheduler.failed(&executing_b).unwrap();
-        let mut ids: Vec<_> = poisoned.iter().map(|i| i.id).collect();
+        let mut ids: Vec<_> = poisoned.iter().map(|i| i.intent_id).collect();
         ids.sort();
         assert_eq!(
             ids,
-            vec![x.id, y.id],
+            vec![x.intent_id, y.intent_id],
             "both blocked intents on the chain must be voided"
         );
 
@@ -1194,9 +1194,9 @@ mod poisoned_test {
     ///
     /// `I1` reaches `X` (shares `b1`), which reaches `I2` (shares `a2`) —
     /// so `I1` and `I2` are *not* isolated from each other. Reachable
-    /// intents must be ID-ordered: `I1.id < I2.id`.
+    /// intents must be ID-ordered: `I1.intent_id < I2.intent_id`.
     ///
-    /// Handwaving proof: suppose instead `I2.id < I1.id`. Then `I2` would
+    /// Handwaving proof: suppose instead `I2.intent_id < I1.intent_id`. Then `I2` would
     /// have been admitted first and would occupy `a2`'s queue ahead of
     /// whatever comes to share it with `I1` — but `I1` is what's supposed
     /// to reach `I2`, not the other way around. Contradiction.
@@ -1219,12 +1219,15 @@ mod poisoned_test {
         assert!(scheduler.schedule(bridge).is_none());
         assert!(scheduler.schedule(i2.clone()).is_none());
 
-        assert!(i1.id < i2.id, "reachable intents must be ID-ordered");
+        assert!(
+            i1.intent_id < i2.intent_id,
+            "reachable intents must be ID-ordered"
+        );
 
         // Empirically: I2 is reachable from I1 (not isolated) - failing I1
         // must void I2 too.
         let poisoned = scheduler.failed(&i1).unwrap();
-        assert!(poisoned.iter().any(|p| p.id == i2.id));
+        assert!(poisoned.iter().any(|p| p.intent_id == i2.intent_id));
     }
 
     /// # Case 3 — which intents to exclude
@@ -1271,9 +1274,13 @@ mod poisoned_test {
         assert!(scheduler.schedule(i4.clone()).is_none());
 
         let poisoned = scheduler.failed(&i1).unwrap();
-        let mut ids: Vec<_> = poisoned.iter().map(|p| p.id).collect();
+        let mut ids: Vec<_> = poisoned.iter().map(|p| p.intent_id).collect();
         ids.sort();
-        assert_eq!(ids, vec![i3.id, i4.id], "I2 must not be voided");
+        assert_eq!(
+            ids,
+            vec![i3.intent_id, i4.intent_id],
+            "I2 must not be voided"
+        );
 
         // Every pubkey touched by a voided intent rejects new scheduling,
         // even a1/a2 where I2 is still healthily queued.
@@ -1288,7 +1295,7 @@ mod poisoned_test {
         // I2 survives and executes normally once executing_a completes.
         assert!(scheduler.complete(&executing_a).is_ok());
         let next = scheduler.pop_next_scheduled_intent().unwrap();
-        assert_eq!(next.id, i2.id);
+        assert_eq!(next.intent_id, i2.intent_id);
     }
 
     /// # Case 4 — a chain of single-key overlaps cascades end to end
@@ -1332,11 +1339,11 @@ mod poisoned_test {
         assert!(scheduler.schedule(i4.clone()).is_none());
 
         let poisoned = scheduler.failed(&i1).unwrap();
-        let mut ids: Vec<_> = poisoned.iter().map(|p| p.id).collect();
+        let mut ids: Vec<_> = poisoned.iter().map(|p| p.intent_id).collect();
         ids.sort();
         assert_eq!(
             ids,
-            vec![i2.id, i3.id, i4.id],
+            vec![i2.intent_id, i3.intent_id, i4.intent_id],
             "the whole chain must be voided, nothing left to survive"
         );
 
@@ -1397,11 +1404,11 @@ mod poisoned_test {
         assert!(scheduler.schedule(x.clone()).is_none());
 
         let poisoned = scheduler.failed(&f).unwrap();
-        let mut ids: Vec<_> = poisoned.iter().map(|p| p.id).collect();
+        let mut ids: Vec<_> = poisoned.iter().map(|p| p.intent_id).collect();
         ids.sort();
         assert_eq!(
             ids,
-            vec![a.id, b.id, x.id],
+            vec![a.intent_id, b.intent_id, x.intent_id],
             "X must be voided exactly once despite two discovery paths"
         );
 
@@ -1470,7 +1477,7 @@ pub(crate) fn create_test_intent(
     use solana_hash::Hash;
 
     let mut intent = ScheduledIntentBundle {
-        id,
+        intent_id: id,
         slot: 0,
         blockhash: Hash::default(),
         sent_transaction: Default::default(),
@@ -1530,7 +1537,7 @@ pub(crate) fn create_test_intent_bundle(
     };
 
     let mut intent = ScheduledIntentBundle {
-        id,
+        intent_id: id,
         slot: 0,
         blockhash: Hash::default(),
         sent_transaction: Default::default(),

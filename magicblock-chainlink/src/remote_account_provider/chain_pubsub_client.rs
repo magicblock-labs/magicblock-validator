@@ -103,6 +103,16 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
             .flatten()
     }
 
+    /// Returns reconnect/drift events from clients that can lose account
+    /// notifications during a transport gap. Consumers use this to run
+    /// freshness reconciliation immediately instead of waiting for the
+    /// periodic safety net.
+    fn take_reconnect_reconciliation_rx(
+        &self,
+    ) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+        None
+    }
+
     fn subs_immediately(&self) -> bool;
 
     fn id(&self) -> &str;
@@ -397,12 +407,19 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 .store(self.initial_resub_delay_ms, Ordering::SeqCst);
         }
         if !remaining.is_empty() {
-            // Leftovers are repaired by the subscription reconciler
             warn!(
                 total_subs,
                 failed = remaining.len(),
-                "Re-subscription completed with failures, \
-                 leaving repair to the reconciler",
+                "Re-subscription incomplete",
+            );
+            return Err(
+                RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
+                    format!(
+                        "{} of {total_subs} account subscriptions remain \
+                         missing after reconnect replay",
+                        remaining.len()
+                    ),
+                ),
             );
         }
         Ok(())
@@ -873,6 +890,7 @@ pub mod mock {
             &self,
             pubkeys: HashSet<Pubkey>,
         ) -> RemoteAccountProviderResult<()> {
+            let requested = pubkeys.clone();
             // Simulate transient resubscription failures
             {
                 let mut to_fail = self.pending_resubscribe_failures.lock();
@@ -889,6 +907,22 @@ pub mod mock {
                 self.subscribe(pubkey, None).await?;
                 // keep it small; tests shouldn't take long
                 tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            let subscribed = self.subscriptions_union();
+            let missing = requested
+                .iter()
+                .filter(|pubkey| !subscribed.contains(pubkey))
+                .count();
+            if missing > 0 {
+                return Err(
+                    RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
+                        format!(
+                            "{missing} of {} mock account subscriptions \
+                             remain missing after reconnect replay",
+                            requested.len()
+                        ),
+                    ),
+                );
             }
             Ok(())
         }

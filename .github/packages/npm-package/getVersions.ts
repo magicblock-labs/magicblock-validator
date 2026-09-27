@@ -25,6 +25,8 @@ export function getVersions() {
       pkg.optionalDependencies["@magicblock-labs/vrf-oracle-linux-x64"],
     RPC_ROUTER:
       pkg.optionalDependencies["@magicblock-labs/rpc-router-linux-x64"],
+    HYDRA_CRANKER:
+      pkg.optionalDependencies["@magicblock-labs/hydra-cranker-linux-x64"],
   } as const;
 }
 

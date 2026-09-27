@@ -293,7 +293,7 @@ where
     /// Wrapper on [`IntentExecutor`] that handles its results and drops execution permit.
     /// Transient failures are retried with a fresh executor while the scheduler
     /// keeps conflicting intents blocked, preserving per-account commit order.
-    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.id))]
+    #[instrument(skip(executor_factory, intent, inner_scheduler, limits, execution_permit, result_sender), fields(intent_id = intent.intent_id))]
     async fn execute(
         executor_factory: Arc<F>,
         intent: OutboxIntentBundle,
@@ -314,10 +314,9 @@ where
 
         // Report
         let is_err = result.inner.as_ref().inspect_err(|err| {
-            error!(intent_id = intent.id, error = ?err, "Failed to execute intent bundle");
+            error!(intent_id = intent.intent_id, error = ?err, "Failed to execute intent bundle");
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
-
         let mut scheduler = inner_scheduler.lock().expect(POISONED_INNER_MSG);
         if is_err {
             // Poison this intent's pubkeys and evict any successor that's
@@ -336,7 +335,7 @@ where
             );
             drop(scheduler);
             Self::broadcast_result(
-                BroadcastedIntentExecutionResult::new(intent.id, result),
+                BroadcastedIntentExecutionResult::new(intent.intent_id, result),
                 &result_sender,
             );
             Self::report_poisoned_intents(poisoned_intents, &result_sender);
@@ -350,7 +349,7 @@ where
                 .expect("Valid completion of previously scheduled message");
             drop(scheduler);
             Self::broadcast_result(
-                BroadcastedIntentExecutionResult::new(intent.id, result),
+                BroadcastedIntentExecutionResult::new(intent.intent_id, result),
                 &result_sender,
             );
         }
@@ -378,9 +377,9 @@ where
             poisoned_intents.len() as u64,
         );
         for intent in poisoned_intents {
-            warn!(poisoned_intent = ?intent.id, "Intent poisoned");
+            warn!(poisoned_intent = ?intent.intent_id, "Intent poisoned");
             Self::broadcast_result(
-                BroadcastedIntentExecutionResult::poisoned(intent.id),
+                BroadcastedIntentExecutionResult::poisoned(intent.intent_id),
                 result_sender,
             );
         }
@@ -396,15 +395,25 @@ where
         limits: ExecutionLimits,
         execution_permit: OwnedSemaphorePermit,
     ) -> (IntentExecutionResult, Option<OwnedSemaphorePermit>) {
+        // Commit tasks give on-chain dedup (commit nonce) to re-executed
+        // sends; action-only intents can double-execute if their transaction
+        // landed unobserved, so they only retry pre-send failures
+        let has_dedup_guard = !intent.get_all_committed_pubkeys().is_empty();
+
         let mut attempt = 0;
         let mut execution_permit = Some(execution_permit);
+        let mut current_intent = intent.clone();
         let result = loop {
             attempt += 1;
-            // TODO(edwin): reconcile intent on retry in the future
-            let executor =
-                executor_factory.create_instance(intent.status().clone());
+            if attempt > 1 {
+                current_intent =
+                    executor_factory.reconcile_intent(&current_intent).await;
+            }
+
+            let executor = executor_factory
+                .create_instance(current_intent.status().clone());
             let (result, cleanup_handle) =
-                executor.execute(intent.inner.clone()).await;
+                executor.execute(current_intent.inner.clone()).await;
 
             tokio::spawn(async move {
                 if let Err(err) = cleanup_handle.clean().await {
@@ -413,7 +422,9 @@ where
             });
 
             // break early if we can't retry anymore
-            if attempt >= MAX_INTENT_ATTEMPTS || !result.is_retriable() {
+            if attempt >= MAX_INTENT_ATTEMPTS
+                || !result.is_retriable(has_dedup_guard)
+            {
                 break result;
             }
 
@@ -421,19 +432,19 @@ where
             // bounded; without a free retry slot the failure is terminal
             let Ok(retry_permit) = limits.retries.clone().try_acquire_owned()
             else {
-                warn!(intent_id = intent.id, "Retry capacity exhausted");
+                warn!(intent_id = intent.intent_id, "Retry capacity exhausted");
                 break result;
             };
 
             if let Err(err) = &result.inner {
-                warn!(intent_id = intent.id, attempt, error = ?err, "Transient intent failure, retrying");
+                warn!(intent_id = intent.intent_id, attempt, error = ?err, "Transient intent failure, retrying");
             }
 
             // Release the executor slot during backoff so unrelated intents
             // keep executing while this one waits out the outage.
             // Per-intent jitter decorrelates synchronized retry bursts when
             // many intents fail together during an outage
-            let jitter = Duration::from_millis((intent.id % 8) * 125);
+            let jitter = Duration::from_millis((intent.intent_id % 8) * 125);
             drop(execution_permit.take());
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit =

@@ -39,6 +39,7 @@ pub trait OutboxClient: Send + Sync + 'static {
         &self,
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), Self::Error>;
 
     /// Registers the result payload and submits its notification on the ER.
@@ -74,7 +75,7 @@ pub struct ScheduledBaseIntentMeta {
 impl ScheduledBaseIntentMeta {
     pub(crate) fn new(intent: &ScheduledIntentBundle) -> Self {
         Self {
-            id: intent.id,
+            id: intent.intent_id,
             slot: intent.slot,
             blockhash: intent.blockhash,
             payer: intent.payer,
