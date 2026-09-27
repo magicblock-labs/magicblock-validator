@@ -22,12 +22,12 @@ use tracing::*;
 const SLOT_MS: u64 = 150;
 
 /*
-* This test uses flexi counter program which is loaded at validator startup.
-* It then executes math operations on the counter which only result in the same
-* outcome if they are executed in the correct order.
-* This way we ensure that during ledger replay the order of transactions is
-* the same as when it was recorded
-*/
+ * This test uses flexi counter program which is loaded at validator startup.
+ * It then executes math operations on the counter which only result in the same
+ * outcome if they are executed in the correct order.
+ * This way we ensure that during ledger replay the order of transactions is
+ * the same as when it was recorded
+ */
 
 #[test]
 fn test_restore_ledger_with_flexi_counter_same_slot() {
