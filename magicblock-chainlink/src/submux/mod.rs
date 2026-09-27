@@ -30,6 +30,8 @@ use crate::remote_account_provider::{
 const SUBMUX_OUT_CHANNEL_SIZE: usize = 5_000;
 const DEDUP_WINDOW_MILLIS: u64 = 2_000;
 const DEBOUNCE_INTERVAL_MILLIS: u64 = 2_000;
+const CONNECTED_CLIENT_WAIT: Duration = Duration::from_secs(2);
+const CONNECTED_CLIENT_POLL: Duration = Duration::from_millis(10);
 
 mod debounce_state;
 pub use self::debounce_state::DebounceState;
@@ -454,6 +456,27 @@ where
             .into_iter()
             .filter(|client| connected_ids.contains(&Self::client_key(client)))
             .collect()
+    }
+
+    async fn connected_clients_snapshot_for_subscription(&self) -> Vec<Arc<T>> {
+        let connected = self.connected_clients_snapshot();
+        if !connected.is_empty() || self.clients_snapshot().is_empty() {
+            return connected;
+        }
+
+        let deadline = Instant::now() + CONNECTED_CLIENT_WAIT;
+        loop {
+            tokio::time::sleep(CONNECTED_CLIENT_POLL).await;
+
+            let connected = self.connected_clients_snapshot();
+            if !connected.is_empty() || self.clients_snapshot().is_empty() {
+                return connected;
+            }
+
+            if Instant::now() >= deadline {
+                return connected;
+            }
+        }
     }
 
     fn remove_client(&self, target: &Arc<T>) {
@@ -1147,12 +1170,14 @@ where
         pubkey: Pubkey,
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
+        let connected_clients =
+            self.connected_clients_snapshot_for_subscription().await;
         AccountSubscriptionTask::Subscribe(
             pubkey,
             retries,
             self.required_account_subscription_confirmations(),
         )
-        .process(self.connected_clients_snapshot())
+        .process(connected_clients)
         .await
     }
 
@@ -1181,11 +1206,13 @@ where
             }
         }
 
+        let connected_clients =
+            self.connected_clients_snapshot_for_subscription().await;
         if let Err(err) = AccountSubscriptionTask::SubscribeProgram(
             program_id,
             self.required_program_subscription_confirmations(),
         )
-        .process(self.connected_clients_snapshot())
+        .process(connected_clients)
         .await
         {
             // Roll back the tentative insertion so a future call can retry.
@@ -2379,6 +2406,40 @@ mod tests {
         assert_eq!(client1.subscribe_attempts(), client1_attempts);
         assert!(!client1.subscriptions_union().contains(&pk2));
         assert!(client2.subscriptions_union().contains(&pk2));
+
+        mux.shutdown().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_subscribe_waits_for_reconnecting_client_when_snapshot_empty()
+    {
+        init_logger();
+
+        let (tx, rx) = mpsc::channel(10_000);
+        let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client.clone()], vec![], Some(100));
+
+        client.disable_reconnect();
+        client.simulate_disconnect();
+        aborts[0].send(()).await.expect("abort send");
+        wait_for_connected_clients(&mux, 0).await;
+
+        let pubkey = Pubkey::new_unique();
+        let result = tokio::time::timeout(Duration::from_secs(3), async {
+            let subscribe = mux.subscribe(pubkey, None);
+            let reconnect = async {
+                sleep_ms(50).await;
+                client.enable_reconnect();
+            };
+            let (result, ()) = tokio::join!(subscribe, reconnect);
+            result
+        })
+        .await
+        .expect("subscribe should wait for reconnecting client");
+
+        result.expect("subscribe should succeed after reconnect");
+        assert!(client.subscriptions_union().contains(&pubkey));
 
         mux.shutdown().await.unwrap();
     }
