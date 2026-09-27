@@ -238,9 +238,14 @@ impl TaskStrategist {
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        if Self::try_optimize_tx_size_if_needed(&mut tasks, uniqueness_nonce)?
-            <= MAX_TRANSACTION_WIRE_SIZE
-        {
+        let tx_size =
+            Self::try_optimize_tx_size_if_needed(&mut tasks, uniqueness_nonce)?;
+
+        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
+            return Err(TaskStrategistError::FailedToFitError);
+        }
+
+        if tx_size <= MAX_TRANSACTION_WIRE_SIZE {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
                 Self::persist_tasks_strategy(persistor, &tasks, false);
@@ -283,6 +288,10 @@ impl TaskStrategist {
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
     ) -> bool {
+        if TransactionUtils::tasks_compute_units(tasks) > 1_400_000 {
+            return false;
+        }
+
         let placeholder = Keypair::new();
         let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
             &Self::collect_lookup_table_keys(

@@ -222,11 +222,15 @@ impl IntentSizeValidator {
     }
 
     /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any), assembled
-    /// with full ALT coverage, fit within [`MAX_TRANSACTION_WIRE_SIZE`].
+    /// with full ALT coverage, fit within compute and wire-size limits.
     fn tasks_fit(
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
     ) -> bool {
+        if TransactionUtils::tasks_compute_units(tasks) > 1_400_000 {
+            return false;
+        }
+
         let placeholder = Keypair::new();
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),

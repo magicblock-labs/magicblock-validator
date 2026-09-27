@@ -193,7 +193,11 @@ impl BaseTask for CommitTask {
     }
 
     fn compute_units(&self) -> u32 {
-        120_000
+        u32::try_from(self.committed_account.account.data.len())
+            .unwrap_or(u32::MAX)
+            .saturating_mul(32)
+            .saturating_add(72_000)
+            .max(120_000)
     }
 
     fn accounts_size_budget(&self) -> u32 {

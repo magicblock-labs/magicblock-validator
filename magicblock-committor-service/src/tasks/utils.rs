@@ -257,7 +257,9 @@ impl TransactionUtils {
     }
 
     pub fn tasks_compute_units(tasks: &[BaseTaskImpl]) -> u32 {
-        tasks.iter().map(|task| task.compute_units()).sum()
+        tasks
+            .iter()
+            .fold(0, |sum, task| sum.saturating_add(task.compute_units()))
     }
 
     pub fn tasks_accounts_size_budget(tasks: &[BaseTaskImpl]) -> u32 {
