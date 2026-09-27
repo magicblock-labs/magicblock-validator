@@ -223,6 +223,7 @@ impl OutboxClient for MockOutboxClient {
         &self,
         _intent_id: u64,
         _stage: ExecutionStage,
+        _recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

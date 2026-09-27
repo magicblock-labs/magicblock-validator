@@ -3,7 +3,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_chainlink::ProdChainlink;
+use magicblock_chainlink::{AccountFetchEntrypoint, ProdChainlink};
 use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
 use magicblock_metrics::metrics::{self};
 use magicblock_program::{Pubkey, outbox_intent_bundles::OutboxIntentBundle};
@@ -25,6 +25,7 @@ use crate::{
             OutboxIntentBundlesReader, OutboxIntentBundlesReaderError,
         },
     },
+    tasks::task_info_fetcher::AccountSnapshot,
 };
 
 pub type ChainlinkImpl = ProdChainlink;
@@ -39,6 +40,16 @@ pub struct IntentExecutionService<O, D> {
     /// Time interval to scrape MagicContext(ER slot interval)
     // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
     slot_interval: Duration,
+}
+
+fn collect_undelegated_pubkeys(
+    intent_bundles: &[OutboxIntentBundle],
+) -> Vec<Pubkey> {
+    let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
+    intent_bundles.iter().for_each(|intent| {
+        pubkeys_being_undelegated.extend(intent.get_undelegated_pubkeys());
+    });
+    pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
 }
 
 impl<O, D: BacklogDB> IntentExecutionService<O, D>
@@ -107,7 +118,8 @@ where
                     });
 
                     let intent_bundles = intent_bundles.into_iter().map(|bundle| {
-                        let bump = outbox_intent_pda_with_bump(bundle.id).1;
+                        let bump =
+                            outbox_intent_pda_with_bump(bundle.intent_id).1;
                         OutboxIntentBundle::accepted(bundle, bump)
                     }).collect();
                     if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
@@ -144,6 +156,9 @@ where
             });
 
             let read_len = intent_bundles_chunk.len();
+            let intent_bundles_chunk = self
+                .retain_recoverable_outbox_intents(intent_bundles_chunk)
+                .await;
             // Schedule  without initial persistence as bundle already exists in db
             let result = self
                 .process_intent_bundles(intent_bundles_chunk, |bundles| {
@@ -190,21 +205,158 @@ where
             return Ok(());
         }
 
-        let pubkeys_being_undelegated = {
-            let mut pubkeys_being_undelegated = HashSet::<Pubkey>::new();
-            intent_bundles.iter().for_each(|intent| {
-                if let Some(undelegate) = intent.get_undelegate_intent_pubkeys()
-                {
-                    pubkeys_being_undelegated.extend(undelegate);
-                }
-            });
-            pubkeys_being_undelegated.into_iter().collect::<Vec<_>>()
-        };
+        let pubkeys_being_undelegated =
+            collect_undelegated_pubkeys(&intent_bundles);
 
         self.process_undelegation_requests(pubkeys_being_undelegated)
             .await;
 
         schedule(intent_bundles).await
+    }
+
+    async fn retain_recoverable_outbox_intents(
+        &self,
+        intent_bundles: Vec<OutboxIntentBundle>,
+    ) -> Vec<OutboxIntentBundle> {
+        let mut recoverable = Vec::with_capacity(intent_bundles.len());
+        for bundle in intent_bundles {
+            if self.is_outbox_intent_recoverable(&bundle).await {
+                recoverable.push(bundle);
+            }
+        }
+        recoverable
+    }
+
+    async fn is_outbox_intent_recoverable(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        if !self.is_same_delegation_session(bundle).await {
+            return false;
+        }
+
+        self.has_valid_recovery_nonces(bundle).await
+    }
+
+    async fn is_same_delegation_session(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        let recovered_accounts = bundle.get_all_committed_accounts();
+        if recovered_accounts.is_empty() {
+            return true;
+        }
+
+        let pubkeys = recovered_accounts
+            .iter()
+            .map(|account| account.pubkey)
+            .collect::<Vec<_>>();
+        let current_sessions = match self
+            .chainlink
+            .account_delegation_sessions(
+                &pubkeys,
+                AccountFetchEntrypoint::Internal,
+            )
+            .await
+        {
+            Ok(sessions) => sessions,
+            Err(err) => {
+                error!(
+                    intent_id = bundle.intent_id,
+                    error = ?err,
+                    "Skipping outbox recovery after delegation session lookup failed"
+                );
+                return false;
+            }
+        };
+
+        recovered_accounts.iter().zip(current_sessions).all(
+            |(recovered, current)| {
+                let Some(current) = current else {
+                    error!(
+                        intent_id = bundle.intent_id,
+                        pubkey = %recovered.pubkey,
+                        "Skipping outbox recovery because committed account is missing locally"
+                    );
+                    return false;
+                };
+                let same_session = current.locally_protected
+                    && (recovered.remote_slot == 0
+                        || recovered.remote_slot == current.remote_slot);
+                if !same_session {
+                    error!(
+                        intent_id = bundle.intent_id,
+                        pubkey = %recovered.pubkey,
+                        recovered_slot = recovered.remote_slot,
+                        current_slot = current.remote_slot,
+                        locally_protected = current.locally_protected,
+                        "Skipping outbox recovery because delegation session changed"
+                    );
+                }
+                same_session
+            },
+        )
+    }
+
+    async fn has_valid_recovery_nonces(
+        &self,
+        bundle: &OutboxIntentBundle,
+    ) -> bool {
+        let recovery_nonces = bundle.recovery_commit_nonces();
+        if recovery_nonces.is_empty() {
+            return true;
+        }
+
+        let committed_accounts = bundle
+            .get_all_committed_accounts()
+            .into_iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect::<Vec<AccountSnapshot>>();
+        let min_context_slot = committed_accounts
+            .iter()
+            .map(|(_, slot)| *slot)
+            .max()
+            .unwrap_or_default();
+        let current_nonces = match self
+            .processor
+            .fetch_current_commit_nonces(&committed_accounts, min_context_slot)
+            .await
+        {
+            Ok(nonces) => nonces,
+            Err(err) => {
+                error!(
+                    intent_id = bundle.intent_id,
+                    error = ?err,
+                    "Skipping outbox recovery after commit nonce lookup failed"
+                );
+                return false;
+            }
+        };
+
+        recovery_nonces
+            .iter()
+            .all(|(pubkey, recovery_commit_nonce)| {
+                let Some(current_commit_nonce) = current_nonces.get(pubkey)
+                else {
+                    error!(
+                        intent_id = bundle.intent_id,
+                        %pubkey,
+                        "Skipping outbox recovery because current commit nonce is missing"
+                    );
+                    return false;
+                };
+                let valid = recovery_commit_nonce >= current_commit_nonce;
+                if !valid {
+                    error!(
+                        intent_id = bundle.intent_id,
+                        %pubkey,
+                        recovery_commit_nonce,
+                        current_commit_nonce,
+                        "Skipping stale outbox recovery because chain nonce has advanced"
+                    );
+                }
+                valid
+            })
     }
 
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -253,4 +405,83 @@ pub enum IntentExecutionServiceError {
     OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
     #[error("IntentExecutorError: {0}")]
     IntentExecutorError(#[from] Box<IntentExecutorError>),
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use magicblock_core::intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
+    };
+    use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_account::Account;
+    use solana_hash::Hash;
+
+    use super::*;
+
+    fn committed_account(pubkey: Pubkey) -> CommittedAccount {
+        CommittedAccount {
+            pubkey,
+            account: Account::default(),
+            remote_slot: Default::default(),
+        }
+    }
+
+    fn accepted_bundle(
+        intent_id: u64,
+        intent_bundle: MagicIntentBundle,
+    ) -> OutboxIntentBundle {
+        let intent = ScheduledIntentBundle {
+            intent_id,
+            slot: 0,
+            blockhash: Hash::default(),
+            sent_transaction: Default::default(),
+            payer: Pubkey::default(),
+            intent_bundle,
+        };
+        let bump = outbox_intent_pda_with_bump(intent_id).1;
+        OutboxIntentBundle::accepted(intent, bump)
+    }
+
+    #[test]
+    fn collect_undelegated_pubkeys_includes_commit_finalize_and_undelegate() {
+        let committed_only = Pubkey::new_unique();
+        let commit_and_undelegate = Pubkey::new_unique();
+        let commit_finalize_and_undelegate = Pubkey::new_unique();
+
+        let intent_bundle = MagicIntentBundle {
+            commit: Some(CommitType::Standalone(vec![committed_account(
+                committed_only,
+            )])),
+            commit_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![committed_account(
+                    commit_and_undelegate,
+                )]),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            commit_finalize_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(vec![committed_account(
+                    commit_finalize_and_undelegate,
+                )]),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            ..Default::default()
+        };
+
+        let actual =
+            collect_undelegated_pubkeys(&[accepted_bundle(1, intent_bundle)])
+                .into_iter()
+                .collect::<HashSet<_>>();
+
+        assert_eq!(
+            actual,
+            HashSet::from([
+                commit_and_undelegate,
+                commit_finalize_and_undelegate
+            ])
+        );
+        assert!(!actual.contains(&committed_only));
+    }
 }

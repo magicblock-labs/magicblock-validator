@@ -3,54 +3,29 @@ use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated,
     assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_subscribed, assert_not_undelegating,
-    assert_remain_undelegating, assert_subscribed_without_delegation_record,
+    assert_not_cloned, assert_not_subscribed,
+    assert_subscribed_without_delegation_record,
     testing::{context::TestContext, deleg::add_delegation_record_for},
 };
 use solana_account::{Account, AccountBuilder, AccountMode};
 use solana_pubkey::Pubkey;
 const CURRENT_SLOT: u64 = 11;
 
-async fn seed_undelegating_account(ctx: &TestContext, pubkey: Pubkey) {
-    let delegated = AccountBuilder::from(Account {
-        owner: dlp_api::id(),
-        data: vec![0; 100],
-        ..Default::default()
-    })
-    .mode(AccountMode::Delegated)
-    .slot(CURRENT_SLOT);
-    ctx.bank
-        .account(pubkey)
-        .await
-        .materialize(delegated.clone(), None)
-        .await
-        .unwrap();
-
-    let transient = delegated.mode(AccountMode::Transient);
-    ctx.bank
-        .account(pubkey)
-        .await
-        .materialize(transient, None)
-        .await
-        .unwrap();
-}
-
 #[tokio::test]
 async fn ensure_account_scenarios() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
-    resident_accounts_skip_remote_resolution(&ctx).await;
+    resident_accounts_reconcile_by_mode(&ctx).await;
     write_non_existing_account(&ctx).await;
     existing_account_undelegated(&ctx).await;
     existing_account_missing_delegation_record(&ctx).await;
     write_existing_account_valid_delegation_record(&ctx).await;
     write_existing_account_other_authority(&ctx).await;
-    write_undelegating_account_undelegated_to_other_validator(&ctx).await;
-    write_undelegating_account_still_being_undelegated(&ctx).await;
     write_existing_account_invalid_delegation_record(&ctx).await;
 }
 
-async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
+async fn resident_accounts_reconcile_by_mode(ctx: &TestContext) {
     let pubkeys = [
+        Pubkey::new_unique(),
         Pubkey::new_unique(),
         Pubkey::new_unique(),
         Pubkey::new_unique(),
@@ -82,6 +57,12 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
             pubkeys[3],
             AccountBuilder::default().mode(AccountMode::Uninit).build(),
         ),
+        (
+            pubkeys[4],
+            AccountBuilder::default()
+                .mode(AccountMode::Transient)
+                .build(),
+        ),
     ];
     ctx.bank.accounts().store(&accounts).unwrap();
 
@@ -89,7 +70,7 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
     let claims = ctx
         .chainlink
         .ensure_accounts(
-            &pubkeys,
+            &pubkeys[..4],
             AccountFetchEntrypoint::RpcGetMultipleAccounts,
         )
         .await
@@ -97,7 +78,20 @@ async fn resident_accounts_skip_remote_resolution(ctx: &TestContext) {
 
     assert_eq!(claims, 0);
     assert_eq!(ctx.chainlink.fetch_count().unwrap(), fetches);
-    assert_not_subscribed!(ctx.chainlink, &pubkeys);
+    assert_not_subscribed!(ctx.chainlink, &pubkeys[..4]);
+
+    let transient = pubkeys[4];
+    let claims = ctx
+        .chainlink
+        .ensure_accounts(
+            &[transient],
+            AccountFetchEntrypoint::RpcGetMultipleAccounts,
+        )
+        .await
+        .unwrap();
+    assert_eq!(claims, 1);
+    assert_cloned_as_empty_placeholder!(ctx.bank, &[transient]);
+    assert_subscribed_without_delegation_record!(ctx.chainlink, &[&transient]);
 }
 
 // NOTE: Case comments refer to the case studies in the relevant tabs of draw.io document, i.e. Fetch
@@ -274,78 +268,6 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
     assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
     assert_subscribed_without_delegation_record!(chainlink, &[&pubkey]);
-}
-
-// -----------------
-// Account is in the process of being undelegated and its owner is the delegation program
-// -----------------
-async fn write_undelegating_account_undelegated_to_other_validator(
-    ctx: &TestContext,
-) {
-    let chainlink = &ctx.chainlink;
-    let rpc_client = &ctx.rpc_client;
-    let bank = &ctx.bank;
-
-    let other_authority = Pubkey::new_unique();
-    let pubkey = Pubkey::new_unique();
-
-    // The account was re-delegated to other validator on chain
-    let account = Account {
-        owner: dlp_api::id(),
-        ..Default::default()
-    };
-    let owner = Pubkey::new_unique();
-    rpc_client.add_account(pubkey, account);
-
-    add_delegation_record_for(rpc_client, pubkey, other_authority, owner);
-
-    // The same account is already marked as undelegated in the bank
-    // (set the owner to the delegation program and mark it as _undelegating_)
-    seed_undelegating_account(ctx, pubkey).await;
-
-    let pubkeys = [pubkey];
-    chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
-        .await
-        .unwrap();
-    assert_not_undelegating!(bank, &pubkeys, CURRENT_SLOT);
-}
-
-async fn write_undelegating_account_still_being_undelegated(ctx: &TestContext) {
-    let chainlink = &ctx.chainlink;
-    let rpc_client = &ctx.rpc_client;
-    let bank = &ctx.bank;
-    let validator_pubkey = ctx.validator_pubkey;
-
-    let authority = validator_pubkey;
-    let pubkey = Pubkey::new_unique();
-
-    // The account is still delegated to us on chain
-    let account = Account {
-        owner: dlp_api::id(),
-        ..Default::default()
-    };
-    let owner = Pubkey::new_unique();
-    rpc_client.add_account(pubkey, account);
-
-    add_delegation_record_for(rpc_client, pubkey, authority, owner);
-
-    // The same account is already marked as undelegated in the bank
-    // (setting the owner to the delegation program marks it as _undelegating_)
-    seed_undelegating_account(ctx, pubkey).await;
-
-    let pubkeys = [pubkey];
-    chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
-        .await
-        .unwrap();
-    assert_remain_undelegating!(bank, &pubkeys, CURRENT_SLOT);
 }
 
 // -----------------

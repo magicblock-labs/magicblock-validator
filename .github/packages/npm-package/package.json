@@ -13,6 +13,7 @@
   "license": "Business Source License 1.1",
   "bin": {
     "ephemeral-validator": "ephemeralValidator.js",
+    "hydra-cranker": "hydraCranker.js",
     "mb-stack": "mbStack.js",
     "mb-test-validator": "mbTestValidator.js",
     "query-filtering-service": "queryFilteringService.js",
@@ -47,7 +48,11 @@
     "@magicblock-labs/rpc-router-linux-x64": "0.0.1",
     "@magicblock-labs/rpc-router-linux-arm64": "0.0.1",
     "@magicblock-labs/rpc-router-darwin-x64": "0.0.1",
-    "@magicblock-labs/rpc-router-darwin-arm64": "0.0.1"
+    "@magicblock-labs/rpc-router-darwin-arm64": "0.0.1",
+    "@magicblock-labs/hydra-cranker-linux-x64": "0.2.0",
+    "@magicblock-labs/hydra-cranker-linux-arm64": "0.2.0",
+    "@magicblock-labs/hydra-cranker-darwin-x64": "0.2.0",
+    "@magicblock-labs/hydra-cranker-darwin-arm64": "0.2.0"
   },
   "publishConfig": {
     "access": "public"

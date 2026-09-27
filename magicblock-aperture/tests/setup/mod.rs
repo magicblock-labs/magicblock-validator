@@ -72,12 +72,14 @@ impl RpcTestEnv {
     pub const TOKEN_AMOUNT: u64 = 10_000_000_000;
 
     pub async fn new() -> Self {
-        let engine = TestEngine::new().await;
-        let inner: Engine = (*engine).clone();
+        Self::with_engine(TestEngine::new().await).await
+    }
+
+    pub async fn with_engine(engine: TestEngine) -> Self {
         let state = SharedState::new(
-            inner.clone(),
+            (*engine).clone(),
             shared_ledger(),
-            chainlink(&inner),
+            chainlink(&engine),
             100,
         );
         let cancel = CancellationToken::new();

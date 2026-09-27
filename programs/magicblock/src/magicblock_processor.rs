@@ -22,9 +22,7 @@ use crate::{
         process_scheduled_commit_sent::process_scheduled_commit_sent,
         process_set_intent_execution_stage::process_set_intent_execution_stage,
     },
-    schedule_task::{
-        process_cancel_task, process_execute_crank, process_schedule_task,
-    },
+    schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         ProcessScheduleCommitOptions, process_accept_scheduled_commits,
         process_add_action_callback, process_execute_callback,
@@ -121,6 +119,13 @@ declare_process_instruction!(
                 );
                 Err(InstructionError::InvalidInstructionData)
             }
+            CloseOutboxIntent(_) => {
+                ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
                 invoke_context,
@@ -165,6 +170,13 @@ declare_process_instruction!(
             EvictAccount { .. } => {
                 composition_removed(invoke_context, "EvictAccount")
             }
+            _ExecuteCrank => {
+                solana_log_collector::ic_msg!(
+                    invoke_context,
+                    "ExecuteCrank is no longer supported: crank execution is handled by hydra"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             Noop(_) => Ok(()),
             CloneAccount { .. } => {
                 composition_removed(invoke_context, "CloneAccount")
@@ -188,40 +200,6 @@ declare_process_instruction!(
                 invoke_context,
                 "FinalizeV1ProgramFromBuffer",
             ),
-            ExecuteCrank {
-                authority,
-                instructions,
-            } => process_execute_crank(
-                signers,
-                invoke_context,
-                &authority,
-                instructions,
-            ),
-        }
-    }
-);
-
-declare_process_instruction!(
-    CrankEntrypoint,
-    DEFAULT_COMPUTE_UNITS,
-    |invoke_context| {
-        let instruction = deserialize_instruction(invoke_context)?;
-        let transaction_context = &invoke_context.transaction_context;
-        let instruction_context =
-            transaction_context.get_current_instruction_context()?;
-        let signers = instruction_context.get_signers()?;
-
-        match instruction {
-            MagicBlockInstruction::ExecuteCrank {
-                authority,
-                instructions,
-            } => process_execute_crank(
-                signers,
-                invoke_context,
-                &authority,
-                instructions,
-            ),
-            _ => Err(InstructionError::InvalidInstructionData),
         }
     }
 );
@@ -300,13 +278,15 @@ declare_process_instruction!(
             OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,
                 stage,
+                recovery_commit_nonces,
             } => process_set_intent_execution_stage(
                 signers,
                 invoke_context,
                 intent_id,
                 stage,
+                recovery_commit_nonces,
             ),
-            OutboxIntentInstruction::ScheduledCommitSent(id) => {
+            OutboxIntentInstruction::ScheduledCommitSent((id, _bump)) => {
                 process_scheduled_commit_sent(signers, invoke_context, id)
             }
         }
@@ -315,7 +295,6 @@ declare_process_instruction!(
 
 #[cfg(test)]
 mod test {
-    use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
     use solana_program_runtime::{
         invoke_context::mock_process_instruction,
@@ -323,31 +302,6 @@ mod test {
     };
 
     use super::*;
-
-    #[test]
-    fn crank_entrypoint_rejects_non_execute_crank_instructions() {
-        let data = wincode::serialize(&MagicBlockInstruction::ScheduleTask(
-            ScheduleTaskArgs {
-                task_id: 1,
-                execution_interval_millis: 10,
-                iterations: 1,
-                instructions: vec![],
-            },
-        ))
-        .unwrap();
-
-        mock_process_instruction(
-            &crate::CRANK_PROGRAM_ID,
-            None,
-            &data,
-            Vec::new(),
-            vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
-            Err(InstructionError::InvalidInstructionData),
-            (CrankEntrypoint::vm, CrankEntrypoint::codegen),
-            |_invoke_context| {},
-            |_invoke_context| {},
-        );
-    }
 
     #[test]
     fn callback_entrypoint_rejects_invalid_instruction_data() {

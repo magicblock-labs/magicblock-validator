@@ -755,6 +755,85 @@ async fn test_delegated_direct_cleanup_keeps_undelegation_tracking() {
 }
 
 #[tokio::test]
+async fn test_undelegation_tracking_refresh_forwards_only_tracked_accounts() {
+    let tracked_pubkey = solana_pubkey::Pubkey::new_unique();
+    let tracked_account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+    let direct_only_pubkey = solana_pubkey::Pubkey::new_unique();
+    let direct_only_account = Account {
+        lamports: 2_000_000,
+        data: vec![5, 6, 7, 8],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        rpc_client,
+        _forward_rx: mut forward_rx,
+        ..
+    } = setup_provider(tracked_pubkey, tracked_account).await;
+    rpc_client.add_account(direct_only_pubkey, direct_only_account);
+
+    provider
+        .acquire_subscription(
+            &tracked_pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+    provider
+        .acquire_subscription(
+            &direct_only_pubkey,
+            SubscriptionReason::DirectAccount,
+        )
+        .await
+        .unwrap();
+
+    let tracked = RemoteAccountProvider::<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+    >::undelegation_tracking_pubkeys(
+        &provider.subscription_ownership
+    )
+    .await;
+    assert_eq!(tracked, vec![tracked_pubkey]);
+
+    let fetches_before = rpc_client.multi_account_fetches();
+    let pipeline_open = RemoteAccountProvider::<
+        ChainRpcClientMock,
+        ChainPubsubClientMock,
+    >::refresh_undelegation_tracking_accounts_once(
+        &rpc_client,
+        &provider.subscription_ownership,
+        provider.subscription_forwarder.as_ref(),
+    )
+    .await;
+
+    assert!(pipeline_open);
+    assert_eq!(rpc_client.multi_account_fetches(), fetches_before + 1);
+
+    let update = tokio::time::timeout(Duration::from_secs(2), async {
+        forward_rx
+            .recv()
+            .await
+            .expect("forward channel should be open")
+    })
+    .await
+    .expect("refresh should forward the tracked account");
+    assert_eq!(update.pubkey, tracked_pubkey);
+    assert_eq!(update.source, SubscriptionSource::Replay);
+    assert_eq!(update.account.slot(), 100);
+    assert_eq!(update.account.fresh_lamports(), Some(1_000_000));
+}
+
+#[tokio::test]
 async fn test_subscription_reasons_do_not_release_each_other() {
     let pubkey = solana_pubkey::Pubkey::new_unique();
     let account = Account {
@@ -982,6 +1061,79 @@ async fn test_lock_aware_reconciler_resubscribes_tracked_missing_pubsub() {
 
     assert!(provider.is_watching(&pubkey));
     assert!(pubsub_client.subscriptions_union().contains(&pubkey));
+}
+
+#[tokio::test]
+async fn test_reconnect_gap_invalidates_uncovered_direct_subscription() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut stale_rx = provider.try_get_stale_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    assert!(provider.is_watching(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
+
+    pubsub_client.remove_subscription(&pubkey);
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+
+    assert_eq!(evicted, 1);
+    assert!(!provider.is_watching(&pubkey));
+    assert!(!provider.subscribed_accounts.contains(&pubkey));
+    assert_eq!(stale_rx.try_recv(), Ok(pubkey));
+}
+
+#[tokio::test]
+async fn test_reconnect_gap_keeps_uncovered_undelegation_tracking() {
+    let pubkey = solana_pubkey::Pubkey::new_unique();
+    let account = Account {
+        lamports: 1_000_000,
+        data: vec![1, 2, 3, 4],
+        owner: solana_pubkey::Pubkey::new_unique(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let ProviderTestCtx {
+        provider,
+        pubsub_client,
+        _forward_rx,
+        ..
+    } = setup_provider(pubkey, account).await;
+    let mut stale_rx = provider.try_get_stale_account_rx().unwrap();
+
+    provider
+        .acquire_subscription(&pubkey, SubscriptionReason::UndelegationTracking)
+        .await
+        .unwrap();
+    assert!(provider.is_watching(&pubkey));
+    assert!(pubsub_client.subscriptions_union().contains(&pubkey));
+
+    pubsub_client.remove_subscription(&pubkey);
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+
+    assert_eq!(evicted, 0);
+    assert!(provider.is_watching(&pubkey));
+    assert!(provider.subscribed_accounts.contains(&pubkey));
+    assert!(matches!(
+        stale_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
 }
 
 #[tokio::test]
@@ -2066,6 +2218,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
             &self.subscribed_accounts,
             &self.pubsub_client,
             &internally_managed,
+            &self.stale_account_tx,
+            Some(&self.subscription_key_locks),
+            Some(&self.subscription_ownership),
+        )
+        .await
+    }
+
+    async fn evict_uncovered_subscriptions_once_for_test(&self) -> usize {
+        subscription_reconciler::evict_uncovered_subscriptions(
+            &self.subscribed_accounts,
+            &self.pubsub_client,
+            None,
             &self.stale_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),

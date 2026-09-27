@@ -89,7 +89,8 @@ pub enum MagicBlockInstruction {
     AcceptScheduleCommits,
 
     /// Deprecated, moved into the outbox intent program. Always errors.
-    ScheduledCommitSent(u64),
+    /// The bump is retained to preserve the serialized instruction ABI.
+    ScheduledCommitSent((u64, u64)),
 
     /// Schedules execution of a single *base intent*.
     ///
@@ -355,18 +356,33 @@ pub enum MagicBlockInstruction {
     /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
 
-    /// Executes a crank
+    /// Reserved: crank execution moved to hydra. The variant is kept so
+    /// `CloseMagicAta` retains its wire discriminant for existing clients
+    /// (MagicRoot / eSPL).
+    _ExecuteCrank,
+
+    /// Closes a drained Magic ATA previously created via
+    /// `CreateMagicAta`. No-op unless the account matches the
+    /// Magic ATA marker for the signing wallet owner and holds zero
+    /// tokens, so it can be appended unconditionally to withdrawal flows.
+    ///
+    /// # Account references
+    /// - **0.** `[SIGNER]` Wallet owner
+    /// - **1.** `[WRITE]`  Canonical ATA PDA
+    CloseMagicAta,
+
+    /// Closes the outbox intent PDA on successful execution of the intent.
+    /// Deterministic and mode-independent: runs identically on replicas
+    /// replaying the same transaction, unlike `ScheduledCommitSent` which
+    /// only logs on the validator that actually executed the intent.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
-    /// | `0` | Validator Authority. Authorizes crank execution. | SIGNER |
-    /// | `1` | Crank signer PDA. PDA signer used by embedded instructions. | - |
-    /// | `2..n` | Instruction accounts. Accounts required by the embedded instructions. | - |
-    ExecuteCrank {
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    },
+    /// | `0` | Validator Authority. Authorizes closing the intent. | WRITE, SIGNER |
+    /// | `1` | MagicBlock program. Must match the MagicBlock program ID. | - |
+    /// | `2` | Outbox intent PDA. Account to close, with seeds `["outbox-intent", intent_id.to_le_bytes()]`. | WRITE |
+    CloseOutboxIntent(u64),
 
     /// Sets or advances the execution stage of an outbox intent.
     /// Must be called before sending the L1 transaction.
@@ -379,17 +395,8 @@ pub enum MagicBlockInstruction {
     SetIntentExecutionStage {
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     },
-
-    /// Closes a drained Magic ATA previously created via
-    /// `CreateMagicAta`. No-op unless the account matches the
-    /// Magic ATA marker for the signing wallet owner and holds zero
-    /// tokens, so it can be appended unconditionally to withdrawal flows.
-    ///
-    /// # Account references
-    /// - **0.** `[SIGNER]` Wallet owner
-    /// - **1.** `[WRITE]`  Canonical ATA PDA
-    CloseMagicAta,
 }
 
 impl MagicBlockInstruction {
@@ -512,7 +519,7 @@ pub enum OutboxIntentInstruction {
     /// # Account references
     /// - 0. [SIGNER] Validator Authority
     /// - 1. []       Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    ScheduledCommitSent(u64),
+    ScheduledCommitSent((u64, u64)),
 
     /// Sets or advances the execution stage of an outbox intent.
     /// Must be called before sending the L1 transaction.
@@ -523,6 +530,7 @@ pub enum OutboxIntentInstruction {
     SetIntentExecutionStage {
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     },
 }
 

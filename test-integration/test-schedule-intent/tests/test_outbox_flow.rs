@@ -1,10 +1,9 @@
 mod common;
 use std::{
     sync::{Arc, Mutex, Once},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
-use anyhow::anyhow;
 use async_trait::async_trait;
 use common::*;
 use integration_test_tools::{
@@ -61,14 +60,23 @@ use solana_rpc_client::{
     rpc_client::RpcClientConfig,
     rpc_sender::{RpcSender, RpcTransportStats},
 };
-use solana_rpc_client_api::{client_error, request::RpcRequest};
+use solana_rpc_client_api::{
+    client_error,
+    request::{RpcError, RpcRequest},
+};
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
+
+const ALREADY_PROCESSED_MESSAGE: &str =
+    "This transaction has already been processed";
+const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration =
+    Duration::from_millis(200);
+const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
 type CallbackRecord =
     (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
@@ -161,6 +169,69 @@ impl TestEnv {
     }
 }
 
+fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
+    match err.kind() {
+        client_error::ErrorKind::TransactionError(
+            TransactionError::AlreadyProcessed,
+        ) => true,
+        client_error::ErrorKind::RpcError(RpcError::RpcResponseError {
+            message,
+            ..
+        }) => message.contains(ALREADY_PROCESSED_MESSAGE),
+        _ => false,
+    }
+}
+
+async fn wait_for_signature_success(
+    rpc: &AsyncRpcClient,
+    signature: Signature,
+) -> Result<(), InternalOutboxClientError> {
+    let start = tokio::time::Instant::now();
+    loop {
+        let status = rpc
+            .get_signature_statuses(&[signature])
+            .await
+            .map_err(InternalOutboxClientError::RpcClientError)?
+            .value
+            .into_iter()
+            .next()
+            .flatten();
+
+        if let Some(status) = status {
+            return match status.err {
+                Some(err) => {
+                    Err(InternalOutboxClientError::TransactionError(err))
+                }
+                None => Ok(()),
+            };
+        }
+
+        if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
+            return Err(InternalOutboxClientError::RpcClientError(
+                client_error::ErrorKind::Custom(format!(
+                    "transaction {signature} was already processed but its status did not resolve"
+                ))
+                .into(),
+            ));
+        }
+
+        tokio::time::sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
+    }
+}
+
+async fn send_and_confirm_outbox_transaction(
+    rpc: &AsyncRpcClient,
+    tx: &Transaction,
+) -> Result<(), InternalOutboxClientError> {
+    match rpc.send_and_confirm_transaction(tx).await {
+        Ok(_) => Ok(()),
+        Err(err) if is_already_processed_rpc_error(&err) => {
+            wait_for_signature_success(rpc, tx.signatures[0]).await
+        }
+        Err(err) => Err(InternalOutboxClientError::RpcClientError(err)),
+    }
+}
+
 pub struct TestIntentExecutorCtxBuilder {
     ctx: TestIntentExecutorCtx,
 }
@@ -181,22 +252,30 @@ impl TestIntentExecutorCtxBuilder {
     }
 }
 
-/// Schedyles commit of counters directly via magic-program using validator authority
-fn schedule_commit_finalize(ctx: &IntegrationTestContext, counters: &[Pubkey]) {
+struct ScheduleAttempt<T> {
+    instructions: Vec<Instruction>,
+    signers: Vec<Keypair>,
+    payer: Pubkey,
+    scheduled: T,
+}
+
+/// Schedules commit of counters directly via magic-program using validator authority.
+fn schedule_commit_finalize(
+    _ctx: &IntegrationTestContext,
+    counters: &[Pubkey],
+) -> ScheduleAttempt<()> {
     let validator_keypair = ensure_validator_authority();
 
     let schedule_ix = schedule_commit_instruction(
         &validator_keypair.pubkey(),
         counters.to_vec(),
     );
-    let mut tx = Transaction::new_with_payer(
-        &[schedule_ix],
-        Some(&validator_keypair.pubkey()),
-    );
-    let sig = ctx
-        .send_transaction_ephem(&mut tx, &[&validator_keypair])
-        .unwrap();
-    println!("schedule_commit_finalize sig: {}", sig);
+    ScheduleAttempt {
+        instructions: vec![schedule_ix],
+        payer: validator_keypair.pubkey(),
+        signers: vec![validator_keypair],
+        scheduled: (),
+    }
 }
 
 /// Schedules a transfer intent with a callback and returns the payer balance
@@ -209,7 +288,7 @@ fn schedule_intent_with_callback(
     ctx: &IntegrationTestContext,
     payer: &Keypair,
     amount: u64,
-) -> (u64, Keypair) {
+) -> ScheduleAttempt<(u64, Keypair)> {
     let destination = Keypair::new();
     let payer_balance_before =
         ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
@@ -222,66 +301,36 @@ fn schedule_intent_with_callback(
         false,
         100_000,
     );
-    let mut tx =
-        Transaction::new_with_payer(&[schedule_ix], Some(&payer.pubkey()));
-    let sig = ctx.send_transaction_ephem(&mut tx, &[payer]).unwrap();
-
-    println!("schedule_intent_with_callback sig: {}", sig);
-
-    (payer_balance_before, destination)
-}
-
-/// Tries to accept intent
-fn steal_accept_intent(
-    ctx: &IntegrationTestContext,
-    intent_id: u64,
-) -> Result<(), anyhow::Error> {
-    let validator_keypair = ensure_validator_authority();
-
-    let accept_ix =
-        InstructionUtils::accept_scheduled_commits_instruction([intent_id]);
-    let mut tx = Transaction::new_with_payer(
-        &[accept_ix],
-        Some(&validator_keypair.pubkey()),
-    );
-
-    let (sig, confirmed) =
-        ctx.send_and_confirm_transaction_ephem(&mut tx, &[&validator_keypair])?;
-
-    if !confirmed {
-        Err(anyhow!("tx not confirmed: {}", sig))
-    } else {
-        println!("accept sig: {}", sig);
-        Ok(())
+    ScheduleAttempt {
+        instructions: vec![schedule_ix],
+        payer: payer.pubkey(),
+        signers: vec![payer.insecure_clone()],
+        scheduled: (payer_balance_before, destination),
     }
 }
 
-/// Schedules an intent and races the validator's own accept loop for it.
-///
-/// A lost race leaves the just-scheduled intent to the validator, which charges
-/// the payer and executes it independently of this test. `schedule` therefore
-/// returns whatever the caller needs to assert on, and only the value from the
-/// attempt we actually accepted is handed back.
-fn steal_schedule_accept_intent<T>(
+fn fetch_outbox_bundle_after_accept(
     ctx: &IntegrationTestContext,
-    schedule: impl Fn(&IntegrationTestContext) -> T,
-) -> (u64, T) {
-    const MAX_ATTEMPTS: u8 = 5;
+    intent_id: u64,
+) -> OutboxIntentBundle {
+    const ACCEPT_FETCH_POLL_INTERVAL: Duration = Duration::from_millis(200);
+    const ACCEPT_FETCH_TIMEOUT: Duration = Duration::from_secs(25);
 
-    let mut attempt = 0;
+    let pda = outbox_intent_pda(intent_id);
+    let start = Instant::now();
     loop {
-        let intent_id = read_next_intent_id(ctx);
-        let scheduled = schedule(ctx);
-        let result = steal_accept_intent(ctx, intent_id);
-        match result {
-            Ok(()) => return (intent_id, scheduled),
+        match ctx.fetch_ephem_account_data(pda) {
+            Ok(data) => {
+                return OutboxIntentBundle::try_from_bytes(&data).unwrap()
+            }
+            Err(err) if start.elapsed() < ACCEPT_FETCH_TIMEOUT => {
+                println!("outbox intent {intent_id} not visible yet: {err}");
+                std::thread::sleep(ACCEPT_FETCH_POLL_INTERVAL);
+            }
             Err(err) => {
-                println!("Failed to steal");
-
-                if attempt >= MAX_ATTEMPTS {
-                    panic!("Failed to steal intent: {}", err);
-                }
-                attempt += 1;
+                panic!(
+                    "failed to fetch accepted outbox intent {intent_id}: {err}"
+                )
             }
         }
     }
@@ -289,17 +338,55 @@ fn steal_schedule_accept_intent<T>(
 
 fn schedule_and_accept<T>(
     ctx: &IntegrationTestContext,
-    schedule: impl Fn(&IntegrationTestContext) -> T,
+    schedule: impl Fn(&IntegrationTestContext) -> ScheduleAttempt<T>,
 ) -> (OutboxIntentBundle, T) {
+    const MAX_ATTEMPTS: u8 = 5;
+
     ctx.wait_for_next_slot_ephem().unwrap();
 
-    let (intent_id, scheduled) = steal_schedule_accept_intent(ctx, schedule);
-    let pda = outbox_intent_pda(intent_id);
-    let data = ctx.fetch_ephem_account_data(pda).unwrap();
-    (
-        OutboxIntentBundle::try_from_bytes(&data).unwrap(),
-        scheduled,
-    )
+    for attempt in 1..=MAX_ATTEMPTS {
+        let intent_id = read_next_intent_id(ctx);
+        let mut attempt_tx = schedule(ctx);
+        attempt_tx.instructions.push(
+            InstructionUtils::accept_scheduled_commits_instruction([intent_id]),
+        );
+
+        let validator_keypair = ensure_validator_authority();
+        if !attempt_tx
+            .signers
+            .iter()
+            .any(|signer| signer.pubkey() == validator_keypair.pubkey())
+        {
+            attempt_tx.signers.push(validator_keypair);
+        }
+
+        let mut tx = Transaction::new_with_payer(
+            &attempt_tx.instructions,
+            Some(&attempt_tx.payer),
+        );
+        let signer_refs = attempt_tx.signers.iter().collect::<Vec<&Keypair>>();
+        match ctx.send_and_confirm_transaction_ephem(&mut tx, &signer_refs) {
+            Ok((sig, true)) => {
+                println!("schedule_and_accept sig: {}", sig);
+                return (
+                    fetch_outbox_bundle_after_accept(ctx, intent_id),
+                    attempt_tx.scheduled,
+                );
+            }
+            Ok((sig, false)) => {
+                println!(
+                    "schedule_and_accept attempt {attempt}/{MAX_ATTEMPTS} was not confirmed: {sig}"
+                );
+            }
+            Err(err) => {
+                println!(
+                    "schedule_and_accept attempt {attempt}/{MAX_ATTEMPTS} failed: {err}"
+                );
+            }
+        }
+    }
+
+    panic!("failed to schedule and accept intent atomically");
 }
 
 /// AcceptedIntentExecutor drives the full commit flow using TestOutboxClient.
@@ -320,13 +407,13 @@ async fn test_pickup_executed_intent() {
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_finalize(ctx, &[counter_pda])
     });
-    let intent_id = outbox_bundle.inner.id;
+    let intent_id = outbox_bundle.inner.intent_id;
 
-    // Execute intent. Force close_intent to fail so the outbox record
-    // survives execution, simulating a validator crash after the commit tx
-    // landed but before the outbox could be closed.
+    // Execute intent. Force the terminal outbox notification to fail so the
+    // outbox record survives execution, simulating a validator crash after the
+    // commit tx landed but before ScheduledCommitSent could be submitted.
     let mut outbox_client = test_env.outbox_client();
-    outbox_client.with_fail_close_intent(true);
+    outbox_client.with_fail_notify_commit_sent(true);
     let outbox_client = Arc::new(outbox_client);
     let executor_ctx = test_env
         .executor_ctx_builder()
@@ -339,19 +426,19 @@ async fn test_pickup_executed_intent() {
         .await;
     assert!(
         result.inner.is_err(),
-        "close_intent failure should surface as overall execution failure"
+        "notify_commit_sent failure should surface as overall execution failure"
     );
     assert_eq!(
         outbox_client.sent_commits.lock().unwrap().as_slice(),
-        [(intent_id, true)],
-        "notify_commit_sent should have been called once with success"
+        [],
+        "failed notify_commit_sent should not record a terminal outbox report"
     );
 
     cleanup_handle.clean().await.expect("cleanup failed");
 
     // Simulates shutdown/crash after successful execution but before the
-    // outbox record could be closed. On restart the validator will pick up
-    // this leftover outbox bundle and re-drive it to completion.
+    // atomic outbox notification. On restart the validator will pick up this
+    // leftover outbox bundle and re-drive it to completion.
     let outbox_bundle = test_env
         .outbox_client()
         .outbox_reader()
@@ -419,9 +506,9 @@ async fn test_pickup_failed_intent() {
     delegate_counter(&test_env.ctx, &payer);
     add_to_counter(&test_env.ctx, &payer, 42);
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_commit_finalize(ctx, &[counter_pda]);
+        schedule_commit_finalize(ctx, &[counter_pda])
     });
-    let intent_id = outbox_bundle.id;
+    let intent_id = outbox_bundle.intent_id;
 
     // Create executor that will fail before chain execution
     let mut failing_outbox = test_env.outbox_client();
@@ -678,7 +765,7 @@ async fn test_pickup_after_committing() {
         counters.iter().map(|(_, pda)| *pda).collect();
 
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_commit_and_undelegate_bundle(ctx, &counter_pdas);
+        schedule_commit_and_undelegate_bundle(ctx, &counter_pdas)
     });
 
     // Fail only when the executor tries to record the Finalizing stage.
@@ -719,7 +806,7 @@ async fn test_pickup_after_committing() {
     let outbox_bundle = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(outbox_bundle.inner.intent_id)
         .await
         .expect("fetch succeeded")
         .expect("outbox bundle present");
@@ -764,7 +851,7 @@ async fn test_pickup_after_committing() {
     let closed = test_env
         .outbox_client()
         .outbox_reader()
-        .fetch_outbox_intent(outbox_bundle.inner.id)
+        .fetch_outbox_intent(outbox_bundle.inner.intent_id)
         .await
         .expect("fetch succeeded");
     assert!(
@@ -802,15 +889,15 @@ async fn test_pickup_after_finalizing() {
         counters.iter().map(|(_, pda)| *pda).collect();
 
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
-        schedule_commit_and_undelegate_bundle(ctx, &counter_pdas);
+        schedule_commit_and_undelegate_bundle(ctx, &counter_pdas)
     });
-    let intent_id = outbox_bundle.inner.id;
+    let intent_id = outbox_bundle.inner.intent_id;
 
-    // Run to completion, but force close_intent to fail so the outbox record
-    // survives execution - simulating a validator crash after both txs
-    // landed but before the outbox could be closed.
+    // Run to completion, but force the terminal outbox notification to fail so
+    // the outbox record survives execution - simulating a validator crash
+    // after both txs landed but before ScheduledCommitSent could be submitted.
     let mut outbox_client = test_env.outbox_client();
-    outbox_client.with_fail_close_intent(true);
+    outbox_client.with_fail_notify_commit_sent(true);
     let executor_ctx = test_env
         .executor_ctx_builder()
         .with_outbox_client(Arc::new(outbox_client))
@@ -823,7 +910,7 @@ async fn test_pickup_after_finalizing() {
         executor.execute(outbox_bundle.inner.clone()).await;
     assert!(
         result.inner.is_err(),
-        "close_intent failure should surface as overall execution failure"
+        "notify_commit_sent failure should surface as overall execution failure"
     );
     cleanup_handle
         .clean()
@@ -964,8 +1051,8 @@ struct TestOutboxClient {
     fail_committing: bool,
     fail_finalizing: bool,
     // Simulates a validator crash after the intent's execution result was
-    // determined but before the outbox record could be closed on chain.
-    fail_close_intent: bool,
+    // determined but before ScheduledCommitSent could be submitted.
+    fail_notify_commit_sent: bool,
 }
 
 impl TestOutboxClient {
@@ -979,7 +1066,7 @@ impl TestOutboxClient {
             set_execution_stage_sleep: None,
             fail_committing: false,
             fail_finalizing: false,
-            fail_close_intent: false,
+            fail_notify_commit_sent: false,
         }
     }
 
@@ -995,8 +1082,8 @@ impl TestOutboxClient {
         self.fail_finalizing = value;
     }
 
-    fn with_fail_close_intent(&mut self, value: bool) {
-        self.fail_close_intent = value;
+    fn with_fail_notify_commit_sent(&mut self, value: bool) {
+        self.fail_notify_commit_sent = value;
     }
 }
 
@@ -1018,6 +1105,7 @@ impl OutboxClient for TestOutboxClient {
         &self,
         intent_id: u64,
         stage: ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), Self::Error> {
         if let Some(sleep_duration) = self.set_execution_stage_sleep {
             tokio::time::sleep(sleep_duration).await;
@@ -1054,17 +1142,19 @@ impl OutboxClient for TestOutboxClient {
             .await
             .map_err(InternalOutboxClientError::RpcClientError)?;
         let tx = InstructionUtils::set_intent_execution_stage(
-            blockhash, intent_id, stage,
+            blockhash,
+            intent_id,
+            stage,
+            recovery_commit_nonces,
         );
-        self.ephem_rpc
-            .send_and_confirm_transaction(&tx)
+        send_and_confirm_outbox_transaction(self.ephem_rpc.as_ref(), &tx)
             .await
             .map_err(|err| {
                 println!(
                     "set_intent_execution_stage failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
                     tx.signatures[0]
                 );
-                InternalOutboxClientError::RpcClientError(err)
+                err
             })?;
         Ok(())
     }
@@ -1079,36 +1169,36 @@ impl OutboxClient for TestOutboxClient {
         else {
             panic!("should be known");
         };
-        let succeeded = result.is_ok();
-        self.sent_commits.lock().unwrap().push((meta.id, succeeded));
-        Ok(())
-    }
-
-    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
-        if self.fail_close_intent {
+        if self.fail_notify_commit_sent {
             return Err(Self::Error::RpcClientError(
                 client_error::ErrorKind::Custom(
-                    "close_intent failed".to_string(),
+                    "notify_commit_sent failed".to_string(),
                 )
                 .into(),
             ));
         }
 
+        let succeeded = result.is_ok();
+        self.sent_commits.lock().unwrap().push((meta.id, succeeded));
+        self.close_intent(meta.id).await?;
+        Ok(())
+    }
+
+    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
         let blockhash = self
             .ephem_rpc
             .get_latest_blockhash()
             .await
             .map_err(InternalOutboxClientError::RpcClientError)?;
         let tx = InstructionUtils::close_outbox_intent(intent_id, blockhash);
-        self.ephem_rpc
-            .send_and_confirm_transaction(&tx)
+        send_and_confirm_outbox_transaction(self.ephem_rpc.as_ref(), &tx)
             .await
             .map_err(|err| {
                 println!(
                     "close_intent failed: intent: {intent_id}, sig: {}, blockhash: {blockhash}, error: {err:?}",
                     tx.signatures[0]
                 );
-                InternalOutboxClientError::RpcClientError(err)
+                err
             })?;
 
         self.close_calls.lock().unwrap().push(intent_id);
@@ -1214,20 +1304,20 @@ fn schedule_commit_and_undelegate_bundle_instruction(
 }
 
 fn schedule_commit_and_undelegate_bundle(
-    ctx: &IntegrationTestContext,
+    _ctx: &IntegrationTestContext,
     counter_pdas: &[Pubkey],
-) {
+) -> ScheduleAttempt<()> {
     let validator_keypair = ensure_validator_authority();
     let ix = schedule_commit_and_undelegate_bundle_instruction(
         &validator_keypair.pubkey(),
         counter_pdas,
     );
-    let mut tx =
-        Transaction::new_with_payer(&[ix], Some(&validator_keypair.pubkey()));
-    let sig = ctx
-        .send_transaction_ephem(&mut tx, &[&validator_keypair])
-        .unwrap();
-    println!("schedule_commit_and_undelegate_bundle sig: {}", sig);
+    ScheduleAttempt {
+        instructions: vec![ix],
+        payer: validator_keypair.pubkey(),
+        signers: vec![validator_keypair],
+        scheduled: (),
+    }
 }
 
 fn setup_counters(

@@ -24,12 +24,19 @@ pub fn process_set_intent_execution_stage(
     invoke_context: &mut InvokeContext,
     intent_id: u64,
     stage: ExecutionStage,
+    recovery_commit_nonces: Vec<(Pubkey, u64)>,
 ) -> Result<(), InstructionError> {
     let validator_auth = authority();
     let bundle =
         validate(&signers, invoke_context, &validator_auth, intent_id)?;
 
-    set_new_execution_stage(invoke_context, intent_id, stage, bundle)
+    set_new_execution_stage(
+        invoke_context,
+        intent_id,
+        stage,
+        recovery_commit_nonces,
+        bundle,
+    )
 }
 
 fn validate(
@@ -98,21 +105,24 @@ fn set_new_execution_stage(
     invoke_context: &InvokeContext,
     intent_id: u64,
     stage: ExecutionStage,
+    recovery_commit_nonces: Vec<(Pubkey, u64)>,
     mut bundle: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let intent_acc =
         get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
 
-    bundle.apply_stage_transition(stage).map_err(|reason| {
-        ic_msg!(
-            invoke_context,
-            "SetIntentExecutionStage ERR: intent {}: invalid transition: {}",
-            intent_id,
-            reason
-        );
-        InstructionError::InvalidArgument
-    })?;
+    bundle
+        .apply_stage_transition(stage, recovery_commit_nonces)
+        .map_err(|reason| {
+            ic_msg!(
+                invoke_context,
+                "SetIntentExecutionStage ERR: intent {}: invalid transition: {}",
+                intent_id,
+                reason
+            );
+            InstructionError::InvalidArgument
+        })?;
 
     let data = bundle.try_to_bytes().map_err(|_| {
         ic_msg!(

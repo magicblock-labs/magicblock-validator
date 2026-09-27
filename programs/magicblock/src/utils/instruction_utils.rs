@@ -1,10 +1,11 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_magic_program_api::{
-    CRANK_PROGRAM_ID, MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::ScheduleTaskArgs,
     instruction::{MagicBlockInstruction, OutboxIntentInstruction},
     outbox,
-    pda::crank_signer_pda,
 };
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
@@ -132,23 +133,27 @@ impl InstructionUtils {
     // Scheduled Commit Sent
     // -----------------
     pub fn scheduled_commit_sent(
-        scheduled_commit_id: u64,
+        intent_id: u64,
         recent_blockhash: Hash,
     ) -> Transaction {
-        let ix = Self::scheduled_commit_sent_instruction(scheduled_commit_id);
+        let ix = Self::scheduled_commit_sent_instruction(intent_id);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     pub(crate) fn scheduled_commit_sent_instruction(
-        scheduled_commit_id: u64,
+        intent_id: u64,
     ) -> Instruction {
+        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
-            AccountMeta::new(outbox_intent_pda(scheduled_commit_id), false),
+            AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_wincode(
             OUTBOX_INTENT_PROGRAM_ID,
-            &OutboxIntentInstruction::ScheduledCommitSent(scheduled_commit_id),
+            &OutboxIntentInstruction::ScheduledCommitSent((
+                intent_id,
+                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
+            )),
             account_metas,
         )
     }
@@ -220,14 +225,20 @@ impl InstructionUtils {
         recent_blockhash: Hash,
         intent_id: u64,
         stage: outbox::ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Transaction {
-        let ix = Self::set_intent_execution_stage_instruction(intent_id, stage);
+        let ix = Self::set_intent_execution_stage_instruction(
+            intent_id,
+            stage,
+            recovery_commit_nonces,
+        );
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
     pub(crate) fn set_intent_execution_stage_instruction(
         intent_id: u64,
         stage: outbox::ExecutionStage,
+        recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Instruction {
         let account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
@@ -238,6 +249,7 @@ impl InstructionUtils {
             &OutboxIntentInstruction::SetIntentExecutionStage {
                 intent_id,
                 stage,
+                recovery_commit_nonces,
             },
             account_metas,
         )
@@ -288,39 +300,6 @@ impl InstructionUtils {
         Instruction::new_with_wincode(
             crate::id(),
             &MagicBlockInstruction::CancelTask { task_id },
-            account_metas,
-        )
-    }
-
-    // -----------------
-    // Execute Crank
-    // -----------------
-    pub fn execute_task_instruction(
-        validator_authority: Pubkey,
-        authority: Pubkey,
-        instructions: Vec<Instruction>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority, true),
-            AccountMeta::new_readonly(crank_signer_pda(&authority), false),
-        ];
-        for instruction in &instructions {
-            account_metas
-                .push(AccountMeta::new_readonly(instruction.program_id, false));
-            account_metas.extend(instruction.accounts.iter().map(|account| {
-                AccountMeta {
-                    pubkey: account.pubkey,
-                    is_signer: false,
-                    is_writable: account.is_writable,
-                }
-            }));
-        }
-        Instruction::new_with_wincode(
-            CRANK_PROGRAM_ID,
-            &MagicBlockInstruction::ExecuteCrank {
-                authority,
-                instructions,
-            },
             account_metas,
         )
     }

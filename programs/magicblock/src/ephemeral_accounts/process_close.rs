@@ -1,5 +1,6 @@
 //! Close ephemeral account instruction processor
 
+use magicblock_magic_program_api::ephemeral;
 use solana_account::{AccountMode, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -8,7 +9,7 @@ use solana_sdk_ids::system_program;
 use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
-    get_ephemeral_data_len, rent_for, transfer_rent,
+    get_ephemeral_data_len, transfer_rent,
     validation::{validate_common, validate_existing_ephemeral},
 };
 use crate::utils::account_actions::set_account_mode;
@@ -23,7 +24,7 @@ pub(crate) fn process_close_ephemeral_account(
         validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
     let data_len = get_ephemeral_data_len(&ephemeral)?;
-    let refund = rent_for(data_len)?;
+    let refund = ephemeral::rent_for(data_len)?;
     transfer_rent(transaction_context, -(refund as i64))?;
 
     // Reset account to empty state

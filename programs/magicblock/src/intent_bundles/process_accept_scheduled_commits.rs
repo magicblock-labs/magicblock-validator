@@ -49,7 +49,7 @@ pub fn process_accept_scheduled_commits(
     for (i, intent) in intents.into_iter().enumerate() {
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
         let (pda, bump) =
-            verify_intent_pda(invoke_context, intent.id, pda_idx)?;
+            verify_intent_pda(invoke_context, intent.intent_id, pda_idx)?;
 
         // Create outbox ephemeral account
         create_outbox_intent_cpi(
@@ -213,7 +213,7 @@ fn create_outbox_intent_cpi(
     pda: Pubkey,
     outbox_account: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
-    let intent_id = outbox_account.inner.id;
+    let intent_id = outbox_account.inner.intent_id;
     let data = outbox_account.try_to_bytes().map_err(|_| {
         ic_msg!(
             invoke_context,
