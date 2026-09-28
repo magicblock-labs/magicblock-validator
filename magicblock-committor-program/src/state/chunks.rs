@@ -33,7 +33,7 @@ impl Chunks {
         assert!(
             Self::struct_size(chunk_count)
                 < consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as usize,
-            "Size ({}) needed to track {} chunks is too large track and would require to realloc. Max allowed is {} bytes",
+            "Size ({}) needed to track {} chunks is too large to track and would require to realloc. Max allowed is {} bytes",
             Self::struct_size(chunk_count),
             chunk_count,
             consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
@@ -58,7 +58,7 @@ impl Chunks {
         count.div_ceil(BITS_PER_BYTE)
     }
 
-    /// Returns how many bytes [`Chunks`] will occupy certain count
+    /// Returns how many bytes [`Chunks`] will occupy for a given count
     pub fn struct_size(count: usize) -> usize {
         // bits: Vec<u8>,
         Self::count_to_bitfield_bytes(count)
@@ -108,8 +108,8 @@ impl Chunks {
         }
     }
 
-    /// Return [`true`] if offset delivered
-    /// Returns error if offset isn't multuple of chunk
+    /// Returns [`true`] if the offset is delivered
+    /// Returns an error if the offset isn't a multiple of the chunk size
     pub fn is_offset_delivered(
         &self,
         offset: usize,
