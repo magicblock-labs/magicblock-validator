@@ -348,6 +348,16 @@ lazy_static::lazy_static! {
         "committor_executors_busy_count", "Number of busy intent executors"
     ).unwrap();
 
+    static ref COMMITTOR_POISONED_KEYS_COUNT: IntGauge = IntGauge::new(
+        "committor_poisoned_keys_count",
+        "Number of pubkeys currently poisoned in the intent scheduler (only cleared by a process restart)"
+    ).unwrap();
+
+    static ref COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT: IntCounter = IntCounter::new(
+        "committor_cascade_voided_intents_count",
+        "Total number of intents voided by a poisoning cascade after a dependency failed"
+    ).unwrap();
+
     static ref COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM: HistogramVec = HistogramVec::new(
         HistogramOpts::new(
             "committor_intent_execution_time_histogram_v2",
@@ -445,6 +455,14 @@ lazy_static::lazy_static! {
     static ref RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT: IntCounter = IntCounter::new(
         "rpc_client_signature_status_batch_signatures_count",
         "Number of signatures included in batched getSignatureStatuses requests"
+    ).unwrap();
+
+    static ref RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS: Histogram = Histogram::with_opts(
+        HistogramOpts::new(
+            "rpc_client_signature_history_duration_seconds",
+            "Time in seconds spent on getSignatureStatuses-with-history (restart recovery)"
+        )
+        .buckets(vec![0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0])
     ).unwrap();
 
     // -----------------
@@ -594,6 +612,8 @@ pub(crate) fn register() {
         register!(COMMITTOR_INTENTS_BACKLOG_COUNT);
         register!(COMMITTOR_FAILED_INTENTS_COUNT);
         register!(COMMITTOR_EXECUTORS_BUSY_COUNT);
+        register!(COMMITTOR_POISONED_KEYS_COUNT);
+        register!(COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT);
         register!(COMMITTOR_INTENT_EXECUTION_TIME_HISTOGRAM);
         register!(COMMITTOR_INTENT_CU_USAGE);
         register!(COMMITTOR_INTENT_TASK_PREPARATION_TIME);
@@ -625,6 +645,7 @@ pub(crate) fn register() {
         register!(RPC_CLIENT_SIGNATURE_WS_FALLBACK_COUNT);
         register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_COUNT);
         register!(RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT);
+        register!(RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS);
         register!(CONNECTED_PUBSUB_CLIENTS_GAUGE);
         register!(CONNECTED_DIRECT_PUBSUB_CLIENTS_GAUGE);
         register!(PUBSUB_CLIENT_UPTIME_GAUGE);
@@ -758,6 +779,14 @@ pub fn inc_committor_failed_intents_count(
 
 pub fn set_committor_executors_busy_count(value: i64) {
     COMMITTOR_EXECUTORS_BUSY_COUNT.set(value)
+}
+
+pub fn set_committor_poisoned_keys_count(value: i64) {
+    COMMITTOR_POISONED_KEYS_COUNT.set(value)
+}
+
+pub fn inc_committor_cascade_voided_intents_count_by(by: u64) {
+    COMMITTOR_CASCADE_VOIDED_INTENTS_COUNT.inc_by(by)
 }
 
 pub fn observe_committor_intent_execution_time_histogram(
@@ -1073,6 +1102,10 @@ pub fn inc_rpc_client_signature_status_batch_count() {
 
 pub fn inc_rpc_client_signature_status_batch_signatures_count(count: u64) {
     RPC_CLIENT_SIGNATURE_STATUS_BATCH_SIGNATURES_COUNT.inc_by(count)
+}
+
+pub fn start_rpc_client_signature_history_timer() -> HistogramTimer {
+    RPC_CLIENT_SIGNATURE_HISTORY_DURATION_SECONDS.start_timer()
 }
 
 pub fn set_connected_pubsub_clients_count(count: usize) {

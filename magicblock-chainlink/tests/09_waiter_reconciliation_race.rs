@@ -198,6 +198,63 @@ async fn transient_redelegation_subscription_executes_action_once() {
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
 }
 
+/// Proves an undelegation-completion update is not dropped just because the
+/// local Transient image was written at a newer ER slot.
+#[tokio::test]
+async fn older_completion_update_replaces_transient_account() {
+    let ctx = TestContext::init(CURRENT_SLOT).await;
+    let pubkey = Pubkey::new_unique();
+    let local_slot = CURRENT_SLOT + 20;
+    let remote_slot = CURRENT_SLOT + 1;
+    ctx.bank
+        .accounts()
+        .store(&[(
+            pubkey,
+            AccountBuilder::default()
+                .lamports(1_000_000)
+                .data(700_i64.to_le_bytes().to_vec())
+                .owner(dlp_api::id())
+                .mode(AccountMode::Transient)
+                .slot(local_slot)
+                .build(),
+        )])
+        .unwrap();
+    ctx.chainlink.undelegation_requested(pubkey).await.unwrap();
+
+    ctx.rpc_client.set_slot(remote_slot);
+    let completed = Account {
+        lamports: 1_000_000,
+        data: 900_i64.to_le_bytes().to_vec(),
+        owner: V42_ID,
+        ..Default::default()
+    };
+    assert!(
+        ctx.send_and_receive_account_update(pubkey, completed, Some(8_000))
+            .await,
+        "subscription update completes"
+    );
+
+    let local = ctx
+        .bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| {
+            (
+                account.mode(),
+                account.slot(),
+                *account.owner(),
+                i64::from_le_bytes(account.data().try_into().unwrap()),
+            )
+        })
+        .unwrap()
+        .expect("completed account remains materialized");
+    assert_eq!(
+        local,
+        (AccountMode::ReadOnly, local_slot, V42_ID, 900),
+        "completed base image replaces the transient without regressing the lifecycle slot"
+    );
+}
+
 /// Proves dropping an activation wait cannot authorize a refetch or replacement
 /// while Engine still owns the submitted same-generation activation.
 #[tokio::test]

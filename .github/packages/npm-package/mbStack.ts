@@ -105,7 +105,7 @@ const CRANKER_KEYPAIR = process.env.MB_STACK_CRANKER_KEYPAIR;
 if (WITH_CRANKER && !CRANKER_KEYPAIR) {
   console.error(
     "--cranker requires MB_STACK_CRANKER_KEYPAIR: a keypair file path, a 64-byte\n" +
-      "JSON array, or a base58 keypair. It receives the per-trigger tips, \n" + 
+      "JSON array, or a base58 keypair. It receives the per-trigger tips,\n" +
       "so the account must be delegated (cranker handles the delegation).",
   );
   process.exit(1);

@@ -319,6 +319,108 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     tracked_count + internally_managed.len()
 }
 
+/// Invalidates tracked accounts that currently have no live account-sub
+/// coverage on any connected pubsub client.
+///
+/// Re-subscribing a WebSocket account after a reconnect gap does not prove
+/// that state changes during the gap were replayed. For ordinary direct
+/// watches, discard the local mirror so the next access must refetch from RPC.
+/// Undelegation-tracked accounts are kept because their dedicated refresher
+/// performs RPC catch-up while undelegation is in flight.
+pub(crate) async fn evict_uncovered_subscriptions<
+    PubsubClient: ChainPubsubClient,
+>(
+    subscribed_accounts: &SubscribedAccounts,
+    pubsub_client: &PubsubClient,
+    gap_candidates: Option<HashSet<Pubkey>>,
+    stale_account_tx: &mpsc::Sender<Pubkey>,
+    subscription_key_locks: Option<&SubscriptionKeyLocks>,
+    subscription_ownership: Option<&SubscriptionOwnershipMap>,
+) -> usize {
+    let from_reconnect_gap = gap_candidates.is_some();
+    let tracked_pubkeys =
+        gap_candidates.unwrap_or_else(|| subscribed_accounts.pubkeys());
+    let tracked_count = tracked_pubkeys.len();
+    if tracked_pubkeys.is_empty() {
+        return 0;
+    }
+
+    let uncovered = if from_reconnect_gap {
+        tracked_pubkeys.into_iter().collect::<Vec<_>>()
+    } else {
+        let covered = pubsub_client
+            .subscription_reconciliation_snapshot()
+            .map(|snapshot| snapshot.union)
+            .unwrap_or_default();
+        tracked_pubkeys
+            .difference(&covered)
+            .copied()
+            .collect::<Vec<_>>()
+    };
+
+    if uncovered.is_empty() {
+        return 0;
+    }
+
+    warn!(
+        tracked_count,
+        uncovered_count = uncovered.len(),
+        "Account subscriptions lost all live pubsub coverage; \
+         invalidating stale local mirrors"
+    );
+
+    let mut evicted = 0;
+    for pubkey in uncovered {
+        let _subscription_guard =
+            acquire_subscription_key_guard(subscription_key_locks, pubkey)
+                .await;
+
+        if !subscribed_accounts.contains(&pubkey) {
+            continue;
+        }
+
+        if !from_reconnect_gap {
+            let restored = pubsub_client
+                .subscription_reconciliation_snapshot()
+                .is_some_and(|snapshot| snapshot.union.contains(&pubkey));
+            if restored {
+                continue;
+            }
+        }
+
+        if let Some(ownership) = subscription_ownership
+            && ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                own.contains(SubscriptionReason::UndelegationTracking)
+            })
+        {
+            trace!(
+                pubkey = %pubkey,
+                "Keeping uncovered undelegation-tracked subscription for RPC catch-up"
+            );
+            continue;
+        }
+
+        subscribed_accounts.remove(&pubkey);
+        if let Some(ownership) = subscription_ownership {
+            ownership.lock().await.remove(&pubkey);
+        }
+        if let Err(err) = stale_account_tx.send(pubkey).await {
+            warn!(pubkey = %pubkey, error = ?err, "Failed to enqueue stale account after reconnect coverage loss");
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::RemovalUpdateFailed,
+            );
+        } else {
+            evicted += 1;
+            inc_chainlink_subscription_cleanup_accounts(
+                SubscriptionCleanupSource::Reconciler,
+                SubscriptionCleanupOutcome::Unsubscribed,
+            );
+        }
+    }
+    evicted
+}
+
 async fn acquire_subscription_key_guard(
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
     pubkey: Pubkey,

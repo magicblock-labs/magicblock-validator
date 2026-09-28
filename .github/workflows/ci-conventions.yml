@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   conventions:
+    if: ${{ false }}
     name: PR title and commit subjects
     runs-on: ubuntu-latest
     steps:

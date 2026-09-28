@@ -144,10 +144,37 @@ where
     /// internal DLP discriminator via delegation-record sightings.
     dlp_collision_tracker: Arc<PlMutex<DlpCollisionTracker>>,
 
+    /// Tracks accounts whose undelegation completion crossed from ER-local
+    /// slots back to base-chain slots. Engine needs monotonic local slots, but
+    /// base slots can be lower than the last transient ER slot.
+    completed_undelegation_slot_handoffs:
+        Arc<PlMutex<LruCache<Pubkey, CompletedUndelegationSlotHandoff>>>,
+
     /// Risk checker for post-delegation action addresses.
     risk_service: Option<Arc<RiskService>>,
 
     undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CompletedUndelegationSlotHandoff {
+    remote_slot: u64,
+    local_slot: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct CompletedUndelegationSlotRecord {
+    pubkey: Pubkey,
+    remote_slot: u64,
+    local_slot: u64,
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CompletedUndelegationSlotAction {
+    IgnoreStale,
+    UseLocalSlot(u64),
+    UseRemoteSlot,
+    None,
 }
 
 /// Negative-cache capacity for known-empty eATAs.
@@ -169,6 +196,12 @@ const PROGRAM_VERIFY_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(64)
 /// account cache because subscription ownership remains in Chainlink.
 const PROGRAMDATA_WATCH_CAPACITY: NonZeroUsize =
     NonZeroUsize::new(512).expect("programdata watch capacity is non-zero");
+
+/// Bounds per-account slot handoff state retained after undelegation
+/// completion. Entries are dropped once base slots catch up to local slots.
+const COMPLETED_UNDELEGATION_SLOT_HANDOFF_CAPACITY: NonZeroUsize =
+    NonZeroUsize::new(100_000)
+        .expect("completed undelegation slot handoff capacity is non-zero");
 
 /// Interval between transport-independent sweeps over the programdata
 /// watches. A watch whose upstream subscription silently dies stops
@@ -311,6 +344,9 @@ where
             programdata_index: self.programdata_index.clone(),
             programdata_sweep_cursor: self.programdata_sweep_cursor.clone(),
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
+            completed_undelegation_slot_handoffs: self
+                .completed_undelegation_slot_handoffs
+                .clone(),
             risk_service: self.risk_service.clone(),
             undelegation_request_sender: self
                 .undelegation_request_sender
@@ -481,6 +517,9 @@ where
             dlp_collision_tracker: Arc::new(PlMutex::new(
                 DlpCollisionTracker::new(),
             )),
+            completed_undelegation_slot_handoffs: Arc::new(PlMutex::new(
+                LruCache::new(COMPLETED_UNDELEGATION_SLOT_HANDOFF_CAPACITY),
+            )),
             risk_service,
             undelegation_request_sender,
         });
@@ -588,6 +627,54 @@ where
     /// Number of subscription updates whose processing has finished.
     pub fn processed_updates_count(&self) -> u64 {
         self.processed_updates_count.load(Ordering::Acquire)
+    }
+
+    fn completed_undelegation_slot_action(
+        &self,
+        pubkey: Pubkey,
+        remote_slot: u64,
+        current_local_slot: u64,
+    ) -> CompletedUndelegationSlotAction {
+        let mut handoffs = self.completed_undelegation_slot_handoffs.lock();
+        let Some(handoff) = handoffs.get(&pubkey).copied() else {
+            return CompletedUndelegationSlotAction::None;
+        };
+
+        if remote_slot <= handoff.remote_slot {
+            return CompletedUndelegationSlotAction::IgnoreStale;
+        }
+
+        if remote_slot >= current_local_slot {
+            return CompletedUndelegationSlotAction::UseRemoteSlot;
+        }
+
+        CompletedUndelegationSlotAction::UseLocalSlot(
+            current_local_slot.max(handoff.local_slot).saturating_add(1),
+        )
+    }
+
+    fn record_completed_undelegation_slot_handoff(
+        &self,
+        record: CompletedUndelegationSlotRecord,
+    ) {
+        let mut handoffs = self.completed_undelegation_slot_handoffs.lock();
+        if record.local_slot > record.remote_slot {
+            handoffs.put(
+                record.pubkey,
+                CompletedUndelegationSlotHandoff {
+                    remote_slot: record.remote_slot,
+                    local_slot: record.local_slot,
+                },
+            );
+        } else {
+            handoffs.pop(&record.pubkey);
+        }
+    }
+
+    fn clear_completed_undelegation_slot_handoff(&self, pubkey: Pubkey) {
+        self.completed_undelegation_slot_handoffs
+            .lock()
+            .pop(&pubkey);
     }
 
     #[instrument(skip(self, pubkeys))]
@@ -1516,15 +1603,15 @@ where
         let Some(resolved) = resolved else {
             return;
         };
-        let source_slots = resolved
+        let mut source_slots = resolved
             .source_slots
             .unwrap_or(CloneSourceSlots::single(update_slot));
-        let update_slot = update_slot.max(source_slots.data);
+        let mut update_slot = update_slot.max(source_slots.data);
         let (deleg_record, delegation_actions) = resolved
             .delegation
             .map(|(record, actions)| (Some(record), actions))
             .unwrap_or_default();
-        let account = resolved.account;
+        let mut account = resolved.account;
         let subscription_clone_context =
             AccountFetchContext::subscription_update(
                 AccountFetchReason::SubscriptionUpdateClone,
@@ -1540,70 +1627,6 @@ where
             )
             .await;
 
-        // Active delegation remains authoritative regardless of observation freshness.
-        if self.account_mode(&pubkey) == Some(AccountMode::Delegated) {
-            self.cleanup_direct_subscription_for_delegated_account(pubkey)
-                .await;
-            return;
-        }
-
-        //
-        // Ensure that the subscription update isn't out of order, i.e.
-        // we already hold a newer version of the account in our bank.
-        //
-        // The stricter intent is to ignore non-advancing subscription updates: if the bank
-        // already has the account at the same slot, then a normal/plain update at that slot is
-        // treated as stale/duplicate and should not overwrite local state, with the following
-        // exception:
-        //
-        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
-        //    or undelegating version while the subscription update carries the delegated state
-        //    at the same slot, so we must allow that update.
-        //
-        let reader = |in_bank: &AccountSharedData| {
-            let bank_slot = in_bank.slot();
-            let update_slot = account.read().slot().max(update_slot);
-            let same_slot_delegated_refresh = bank_slot == update_slot
-                && account.read().is(AccountMode::Delegated)
-                && (!in_bank.is(AccountMode::Delegated)
-                    || in_bank.is(AccountMode::Transient));
-            if bank_slot > update_slot
-                || (bank_slot == update_slot && !same_slot_delegated_refresh)
-            {
-                Some(bank_slot)
-            } else {
-                None
-            }
-        };
-        let non_advancing_slot = self.read_account(&pubkey, reader).flatten();
-
-        if let Some(in_bank_slot) = non_advancing_slot {
-            let update_slot = account.read().slot().max(update_slot);
-            if in_bank_slot == update_slot
-                && let Some(projected_ata_clone_request) =
-                    projected_ata_clone_request
-                && let Err(err) = self
-                    .clone_projected_ata_request(
-                        projected_ata_clone_request,
-                        subscription_clone_context,
-                    )
-                    .await
-            {
-                warn!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone projected ATA from out-of-order delegated eATA update"
-                );
-            }
-            trace!(
-                pubkey = %pubkey,
-                bank_slot = in_bank_slot,
-                update_slot,
-                "Ignoring out-of-order subscription update"
-            );
-            return;
-        }
-
         let mut undelegation_completed_on_chain = false;
         let reader = |in_bank: &AccountSharedData| {
             (
@@ -1613,9 +1636,10 @@ where
                 in_bank.slot(),
             )
         };
-        if let Some((delegated, transient, owner, slot)) =
-            self.read_account(&pubkey, reader)
-        {
+        let local_state = self.read_account(&pubkey, reader);
+        let mut completed_transient_replacement = false;
+        let mut completed_undelegation_slot_record = None;
+        if let Some((delegated, transient, owner, slot)) = local_state {
             if delegated && !transient {
                 self.cleanup_direct_subscription_for_delegated_account(pubkey)
                     .await;
@@ -1662,14 +1686,74 @@ where
                     &pubkey,
                     account.read().is(AccountMode::Delegated),
                     slot,
-                    deleg_record,
+                    deleg_record.as_ref().copied(),
                     &self.validator_pubkey,
                 ) {
                     return;
                 }
                 undelegation_completed_on_chain = true;
+                if !account.read().is(AccountMode::Delegated) {
+                    completed_transient_replacement = true;
+                    let remote_slot = account.read().slot();
+                    let replacement_slot = remote_slot.max(slot);
+                    if replacement_slot != account.read().slot() {
+                        account = account.slot(replacement_slot);
+                        source_slots = CloneSourceSlots {
+                            data: source_slots.data.max(replacement_slot),
+                            view: source_slots.view.max(replacement_slot),
+                        };
+                        update_slot = update_slot.max(replacement_slot);
+                    }
+                    completed_undelegation_slot_record =
+                        Some(CompletedUndelegationSlotRecord {
+                            pubkey,
+                            remote_slot,
+                            local_slot: replacement_slot,
+                        });
+                }
             } else if !delegated && account.read().is(AccountMode::Delegated) {
                 undelegation_completed_on_chain = true;
+            } else if !delegated && !account.read().is(AccountMode::Delegated) {
+                let remote_slot = account.read().slot();
+                match self.completed_undelegation_slot_action(
+                    pubkey,
+                    remote_slot,
+                    slot,
+                ) {
+                    CompletedUndelegationSlotAction::IgnoreStale => {
+                        trace!(
+                            pubkey = %pubkey,
+                            remote_slot,
+                            "Ignoring stale completed-undelegation base update"
+                        );
+                        return;
+                    }
+                    CompletedUndelegationSlotAction::UseLocalSlot(
+                        local_slot,
+                    ) => {
+                        account = account.slot(local_slot);
+                        source_slots = CloneSourceSlots {
+                            data: source_slots.data.max(local_slot),
+                            view: source_slots.view.max(local_slot),
+                        };
+                        update_slot = update_slot.max(local_slot);
+                        completed_undelegation_slot_record =
+                            Some(CompletedUndelegationSlotRecord {
+                                pubkey,
+                                remote_slot,
+                                local_slot,
+                            });
+                    }
+                    CompletedUndelegationSlotAction::UseRemoteSlot => {
+                        completed_undelegation_slot_record =
+                            Some(CompletedUndelegationSlotRecord {
+                                pubkey,
+                                remote_slot,
+                                local_slot: remote_slot,
+                            });
+                    }
+                    CompletedUndelegationSlotAction::None => {}
+                }
             } else if owner == dlp_api::id() {
                 debug!(
                     pubkey = %pubkey,
@@ -1683,6 +1767,71 @@ where
             );
             if account.read().is(AccountMode::Delegated) {
                 undelegation_completed_on_chain = true;
+            }
+        }
+
+        //
+        // Ensure that the subscription update isn't out of order, i.e.
+        // we already hold a newer version of the account in our bank.
+        //
+        // The stricter intent is to ignore non-advancing subscription updates: if the bank
+        // already has the account at the same slot, then a normal/plain update at that slot is
+        // treated as stale/duplicate and should not overwrite local state, with the following
+        // exceptions:
+        //
+        //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
+        //    or undelegating version while the subscription update carries the delegated state
+        //    at the same slot, so we must allow that update.
+        //  - A completed undelegation replaces a local Transient image with
+        //    base-chain state. That base image can have an older observed slot
+        //    than the local transient while still being the lifecycle-completing
+        //    authority.
+        //
+        if !completed_transient_replacement {
+            let reader = |in_bank: &AccountSharedData| {
+                let bank_slot = in_bank.slot();
+                let update_slot = account.read().slot().max(update_slot);
+                let same_slot_delegated_refresh = bank_slot == update_slot
+                    && account.read().is(AccountMode::Delegated)
+                    && (!in_bank.is(AccountMode::Delegated)
+                        || in_bank.is(AccountMode::Transient));
+                if bank_slot > update_slot
+                    || (bank_slot == update_slot
+                        && !same_slot_delegated_refresh)
+                {
+                    Some(bank_slot)
+                } else {
+                    None
+                }
+            };
+            let non_advancing_slot =
+                self.read_account(&pubkey, reader).flatten();
+
+            if let Some(in_bank_slot) = non_advancing_slot {
+                let update_slot = account.read().slot().max(update_slot);
+                if in_bank_slot == update_slot
+                    && let Some(projected_ata_clone_request) =
+                        projected_ata_clone_request
+                    && let Err(err) = self
+                        .clone_projected_ata_request(
+                            projected_ata_clone_request,
+                            subscription_clone_context,
+                        )
+                        .await
+                {
+                    warn!(
+                        pubkey = %pubkey,
+                        error = %err,
+                        "Failed to clone projected ATA from out-of-order delegated eATA update"
+                    );
+                }
+                trace!(
+                    pubkey = %pubkey,
+                    bank_slot = in_bank_slot,
+                    update_slot,
+                    "Ignoring out-of-order subscription update"
+                );
+                return;
             }
         }
 
@@ -1741,6 +1890,11 @@ where
                 && local.is(AccountMode::Delegated) == delegated
         }) == Some(true)
         {
+            if delegated {
+                self.clear_completed_undelegation_slot_handoff(pubkey);
+            } else if let Some(record) = completed_undelegation_slot_record {
+                self.record_completed_undelegation_slot_handoff(record);
+            }
             self.cleanup_completed_subscription_update(
                 pubkey,
                 delegated,

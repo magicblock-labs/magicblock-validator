@@ -112,13 +112,6 @@ fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {
         return;
     };
 
-    let post_balance_len = value["meta"]["postBalances"]
-        .as_array()
-        .map_or(0, |post_balances| post_balances.len());
-    if post_balance_len == pre_balances.len() {
-        return;
-    }
-
     let mut repaired_post_balances = pre_balances;
 
     let fee = json_value_as_u64(&value["meta"]["fee"]).unwrap_or(0);
@@ -315,6 +308,25 @@ mod tests {
         assert_eq!(value["meta"]["postBalances"][0], 5000);
         assert_eq!(value["meta"]["postBalances"][1], 20000);
         assert_eq!(value["meta"]["postBalances"][2], 30000);
+    }
+
+    #[test]
+    fn normalize_failed_transaction_overwrites_stale_post_balances() {
+        let mut value = json::json!({
+            "meta": {
+                "err": "InvalidWritableAccount",
+                "fee": 5000,
+                "preBalances": [10000, 20000, 30000],
+                "postBalances": [7000, 23000, 30000]
+            }
+        });
+
+        normalize_failed_transaction_balance_arrays(&mut value);
+
+        assert_eq!(
+            value["meta"]["postBalances"],
+            json::json!([5000, 20000, 30000])
+        );
     }
 
     #[test]

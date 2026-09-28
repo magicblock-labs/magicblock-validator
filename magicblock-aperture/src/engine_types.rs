@@ -100,6 +100,9 @@ pub(crate) fn processed_transaction(
         .clone()
         .map(|balances| balances.into_vecs())
         .unwrap_or_default();
+    let fee = execution.loaded_transaction.fee_details.total_fee();
+    let post_balances =
+        post_balances_for_status(&status, fee, &pre_balances, post_balances);
     let inner_instructions =
         details.inner_instructions.as_ref().map(|groups| {
             groups
@@ -119,7 +122,7 @@ pub(crate) fn processed_transaction(
         });
     let meta = TransactionStatusMeta {
         status,
-        fee: execution.loaded_transaction.fee_details.total_fee(),
+        fee,
         pre_balances,
         post_balances,
         inner_instructions,
@@ -161,11 +164,20 @@ fn meta_from_details(
     status: Result<(), solana_transaction_error::TransactionError>,
     details: ExecutionDetails,
 ) -> TransactionStatusMeta {
+    let fee = details.fee;
+    let pre_balances = details.balances.pre;
+    let post_balances = post_balances_for_status(
+        &status,
+        fee,
+        &pre_balances,
+        details.balances.post,
+    );
+
     TransactionStatusMeta {
         status,
-        fee: details.fee,
-        pre_balances: details.balances.pre,
-        post_balances: details.balances.post,
+        fee,
+        pre_balances,
+        post_balances,
         inner_instructions: details.cpi.map(inner_instructions),
         log_messages: Some(details.logs.as_ref().clone()),
         pre_token_balances: None,
@@ -179,6 +191,23 @@ fn meta_from_details(
         compute_units_consumed: Some(details.compute_units),
         cost_units: None,
     }
+}
+
+fn post_balances_for_status(
+    status: &Result<(), solana_transaction_error::TransactionError>,
+    fee: u64,
+    pre_balances: &[u64],
+    post_balances: Vec<u64>,
+) -> Vec<u64> {
+    if status.is_ok() || pre_balances.is_empty() {
+        return post_balances;
+    }
+
+    let mut rolled_back = pre_balances.to_vec();
+    if let Some(payer_balance) = rolled_back.first_mut() {
+        *payer_balance = payer_balance.saturating_sub(fee);
+    }
+    rolled_back
 }
 
 fn inner_instructions(groups: Vec<Cpis>) -> Vec<InnerInstructions> {
@@ -201,4 +230,55 @@ fn inner_instructions(groups: Vec<Cpis>) -> Vec<InnerInstructions> {
                 .collect(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_transaction_error::TransactionError;
+
+    use super::*;
+
+    #[test]
+    fn post_balances_for_status_keeps_successful_balances() {
+        let post_balances =
+            post_balances_for_status(&Ok(()), 5, &[10, 20], vec![4, 26]);
+
+        assert_eq!(post_balances, vec![4, 26]);
+    }
+
+    #[test]
+    fn post_balances_for_status_repairs_failed_balances() {
+        let post_balances = post_balances_for_status(
+            &Err(TransactionError::AccountInUse),
+            5,
+            &[10, 20, 30],
+            vec![1, 2, 3],
+        );
+
+        assert_eq!(post_balances, vec![5, 20, 30]);
+    }
+
+    #[test]
+    fn post_balances_for_status_keeps_empty_failed_balances() {
+        let post_balances = post_balances_for_status(
+            &Err(TransactionError::AccountInUse),
+            5,
+            &[],
+            vec![1, 2, 3],
+        );
+
+        assert_eq!(post_balances, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn post_balances_for_status_saturates_fee() {
+        let post_balances = post_balances_for_status(
+            &Err(TransactionError::AccountInUse),
+            50,
+            &[10, 20],
+            vec![10, 20],
+        );
+
+        assert_eq!(post_balances, vec![0, 20]);
+    }
 }

@@ -176,6 +176,76 @@ async fn waiter_applies_newer_account_image() {
     assert_eq!(state, (AccountMode::ReadOnly, 12, vec![2]));
 }
 
+#[tokio::test]
+async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
+    let ctx = TestContext::init(10).await;
+    let pubkey = Pubkey::new_unique();
+    let owner = system_program::id();
+    let remote_account = |data| Account {
+        lamports: 1_000_000,
+        data: vec![data],
+        owner,
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    let transient = AccountBuilder::from(remote_account(7))
+        .owner(dlp_api::id())
+        .mode(AccountMode::Transient)
+        .slot(100)
+        .build();
+    ctx.bank
+        .accounts()
+        .store(&[(pubkey, transient)])
+        .expect("seed transient account");
+    ctx.chainlink
+        .undelegation_requested(pubkey)
+        .await
+        .expect("watch undelegating account");
+
+    ctx.rpc_client.set_slot(10);
+    assert!(
+        ctx.send_and_receive_account_update(
+            pubkey,
+            remote_account(7),
+            Some(8_000),
+        )
+        .await,
+        "completion update should be processed"
+    );
+    assert_eq!(
+        ctx.bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| {
+                (account.mode(), account.slot(), account.data().to_vec())
+            })
+            .expect("read completed account"),
+        Some((AccountMode::ReadOnly, 100, vec![7]))
+    );
+
+    ctx.rpc_client.set_slot(11);
+    assert!(
+        ctx.send_and_receive_account_update(
+            pubkey,
+            remote_account(9),
+            Some(8_000),
+        )
+        .await,
+        "follow-up base update should be processed"
+    );
+    assert_eq!(
+        ctx.bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| {
+                (account.mode(), account.slot(), account.data().to_vec())
+            })
+            .expect("read refreshed account"),
+        Some((AccountMode::ReadOnly, 101, vec![9]))
+    );
+}
+
 mod aml_check_strategy {
     use solana_instruction::AccountMeta;
 

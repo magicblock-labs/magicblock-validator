@@ -1,7 +1,9 @@
 use magicblock_magic_program_api::instruction::{
     CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction,
+    OutboxIntentInstruction,
 };
 use solana_instruction::error::InstructionError;
+use solana_log_collector::ic_msg;
 use solana_program_runtime::{
     declare_process_instruction, invoke_context::InvokeContext,
 };
@@ -14,7 +16,12 @@ use crate::{
         process_resize_ephemeral_account,
     },
     errors::MagicBlockProgramError,
-    process_scheduled_commit_sent,
+    outbox_intent::{
+        process_close_outbox_intent::process_close_outbox_intent,
+        process_create_outbox_intent::process_create_outbox_intent,
+        process_scheduled_commit_sent::process_scheduled_commit_sent,
+        process_set_intent_execution_stage::process_set_intent_execution_stage,
+    },
     schedule_task::{process_cancel_task, process_schedule_task},
     schedule_transactions::{
         ProcessScheduleCommitOptions, process_accept_scheduled_commits,
@@ -34,7 +41,7 @@ fn composition_removed(
     invoke_context: &InvokeContext,
     instruction: &str,
 ) -> Result<(), InstructionError> {
-    solana_log_collector::ic_msg!(
+    ic_msg!(
         invoke_context,
         "{} is no longer supported: account composition is handled by the engine",
         instruction
@@ -98,12 +105,27 @@ declare_process_instruction!(
             AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            ScheduledCommitSent((id, _bump)) => process_scheduled_commit_sent(
-                signers,
-                invoke_context,
-                transaction_context,
-                id,
-            ),
+            ScheduledCommitSent(_) => {
+                ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
+            SetIntentExecutionStage { .. } => {
+                ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
+            CloseOutboxIntent(_) => {
+                ic_msg!(
+                    invoke_context,
+                    "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                );
+                Err(InstructionError::InvalidInstructionData)
+            }
             ScheduleBaseIntent(args) => process_schedule_intent_bundle(
                 signers,
                 invoke_context,
@@ -229,6 +251,43 @@ declare_process_instruction!(
                     invoke_context,
                     transaction_context,
                 )
+            }
+        }
+    }
+);
+
+declare_process_instruction!(
+    OutboxIntentEntrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let instruction: OutboxIntentInstruction =
+            deserialize_instruction(invoke_context)?;
+
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let signers = instruction_context.get_signers()?;
+
+        match instruction {
+            OutboxIntentInstruction::CreateOutboxIntent { data } => {
+                process_create_outbox_intent(signers, invoke_context, data)
+            }
+            OutboxIntentInstruction::CloseOutboxIntent(id) => {
+                process_close_outbox_intent(signers, invoke_context, id)
+            }
+            OutboxIntentInstruction::SetIntentExecutionStage {
+                intent_id,
+                stage,
+                recovery_commit_nonces,
+            } => process_set_intent_execution_stage(
+                signers,
+                invoke_context,
+                intent_id,
+                stage,
+                recovery_commit_nonces,
+            ),
+            OutboxIntentInstruction::ScheduledCommitSent((id, _bump)) => {
+                process_scheduled_commit_sent(signers, invoke_context, id)
             }
         }
     }
