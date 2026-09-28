@@ -17,7 +17,7 @@ use solana_signature::Signature;
 
 use crate::{
     errors::custom_error_codes,
-    intent_bundles::outbox_intent_bundles::OutboxIntentBundle,
+    outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
         accounts::{
@@ -26,6 +26,9 @@ use crate::{
     },
     validator::authority,
 };
+
+const VALIDATOR_IDX: u16 = 0;
+const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
 #[derive(Default, Debug, Clone)]
 pub struct SentCommit {
@@ -165,18 +168,16 @@ fn validate(
     invoke_context: &InvokeContext,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    const VALIDATOR_IDX: u16 = 0;
-    const MAGIC_PROGRAM_IDX: u16 = VALIDATOR_IDX + 1;
-    const CLOSING_PDA_IDX: u16 = MAGIC_PROGRAM_IDX + 1;
-
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
-    // Assert MagicBlock program
-    if ix_ctx.get_program_key()? != &crate::id() {
+    // Assert outbox intent program
+    if ix_ctx.get_program_key()?
+        != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID
+    {
         ic_msg!(
             invoke_context,
-            "ScheduleCommitSent ERR: Magic program account not found"
+            "ScheduleCommitSent ERR: outbox intent program account not found"
         );
         return Err(InstructionError::UnsupportedProgramId);
     }
@@ -193,22 +194,6 @@ fn validate(
             validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
-    }
-
-    // Assert magic program account
-    let magic_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        MAGIC_PROGRAM_IDX,
-    )?;
-    if *magic_program_pubkey != crate::id() {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommitSent ERR: account at idx {} is {}, expected magic program {}",
-            MAGIC_PROGRAM_IDX,
-            magic_program_pubkey,
-            crate::id()
-        );
-        return Err(InstructionError::IncorrectProgramId);
     }
 
     // Assert signers
@@ -256,8 +241,6 @@ fn validate(
 fn close_outbox_ephemeral_account(
     invoke_context: &InvokeContext,
 ) -> Result<(), InstructionError> {
-    const CLOSING_PDA_IDX: u16 = 2;
-
     let transaction_context = &*invoke_context.transaction_context;
     let pda =
         get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
@@ -339,11 +322,13 @@ mod tests {
     use magicblock_core::intent::{
         MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
     };
-    use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
+    use magicblock_magic_program_api::{
+        EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
+    };
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
-    use solana_sdk_ids::{bpf_loader_upgradeable, system_program};
+    use solana_sdk_ids::system_program;
     use solana_signer::Signer;
     use solana_transaction::Transaction;
 
@@ -351,7 +336,9 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{ensure_started_validator, process_instruction},
+        test_utils::{
+            ensure_started_validator, process_outbox_intent_instruction,
+        },
     };
 
     fn single_acc_commit(intent_id: u64) -> SentCommit {
@@ -410,7 +397,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
@@ -444,46 +431,11 @@ mod tests {
         ix.accounts[0].pubkey = fake_validator.pubkey();
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
             Err(InstructionError::IncorrectAuthority),
-        );
-
-        assert!(
-            get_scheduled_commit(commit.message_id).is_some(),
-            "does not remove scheduled commit data"
-        );
-    }
-
-    #[test]
-    fn test_registered_but_invalid_program() {
-        let commit = setup_registered_commit();
-
-        let fake_program = Keypair::new();
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                fake_program.pubkey(),
-                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
-            );
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
-            commit.message_id,
-        );
-        ix.accounts[1].pubkey = fake_program.pubkey();
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
-
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::IncorrectProgramId),
         );
 
         assert!(
@@ -512,7 +464,7 @@ mod tests {
         let mut pda_account = AccountBuilder::from(AccountSharedData::new(
             0,
             data.len(),
-            &crate::id(),
+            &OUTBOX_INTENT_PROGRAM_ID,
         ))
         .mode(AccountMode::Magic)
         .build::<AccountSharedData>();
@@ -542,7 +494,7 @@ mod tests {
 
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
-        process_instruction(
+        process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,

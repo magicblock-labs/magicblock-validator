@@ -10,7 +10,7 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
+use crate::intent_bundles::magic_scheduled_base_intent::ScheduledIntentBundle;
 
 #[derive(
     Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite,
