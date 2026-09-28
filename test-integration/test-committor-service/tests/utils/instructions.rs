@@ -47,6 +47,43 @@ pub fn init_account_and_delegate_ixs(
     }
 }
 
+/// Flexi-counter-specific variant of [`init_account_and_delegate_ixs`], used
+/// only where a test needs flexi-counter's own on-chain behavior (e.g. its
+/// `FAIL_UNDELEGATION_LABEL` forced-undelegation-failure hook), which
+/// `program_schedulecommit`'s order-book program does not implement.
+pub fn init_flexi_counter_and_delegate_ixs(
+    payer: Pubkey,
+    bytes: u64,
+    label: Option<String>,
+) -> InitAccountAndDelegateIxs {
+    const MAX_ALLOC: u64 = magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
+
+    use program_flexi_counter::{instruction::*, state::*};
+
+    let init_counter_ix =
+        create_init_ix(payer, label.unwrap_or("COUNTER".to_string()));
+    let rent_exempt = Rent::default().minimum_balance(bytes as usize);
+
+    let num_reallocs = bytes.div_ceil(MAX_ALLOC);
+    let realloc_ixs = if num_reallocs == 0 {
+        vec![]
+    } else {
+        (0..num_reallocs)
+            .map(|i| create_realloc_ix(payer, bytes, i as u16))
+            .collect()
+    };
+
+    let delegate_ix = create_delegate_ix(payer);
+    let pda = FlexiCounter::pda(&payer).0;
+    InitAccountAndDelegateIxs {
+        init: init_counter_ix,
+        reallocs: realloc_ixs,
+        delegate: delegate_ix,
+        pda,
+        rent_excempt: rent_exempt,
+    }
+}
+
 pub fn account_pda(authority: &Pubkey) -> Pubkey {
     Pubkey::find_program_address(
         &[b"order_book", authority.as_ref()],

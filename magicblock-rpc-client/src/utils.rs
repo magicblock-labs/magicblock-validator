@@ -37,7 +37,7 @@ pub trait SendErrorMapper<E> {
 /// - `ExecErr`: The unified execution error type returned to the caller with mapped errors
 pub async fn send_transaction_with_retries<F, Fut, Map, SendErr, ExecErr>(
     make_send_fut: F,
-    send_result_mapper: Map,
+    send_error_mapper: Map,
     stop_predicate: impl Fn(usize, Duration) -> bool,
 ) -> Result<Signature, ExecErr>
 where
@@ -60,9 +60,44 @@ where
             },
             Err(err) => err,
         };
-        let mapped_error = send_result_mapper.map(err);
-        let sleep_duration = match send_result_mapper.decide_flow(&mapped_error)
+        let mapped_error = send_error_mapper.map(err);
+        let sleep_duration = match send_error_mapper.decide_flow(&mapped_error)
         {
+            ControlFlow::Continue(value) => value,
+            ControlFlow::Break(()) => return Err(mapped_error),
+        };
+
+        if stop_predicate(i, start.elapsed()) {
+            return Err(mapped_error);
+        }
+
+        sleep(sleep_duration).await
+    }
+}
+
+pub async fn get_with_retries<F, Fut, R, Map, RpcError, MappedError>(
+    make_get_fut: F,
+    error_mapper: Map,
+    stop_predicate: impl Fn(usize, Duration) -> bool,
+) -> Result<R, MappedError>
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = Result<R, RpcError>>,
+    Map: SendErrorMapper<RpcError, ExecutionError = MappedError>,
+{
+    let start = Instant::now();
+    let mut i = 0;
+
+    loop {
+        i += 1;
+
+        let result = make_get_fut().await;
+        let err = match result {
+            Ok(value) => return Ok(value),
+            Err(err) => err,
+        };
+        let mapped_error = error_mapper.map(err);
+        let sleep_duration = match error_mapper.decide_flow(&mapped_error) {
             ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return Err(mapped_error),
         };

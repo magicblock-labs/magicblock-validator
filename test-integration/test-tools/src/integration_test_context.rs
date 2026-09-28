@@ -287,6 +287,15 @@ impl IntegrationTestContext {
         Ok(ephem_client)
     }
 
+    pub fn try_ephem_client_async(
+        &self,
+    ) -> anyhow::Result<nonblocking::rpc_client::RpcClient> {
+        let Some(ephem_client) = self.ephem_client.as_ref() else {
+            return Err(anyhow::anyhow!("Ephem client not available"));
+        };
+        Ok(async_rpc_client(ephem_client))
+    }
+
     pub fn fetch_ephem_account_data(
         &self,
         pubkey: Pubkey,
