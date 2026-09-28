@@ -248,15 +248,16 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             let (first, rest) = if remaining_capacity > 0 {
                 new_pks.split_at(remaining_capacity)
             } else {
-                // No remaining capacity — force a promotion by
-                // sending an empty-ish batch that will still
-                // trigger the promote path, then chunk the rest.
+                // No remaining capacity — the current-new stream is already
+                // at the optimized limit, so send an empty batch to trigger
+                // the promote path, then chunk the rest.
                 ([].as_slice(), new_pks.as_slice())
             };
-            if !first.is_empty() {
-                self.account_subscribe_batch(first, commitment, from_slot)
-                    .await?;
-            }
+            // `first` is empty only in the no-capacity case above, where this
+            // call is exactly what forces the promotion that clears
+            // `current_new_subs` before the chunks below are appended.
+            self.account_subscribe_batch(first, commitment, from_slot)
+                .await?;
             for chunk in rest.chunks(max) {
                 self.account_subscribe_batch(chunk, commitment, from_slot)
                     .await?;
@@ -2110,6 +2111,50 @@ mod tests {
         // All 85 pubkeys are subscribed.
         let all: Vec<Pubkey> =
             seed.iter().chain(batch.iter()).copied().collect();
+        assert_subscriptions_eq(&mgr, &all);
+    }
+
+    #[tokio::test]
+    async fn test_chunking_with_zero_remaining_capacity_promotes_first() {
+        // max_subs_in_new (5) is below max_subs_in_old_optimized (10), so
+        // seeding the current-new stream up to `max` leaves zero remaining
+        // capacity. The empty first batch must still be delivered so the
+        // promote path runs and `current_new_subs` is cleared before the
+        // following chunks are appended.
+        let (mut mgr, factory) = create_manager();
+
+        // max_subs_in_new = 5, so 5 pubkeys stay in current-new without
+        // promotion. Then 5 more reach `max` and promote, leaving the
+        // next subscribe with remaining_capacity == 0.
+        subscribe_in_batches(&mut mgr, 5, 5).await;
+        assert_eq!(mgr.current_new_sub_count(), 5);
+
+        // Fill up to `max` so the next call sees no remaining capacity.
+        let fill = make_pubkeys(5);
+        mgr.account_subscribe(&fill, &COMMITMENT, 0).await.unwrap();
+        assert_eq!(mgr.unoptimized_old_stream_count(), 1);
+        assert_eq!(mgr.current_new_sub_count(), 0);
+
+        // Now subscribe a batch that must be chunked while the promote
+        // path is entered with zero remaining capacity.
+        let batch = make_pubkeys(30);
+        mgr.account_subscribe(&batch, &COMMITMENT, 0).await.unwrap();
+
+        let max = test_config().max_subs_in_old_optimized.get();
+        for req in factory.handle_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(n <= max, "request has {n} pubkeys, exceeds limit {max}",);
+        }
+        for req in factory.captured_requests() {
+            let n = account_pubkeys_from_request(&req).len();
+            assert!(
+                n <= max,
+                "captured request has {n} pubkeys, exceeds limit {max}",
+            );
+        }
+
+        let all: Vec<Pubkey> =
+            fill.iter().chain(batch.iter()).copied().collect();
         assert_subscriptions_eq(&mgr, &all);
     }
 
