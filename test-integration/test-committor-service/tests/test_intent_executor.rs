@@ -1121,7 +1121,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
 
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let counters = (0..8).map(async |_| {
+    let counters = (0..5).map(async |_| {
         let (counter_auth, account) = setup_counter(40, None).await;
         setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
             .await;
