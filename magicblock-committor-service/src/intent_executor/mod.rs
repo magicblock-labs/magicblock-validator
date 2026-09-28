@@ -154,6 +154,10 @@ impl IntentExecutionResult {
     pub fn is_err(&self) -> bool {
         self.inner.is_err()
     }
+
+    pub fn is_ok(&self) -> bool {
+        self.inner.is_ok()
+    }
 }
 
 #[derive(Default)]

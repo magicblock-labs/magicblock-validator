@@ -236,7 +236,8 @@ fn is_terminal_execution_error(err: &IntentExecutorError) -> bool {
         | IntentExecutorError::GetPendingSignatureStatusError(_)
         | IntentExecutorError::PendingSignatureResolutionError(_)
         | IntentExecutorError::FailedCommitPreparationError(_)
-        | IntentExecutorError::FailedFinalizePreparationError(_) => false,
+        | IntentExecutorError::FailedFinalizePreparationError(_)
+        | IntentExecutorError::PoisonedIntentError => false,
         IntentExecutorError::FailedToCommitError { err, .. }
         | IntentExecutorError::FailedToFinalizeError { err, .. } => {
             is_terminal_strategy_error(err)
