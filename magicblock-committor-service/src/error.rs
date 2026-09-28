@@ -1,7 +1,15 @@
 use thiserror::Error;
 use tokio::sync::oneshot::error::RecvError;
 
-use crate::intent_engine::intent_channel::IntentScheduleError;
+use crate::intent_engine::db;
+
+#[derive(Error, Debug)]
+pub enum IntentScheduleError {
+    #[error("Channel was closed")]
+    ChannelClosed,
+    #[error("DBError: {0}")]
+    DBError(#[from] db::Error),
+}
 
 pub type CommittorServiceResult<T, E = CommittorServiceError> = Result<T, E>;
 

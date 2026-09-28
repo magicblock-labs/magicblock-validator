@@ -421,7 +421,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        intent_engine::intent_scheduler::create_test_intent,
+        intent_engine::intent_scheduler::create_test_intent_bundle,
         tasks::{
             BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
             UndelegateTask,
@@ -851,7 +851,7 @@ mod tests {
     async fn test_finalize_tasks_include_request_for_owner_program_undelegate()
     {
         let delegated_account = Pubkey::new_unique();
-        let intent = create_test_intent(0, &[delegated_account], true);
+        let intent = create_test_intent_bundle(0, &[], &[delegated_account]);
         let info_fetcher = Arc::new(MockInfoFetcher {
             delegation_metadata: HashMap::from([(
                 delegated_account,
@@ -874,7 +874,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_single_stage_mode() {
         let pubkey = [Pubkey::new_unique()];
-        let intent = create_test_intent(0, &pubkey, false);
+        let intent = create_test_intent_bundle(0, &pubkey, &[]);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
@@ -903,7 +903,7 @@ mod tests {
     async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit()
      {
         let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
-        let intent = create_test_intent(0, &pubkeys, true);
+        let intent = create_test_intent_bundle(0, &[], &pubkeys);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
@@ -930,7 +930,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_single_stage_mode_with_alts() {
         let pubkeys: [_; 8] = std::array::from_fn(|_| Pubkey::new_unique());
-        let intent = create_test_intent(0, &pubkeys, false);
+        let intent = create_test_intent_bundle(0, &pubkeys, &[]);
 
         let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent)
