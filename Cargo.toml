@@ -8,25 +8,25 @@ opt-level = 0 # Keep dependency compile time fast
 [workspace]
 members = [
     "bins/magicblock",
-    "bins/magicblock-validator",
-    "bins/magicblock-validator-tui",
-    "bins/magicblock-verifier",
-    "magicblock-aml",
-    "magicblock-aperture",
-    "magicblock-chainlink",
-    "magicblock-committor-program",
-    "magicblock-committor-service",
-    "magicblock-config",
-    "magicblock-core",
-    "magicblock-ledger",
-    "magicblock-magic-program-api",
-    "magicblock-metrics",
-    "magicblock-rpc-client",
-    "magicblock-runtime",
-    "magicblock-services",
-    "magicblock-table-mania",
-    "magicblock-task-scheduler",
-    "magicblock-version",
+    "bins/validator",
+    "bins/validator-tui",
+    "bins/verifier",
+    "aml",
+    "aperture",
+    "chainlink",
+    "committor-program",
+    "committor-service",
+    "config",
+    "core",
+    "ledger",
+    "magic-program-api",
+    "metrics",
+    "rpc-client",
+    "runtime",
+    "services",
+    "table-mania",
+    "task-scheduler",
+    "version",
     "programs/magicblock",
     "storage-proto",
 ]
@@ -44,24 +44,24 @@ repository = "https://github.com/magicblock-labs/ephemeral-validator"
 version = "0.15.4"
 
 [workspace.dependencies]
-magicblock-aml = { path = "magicblock-aml" }
-magicblock-aperture = { path = "magicblock-aperture" }
-magicblock-chainlink = { path = "magicblock-chainlink" }
-magicblock-committor-program = { path = "magicblock-committor-program", features = ["no-entrypoint"] }
-magicblock-committor-service = { path = "magicblock-committor-service" }
-magicblock-config = { path = "magicblock-config" }
-magicblock-core = { path = "magicblock-core" }
+magicblock-aml = { path = "aml" }
+magicblock-aperture = { path = "aperture" }
+magicblock-chainlink = { path = "chainlink" }
+magicblock-committor-program = { path = "committor-program", features = ["no-entrypoint"] }
+magicblock-committor-service = { path = "committor-service" }
+magicblock-config = { path = "config" }
+magicblock-core = { path = "core" }
 magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de" }
-magicblock-ledger-deprecated = { path = "magicblock-ledger" }
-magicblock-magic-program-api = { path = "magicblock-magic-program-api" }
-magicblock-metrics = { path = "magicblock-metrics" }
+magicblock-ledger-deprecated = { path = "ledger" }
+magicblock-magic-program-api = { path = "magic-program-api" }
+magicblock-metrics = { path = "metrics" }
 magicblock-program = { path = "programs/magicblock" }
-magicblock-rpc-client = { path = "magicblock-rpc-client" }
-magicblock-runtime = { path = "magicblock-runtime" }
-magicblock-services = { path = "magicblock-services" }
-magicblock-table-mania = { path = "magicblock-table-mania" }
-magicblock-task-scheduler = { path = "magicblock-task-scheduler" }
-magicblock-version = { path = "magicblock-version" }
+magicblock-rpc-client = { path = "rpc-client" }
+magicblock-runtime = { path = "runtime" }
+magicblock-services = { path = "services" }
+magicblock-table-mania = { path = "table-mania" }
+magicblock-task-scheduler = { path = "task-scheduler" }
+magicblock-version = { path = "version" }
 
 accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.12.0" }
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.12.0" }

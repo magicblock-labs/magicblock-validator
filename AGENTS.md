@@ -6,13 +6,13 @@ changing that boundary.
 
 ## Boundaries
 
-- `bins/magicblock-validator` owns leader orchestration;
-  `bins/magicblock-verifier` owns follower lifecycle. Only the leader starts
+- `bins/validator` owns leader orchestration;
+  `bins/verifier` owns follower lifecycle. Only the leader starts
   application services.
-- `magicblock-runtime` owns the shared runtime image; `magicblock-chainlink`
-  owns account synchronization/materialization; `magicblock-aperture` owns RPC;
-  committor crates own settlement; `magicblock-task-scheduler` owns repeated tasks.
-- Keep operator work in `bins/magicblock` and `bins/magicblock-validator-tui`,
+- `runtime` owns the shared runtime image; `chainlink`
+  owns account synchronization/materialization; `aperture` owns RPC;
+  committor crates own settlement; `task-scheduler` owns repeated tasks.
+- Keep operator work in `bins/magicblock` and `bins/validator-tui`,
   off execution hot paths.
 - Reuse Engine's `testkit` and v42 program for validator execution tests;
   do not add local test-program crates.

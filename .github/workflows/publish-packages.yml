@@ -277,7 +277,7 @@ jobs:
           fi
 
       - name: cargo publish
-        working-directory: magicblock-magic-program-api/
+        working-directory: magic-program-api/
         run: |
           DRY_RUN_FLAG=""
           if [ "${DRY_RUN}" = "true" ]; then

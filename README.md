@@ -10,7 +10,7 @@
   <p>
     <a href="https://docs.magicblock.gg">Build with MagicBlock</a> ·
     <a href="#-try-it-locally">Try it locally</a> ·
-    <a href="bins/magicblock-validator/README.md">Run a validator</a>
+    <a href="bins/validator/README.md">Run a validator</a>
   </p>
 </div>
 
@@ -52,8 +52,8 @@ periodic application work, rather than exact wall-clock deadlines.
 Applications can also request **base-chain actions and local callbacks**, letting
 rollup logic react to an action's result. The action and callback are separate
 transactions, not one atomic cross-chain operation. Explore
-[scheduled tasks](magicblock-task-scheduler/README.md) and
-[callbacks](magicblock-services/README.md#callbacks).
+[scheduled tasks](task-scheduler/README.md) and
+[callbacks](services/README.md#callbacks).
 
 ### Connect clients and stream live activity
 
@@ -64,7 +64,7 @@ changes, logs, and transaction status without continuous polling.
 For deeper integrations, **Geyser plugins** can feed validator notifications into
 external systems such as indexers. Plugins must match the validator's Rust and
 Agave ABI; the available notification fields differ from a full Solana validator.
-See the [RPC and plugin guide](magicblock-aperture/README.md).
+See the [RPC and plugin guide](aperture/README.md).
 
 ## 🌉 From Solana to a rollup and back
 
@@ -77,7 +77,7 @@ to Solana.
 
 Rollup execution and base-chain settlement are separate steps. Start with the
 [developer documentation](https://docs.magicblock.gg) for the application flow;
-the [settlement guide](magicblock-committor-service/README.md) explains completion
+the [settlement guide](committor-service/README.md) explains completion
 and retry boundaries.
 
 ## 🚀 Try it locally
@@ -102,10 +102,10 @@ ports, external remotes, and individual services.
 | I want to… | Start here |
 | :-- | :-- |
 | Build an application | [Developer documentation](https://docs.magicblock.gg) |
-| Run a leader from source | [Validator setup](bins/magicblock-validator/README.md) |
-| Follow a leader with a verifier | [Verifier setup](bins/magicblock-verifier/README.md) |
-| Configure a deployment | [Configuration guide](magicblock-config/README.md) |
-| Manage a validator | [Operator CLI](bins/magicblock/README.md) · [Terminal monitor](bins/magicblock-validator-tui/README.md) · [Metrics](magicblock-metrics/README.md) |
+| Run a leader from source | [Validator setup](bins/validator/README.md) |
+| Follow a leader with a verifier | [Verifier setup](bins/verifier/README.md) |
+| Configure a deployment | [Configuration guide](config/README.md) |
+| Manage a validator | [Operator CLI](bins/magicblock/README.md) · [Terminal monitor](bins/validator-tui/README.md) · [Metrics](metrics/README.md) |
 | Understand the system | [Architecture and operations](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md) |
 
 ## 🦀 Inside the project
@@ -114,12 +114,12 @@ ports, external remotes, and individual services.
 transactions and stores their results. To explore the surrounding services,
 start with the part of the application flow that interests you:
 
-- **Bring accounts into the rollup:** [Chainlink](magicblock-chainlink/README.md).
-- **Submit transactions and follow updates:** [Aperture](magicblock-aperture/README.md).
-- **Commit state back to Solana:** [Committor](magicblock-committor-service/README.md).
-- **Run recurring actions:** [task scheduler](magicblock-task-scheduler/README.md).
+- **Bring accounts into the rollup:** [Chainlink](chainlink/README.md).
+- **Submit transactions and follow updates:** [Aperture](aperture/README.md).
+- **Commit state back to Solana:** [Committor](committor-service/README.md).
+- **Run recurring actions:** [task scheduler](task-scheduler/README.md).
 - **Build rollup instructions:** [native programs](programs/magicblock/README.md)
-  and the [instruction API](magicblock-magic-program-api/README.md).
+  and the [instruction API](magic-program-api/README.md).
 
 Want to contribute? Start with [contributing](docs/CONTRIBUTING.md) for development
 setup and checks, or explore the supported [integration tests](test-integration/).

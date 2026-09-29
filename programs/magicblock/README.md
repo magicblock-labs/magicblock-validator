@@ -6,11 +6,11 @@ the base-chain Delegation Program.
 
 ## Working with the programs
 
-Use the [Magic Program API](../../magicblock-magic-program-api/README.md) for
+Use the [Magic Program API](../../magic-program-api/README.md) for
 instruction builders, IDs, and response types. The
-[shared runtime](../../magicblock-runtime/README.md) installs the programs, while
+[shared runtime](../../runtime/README.md) installs the programs, while
 leader services handle settlement and
-[scheduled tasks](../../magicblock-task-scheduler/README.md).
+[scheduled tasks](../../task-scheduler/README.md).
 
 Callbacks run separately from the base-chain actions they report. Ephemeral-account
 operations manage local account creation, resizing, closing, and sponsorship;

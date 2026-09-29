@@ -18,7 +18,7 @@ your `PATH`. Run `magicblock --help` for available commands.
 ## Fee claims
 
 Claim accrued fees once using the base-chain RPC and signing identity from the
-[leader configuration](../../magicblock-config/README.md):
+[leader configuration](../../config/README.md):
 
 ```bash
 magicblock claim-fees --config /etc/magicblock/config.toml
@@ -49,7 +49,7 @@ and capture stdout/stderr in your scheduler's logs. There is no CLI interval loo
 
 ## Domain records
 
-Commands use the [leader configuration](../../magicblock-config/README.md) and
+Commands use the [leader configuration](../../config/README.md) and
 its signing identity. They submit real base-chain transactions. Operator commands
 require the exact file supplied with `--config`; missing files fail rather than
 falling back to defaults or searching parent directories.

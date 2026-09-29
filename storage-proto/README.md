@@ -1,7 +1,7 @@
 # solana-storage-proto
 
 Schemas and conversions for the validator's
-[legacy ledger](../magicblock-ledger/README.md). These describe retained historical
+[legacy ledger](../ledger/README.md). These describe retained historical
 records, not Engine's current storage format.
 
 ## Updating schemas

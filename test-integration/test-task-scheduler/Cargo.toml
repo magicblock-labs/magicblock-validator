@@ -9,9 +9,9 @@ chrono = { workspace = true }
 cleanass = { workspace = true }
 hydra-api = { workspace = true, features = ["client"] }
 integration-test-tools = { workspace = true }
-magicblock-config = { path = "../../magicblock-config" }
+magicblock-config = { path = "../../config" }
 magicblock-program = { path = "../../programs/magicblock" }
-magicblock-task-scheduler = { path = "../../magicblock-task-scheduler" }
+magicblock-task-scheduler = { path = "../../task-scheduler" }
 program-schedulecommit = { path = "../programs/schedulecommit", features = ["no-entrypoint"] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
