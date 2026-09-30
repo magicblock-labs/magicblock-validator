@@ -248,3 +248,60 @@ impl Transaction {
         self.serialized.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn serializes_config_before_instruction_headers() {
+        let config = TransactionConfig::empty()
+            .with_priority_fee(11)
+            .with_compute_unit_limit(22)
+            .with_loaded_accounts_data_size_limit(33);
+        let message = Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            config,
+            account_keys: vec![Pubkey::new_unique(), Pubkey::new_unique()],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![7, 8, 9],
+            }],
+        };
+        let serialized = message.serialize();
+        let config_values_offset = 1
+            + 3
+            + size_of::<u32>()
+            + size_of::<Hash>()
+            + 2
+            + (message.account_keys.len() * size_of::<Pubkey>());
+
+        assert_eq!(
+            &serialized[4..8],
+            &(PRIORITY_FEE_MASK
+                | COMPUTE_UNIT_LIMIT_MASK
+                | LOADED_ACCOUNTS_DATA_SIZE_MASK)
+                .to_le_bytes()
+        );
+        assert_eq!(
+            &serialized[config_values_offset..config_values_offset + 8],
+            &11u64.to_le_bytes()
+        );
+        assert_eq!(
+            &serialized[config_values_offset + 8..config_values_offset + 12],
+            &22u32.to_le_bytes()
+        );
+        assert_eq!(
+            &serialized[config_values_offset + 12..config_values_offset + 16],
+            &33u32.to_le_bytes()
+        );
+        assert_eq!(serialized[config_values_offset + 16], 1);
+        assert_eq!(serialized.len(), message.serialized_size());
+    }
+}
