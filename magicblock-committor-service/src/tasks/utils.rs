@@ -121,6 +121,7 @@ pub struct TransactionUtils;
 impl TransactionUtils {
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
+    const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
 
     pub fn dummy_lookup_table(
         pubkeys: &[Pubkey],
@@ -224,8 +225,9 @@ impl TransactionUtils {
         compute_unit_price: u64,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<v1::Message> {
-        let budget_instructions = Self::budget_instructions(
-            Self::tasks_compute_units(tasks),
+        let compute_units = Self::tasks_compute_units(tasks);
+        let config = Self::v1_config(
+            compute_units,
             compute_unit_price,
             Self::tasks_accounts_size_budget(tasks),
         );
@@ -233,7 +235,7 @@ impl TransactionUtils {
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
-        Self::assemble_v1_message_raw(authority, &ixs, &budget_instructions)
+        Self::assemble_v1_message_raw(authority, &ixs, config)
     }
 
     pub fn assemble_tx_raw(
@@ -286,12 +288,13 @@ impl TransactionUtils {
     pub(crate) fn assemble_v1_message_raw(
         authority: &Keypair,
         instructions: &[Instruction],
-        budget_instructions: &[Instruction],
+        config: v1::TransactionConfig,
     ) -> TaskStrategistResult<v1::Message> {
-        let message = match v1::Message::try_compile(
+        let message = match v1::Message::try_compile_with_config(
             &authority.pubkey(),
-            &[budget_instructions, instructions].concat(),
+            instructions,
             Hash::new_unique(),
+            config,
         ) {
             Ok(message) => Ok(message),
             Err(CompileError::AccountIndexOverflow)
@@ -354,6 +357,33 @@ impl TransactionUtils {
         } else {
             total_budget
         }
+    }
+
+    fn v1_config(
+        compute_units: u32,
+        compute_unit_price: u64,
+        accounts_size_budget: u32,
+    ) -> v1::TransactionConfig {
+        v1::TransactionConfig::empty()
+            .with_priority_fee(Self::priority_fee_lamports(
+                compute_unit_price,
+                compute_units,
+            ))
+            .with_compute_unit_limit(compute_units)
+            .with_loaded_accounts_data_size_limit(accounts_size_budget)
+    }
+
+    fn priority_fee_lamports(
+        compute_unit_price: u64,
+        compute_units: u32,
+    ) -> u64 {
+        let fee = (compute_unit_price as u128)
+            .saturating_mul(u128::from(compute_units))
+            .saturating_add(
+                u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT).saturating_sub(1),
+            )
+            / u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT);
+        u64::try_from(fee).unwrap_or(u64::MAX)
     }
 
     pub fn budget_instructions(

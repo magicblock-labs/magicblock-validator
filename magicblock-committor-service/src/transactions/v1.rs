@@ -16,19 +16,85 @@ const MAX_ADDRESSES: usize = 64;
 const MAX_INSTRUCTIONS: usize = 64;
 const MAX_SIGNATURES: usize = 12;
 
+const PRIORITY_FEE_MASK: u32 = 0b11;
+const COMPUTE_UNIT_LIMIT_MASK: u32 = 0b100;
+const LOADED_ACCOUNTS_DATA_SIZE_MASK: u32 = 0b1000;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TransactionConfig {
+    pub priority_fee: Option<u64>,
+    pub compute_unit_limit: Option<u32>,
+    pub loaded_accounts_data_size_limit: Option<u32>,
+}
+
+impl TransactionConfig {
+    pub const fn empty() -> Self {
+        Self {
+            priority_fee: None,
+            compute_unit_limit: None,
+            loaded_accounts_data_size_limit: None,
+        }
+    }
+
+    #[must_use]
+    pub const fn with_priority_fee(mut self, fee: u64) -> Self {
+        self.priority_fee = Some(fee);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_compute_unit_limit(mut self, limit: u32) -> Self {
+        self.compute_unit_limit = Some(limit);
+        self
+    }
+
+    #[must_use]
+    pub const fn with_loaded_accounts_data_size_limit(
+        mut self,
+        limit: u32,
+    ) -> Self {
+        self.loaded_accounts_data_size_limit = Some(limit);
+        self
+    }
+
+    fn mask(&self) -> u32 {
+        let mut mask = 0;
+        if self.priority_fee.is_some() {
+            mask |= PRIORITY_FEE_MASK;
+        }
+        if self.compute_unit_limit.is_some() {
+            mask |= COMPUTE_UNIT_LIMIT_MASK;
+        }
+        if self.loaded_accounts_data_size_limit.is_some() {
+            mask |= LOADED_ACCOUNTS_DATA_SIZE_MASK;
+        }
+        mask
+    }
+
+    fn serialized_size(&self) -> usize {
+        self.priority_fee.map_or(0, |_| size_of::<u64>())
+            + self.compute_unit_limit.map_or(0, |_| size_of::<u32>())
+            + self
+                .loaded_accounts_data_size_limit
+                .map_or(0, |_| size_of::<u32>())
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Message {
     header: MessageHeader,
+    config: TransactionConfig,
     account_keys: Vec<Pubkey>,
     recent_blockhash: Hash,
     instructions: Vec<CompiledInstruction>,
 }
 
 impl Message {
-    pub(crate) fn try_compile(
+    pub(crate) fn try_compile_with_config(
         payer: &Pubkey,
         instructions: &[Instruction],
         recent_blockhash: Hash,
+        config: TransactionConfig,
     ) -> Result<Self, CompileError> {
         let message = v0::Message::try_compile(
             payer,
@@ -38,6 +104,7 @@ impl Message {
         )?;
         Ok(Self {
             header: message.header,
+            config,
             account_keys: message.account_keys,
             recent_blockhash: message.recent_blockhash,
             instructions: message.instructions,
@@ -53,6 +120,9 @@ impl Message {
     }
 
     pub(crate) fn matches_v0_message(&self, other: &v0::Message) -> bool {
+        if self.config != TransactionConfig::empty() {
+            return false;
+        }
         other.address_table_lookups.is_empty()
             && self.header == other.header
             && self.account_keys == other.account_keys
@@ -86,12 +156,21 @@ impl Message {
         out.push(self.header.num_required_signatures);
         out.push(self.header.num_readonly_signed_accounts);
         out.push(self.header.num_readonly_unsigned_accounts);
-        out.extend_from_slice(&0u32.to_le_bytes());
+        out.extend_from_slice(&self.config.mask().to_le_bytes());
         out.extend_from_slice(self.recent_blockhash.as_ref());
         out.push(self.instructions.len() as u8);
         out.push(self.account_keys.len() as u8);
         for key in &self.account_keys {
             out.extend_from_slice(key.as_ref());
+        }
+        if let Some(value) = self.config.priority_fee {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        if let Some(value) = self.config.compute_unit_limit {
+            out.extend_from_slice(&value.to_le_bytes());
+        }
+        if let Some(value) = self.config.loaded_accounts_data_size_limit {
+            out.extend_from_slice(&value.to_le_bytes());
         }
         for ix in &self.instructions {
             out.push(ix.program_id_index);
@@ -111,6 +190,7 @@ impl Message {
             + size_of::<Hash>()
             + 2
             + (self.account_keys.len() * size_of::<Pubkey>())
+            + self.config.serialized_size()
             + self
                 .instructions
                 .iter()
