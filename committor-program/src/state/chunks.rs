@@ -59,13 +59,21 @@ impl Chunks {
     }
 
     /// Returns how many bytes [`Chunks`] will occupy certain count
+    ///
+    /// This must stay in sync with the borsh encoding of [`Chunks`], which
+    /// prefixes every `Vec` with its `u32` length. [`Chunks::new`] uses this
+    /// as a resource guard for the on-chain account, so an under-estimate
+    /// would let a `Chunks` account grow past the per-instruction allocation
+    /// limit.
     pub fn struct_size(count: usize) -> usize {
         // bits: Vec<u8>,
-        Self::count_to_bitfield_bytes(count)
-        // count: usize,
-        + std::mem::size_of::<usize>()
-        // chunk_size: u16,
-        + std::mem::size_of::<u16>()
+        // u32 length prefix written by borsh,
+        std::mem::size_of::<u32>()
+            + Self::count_to_bitfield_bytes(count)
+            // count: usize,
+            + std::mem::size_of::<usize>()
+            // chunk_size: u16,
+            + std::mem::size_of::<u16>()
     }
 
     /// Returns `true` if the chunk at index has been delivered
@@ -263,5 +271,17 @@ mod test {
         assert!(chunks.is_chunk_delivered(2049).is_none());
 
         assert_eq!(chunks.iter().count(), 2048);
+    }
+
+    #[test]
+    fn test_struct_size_matches_borsh_encoded_length() {
+        for count in [0usize, 1, 7, 8, 9, 255, 2048] {
+            let chunks = Chunks::new(count, CHUNK_SIZE);
+            assert_eq!(
+                Chunks::struct_size(count),
+                borsh::object_length(&chunks).unwrap(),
+                "struct_size must not under-report the encoded size for {count} chunks"
+            );
+        }
     }
 }
