@@ -399,3 +399,22 @@ impl TransactionUtils {
         ]
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::TransactionUtils;
+
+    #[test]
+    fn v1_priority_fee_matches_compute_budget_rounding() {
+        assert_eq!(TransactionUtils::priority_fee_lamports(0, 100), 0);
+        assert_eq!(TransactionUtils::priority_fee_lamports(1, 1), 1);
+        assert_eq!(
+            TransactionUtils::priority_fee_lamports(1_000_000, 345),
+            345
+        );
+        assert_eq!(
+            TransactionUtils::priority_fee_lamports(u64::MAX, u32::MAX),
+            u64::MAX
+        );
+    }
+}

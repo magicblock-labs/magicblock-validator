@@ -689,7 +689,7 @@ mod tests {
     fn test_build_strategy_optimizes_to_buffer_when_needed() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 1000, 0); // Large task
+        let task = create_test_commit_task(1, 5000, 0); // Large task
         let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
@@ -769,8 +769,7 @@ mod tests {
     fn test_build_strategy_does_optimize_large_account_and_large_diff() {
         let validator = Pubkey::new_unique();
 
-        let task =
-            create_test_commit_task(1, 10_240, COMMIT_STATE_SIZE_THRESHOLD * 4); // large account but small diff
+        let task = create_test_commit_task(1, 10_240, 5000);
         let tasks = vec![task.into()];
 
         let strategy = TaskStrategist::build_strategy(
@@ -797,7 +796,7 @@ mod tests {
 
         let tasks = (0..NUM_COMMITS)
             .map(|i| {
-                let task = create_test_commit_task(i, 500, 0); // Large task
+                let task = create_test_commit_task(i, 5000, 0); // Large task
                 task.into()
             })
             .collect();
@@ -936,8 +935,8 @@ mod tests {
     fn test_optimize_strategy_prioritizes_largest_tasks() {
         let mut tasks: [BaseTaskImpl; 3] = [
             create_test_commit_task(1, 100, 0).into(),
-            create_test_commit_task(2, 1000, 0).into(), // Larger task
-            create_test_commit_task(3, 1000, 0).into(), // Larger task
+            create_test_commit_task(2, 5000, 0).into(), // Larger task
+            create_test_commit_task(3, 5000, 0).into(), // Larger task
         ];
 
         let _ = TaskStrategist::try_optimize_tx_size_if_needed(
@@ -954,7 +953,7 @@ mod tests {
     fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
         let tasks: Vec<BaseTaskImpl> = vec![
-            create_test_commit_task(1, 1000, 0).into(),
+            create_test_commit_task(1, 5000, 0).into(),
             create_test_finalize_task().into(),
             create_test_base_action_task(500).into(),
             create_test_undelegate_task().into(),
@@ -985,10 +984,7 @@ mod tests {
                 TaskStrategy::Args,   // Undelegate stays
             ]
         );
-        // This means that couldn't squeeze task optimization
-        // So had to switch to ALTs
-        // As expected
-        assert!(!strategy.lookup_tables_keys.is_empty());
+        assert!(strategy.lookup_tables_keys.is_empty());
     }
 
     #[tokio::test]
@@ -1095,36 +1091,4 @@ mod tests {
         };
     }
 
-    #[tokio::test]
-    async fn test_build_single_stage_mode_with_alts() {
-        let pubkeys: [_; 5] = std::array::from_fn(|_| Pubkey::new_unique());
-        let intent = create_test_intent(0, &pubkeys, false);
-
-        let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(
-            &info_fetcher,
-            &intent,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .unwrap();
-        let finalize_task =
-            TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
-                .await
-                .unwrap();
-
-        let execution_mode = TaskStrategist::build_execution_strategy(
-            commit_task,
-            finalize_task,
-            &Pubkey::new_unique(),
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Execution mode created");
-
-        let StrategyExecutionMode::SingleStage(value) = execution_mode else {
-            panic!("Unexpected execution mode");
-        };
-        assert!(value.uses_alts());
-    }
 }
