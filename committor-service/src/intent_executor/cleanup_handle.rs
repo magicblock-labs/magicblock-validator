@@ -3,9 +3,7 @@ use solana_keypair::Keypair;
 
 use crate::{
     tasks::task_strategist::TransactionStrategy,
-    transaction_preparator::{
-        TransactionPreparator, delivery_preparator::BufferExecutionError,
-    },
+    transaction_preparator::{TransactionPreparator, delivery_preparator::BufferExecutionError},
 };
 
 pub struct CleanupHandle<T> {

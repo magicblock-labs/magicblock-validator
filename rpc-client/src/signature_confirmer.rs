@@ -12,9 +12,7 @@ use magicblock_metrics::metrics;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::{
-    config::RpcSignatureSubscribeConfig, response::RpcSignatureResult,
-};
+use solana_rpc_client_api::{config::RpcSignatureSubscribeConfig, response::RpcSignatureResult};
 use solana_signature::Signature;
 use solana_transaction_error::{TransactionError, TransactionResult};
 use solana_transaction_status_client_types::TransactionStatus;
@@ -52,10 +50,7 @@ impl Default for SignatureConfirmerConfig {
 
 impl SignatureConfirmerConfig {
     pub(crate) fn with_websocket_url(websocket_url: Option<String>) -> Self {
-        Self {
-            websocket_url,
-            ..Self::default()
-        }
+        Self { websocket_url, ..Self::default() }
     }
 }
 
@@ -69,10 +64,7 @@ pub(crate) struct SignatureConfirmer {
 }
 
 impl SignatureConfirmer {
-    pub(crate) fn new(
-        rpc_client: Arc<RpcClient>,
-        config: SignatureConfirmerConfig,
-    ) -> Self {
+    pub(crate) fn new(rpc_client: Arc<RpcClient>, config: SignatureConfirmerConfig) -> Self {
         let mut config = config;
         if config.batch_size == 0 {
             config.batch_size = DEFAULT_SIGNATURE_STATUS_BATCH_SIZE;
@@ -106,13 +98,8 @@ impl SignatureConfirmer {
             )
             .await
         } else {
-            self.wait_with_batched_polling(
-                signature,
-                commitment,
-                timeout_duration,
-                poll_interval,
-            )
-            .await
+            self.wait_with_batched_polling(signature, commitment, timeout_duration, poll_interval)
+                .await
         }
     }
 
@@ -124,13 +111,8 @@ impl SignatureConfirmer {
         poll_interval: Duration,
     ) -> Option<TransactionResult<()>> {
         let start = Instant::now();
-        let fallback_delay = std::cmp::min(
-            timeout_duration,
-            self.config.websocket_fallback_delay,
-        );
-        let pubsub_client = match timeout(fallback_delay, self.pubsub_client())
-            .await
-        {
+        let fallback_delay = std::cmp::min(timeout_duration, self.config.websocket_fallback_delay);
+        let pubsub_client = match timeout(fallback_delay, self.pubsub_client()).await {
             Ok(Some(pubsub_client)) => pubsub_client,
             Ok(None) => {
                 metrics::inc_rpc_client_signature_ws_fallback_count();
@@ -213,13 +195,8 @@ impl SignatureConfirmer {
             sleep(fallback_delay).await;
             metrics::inc_rpc_client_signature_ws_fallback_count();
             let remaining = timeout_duration.saturating_sub(start.elapsed());
-            self.wait_with_batched_polling(
-                signature,
-                commitment,
-                remaining,
-                poll_interval,
-            )
-            .await
+            self.wait_with_batched_polling(signature, commitment, remaining, poll_interval)
+                .await
         };
         tokio::pin!(fallback);
 
@@ -266,12 +243,10 @@ impl SignatureConfirmer {
         notification: RpcSignatureResult,
     ) -> Option<TransactionResult<()>> {
         match notification {
-            RpcSignatureResult::ProcessedSignature(status) => {
-                Some(match status.err {
-                    Some(err) => Err(TransactionError::from(err)),
-                    None => Ok(()),
-                })
-            }
+            RpcSignatureResult::ProcessedSignature(status) => Some(match status.err {
+                Some(err) => Err(TransactionError::from(err)),
+                None => Ok(()),
+            }),
             RpcSignatureResult::ReceivedSignature(_) => None,
         }
     }
@@ -323,15 +298,11 @@ impl SignatureConfirmer {
             if let Some(status) = state.cached_status(signature, commitment) {
                 return Some(status);
             }
-            state
-                .waiters
-                .entry(*signature)
-                .or_default()
-                .push(StatusWaiter {
-                    id: waiter_id,
-                    commitment,
-                    sender,
-                });
+            state.waiters.entry(*signature).or_default().push(StatusWaiter {
+                id: waiter_id,
+                commitment,
+                sender,
+            });
             if state.worker_running {
                 false
             } else {
@@ -406,18 +377,12 @@ impl SignatureConfirmer {
         let mut fetched = Vec::new();
         for chunk in signatures.chunks(self.config.batch_size) {
             metrics::inc_rpc_client_signature_status_batch_count();
-            metrics::inc_rpc_client_signature_status_batch_signatures_count(
-                chunk.len() as u64,
-            );
+            metrics::inc_rpc_client_signature_status_batch_signatures_count(chunk.len() as u64);
             match self.rpc_client.get_signature_statuses(chunk).await {
                 Ok(response) => {
-                    fetched.extend(
-                        chunk.iter().copied().zip(response.value).filter_map(
-                            |(signature, status)| {
-                                status.map(|status| (signature, status))
-                            },
-                        ),
-                    );
+                    fetched.extend(chunk.iter().copied().zip(response.value).filter_map(
+                        |(signature, status)| status.map(|status| (signature, status)),
+                    ));
                 }
                 Err(err) => {
                     trace!(
@@ -431,10 +396,7 @@ impl SignatureConfirmer {
         fetched
     }
 
-    async fn apply_statuses(
-        &self,
-        statuses: Vec<(Signature, TransactionStatus)>,
-    ) {
+    async fn apply_statuses(&self, statuses: Vec<(Signature, TransactionStatus)>) {
         let mut state = self.poll_state.lock().await;
         let now = Instant::now();
         for (signature, status) in statuses {
@@ -451,9 +413,7 @@ impl SignatureConfirmer {
             };
             let mut pending = Vec::new();
             for waiter in waiters {
-                if let Some(result) =
-                    status_result_for_commitment(&status, waiter.commitment)
-                {
+                if let Some(result) = status_result_for_commitment(&status, waiter.commitment) {
                     let _ = waiter.sender.send(result);
                 } else {
                     pending.push(waiter);
@@ -479,14 +439,13 @@ impl PollState {
         signature: &Signature,
         commitment: CommitmentConfig,
     ) -> Option<TransactionResult<()>> {
-        self.cached_statuses.get(signature).and_then(|status| {
-            status_result_for_commitment(&status.status, commitment)
-        })
+        self.cached_statuses
+            .get(signature)
+            .and_then(|status| status_result_for_commitment(&status.status, commitment))
     }
 
     fn prune_status_cache(&mut self, ttl: Duration) {
-        self.cached_statuses
-            .retain(|_, status| status.fetched_at.elapsed() < ttl);
+        self.cached_statuses.retain(|_, status| status.fetched_at.elapsed() < ttl);
     }
 }
 
@@ -514,10 +473,9 @@ fn status_result_for_commitment(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Mutex as StdMutex,
-        atomic::{AtomicUsize, Ordering},
-    };
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use parking_lot::Mutex as StdMutex;
 
     use async_trait::async_trait;
     use serde_json::Value;
@@ -561,7 +519,7 @@ mod tests {
         assert_eq!(status_a, Some(Ok(())));
         assert_eq!(status_b, Some(Ok(())));
         assert_eq!(calls.load(Ordering::Relaxed), 1);
-        assert_eq!(*batch_sizes.lock().unwrap(), vec![2]);
+        assert_eq!(*batch_sizes.lock(), vec![2]);
     }
 
     #[tokio::test]
@@ -605,24 +563,17 @@ mod tests {
         };
 
         assert_eq!(
-            status_result_for_commitment(
-                &status,
-                CommitmentConfig::confirmed()
-            ),
+            status_result_for_commitment(&status, CommitmentConfig::confirmed()),
             None
         );
         assert_eq!(
-            status_result_for_commitment(
-                &status,
-                CommitmentConfig::processed()
-            ),
+            status_result_for_commitment(&status, CommitmentConfig::processed()),
             Some(Err(err))
         );
     }
 
     fn test_confirmer(sender: RecordingSender) -> SignatureConfirmer {
-        let rpc_client =
-            RpcClient::new_sender(sender, RpcClientConfig::default());
+        let rpc_client = RpcClient::new_sender(sender, RpcClientConfig::default());
         SignatureConfirmer::new(
             Arc::new(rpc_client),
             SignatureConfirmerConfig {
@@ -654,9 +605,7 @@ mod tests {
                     slot: 1,
                     confirmations: None,
                     err: status.err(),
-                    confirmation_status: Some(
-                        TransactionConfirmationStatus::Finalized,
-                    ),
+                    confirmation_status: Some(TransactionConfirmationStatus::Finalized),
                 },
             }
         }
@@ -664,22 +613,14 @@ mod tests {
 
     #[async_trait]
     impl RpcSender for RecordingSender {
-        async fn send(
-            &self,
-            request: RpcRequest,
-            params: Value,
-        ) -> RpcResult<Value> {
+        async fn send(&self, request: RpcRequest, params: Value) -> RpcResult<Value> {
             assert_eq!(request, RpcRequest::GetSignatureStatuses);
             self.calls.fetch_add(1, Ordering::Relaxed);
-            let signature_count =
-                params.as_array().unwrap()[0].as_array().unwrap().len();
-            self.batch_sizes.lock().unwrap().push(signature_count);
+            let signature_count = params.as_array().unwrap()[0].as_array().unwrap().len();
+            self.batch_sizes.lock().push(signature_count);
             let statuses = vec![Some(self.status.clone()); signature_count];
             Ok(serde_json::to_value(Response {
-                context: RpcResponseContext {
-                    slot: 1,
-                    api_version: None,
-                },
+                context: RpcResponseContext { slot: 1, api_version: None },
                 value: statuses,
             })
             .unwrap())

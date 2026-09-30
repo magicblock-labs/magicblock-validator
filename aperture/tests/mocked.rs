@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use engine::{
@@ -15,11 +17,7 @@ mod setup;
 #[tokio::test]
 async fn test_get_slot_leaders() {
     let env = RpcTestEnv::new().await;
-    let leaders = env
-        .rpc
-        .get_slot_leaders(0, 1)
-        .await
-        .expect("get_slot_leaders request failed");
+    let leaders = env.rpc.get_slot_leaders(0, 1).await.expect("get_slot_leaders request failed");
 
     assert_eq!(leaders.len(), 1, "should return a single leader");
     assert_eq!(
@@ -93,8 +91,7 @@ async fn test_get_token_supply() {
 #[tokio::test]
 async fn test_get_supply() {
     let env = RpcTestEnv::new().await;
-    let supply_info =
-        env.rpc.supply().await.expect("get_supply request failed");
+    let supply_info = env.rpc.supply().await.expect("get_supply request failed");
 
     assert_eq!(
         supply_info.value.total,
@@ -142,11 +139,7 @@ async fn test_get_health() {
 #[tokio::test]
 async fn test_get_genesis_hash() {
     let env = RpcTestEnv::new().await;
-    let genesis_hash = env
-        .rpc
-        .get_genesis_hash()
-        .await
-        .expect("get_genesis_hash request failed");
+    let genesis_hash = env.rpc.get_genesis_hash().await.expect("get_genesis_hash request failed");
 
     assert_eq!(
         genesis_hash,
@@ -163,8 +156,7 @@ async fn test_get_epoch_info() {
         let dirs = Dirs::default();
         let mut builder = keeper_builder(&dirs);
         builder.blockstore.superblock = superblock;
-        let engine =
-            TestEngine::from_builder(dirs, builder, Pacing::External).await;
+        let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
         let mut env = RpcTestEnv::with_engine(engine).await;
         let schedule = env.rpc.get_epoch_schedule().await.unwrap();
         assert_eq!(schedule, *env.engine.epoch_schedule());
@@ -174,13 +166,9 @@ async fn test_get_epoch_info() {
         for slot in [0, slots - 1, slots, slots + 1, 3 * slots + 2] {
             let clock = env.engine.clock(env.engine.blocks().latest());
             if slot != 0 {
-                let (boundary, submitted) =
-                    ExternalBlock::new(BlockInput::Production(block(slot)));
+                let (boundary, submitted) = ExternalBlock::new(BlockInput::Production(block(slot)));
                 env.engine.pacer().send(boundary).await.unwrap();
-                tokio::time::timeout(Duration::from_secs(4), submitted)
-                    .await
-                    .unwrap()
-                    .unwrap();
+                tokio::time::timeout(Duration::from_secs(4), submitted).await.unwrap().unwrap();
             }
             let info = env.rpc.get_epoch_info().await.unwrap();
             assert_eq!(info.absolute_slot, slot);
@@ -198,16 +186,10 @@ async fn test_get_epoch_info() {
             // External pacing is idle; the barrier excludes execution during the snapshot.
             let guard = env.engine.barrier().await.unwrap();
             let sealed = env.engine.finalize_superblock(None).unwrap();
-            tokio::time::timeout(Duration::from_secs(4), sealed)
-                .await
-                .unwrap()
-                .unwrap();
+            tokio::time::timeout(Duration::from_secs(4), sealed).await.unwrap().unwrap();
             drop(guard);
             let after = env.rpc.get_epoch_info().await.unwrap();
-            assert_eq!(
-                after, before,
-                "sealing must not advance epoch progress"
-            );
+            assert_eq!(after, before, "sealing must not advance epoch progress");
         }
         env.engine.shutdown().terminate().await;
     }
@@ -217,11 +199,7 @@ async fn test_get_epoch_info() {
 #[tokio::test]
 async fn test_get_epoch_schedule() {
     let env = RpcTestEnv::new().await;
-    let schedule = env
-        .rpc
-        .get_epoch_schedule()
-        .await
-        .expect("get_epoch_schedule request failed");
+    let schedule = env.rpc.get_epoch_schedule().await.expect("get_epoch_schedule request failed");
 
     assert_eq!(schedule, *env.engine.epoch_schedule());
     assert!(!schedule.warmup, "warmup should be false");
@@ -231,11 +209,7 @@ async fn test_get_epoch_schedule() {
 #[tokio::test]
 async fn test_get_cluster_nodes() {
     let env = RpcTestEnv::new().await;
-    let nodes = env
-        .rpc
-        .get_cluster_nodes()
-        .await
-        .expect("get_cluster_nodes request failed");
+    let nodes = env.rpc.get_cluster_nodes().await.expect("get_cluster_nodes request failed");
 
     assert_eq!(nodes.len(), 1, "should be exactly one node in the cluster");
     assert_eq!(

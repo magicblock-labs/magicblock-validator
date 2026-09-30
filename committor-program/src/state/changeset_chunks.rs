@@ -73,23 +73,12 @@ impl<'chunks> ChangesetChunks<'chunks> {
         );
     }
 
-    pub fn iter<'data>(
-        &'chunks self,
-        data: &'data [u8],
-    ) -> ChangesetChunksIter<'data> {
+    pub fn iter<'data>(&'chunks self, data: &'data [u8]) -> ChangesetChunksIter<'data> {
         self.assert_sizes(data);
-        ChangesetChunksIter::new(
-            data,
-            self.chunk_size,
-            self.chunks.count(),
-            None,
-        )
+        ChangesetChunksIter::new(data, self.chunk_size, self.chunks.count(), None)
     }
 
-    pub fn iter_missing<'data>(
-        &self,
-        data: &'data [u8],
-    ) -> ChangesetChunksIter<'data> {
+    pub fn iter_missing<'data>(&self, data: &'data [u8]) -> ChangesetChunksIter<'data> {
         self.assert_sizes(data);
         ChangesetChunksIter::new(
             data,
@@ -156,8 +145,7 @@ impl Iterator for ChangesetChunksIter<'_> {
             self.data.len()
         );
 
-        let chunk =
-            ChangesetChunk::from((self.data, offset as u32, self.chunk_size));
+        let chunk = ChangesetChunk::from((self.data, offset as u32, self.chunk_size));
 
         self.idx += 1;
 

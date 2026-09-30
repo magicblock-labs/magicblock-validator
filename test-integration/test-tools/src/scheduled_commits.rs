@@ -6,23 +6,18 @@ use std::{
 
 use anyhow::{bail, Context, Result};
 use borsh::BorshDeserialize;
-use solana_sdk::{
-    pubkey::Pubkey, signature::Signature, transaction::TransactionError,
-};
+use solana_sdk::{pubkey::Pubkey, signature::Signature, transaction::TransactionError};
 
 use crate::IntegrationTestContext;
 
 // -----------------
 // Log Extractors
 // -----------------
-pub fn extract_scheduled_commit_sent_signature_from_logs(
-    logs: &[String],
-) -> Option<Signature> {
+pub fn extract_scheduled_commit_sent_signature_from_logs(logs: &[String]) -> Option<Signature> {
     // ScheduledCommitSent signature: <signature>
     for log in logs {
         if log.starts_with("ScheduledCommitSent signature: ") {
-            let commit_sig =
-                log.split_whitespace().last().expect("No signature found");
+            let commit_sig = log.split_whitespace().last().expect("No signature found");
             return Signature::from_str(commit_sig).ok();
         }
     }
@@ -52,11 +47,7 @@ pub fn extract_sent_commit_info_from_logs(
             .split_whitespace()
             .skip(2)
             .flat_map(|p| {
-                let key = p
-                    .trim()
-                    .trim_matches(',')
-                    .trim_matches('[')
-                    .trim_matches(']');
+                let key = p.trim().trim_matches(',').trim_matches('[').trim_matches(']');
                 if key.is_empty() {
                     None
                 } else {
@@ -66,9 +57,7 @@ pub fn extract_sent_commit_info_from_logs(
             .collect::<Vec<Pubkey>>()
     }
 
-    fn pubkey_owner_tuple_hashset_from_log_line(
-        log: &str,
-    ) -> HashSet<(Pubkey, Pubkey)> {
+    fn pubkey_owner_tuple_hashset_from_log_line(log: &str) -> HashSet<(Pubkey, Pubkey)> {
         log.trim_end_matches(']')
             .split_whitespace()
             .skip(3)
@@ -82,10 +71,7 @@ pub fn extract_sent_commit_info_from_logs(
                     .map(|s| s.trim())
                     .collect();
                 if parts.len() == 2 {
-                    match (
-                        Pubkey::from_str(parts[0]),
-                        Pubkey::from_str(parts[1]),
-                    ) {
+                    match (Pubkey::from_str(parts[0]), Pubkey::from_str(parts[1])) {
                         (Ok(key1), Ok(key2)) => Some((key1, key2)),
                         _ => None,
                     }
@@ -117,13 +103,10 @@ pub fn extract_sent_commit_info_from_logs(
     (included, excluded, feepayers, signatures)
 }
 
-pub fn extract_chain_transaction_signature_from_logs(
-    logs: &[String],
-) -> Option<Signature> {
+pub fn extract_chain_transaction_signature_from_logs(logs: &[String]) -> Option<Signature> {
     for log in logs {
         if log.starts_with("CommitTransactionSignature: ") {
-            let commit_sig =
-                log.split_whitespace().last().expect("No signature found");
+            let commit_sig = log.split_whitespace().last().expect("No signature found");
             return Signature::from_str(commit_sig).ok();
         }
     }
@@ -149,18 +132,14 @@ impl<T> ScheduledCommitResult<T>
 where
     T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
 {
-    pub fn confirm_commit_transactions_on_chain(
-        &self,
-        ctx: &IntegrationTestContext,
-    ) -> Result<()> {
+    pub fn confirm_commit_transactions_on_chain(&self, ctx: &IntegrationTestContext) -> Result<()> {
         for sig in &self.sigs {
-            let confirmed =
-                ctx.confirm_transaction_chain(sig, None).with_context(|| {
-                    format!(
-                        "Transaction with sig {:?} confirmation on chain failed",
-                        sig
-                    )
-                })?;
+            let confirmed = ctx.confirm_transaction_chain(sig, None).with_context(|| {
+                format!(
+                    "Transaction with sig {:?} confirmation on chain failed",
+                    sig
+                )
+            })?;
             if !confirmed {
                 bail!(
                     "Transaction {:?} not confirmed on chain within timeout",
@@ -184,24 +163,22 @@ impl IntegrationTestContext {
         // ScheduledCommitSent signature: <signature>
         let (ephem_logs_l1, scheduled_commmit_sent_sig) = {
             let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
-                format!(
-                    "Scheduled commit sent logs not found for sig {:?}",
-                    sig
-                )
+                format!("Scheduled commit sent logs not found for sig {:?}", sig)
             })?;
             let sig =
-                extract_scheduled_commit_sent_signature_from_logs(&logs)
-                    .with_context(|| {
-                        format!("ScheduledCommitSent signature not found in logs, {:#?}", logs)
-                    })?;
+                extract_scheduled_commit_sent_signature_from_logs(&logs).with_context(|| {
+                    format!(
+                        "ScheduledCommitSent signature not found in logs, {:#?}",
+                        logs
+                    )
+                })?;
 
             (logs, sig)
         };
 
         // 2. Find chain commit signatures
-        let ephem_logs_l2 = self
-            .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
-            .with_context(|| {
+        let ephem_logs_l2 =
+            self.fetch_ephemeral_logs(scheduled_commmit_sent_sig).with_context(|| {
                 format!(
                     "Logs {:#?}\nScheduled commit sent sig {:?}",
                     ephem_logs_l1, scheduled_commmit_sent_sig
@@ -227,13 +204,12 @@ impl IntegrationTestContext {
             }
             let ephem_data = self.fetch_ephem_account_data(pubkey)?;
             if !ephem_data.is_empty() {
-                let ephem_account = T::try_from_slice(&ephem_data)
-                    .with_context(|| {
-                        format!(
-                            "Failed to deserialize ephemeral account data for {:?}",
-                            pubkey
-                        )
-                    })?;
+                let ephem_account = T::try_from_slice(&ephem_data).with_context(|| {
+                    format!(
+                        "Failed to deserialize ephemeral account data for {:?}",
+                        pubkey
+                    )
+                })?;
                 committed_accounts.insert(pubkey, ephem_account);
             };
         }

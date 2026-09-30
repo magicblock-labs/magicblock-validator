@@ -23,8 +23,7 @@ use test_runner::{
 pub fn main() {
     let config = TestConfigViaEnvVars::default();
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let Ok((security_output, scenarios_output)) =
-        run_schedule_commit_tests(&manifest_dir, &config)
+    let Ok((security_output, scenarios_output)) = run_schedule_commit_tests(&manifest_dir, &config)
     else {
         // If any test run panics (i.e. not just a failing test) then we bail
         return;
@@ -37,9 +36,7 @@ pub fn main() {
         return;
     };
 
-    let Ok(validator_services_output) =
-        run_validator_services_tests(&manifest_dir, &config)
-    else {
+    let Ok(validator_services_output) = run_validator_services_tests(&manifest_dir, &config) else {
         return;
     };
 
@@ -53,15 +50,11 @@ pub fn main() {
         return;
     };
 
-    let Ok(schedule_intents_output) =
-        run_schedule_intents_tests(&manifest_dir, &config)
-    else {
+    let Ok(schedule_intents_output) = run_schedule_intents_tests(&manifest_dir, &config) else {
         return;
     };
 
-    let Ok(task_scheduler_output) =
-        run_task_scheduler_tests(&manifest_dir, &config)
-    else {
+    let Ok(task_scheduler_output) = run_task_scheduler_tests(&manifest_dir, &config) else {
         return;
     };
 
@@ -107,8 +100,7 @@ fn run_aml_tests(
         return Ok(success_output());
     }
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
         "aml.devnet.toml",
@@ -140,8 +132,7 @@ fn run_aml_tests(
         cleanup_devnet_only(&mut devnet_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
@@ -292,56 +283,52 @@ const COMMITTOR_SUBSET_INTENT_BUNDLES: CommittorSubset = CommittorSubset {
     extra_files: &[],
 };
 // The dedicated intent_executor file is split by test-name groups.
-const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset =
-    CommittorSubset {
-        label: "committor (intent_executor_parsing)",
-        files: &["test_intent_executor"],
-        name_filters: &[],
-        exact_name_filters: &[
-            "test_commit_id_error_parsing",
-            "test_action_error_parsing",
-            "test_cpi_limits_error_parsing",
-            "test_min_context_slot_not_reached_error_parsing",
-        ],
-        extra_files: &[],
-    };
-const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset =
-    CommittorSubset {
-        label: "committor (intent_executor_basic_recovery)",
-        files: &["test_intent_executor"],
-        name_filters: &[],
-        exact_name_filters: &[
-            "test_commit_id_error_recovery",
-            "test_action_error_recovery",
-            "test_cpi_limits_error_recovery",
-        ],
-        extra_files: &[],
-    };
-const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
-    CommittorSubset {
-        label: "committor (intent_executor_recovery)",
-        files: &["test_intent_executor"],
-        name_filters: &[],
-        exact_name_filters: &[
-            "test_commit_id_and_action_errors_recovery",
-            "test_commit_id_actions_cpi_limit_errors_recovery",
-            "test_commit_unfinalized_account_recovery",
-            "test_commit_unfinalized_account_recovery_two_stage",
-        ],
-        extra_files: &[],
-    };
-const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
-    CommittorSubset {
-        label: "committor (intent_executor_callbacks)",
-        files: &["test_intent_executor"],
-        name_filters: &[],
-        exact_name_filters: &[
-            "test_action_callback_fired_on_failure",
-            "test_action_callback_fired_on_timeout",
-            "test_callbacks_fired_in_two_stage",
-        ],
-        extra_files: &[],
-    };
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset = CommittorSubset {
+    label: "committor (intent_executor_parsing)",
+    files: &["test_intent_executor"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_id_error_parsing",
+        "test_action_error_parsing",
+        "test_cpi_limits_error_parsing",
+        "test_min_context_slot_not_reached_error_parsing",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset = CommittorSubset {
+    label: "committor (intent_executor_basic_recovery)",
+    files: &["test_intent_executor"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_id_error_recovery",
+        "test_action_error_recovery",
+        "test_cpi_limits_error_recovery",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset = CommittorSubset {
+    label: "committor (intent_executor_recovery)",
+    files: &["test_intent_executor"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_commit_id_and_action_errors_recovery",
+        "test_commit_id_actions_cpi_limit_errors_recovery",
+        "test_commit_unfinalized_account_recovery",
+        "test_commit_unfinalized_account_recovery_two_stage",
+    ],
+    extra_files: &[],
+};
+const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset = CommittorSubset {
+    label: "committor (intent_executor_callbacks)",
+    files: &["test_intent_executor"],
+    name_filters: &[],
+    exact_name_filters: &[
+        "test_action_callback_fired_on_failure",
+        "test_action_callback_fired_on_timeout",
+        "test_callbacks_fired_in_two_stage",
+    ],
+    extra_files: &[],
+};
 
 fn run_table_mania_and_committor_tests(
     manifest_dir: &str,
@@ -387,17 +374,14 @@ fn run_table_mania_and_committor_tests(
         ),
     ];
 
-    let any_committor_active = committor_shards
-        .iter()
-        .any(|(name, _)| !config.skip_entirely(name));
+    let any_committor_active = committor_shards.iter().any(|(name, _)| !config.skip_entirely(name));
 
     if config.skip_entirely(TABLE_MANIA_TEST) && !any_committor_active {
         eprintln!("Skipping table mania and committor tests");
         return Ok((success_output(), success_output()));
     }
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
         "committor-conf.devnet.toml",
@@ -426,8 +410,7 @@ fn run_table_mania_and_committor_tests(
         // a chain validator therefore no ephemeral validator needs to be started
 
         let table_mania_test_output = if run_table_mania {
-            let test_table_mania_dir =
-                format!("{}/../{}", manifest_dir, "test-table-mania");
+            let test_table_mania_dir = format!("{}/../{}", manifest_dir, "test-table-mania");
 
             match run_test(test_table_mania_dir, Default::default()) {
                 Ok(output) => output,
@@ -443,8 +426,7 @@ fn run_table_mania_and_committor_tests(
         };
 
         let committor_test_output = if !active_committor_subsets.is_empty() {
-            let test_committor_dir =
-                format!("{}/../{}", manifest_dir, "test-committor-service");
+            let test_committor_dir = format!("{}/../{}", manifest_dir, "test-committor-service");
             let mut combined_status_ok = true;
             let mut combined_stdout = Vec::new();
             let mut combined_stderr = Vec::new();
@@ -452,7 +434,7 @@ fn run_table_mania_and_committor_tests(
             // Each subset may produce up to two `cargo test` invocations:
             // one for `files` with the libtest name filters applied, and one
             // for `extra_files` run unfiltered (e.g. the preparator suites).
-            let mut invocations: Vec<(String, RunTestConfig)> = Vec::new();
+            let mut invocations: Vec<(String, RunTestConfig<'_>)> = Vec::new();
             for subset in &active_committor_subsets {
                 if !subset.files.is_empty() {
                     invocations.push((
@@ -521,9 +503,7 @@ fn run_table_mania_and_committor_tests(
         Ok((table_mania_test_output, committor_test_output))
     } else {
         let setup_needed = config.setup_devnet(TABLE_MANIA_TEST)
-            || committor_shards
-                .iter()
-                .any(|(name, _)| config.setup_devnet(name));
+            || committor_shards.iter().any(|(name, _)| config.setup_devnet(name));
         let devnet_validator = setup_needed.then(start_devnet_validator);
         Ok((
             wait_for_ctrlc(devnet_validator, None, success_output())?,
@@ -541,8 +521,7 @@ fn run_schedule_commit_tests(
         return Ok((success_output(), success_output()));
     }
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
@@ -567,59 +546,43 @@ fn run_schedule_commit_tests(
     };
 
     if config.run_test(TEST_NAME) {
-        eprintln!(
-            "======== Starting DEVNET Validator for Scenarios + Security ========"
-        );
+        eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
 
         let mut devnet_validator = start_devnet_validator();
 
         // These share a common config that includes the program to schedule commits
         // Thus they can run against the same validator instances
-        eprintln!(
-            "======== Starting EPHEM Validator for Scenarios + Security ========"
-        );
+        eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
         let mut ephem_validator = start_ephem_validator();
 
         eprintln!("======== RUNNING SECURITY TESTS ========");
-        let test_security_dir =
-            format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
+        let test_security_dir = format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
         eprintln!("Running security tests in {}", test_security_dir);
-        let test_security_output =
-            match run_test(test_security_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run security: {:?}", err);
-                    cleanup_validators(
-                        &mut ephem_validator,
-                        &mut devnet_validator,
-                    );
-                    return Err(err.into());
-                }
-            };
+        let test_security_output = match run_test(test_security_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run security: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
 
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
-        let test_scenarios_dir =
-            format!("{}/../{}", manifest_dir, "schedulecommit/test-scenarios");
-        let test_scenarios_output =
-            match run_test(test_scenarios_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run scenarios: {:?}", err);
-                    cleanup_validators(
-                        &mut ephem_validator,
-                        &mut devnet_validator,
-                    );
-                    return Err(err.into());
-                }
-            };
+        let test_scenarios_dir = format!("{}/../{}", manifest_dir, "schedulecommit/test-scenarios");
+        let test_scenarios_output = match run_test(test_scenarios_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run scenarios: {:?}", err);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
 
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
         Ok((test_security_output, test_scenarios_output))
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator = config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         eprintln!("Setup validator(s)");
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())?;
         Ok((success_output(), success_output()))
@@ -636,8 +599,7 @@ fn run_cloning_tests(
     }
 
     let loaded_chain_accounts = {
-        let mut loaded_chain_accounts =
-            LoadedAccounts::with_delegation_program_test_authority();
+        let mut loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
         loaded_chain_accounts.add(&[(
             "Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo",
@@ -673,8 +635,7 @@ fn run_cloning_tests(
         let mut devnet_validator = start_devnet_validator();
         let mut ephem_validator = start_ephem_validator();
 
-        let test_cloning_dir =
-            format!("{}/../{}", manifest_dir, "test-cloning");
+        let test_cloning_dir = format!("{}/../{}", manifest_dir, "test-cloning");
         eprintln!("Running cloning tests in {}", test_cloning_dir);
         let output = match run_test(
             test_cloning_dir,
@@ -695,10 +656,8 @@ fn run_cloning_tests(
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator = config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
@@ -740,8 +699,7 @@ fn run_validator_services_tests(
         let mut devnet_validator = start_devnet_validator();
         let mut ephem_validator = start_ephem_validator();
 
-        let test_dir =
-            format!("{}/../{}", manifest_dir, "test-validator-services");
+        let test_dir = format!("{}/../{}", manifest_dir, "test-validator-services");
         eprintln!("Running validator-services tests in {}", test_dir);
 
         let output = run_test(test_dir, Default::default()).map_err(|err| {
@@ -753,10 +711,8 @@ fn run_validator_services_tests(
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator = config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
@@ -772,8 +728,7 @@ fn run_config_tests(
 
     materialize_v42_program(manifest_dir)?;
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
         "config-conf.devnet.toml",
@@ -804,8 +759,7 @@ fn run_config_tests(
         cleanup_devnet_only(&mut devnet_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
@@ -821,8 +775,7 @@ fn run_schedule_intents_tests(
 
     materialize_v42_program(manifest_dir)?;
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
     let start_devnet_validator = || match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
@@ -850,8 +803,7 @@ fn run_schedule_intents_tests(
         let mut devnet_validator = start_devnet_validator();
         let mut ephem_validator = start_ephem_validator();
 
-        let test_intents_dir =
-            format!("{}/../{}", manifest_dir, "test-schedule-intent");
+        let test_intents_dir = format!("{}/../{}", manifest_dir, "test-schedule-intent");
         eprintln!("Running schedule intents tests in {}", test_intents_dir);
         let test_output = match run_test(
             test_intents_dir,
@@ -874,10 +826,8 @@ fn run_schedule_intents_tests(
         cleanup_validators(&mut ephem_validator, &mut devnet_validator);
         Ok(test_output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let ephem_validator = config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }
@@ -891,8 +841,7 @@ fn run_task_scheduler_tests(
         return Ok(success_output());
     }
 
-    let loaded_chain_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
 
     let start_devnet_validator = || match start_validator(
         "schedule-task.devnet.toml",
@@ -925,8 +874,7 @@ fn run_task_scheduler_tests(
         cleanup_devnet_only(&mut devnet_validator);
         Ok(output)
     } else {
-        let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
@@ -934,7 +882,7 @@ fn run_task_scheduler_tests(
 // -----------------
 // Configs/Checks
 // -----------------
-fn assert_cargo_tests_passed(output: process::Output, test_name: &str) {
+fn assert_cargo_tests_passed(output: Output, test_name: &str) {
     if !output.status.success() {
         eprintln!("cargo test '{}'", test_name);
         eprintln!("status: {}", output.status);
@@ -963,10 +911,7 @@ struct RunTestConfig<'a> {
     exact_name_filters: &'a [&'a str],
 }
 
-fn run_test(
-    manifest_dir: String,
-    config: RunTestConfig,
-) -> io::Result<process::Output> {
+fn run_test(manifest_dir: String, config: RunTestConfig<'_>) -> io::Result<Output> {
     // Integration tests against a live validator can hit timing-related
     // flakes. RUN_TEST_RETRIES is the number of EXTRA attempts on failure
     // (so total attempts = RUN_TEST_RETRIES + 1). Default is 0: retries
@@ -978,7 +923,7 @@ fn run_test(
         .unwrap_or(0)
         .saturating_add(1);
 
-    let mut last: Option<process::Output> = None;
+    let mut last: Option<Output> = None;
     for attempt in 1..=max_attempts {
         let output = run_test_once(manifest_dir.clone(), &config)?;
         if output.status.success() {
@@ -993,10 +938,7 @@ fn run_test(
     Ok(last.expect("run_test loop must run at least once"))
 }
 
-fn run_test_once(
-    manifest_dir: String,
-    config: &RunTestConfig,
-) -> io::Result<process::Output> {
+fn run_test_once(manifest_dir: String, config: &RunTestConfig<'_>) -> io::Result<Output> {
     if let Some(bin_dir) = std::env::var_os("INTEGRATION_TEST_BIN_DIR") {
         let bin_dir = PathBuf::from(bin_dir);
         return run_prebuilt_tests(Path::new(&manifest_dir), config, &bin_dir);
@@ -1008,11 +950,7 @@ fn run_test_once(
         let mut combined_stderr = Vec::new();
 
         for exact_filter in config.exact_name_filters {
-            let output = run_cargo_test_command(
-                manifest_dir.clone(),
-                config,
-                Some(exact_filter),
-            )?;
+            let output = run_cargo_test_command(manifest_dir.clone(), config, Some(exact_filter))?;
             combined_status_ok &= output.status.success();
             combined_stdout.extend_from_slice(&output.stdout);
             combined_stderr.extend_from_slice(&output.stderr);
@@ -1034,9 +972,9 @@ fn run_test_once(
 
 fn run_cargo_test_command(
     manifest_dir: String,
-    config: &RunTestConfig,
+    config: &RunTestConfig<'_>,
     exact_filter: Option<&str>,
-) -> io::Result<process::Output> {
+) -> io::Result<Output> {
     let mut cmd = process::Command::new("cargo");
     cmd.env(
         "RUST_LOG",
@@ -1067,9 +1005,9 @@ fn run_cargo_test_command(
 
 fn run_prebuilt_tests(
     manifest_dir: &Path,
-    config: &RunTestConfig,
+    config: &RunTestConfig<'_>,
     bin_dir: &Path,
-) -> io::Result<process::Output> {
+) -> io::Result<Output> {
     let test_targets = resolve_test_targets(manifest_dir, config)?;
     let mut combined_status_ok = true;
     let mut combined_stdout = Vec::new();
@@ -1078,12 +1016,7 @@ fn run_prebuilt_tests(
     for test_target in test_targets {
         let test_bin = resolve_prebuilt_test_bin(bin_dir, &test_target)?;
         if config.exact_name_filters.is_empty() {
-            let output = run_prebuilt_test_command(
-                &test_bin,
-                manifest_dir,
-                config,
-                None,
-            )?;
+            let output = run_prebuilt_test_command(&test_bin, manifest_dir, config, None)?;
             combined_status_ok &= output.status.success();
             combined_stdout.extend_from_slice(&output.stdout);
             combined_stderr.extend_from_slice(&output.stderr);
@@ -1093,12 +1026,8 @@ fn run_prebuilt_tests(
             }
         } else {
             for exact_filter in config.exact_name_filters {
-                let output = run_prebuilt_test_command(
-                    &test_bin,
-                    manifest_dir,
-                    config,
-                    Some(exact_filter),
-                )?;
+                let output =
+                    run_prebuilt_test_command(&test_bin, manifest_dir, config, Some(exact_filter))?;
                 combined_status_ok &= output.status.success();
                 combined_stdout.extend_from_slice(&output.stdout);
                 combined_stderr.extend_from_slice(&output.stderr);
@@ -1123,9 +1052,9 @@ fn run_prebuilt_tests(
 fn run_prebuilt_test_command(
     test_bin: &Path,
     manifest_dir: &Path,
-    config: &RunTestConfig,
+    config: &RunTestConfig<'_>,
     exact_filter: Option<&str>,
-) -> io::Result<process::Output> {
+) -> io::Result<Output> {
     let mut cmd = process::Command::new(test_bin);
     cmd.env(
         "RUST_LOG",
@@ -1150,11 +1079,7 @@ fn run_prebuilt_test_command(
     Teepee::new(cmd).output()
 }
 
-fn combined_output(
-    status_ok: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-) -> Output {
+fn combined_output(status_ok: bool, stdout: Vec<u8>, stderr: Vec<u8>) -> Output {
     Output {
         status: if status_ok {
             process::ExitStatus::default()
@@ -1170,7 +1095,7 @@ fn combined_output(
 
 fn resolve_test_targets(
     manifest_dir: &Path,
-    config: &RunTestConfig,
+    config: &RunTestConfig<'_>,
 ) -> io::Result<Vec<String>> {
     if !config.test_files.is_empty() {
         return Ok(config.test_files.iter().map(|s| s.to_string()).collect());
@@ -1204,10 +1129,7 @@ fn resolve_test_targets(
     Ok(test_targets)
 }
 
-fn resolve_prebuilt_test_bin(
-    bin_dir: &Path,
-    test_target: &str,
-) -> io::Result<PathBuf> {
+fn resolve_prebuilt_test_bin(bin_dir: &Path, test_target: &str) -> io::Result<PathBuf> {
     let normalized = test_target.replace('-', "_");
     let mut prefixes = vec![format!("{}-", test_target)];
     if normalized != test_target {
@@ -1221,8 +1143,7 @@ fn resolve_prebuilt_test_bin(
         if !path.is_file() {
             continue;
         }
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str())
-        else {
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
             continue;
         };
         if prefixes.iter().any(|prefix| file_name.starts_with(prefix)) {
@@ -1257,13 +1178,8 @@ fn resolve_prebuilt_test_bin(
 // -----------------
 fn resolve_paths(config_file: &str) -> TestRunnerPaths {
     let workspace_dir = resolve_workspace_dir();
-    let root_dir = Path::new(&workspace_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf();
-    let config_path =
-        Path::new(&workspace_dir).join("configs").join(config_file);
+    let root_dir = Path::new(&workspace_dir).join("..").canonicalize().unwrap().to_path_buf();
+    let config_path = Path::new(&workspace_dir).join("configs").join(config_file);
     TestRunnerPaths {
         config_path,
         root_dir,

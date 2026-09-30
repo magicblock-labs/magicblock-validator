@@ -31,11 +31,7 @@ pub struct Version {
 
 impl Version {
     pub fn as_semver_version(&self) -> semver::Version {
-        semver::Version::new(
-            self.major as u64,
-            self.minor as u64,
-            self.patch as u64,
-        )
+        semver::Version::new(self.major as u64, self.minor as u64, self.patch as u64)
     }
 
     fn client(&self) -> ClientId {
@@ -49,21 +45,17 @@ fn compute_commit(sha1: Option<&'static str>) -> Option<u32> {
 
 impl Default for Version {
     fn default() -> Self {
-        let feature_set = u32::from_le_bytes(
-            solana_feature_set::ID.as_ref()[..4].try_into().unwrap(),
-        );
+        let feature_set =
+            u32::from_le_bytes(solana_feature_set::ID.as_ref()[..4].try_into().unwrap());
         Self {
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
             minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
             patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
-            commit: compute_commit(option_env!("CI_COMMIT"))
-                .unwrap_or_default(),
+            commit: compute_commit(option_env!("CI_COMMIT")).unwrap_or_default(),
             feature_set,
             // Other client implementations need to modify this line.
             client: u16::try_from(ClientId::MagicBlock).unwrap(),
-            solana_core:
-                solana_rpc_client_api::response::RpcApiVersion::default()
-                    .to_string(),
+            solana_core: solana_rpc_client_api::response::RpcApiVersion::default().to_string(),
             git_version: git_version::git_version!().to_string(),
         }
     }
@@ -113,9 +105,7 @@ impl TryFrom<ClientId> for u16 {
             ClientId::JitoLabs => Ok(1u16),
             ClientId::Firedancer => Ok(2u16),
             ClientId::MagicBlock => Ok(3u16),
-            ClientId::Unknown(client @ 0u16..=3u16) => {
-                Err(format!("Invalid client: {client}"))
-            }
+            ClientId::Unknown(client @ 0u16..=3u16) => Err(format!("Invalid client: {client}")),
             ClientId::Unknown(client) => Ok(client),
         }
     }

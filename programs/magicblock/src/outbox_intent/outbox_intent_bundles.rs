@@ -12,9 +12,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::intent_bundles::magic_scheduled_base_intent::ScheduledIntentBundle;
 
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite,
-)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct OutboxIntentBundle {
     pub inner: ScheduledIntentBundle,
     status: OutboxIntentBundleStatus,
@@ -49,11 +47,9 @@ impl OutboxIntentBundle {
         matches!(
             self.status,
             OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(_))
-                | OutboxIntentBundleStatus::Executing(
-                    ExecutionStage::TwoStage(
-                        TwoStageProgress::Finalizing { .. }
-                    )
-                )
+                | OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
+                    TwoStageProgress::Finalizing { .. }
+                ))
         )
     }
 
@@ -85,44 +81,29 @@ impl OutboxIntentBundle {
         // is inner size + worst-case status size (TwoStage::Finalizing with 2 sigs)
         // + the bump byte
         let max_body_size = (wincode::serialized_size(&self.inner)?
-            + wincode::serialized_size(
-                &OutboxIntentBundleStatus::max_size_variant(),
-            )?
+            + wincode::serialized_size(&OutboxIntentBundleStatus::max_size_variant())?
             + wincode::serialized_size(&vec![
-                (
-                    Pubkey::default(),
-                    u64::default()
-                );
-                self.inner
-                    .get_all_committed_pubkeys()
-                    .len()
+                (Pubkey::default(), u64::default());
+                self.inner.get_all_committed_pubkeys().len()
             ])?
-            + wincode::serialized_size(&self.bump)?)
-            as usize;
+            + wincode::serialized_size(&self.bump)?) as usize;
 
         let mut out = vec![0u8; DISCRIMINATOR_LEN + max_body_size];
         out[..DISCRIMINATOR_LEN].copy_from_slice(&OUTBOX_INTENT_DISCRIMINATOR);
-        wincode::serialize_into(
-            std::io::Cursor::new(&mut out[DISCRIMINATOR_LEN..]),
-            self,
-        )?;
+        wincode::serialize_into(std::io::Cursor::new(&mut out[DISCRIMINATOR_LEN..]), self)?;
         Ok(out)
     }
 
     pub fn try_from_bytes(data: &[u8]) -> Result<Self, wincode::ReadError> {
         let disc_len = OUTBOX_INTENT_DISCRIMINATOR.len();
-        if data.len() < disc_len
-            || data[..disc_len] != OUTBOX_INTENT_DISCRIMINATOR
-        {
+        if data.len() < disc_len || data[..disc_len] != OUTBOX_INTENT_DISCRIMINATOR {
             return Err(wincode::ReadError::Custom("invalid discriminator"));
         }
         wincode::deserialize(&data[disc_len..])
     }
 }
 
-#[derive(
-    Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite,
-)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub enum OutboxIntentBundleStatus {
     Accepted,
     Executing(ExecutionStage),
@@ -130,15 +111,13 @@ pub enum OutboxIntentBundleStatus {
 
 impl OutboxIntentBundleStatus {
     fn max_size_variant() -> Self {
-        Self::Executing(ExecutionStage::TwoStage(
-            TwoStageProgress::Finalizing {
-                commit: Signature::default(),
-                finalize: PendingTransaction {
-                    signature: Signature::default(),
-                    blockhash: Hash::default(),
-                },
+        Self::Executing(ExecutionStage::TwoStage(TwoStageProgress::Finalizing {
+            commit: Signature::default(),
+            finalize: PendingTransaction {
+                signature: Signature::default(),
+                blockhash: Hash::default(),
             },
-        ))
+        }))
     }
 
     fn apply_stage_transition(
@@ -154,9 +133,7 @@ impl OutboxIntentBundleStatus {
                     }
                     // Transition from Accepted state to TwoStage::Finalizing is invalid
                     TwoStageProgress::Finalizing { .. } => {
-                        return Err(
-                            OutboxStageTransitionError::AcceptedToFinalizingError,
-                        );
+                        return Err(OutboxStageTransitionError::AcceptedToFinalizingError);
                     }
                 }
             }

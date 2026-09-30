@@ -1,15 +1,12 @@
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
-pub type RemoteAccountProviderResult<T> =
-    std::result::Result<T, RemoteAccountProviderError>;
+pub type RemoteAccountProviderResult<T> = Result<T, RemoteAccountProviderError>;
 
 #[derive(Debug, Error)]
 pub enum RemoteAccountProviderError {
     #[error("Pubsub client error: {0}")]
-    PubsubClientError(
-        Box<solana_pubsub_client::pubsub_client::PubsubClientError>,
-    ),
+    PubsubClientError(Box<solana_pubsub_client::pubsub_client::PubsubClientError>),
 
     #[error(transparent)]
     JoinError(#[from] tokio::task::JoinError),
@@ -95,9 +92,7 @@ pub enum RemoteAccountProviderError {
     #[error("The LoaderV2 program {0} needs a program account to be provided")]
     LoaderV2StateMissingProgramAccount(Pubkey),
 
-    #[error(
-        "The LoaderV3 program {0} needs a program data account to be provided"
-    )]
+    #[error("The LoaderV3 program {0} needs a program data account to be provided")]
     LoaderV3StateMissingProgramDataAccount(Pubkey),
 
     #[error("The LoaderV3 program {0} data account has an invalid length: {1}")]
@@ -111,9 +106,7 @@ pub enum RemoteAccountProviderError {
 
     #[error("The LoaderV4 program {0} account has invalid program data state")]
     LoaderV4InvalidProgramDataState(Pubkey),
-    #[error(
-        "The LoaderV4 program {0} account state deserialization failed: {1}"
-    )]
+    #[error("The LoaderV4 program {0} account state deserialization failed: {1}")]
     LoaderV4StateDeserializationFailed(Pubkey, String),
 
     #[error("Failed to update gRPC subscription to {0} after {1} retries: {2}")]
@@ -122,9 +115,7 @@ pub enum RemoteAccountProviderError {
     #[error("Failed to fetch data slice for {0} at min context slot {1}: {2}")]
     AccountDataSliceFetchFailed(Pubkey, u64, String),
 }
-impl From<solana_pubsub_client::pubsub_client::PubsubClientError>
-    for RemoteAccountProviderError
-{
+impl From<solana_pubsub_client::pubsub_client::PubsubClientError> for RemoteAccountProviderError {
     fn from(e: solana_pubsub_client::pubsub_client::PubsubClientError) -> Self {
         Self::PubsubClientError(Box::new(e))
     }

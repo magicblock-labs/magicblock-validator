@@ -1,23 +1,14 @@
 use json::Serialize;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_account_decoder::{
-    UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
-};
+use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::{
-    config::RpcProgramAccountsConfig, filter::RpcFilterType,
-};
-use spl_token_2022::{
-    generic_token_account::GenericTokenAccount, state::Account as TokenAccount,
-};
+use solana_rpc_client_api::{config::RpcProgramAccountsConfig, filter::RpcFilterType};
+use spl_token_2022::{generic_token_account::GenericTokenAccount, state::Account as TokenAccount};
 
 use super::HandlerResult;
 use crate::{
     error::RpcError,
-    requests::{
-        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
@@ -45,38 +36,27 @@ pub(crate) fn matches_filters(filters: &[RpcFilterType], data: &[u8]) -> bool {
     filters.iter().all(|filter| match filter {
         RpcFilterType::DataSize(size) => data.len() as u64 == *size,
         RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
-        RpcFilterType::TokenAccountState => {
-            TokenAccount::valid_account_data(data)
-        }
+        RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
     })
 }
 
 impl HttpDispatcher {
-    pub(crate) fn get_program_accounts(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_program_accounts(&self, request: &JsonRequest) -> HandlerResult {
         let program: Pubkey = request.required::<Serde32Bytes>(0)?.into();
-        let config = request
-            .optional::<RpcProgramAccountsConfig>(1)?
-            .unwrap_or_default();
+        let config = request.optional::<RpcProgramAccountsConfig>(1)?.unwrap_or_default();
         let filters = config.filters.unwrap_or_default();
         for filter in &filters {
             filter.verify().map_err(RpcError::invalid_params)?;
         }
 
-        let encoding = config
-            .account_config
-            .encoding
-            .unwrap_or(UiAccountEncoding::Base58);
+        let encoding = config.account_config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.account_config.data_slice;
 
         let accounts = self.engine.accounts();
         let accounts = accounts
             .program(&program, |pubkey, account| {
-                matches_filters(&filters, account.data()).then(|| {
-                    AccountWithPubkey::new(*pubkey, account, encoding, slice)
-                })
+                matches_filters(&filters, account.data())
+                    .then(|| AccountWithPubkey::new(*pubkey, account, encoding, slice))
             })
             .map_err(RpcError::internal)?
             .filter_map(|(_, account)| account)

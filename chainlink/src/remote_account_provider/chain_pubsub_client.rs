@@ -1,7 +1,7 @@
 use std::{
     collections::HashSet,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicU64, Ordering},
     },
     time::Duration,
@@ -9,6 +9,7 @@ use std::{
 
 use async_trait::async_trait;
 use magicblock_metrics::metrics;
+use parking_lot::Mutex;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::{mpsc, oneshot};
@@ -47,14 +48,8 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
         pubkey: Pubkey,
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()>;
-    async fn subscribe_program(
-        &self,
-        program_id: Pubkey,
-    ) -> RemoteAccountProviderResult<()>;
-    async fn unsubscribe(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()>;
+    async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()>;
+    async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()>;
     async fn shutdown(&self) -> RemoteAccountProviderResult<()>;
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate>;
@@ -81,9 +76,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// with connection availability state, such as `SubMuxClient`, must override
     /// this method and decide availability from the same state snapshot used to
     /// build the returned sets.
-    fn subscription_reconciliation_snapshot(
-        &self,
-    ) -> Option<SubscriptionReconciliationSnapshot> {
+    fn subscription_reconciliation_snapshot(&self) -> Option<SubscriptionReconciliationSnapshot> {
         let union = self.subscriptions_union();
         Some(SubscriptionReconciliationSnapshot {
             intersection: union.clone(),
@@ -107,9 +100,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// notifications during a transport gap. Consumers use this to run
     /// freshness reconciliation immediately instead of waiting for the
     /// periodic safety net.
-    fn take_reconnect_reconciliation_rx(
-        &self,
-    ) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
         None
     }
 
@@ -124,22 +115,17 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// Prefers gRPC-only coverage for `pubkey`.
     /// Multiplexing implementors drop websocket legs only after gRPC
     /// coverage is confirmed and err otherwise, leaving coverage untouched.
-    async fn prefer_grpc_subscription(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn prefer_grpc_subscription(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
         match self.transport() {
             PubsubTransport::Grpc => self.subscribe(pubkey, None).await,
             // Dropping a ws subscription is only safe behind a multiplexer
             // that confirmed gRPC coverage.
-            PubsubTransport::WebSocket => {
-                Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                    format!(
-                        "cannot prefer gRPC-only coverage for {pubkey} on a \
+            PubsubTransport::WebSocket => Err(
+                RemoteAccountProviderError::AccountSubscriptionsTaskFailed(format!(
+                    "cannot prefer gRPC-only coverage for {pubkey} on a \
                          websocket-only client"
-                    ),
-                ))
-            }
+                )),
+            ),
         }
     }
 }
@@ -150,10 +136,7 @@ pub trait ReconnectableClient {
     /// abort signal.
     async fn try_reconnect(&self) -> RemoteAccountProviderResult<()>;
     /// Re-subscribes to multiple accounts after a reconnection.
-    async fn resub_multiple(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> RemoteAccountProviderResult<()>;
+    async fn resub_multiple(&self, pubkeys: HashSet<Pubkey>) -> RemoteAccountProviderResult<()>;
     /// Returns the current resubscription delay in milliseconds.
     /// Returns None if this client doesn't track resubscription delay.
     fn current_resub_delay_ms(&self) -> Option<u64> {
@@ -198,8 +181,7 @@ impl ChainPubsubClientImpl {
         )
         .await?;
         let initial_resub_delay_ms = resubscription_delay.as_millis() as u64;
-        let current_resub_delay_ms =
-            Arc::new(AtomicU64::new(initial_resub_delay_ms));
+        let current_resub_delay_ms = Arc::new(AtomicU64::new(initial_resub_delay_ms));
         Ok(Self {
             actor: Arc::new(actor),
             updates_rcvr: Arc::new(Mutex::new(Some(updates))),
@@ -214,9 +196,7 @@ impl ChainPubsubClientImpl {
 impl ChainPubsubClient for ChainPubsubClientImpl {
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
-            .await?;
+        self.actor.send_msg(ChainPubsubActorMessage::Shutdown { response: tx }).await?;
 
         rx.await.inspect_err(|err| {
             warn!(
@@ -226,6 +206,8 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         })?
     }
 
+    // The trait transfers this receiver exactly once and cannot report a second take.
+    #[allow(clippy::expect_used)]
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
         // SAFETY: This can only be None if `take_updates` is called more than
         // once (double-take). That indicates a logic bug in the calling code.
@@ -233,7 +215,6 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
         // the updates stream.
         self.updates_rcvr
             .lock()
-            .unwrap()
             .take()
             .expect("ChainPubsubClientImpl::take_updates called more than once")
     }
@@ -245,11 +226,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
     ) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
         self.actor
-            .send_msg(ChainPubsubActorMessage::AccountSubscribe {
-                pubkey,
-                retries,
-                response: tx,
-            })
+            .send_msg(ChainPubsubActorMessage::AccountSubscribe { pubkey, retries, response: tx })
             .await?;
 
         rx.await
@@ -258,10 +235,7 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })?
     }
 
-    async fn subscribe_program(
-        &self,
-        program_id: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
         self.actor
             .send_msg(ChainPubsubActorMessage::ProgramSubscribe {
@@ -276,16 +250,10 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
             })?
     }
 
-    async fn unsubscribe(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
         self.actor
-            .send_msg(ChainPubsubActorMessage::AccountUnsubscribe {
-                pubkey,
-                response: tx,
-            })
+            .send_msg(ChainPubsubActorMessage::AccountUnsubscribe { pubkey, response: tx })
             .await?;
 
         rx.await
@@ -311,19 +279,14 @@ impl ChainPubsubClient for ChainPubsubClientImpl {
 impl ReconnectableClient for ChainPubsubClientImpl {
     async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.actor
-            .send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
-            .await?;
+        self.actor.send_msg(ChainPubsubActorMessage::Reconnect { response: tx }).await?;
 
         rx.await.inspect_err(|err| {
             warn!(error = ?err, "RecvError awaiting reconnect response");
         })?
     }
 
-    async fn resub_multiple(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn resub_multiple(&self, pubkeys: HashSet<Pubkey>) -> RemoteAccountProviderResult<()> {
         const RESUB_MULTIPLE_RETRY_PER_PUBKEY: usize = 5;
         // Failed keys are retried over just the remainder: erroring out
         // instead triggers a full reconnect that drains every subscription.
@@ -331,10 +294,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
         // Only resubscribe what is still missing
         let subscribed = self.subscriptions_union();
         let had_active_subs = !subscribed.is_empty();
-        let mut remaining: Vec<Pubkey> = pubkeys
-            .into_iter()
-            .filter(|pk| !subscribed.contains(pk))
-            .collect();
+        let mut remaining: Vec<Pubkey> =
+            pubkeys.into_iter().filter(|pk| !subscribed.contains(pk)).collect();
         let total_subs = remaining.len();
         let mut fatal_err = None;
 
@@ -347,10 +308,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             let mut failed = Vec::new();
             let mut last_err = None;
             for (idx, pubkey) in remaining.iter().enumerate() {
-                match self
-                    .subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY))
-                    .await
-                {
+                match self.subscribe(*pubkey, Some(RESUB_MULTIPLE_RETRY_PER_PUBKEY)).await {
                     Ok(()) => {
                         // Pace successful subscribes only; failures
                         // already backed off internally
@@ -373,10 +331,8 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 // Exponentially back off on resubscription attempts, so the next time we
                 // reconnect and try to resubscribe, we wait longer in between each subscription
                 // in order to avoid overwhelming the RPC with requests
-                let new_delay =
-                    delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
-                self.current_resub_delay_ms
-                    .store(new_delay, Ordering::SeqCst);
+                let new_delay = delay_ms.saturating_mul(2).min(MAX_RESUB_DELAY_MS);
+                self.current_resub_delay_ms.store(new_delay, Ordering::SeqCst);
             }
             let no_progress = failed.len() == remaining.len();
             remaining = failed;
@@ -403,8 +359,7 @@ impl ReconnectableClient for ChainPubsubClientImpl {
             // Any progress restores the configured pacing: an escalated
             // delay stretches the restore window past the connection's
             // lifetime and wedges reconnects into a permanent loop.
-            self.current_resub_delay_ms
-                .store(self.initial_resub_delay_ms, Ordering::SeqCst);
+            self.current_resub_delay_ms.store(self.initial_resub_delay_ms, Ordering::SeqCst);
         }
         if !remaining.is_empty() {
             warn!(
@@ -412,15 +367,13 @@ impl ReconnectableClient for ChainPubsubClientImpl {
                 failed = remaining.len(),
                 "Re-subscription incomplete",
             );
-            return Err(
-                RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
-                    format!(
-                        "{} of {total_subs} account subscriptions remain \
+            return Err(RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
+                format!(
+                    "{} of {total_subs} account subscriptions remain \
                          missing after reconnect replay",
-                        remaining.len()
-                    ),
+                    remaining.len()
                 ),
-            );
+            ));
         }
         Ok(())
     }
@@ -449,16 +402,13 @@ pub mod mock {
     use solana_account::Account;
     use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
     use solana_program::clock::Slot;
-    use solana_rpc_client_api::response::{
-        Response as RpcResponse, RpcResponseContext,
-    };
+    use solana_rpc_client_api::response::{Response as RpcResponse, RpcResponseContext};
     use tokio::sync::Notify;
     use tracing::*;
 
     use super::*;
     use crate::remote_account_provider::{
-        RemoteAccountProviderError, RemoteAccountProviderResult,
-        pubsub_common::SubscriptionSource,
+        RemoteAccountProviderError, RemoteAccountProviderResult, pubsub_common::SubscriptionSource,
     };
 
     #[derive(Clone)]
@@ -516,10 +466,7 @@ pub mod mock {
                 program_subscribe_attempts: Arc::new(AtomicU64::new(0)),
                 reconnect_calls: Arc::new(AtomicU64::new(0)),
                 subscribe_notify: Arc::new(Notify::new()),
-                client_id: format!(
-                    "mock:{}",
-                    CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)
-                ),
+                client_id: format!("mock:{}", CLIENT_ID.fetch_add(1, AtomicOrdering::SeqCst)),
                 transport: Arc::new(Mutex::new(PubsubTransport::WebSocket)),
                 prefer_grpc_calls: Arc::new(Mutex::new(Vec::new())),
             }
@@ -537,8 +484,7 @@ pub mod mock {
         /// Simulate a disconnect: clear all subscriptions and mark client as disconnected.
         pub fn simulate_disconnect(&self) {
             *self.connected.lock() = false;
-            *self.subscription_count_at_disconnect.lock() =
-                self.subscribed_pubkeys.lock().len();
+            *self.subscription_count_at_disconnect.lock() = self.subscribed_pubkeys.lock().len();
             self.subscribed_pubkeys.lock().clear();
         }
 
@@ -569,30 +515,16 @@ pub mod mock {
             let subscribed_pubkeys = self.subscribed_pubkeys.lock().clone();
             if subscribed_pubkeys.contains(&update.pubkey) {
                 let _ =
-                    self.updates_sndr.send(update).await.inspect_err(|err| {
-                        error!(error = ?err, "Failed to send subscription update")
-                    });
+                    self.updates_sndr.send(update).await.inspect_err(
+                        |err| error!(error = ?err, "Failed to send subscription update"),
+                    );
             }
         }
 
-        pub async fn send_account_update(
-            &self,
-            pubkey: Pubkey,
-            slot: Slot,
-            account: &Account,
-        ) {
-            let ui_acc = encode_ui_account(
-                &pubkey,
-                account,
-                UiAccountEncoding::Base58,
-                None,
-                None,
-            );
+        pub async fn send_account_update(&self, pubkey: Pubkey, slot: Slot, account: &Account) {
+            let ui_acc = encode_ui_account(&pubkey, account, UiAccountEncoding::Base58, None, None);
             let rpc_response = RpcResponse {
-                context: RpcResponseContext {
-                    slot,
-                    api_version: None,
-                },
+                context: RpcResponseContext { slot, api_version: None },
                 value: ui_acc,
             };
             let update = SubscriptionUpdate::from_rpc_response(
@@ -642,8 +574,7 @@ pub mod mock {
             loop {
                 let notified = self.subscribe_insert_notify.notified();
                 tokio::pin!(notified);
-                let current =
-                    self.subscribe_insertions.load(AtomicOrdering::SeqCst);
+                let current = self.subscribe_insertions.load(AtomicOrdering::SeqCst);
                 if current >= min_insertions {
                     break;
                 }
@@ -660,8 +591,7 @@ pub mod mock {
                 // arrived between the check and the await, we would miss it.
                 let notified = self.subscribe_notify.notified();
                 tokio::pin!(notified);
-                let current =
-                    self.subscribe_attempts.load(AtomicOrdering::SeqCst);
+                let current = self.subscribe_attempts.load(AtomicOrdering::SeqCst);
                 if current >= min_attempts {
                     break;
                 }
@@ -712,24 +642,24 @@ pub mod mock {
             match self.transport() {
                 PubsubTransport::Grpc => self.subscribe(pubkey, None).await,
                 PubsubTransport::WebSocket => Err(
-                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                        format!(
-                            "cannot prefer gRPC-only coverage for {pubkey} on \
+                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(format!(
+                        "cannot prefer gRPC-only coverage for {pubkey} on \
                              a websocket-only client"
-                        ),
-                    ),
+                    )),
                 ),
             }
         }
 
+        #[allow(clippy::expect_used)]
         fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
             // SAFETY: This can only be None if `take_updates` is called more
             // than once (double take). That would indicate a logic bug in the
             // calling code. Panicking here surfaces such a bug early and avoids
             // silently losing the updates stream.
-            self.updates_rcvr.lock().take().expect(
-                "ChainPubsubClientMock::take_updates called more than once",
-            )
+            self.updates_rcvr
+                .lock()
+                .take()
+                .expect("ChainPubsubClientMock::take_updates called more than once")
         }
         async fn subscribe(
             &self,
@@ -754,11 +684,9 @@ pub mod mock {
             }
 
             if !*self.connected.lock() {
-                return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                        "mock: subscribe while disconnected".to_string(),
-                    ),
-                );
+                return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    "mock: subscribe while disconnected".to_string(),
+                ));
             }
             {
                 let mut to_noop = self.pending_silent_subscribe_noops.lock();
@@ -771,8 +699,7 @@ pub mod mock {
                 let mut subscribed_pubkeys = self.subscribed_pubkeys.lock();
                 subscribed_pubkeys.insert(pubkey);
             }
-            self.subscribe_insertions
-                .fetch_add(1, AtomicOrdering::SeqCst);
+            self.subscribe_insertions.fetch_add(1, AtomicOrdering::SeqCst);
             self.subscribe_insert_notify.notify_waiters();
 
             loop {
@@ -787,53 +714,37 @@ pub mod mock {
             Ok(())
         }
 
-        async fn subscribe_program(
-            &self,
-            program_id: Pubkey,
-        ) -> RemoteAccountProviderResult<()> {
-            self.program_subscribe_attempts
-                .fetch_add(1, AtomicOrdering::SeqCst);
+        async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()> {
+            self.program_subscribe_attempts.fetch_add(1, AtomicOrdering::SeqCst);
 
             {
-                let mut to_fail =
-                    self.pending_program_subscribe_failures.lock();
+                let mut to_fail = self.pending_program_subscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
-                    return Err(
-                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                            "mock: forced program subscribe failure"
-                                .to_string(),
-                        ),
-                    );
+                    return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: forced program subscribe failure".to_string(),
+                    ));
                 }
             }
 
             if !*self.connected.lock() {
-                return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                        "mock: subscribe_program while disconnected"
-                            .to_string(),
-                    ),
-                );
+                return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    "mock: subscribe_program while disconnected".to_string(),
+                ));
             }
             let mut subscribed_programs = self.subscribed_programs.lock();
             subscribed_programs.insert(program_id);
             Ok(())
         }
 
-        async fn unsubscribe(
-            &self,
-            pubkey: Pubkey,
-        ) -> RemoteAccountProviderResult<()> {
+        async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
             {
                 let mut to_fail = self.pending_unsubscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
-                    return Err(
-                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                            "mock: forced unsubscribe failure".to_string(),
-                        ),
-                    );
+                    return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: forced unsubscribe failure".to_string(),
+                    ));
                 }
             }
 
@@ -841,11 +752,9 @@ pub mod mock {
             if subscribed_pubkeys.remove(&pubkey) {
                 Ok(())
             } else {
-                Err(
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        pubkey.to_string(),
-                    ),
-                )
+                Err(RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
+                    pubkey.to_string(),
+                ))
             }
         }
 
@@ -876,11 +785,9 @@ pub mod mock {
         async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
             self.reconnect_calls.fetch_add(1, AtomicOrdering::SeqCst);
             if !*self.reconnectable.lock() {
-                return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                        "mock: reconnect failed".to_string(),
-                    ),
-                );
+                return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                    "mock: reconnect failed".to_string(),
+                ));
             }
             *self.connected.lock() = true;
             Ok(())
@@ -896,11 +803,9 @@ pub mod mock {
                 let mut to_fail = self.pending_resubscribe_failures.lock();
                 if *to_fail > 0 {
                     *to_fail -= 1;
-                    return Err(
-                        RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
-                            "mock: forced resubscribe failure".to_string(),
-                        ),
-                    );
+                    return Err(RemoteAccountProviderError::AccountSubscriptionsTaskFailed(
+                        "mock: forced resubscribe failure".to_string(),
+                    ));
                 }
             }
             for pubkey in pubkeys {
@@ -909,20 +814,15 @@ pub mod mock {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             let subscribed = self.subscriptions_union();
-            let missing = requested
-                .iter()
-                .filter(|pubkey| !subscribed.contains(pubkey))
-                .count();
+            let missing = requested.iter().filter(|pubkey| !subscribed.contains(pubkey)).count();
             if missing > 0 {
-                return Err(
-                    RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
-                        format!(
-                            "{missing} of {} mock account subscriptions \
+                return Err(RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
+                    format!(
+                        "{missing} of {} mock account subscriptions \
                              remain missing after reconnect replay",
-                            requested.len()
-                        ),
+                        requested.len()
                     ),
-                );
+                ));
             }
             Ok(())
         }

@@ -15,10 +15,9 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     ChainPubsubClient, ChainPubsubClientImpl, Endpoint, ReconnectableClient,
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-    chain_laser_actor::Slots, chain_laser_client::ChainLaserClientImpl,
-    chain_rpc_client::ChainRpcClientImpl, chain_slot::ChainSlot,
-    pubsub_common::SubscriptionUpdate,
+    RemoteAccountProviderError, RemoteAccountProviderResult, chain_laser_actor::Slots,
+    chain_laser_client::ChainLaserClientImpl, chain_rpc_client::ChainRpcClientImpl,
+    chain_slot::ChainSlot, pubsub_common::SubscriptionUpdate,
 };
 
 #[derive(Clone)]
@@ -43,16 +42,9 @@ impl ChainUpdatesClient {
         static CLIENT_ID: AtomicU16 = AtomicU16::new(0);
 
         match endpoint {
-            WebSocket {
-                url,
-                label,
-                subs_per_connection,
-            } => {
+            WebSocket { url, label, subs_per_connection } => {
                 debug!(url = %url, "Initializing WebSocket client");
-                let client_id = format!(
-                    "ws:{label}-{}",
-                    CLIENT_ID.fetch_add(1, Ordering::SeqCst)
-                );
+                let client_id = format!("ws:{label}-{}", CLIENT_ID.fetch_add(1, Ordering::SeqCst));
                 Ok(ChainUpdatesClient::WebSocket(
                     ChainPubsubClientImpl::try_new_from_url(
                         url,
@@ -65,16 +57,10 @@ impl ChainUpdatesClient {
                     .await?,
                 ))
             }
-            Grpc {
-                url,
-                label,
-                api_key,
-            } => {
+            Grpc { url, label, api_key } => {
                 debug!(url = %url, "Initializing gRPC client");
-                let client_id = format!(
-                    "grpc:{label}-{}",
-                    CLIENT_ID.fetch_add(1, Ordering::SeqCst)
-                );
+                let client_id =
+                    format!("grpc:{label}-{}", CLIENT_ID.fetch_add(1, Ordering::SeqCst));
 
                 let slots = Slots {
                     chain_slot: ChainSlot::new(chain_slot),
@@ -92,11 +78,9 @@ impl ChainUpdatesClient {
                     ),
                 ))
             }
-            Rpc { .. } => {
-                Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(
-                    "{endpoint:?}"
-                )))
-            }
+            Rpc { .. } => Err(RemoteAccountProviderError::InvalidPubsubEndpoint(format!(
+                "{endpoint:?}"
+            ))),
         }
     }
 }
@@ -115,10 +99,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    async fn subscribe_program(
-        &self,
-        program_id: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.subscribe_program(program_id).await,
@@ -126,10 +107,7 @@ impl ChainPubsubClient for ChainUpdatesClient {
         }
     }
 
-    async fn unsubscribe(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.unsubscribe(pubkey).await,
@@ -188,10 +166,7 @@ impl ReconnectableClient for ChainUpdatesClient {
         }
     }
 
-    async fn resub_multiple(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn resub_multiple(&self, pubkeys: HashSet<Pubkey>) -> RemoteAccountProviderResult<()> {
         use ChainUpdatesClient::*;
         match self {
             WebSocket(client) => client.resub_multiple(pubkeys).await,

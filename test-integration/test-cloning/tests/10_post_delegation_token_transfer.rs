@@ -2,9 +2,7 @@ use std::{thread::sleep, time::Duration};
 
 use dlp_api::{
     args::DelegateArgs,
-    instruction_builder::{
-        delegate_with_actions, Encryptable, PostDelegationInstruction,
-    },
+    instruction_builder::{delegate_with_actions, Encryptable, PostDelegationInstruction},
     pda::{
         delegate_buffer_pda_from_delegated_account_and_owner_program,
         delegation_metadata_pda_from_delegated_account,
@@ -12,12 +10,10 @@ use dlp_api::{
     },
 };
 use integration_test_tools::{
-    init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES,
-    IntegrationTestContext,
+    init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use magicblock_core::token_programs::{
-    derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
-    TOKEN_PROGRAM_ID,
+    derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -27,9 +23,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use solana_system_interface::{
-    instruction as system_instruction, program as system_program,
-};
+use solana_system_interface::{instruction as system_instruction, program as system_program};
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 
@@ -42,18 +36,11 @@ const DEPOSIT_SPL_TOKENS: u8 = 2;
 const DELEGATE_EPHEMERAL_ATA: u8 = 4;
 
 fn token_balance_chain(ctx: &IntegrationTestContext, account: &Pubkey) -> u64 {
-    let balance = ctx
-        .try_chain_client()
-        .unwrap()
-        .get_token_account_balance(account)
-        .unwrap();
+    let balance = ctx.try_chain_client().unwrap().get_token_account_balance(account).unwrap();
     balance.amount.parse::<u64>().unwrap()
 }
 
-fn token_balance_ephem(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> Option<u64> {
+fn token_balance_ephem(ctx: &IntegrationTestContext, account: &Pubkey) -> Option<u64> {
     ctx.try_ephem_client()
         .unwrap()
         .get_token_account_balance(account)
@@ -86,11 +73,7 @@ fn initialize_global_vault_ix(payer: Pubkey, mint: Pubkey) -> Instruction {
     }
 }
 
-fn initialize_eata_ix(
-    payer: Pubkey,
-    user: Pubkey,
-    mint: Pubkey,
-) -> Instruction {
+fn initialize_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey) -> Instruction {
     Instruction {
         program_id: EATA_PROGRAM_ID,
         accounts: vec![
@@ -133,21 +116,12 @@ fn deposit_spl_tokens_ix(
     }
 }
 
-fn delegate_eata_ix(
-    payer: Pubkey,
-    user: Pubkey,
-    mint: Pubkey,
-    validator: Pubkey,
-) -> Instruction {
+fn delegate_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey, validator: Pubkey) -> Instruction {
     let eata = derive_eata(&user, &mint);
     let delegation_buffer =
-        delegate_buffer_pda_from_delegated_account_and_owner_program(
-            &eata,
-            &EATA_PROGRAM_ID,
-        );
+        delegate_buffer_pda_from_delegated_account_and_owner_program(&eata, &EATA_PROGRAM_ID);
     let delegation_record = delegation_record_pda_from_delegated_account(&eata);
-    let delegation_metadata =
-        delegation_metadata_pda_from_delegated_account(&eata);
+    let delegation_metadata = delegation_metadata_pda_from_delegated_account(&eata);
     let mut data = Vec::with_capacity(33);
     data.push(DELEGATE_EPHEMERAL_ATA);
     data.extend_from_slice(validator.as_ref());
@@ -179,23 +153,15 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
     let destination_authority = Keypair::new();
     let mint = Keypair::new();
     let source_ata = derive_ata(&source_authority.pubkey(), &mint.pubkey());
-    let destination_ata =
-        derive_ata(&destination_authority.pubkey(), &mint.pubkey());
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let destination_ata = derive_ata(&destination_authority.pubkey(), &mint.pubkey());
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
-    ctx.airdrop_chain(&fee_payer.pubkey(), 2_000_000_000)
-        .unwrap();
-    ctx.airdrop_chain(&delegated_account.pubkey(), 2_000_000_000)
-        .unwrap();
-    ctx.airdrop_chain(&source_authority.pubkey(), 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain(&fee_payer.pubkey(), 2_000_000_000).unwrap();
+    ctx.airdrop_chain(&delegated_account.pubkey(), 2_000_000_000).unwrap();
+    ctx.airdrop_chain(&source_authority.pubkey(), 2_000_000_000).unwrap();
 
     let chain_client = ctx.try_chain_client().unwrap();
-    let mint_rent = chain_client
-        .get_minimum_balance_for_rent_exemption(Mint::LEN)
-        .unwrap();
+    let mint_rent = chain_client.get_minimum_balance_for_rent_exemption(Mint::LEN).unwrap();
 
     let setup_ixs = vec![
         system_instruction::create_account(
@@ -244,31 +210,22 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         )
         .unwrap(),
     ];
-    let mut setup_tx =
-        Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
+    let mut setup_tx = Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut setup_tx,
-            &[&fee_payer, &mint, &source_authority],
-        )
+        .send_and_confirm_transaction_chain(&mut setup_tx, &[&fee_payer, &mint, &source_authority])
         .unwrap();
     assert!(confirmed, "setup transaction failed");
 
     let eata_setup_ixs = vec![
         initialize_global_vault_ix(fee_payer.pubkey(), mint.pubkey()),
-        initialize_eata_ix(
-            fee_payer.pubkey(),
-            source_authority.pubkey(),
-            mint.pubkey(),
-        ),
+        initialize_eata_ix(fee_payer.pubkey(), source_authority.pubkey(), mint.pubkey()),
         initialize_eata_ix(
             fee_payer.pubkey(),
             destination_authority.pubkey(),
             mint.pubkey(),
         ),
     ];
-    let mut eata_setup_tx =
-        Transaction::new_with_payer(&eata_setup_ixs, Some(&fee_payer.pubkey()));
+    let mut eata_setup_tx = Transaction::new_with_payer(&eata_setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
         .send_and_confirm_transaction_chain(&mut eata_setup_tx, &[&fee_payer])
         .unwrap();
@@ -288,8 +245,7 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
             DESTINATION_EATA_BALANCE,
         ),
     ];
-    let mut deposit_tx =
-        Transaction::new_with_payer(&deposit_ixs, Some(&fee_payer.pubkey()));
+    let mut deposit_tx = Transaction::new_with_payer(&deposit_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
         .send_and_confirm_transaction_chain(
             &mut deposit_tx,
@@ -312,15 +268,10 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
             validator,
         ),
     ];
-    let mut delegate_eata_tx = Transaction::new_with_payer(
-        &delegate_eata_ixs,
-        Some(&fee_payer.pubkey()),
-    );
+    let mut delegate_eata_tx =
+        Transaction::new_with_payer(&delegate_eata_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut delegate_eata_tx,
-            &[&fee_payer],
-        )
+        .send_and_confirm_transaction_chain(&mut delegate_eata_tx, &[&fee_payer])
         .unwrap();
     assert!(confirmed, "eATA delegation transaction failed");
 
@@ -349,8 +300,7 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         TRANSFER_AMOUNT,
     )
     .unwrap();
-    let post_actions: Vec<PostDelegationInstruction> =
-        vec![transfer_100_ix.cleartext()];
+    let post_actions: Vec<PostDelegationInstruction> = vec![transfer_100_ix.cleartext()];
 
     let delegate_with_actions_ix = delegate_with_actions(
         fee_payer.pubkey(),
@@ -364,22 +314,15 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         post_actions,
     );
 
-    let assign_ix =
-        system_instruction::assign(&delegated_account.pubkey(), &dlp_api::id());
-    let mut assign_tx =
-        Transaction::new_with_payer(&[assign_ix], Some(&fee_payer.pubkey()));
+    let assign_ix = system_instruction::assign(&delegated_account.pubkey(), &dlp_api::id());
+    let mut assign_tx = Transaction::new_with_payer(&[assign_ix], Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut assign_tx,
-            &[&fee_payer, &delegated_account],
-        )
+        .send_and_confirm_transaction_chain(&mut assign_tx, &[&fee_payer, &delegated_account])
         .unwrap();
     assert!(confirmed, "assign transaction failed");
 
-    let mut delegate_tx = Transaction::new_with_payer(
-        &[delegate_with_actions_ix],
-        Some(&fee_payer.pubkey()),
-    );
+    let mut delegate_tx =
+        Transaction::new_with_payer(&[delegate_with_actions_ix], Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
         .send_and_confirm_transaction_chain(
             &mut delegate_tx,

@@ -2,8 +2,7 @@ use std::net::SocketAddr;
 
 use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::{
-    Method, Request, Response, StatusCode, body::Bytes, server::conn::http1,
-    service::service_fn,
+    Method, Request, Response, StatusCode, body::Bytes, server::conn::http1, service::service_fn,
 };
 use hyper_util::rt::TokioIo;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
@@ -84,33 +83,27 @@ async fn serve(
     fields(
         method = %req.method(),
         path = req.uri().path(),
-        host = tracing::field::Empty,
-        user_agent = tracing::field::Empty
+        host = field::Empty,
+        user_agent = field::Empty
     )
 )]
 async fn metrics_service_router(
     req: Request<hyper::body::Incoming>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     // Record optional headers
-    if let Some(host) = req.headers().get("host").and_then(|h| h.to_str().ok())
-    {
-        tracing::Span::current().record("host", host);
+    if let Some(host) = req.headers().get("host").and_then(|h| h.to_str().ok()) {
+        Span::current().record("host", host);
     }
-    if let Some(ua) = req
-        .headers()
-        .get("user-agent")
-        .and_then(|h| h.to_str().ok())
-    {
-        tracing::Span::current().record("user_agent", ua);
+    if let Some(ua) = req.headers().get("user-agent").and_then(|h| h.to_str().ok()) {
+        Span::current().record("user_agent", ua);
     }
 
     let result = match (req.method(), req.uri().path()) {
         (&Method::GET, "/metrics") => {
             let mut metric_families = metrics::REGISTRY.gather();
             metric_families.extend(prometheus::gather());
-            let metrics = TextEncoder::new()
-                .encode_to_string(&metric_families)
-                .unwrap_or_else(|error| {
+            let metrics =
+                TextEncoder::new().encode_to_string(&metric_families).unwrap_or_else(|error| {
                     warn!(error = %error, "Failed to encode metrics");
                     String::new()
                 });
@@ -132,9 +125,7 @@ async fn metrics_service_router(
 }
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
-    Full::new(chunk.into())
-        .map_err(|never| match never {})
-        .boxed()
+    Full::new(chunk.into()).map_err(|never| match never {}).boxed()
 }
 
 fn empty() -> BoxBody<Bytes, hyper::Error> {

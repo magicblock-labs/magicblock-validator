@@ -1,13 +1,11 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use lazy_static::lazy_static;
 use magicblock_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
+use parking_lot::RwLock;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 
@@ -26,13 +24,8 @@ lazy_static! {
     static ref MAGIC_SYS: RwLock<Option<Arc<dyn MagicSys>>> = RwLock::new(None);
 }
 
-const MAGIC_SYS_POISONED_MSG: &str = "MAGIC_SYS poisoned";
-
 pub fn init_magic_sys<T: MagicSys>(magic_sys: Arc<T>) {
-    MAGIC_SYS
-        .write()
-        .expect(MAGIC_SYS_POISONED_MSG)
-        .replace(magic_sys);
+    MAGIC_SYS.write().replace(magic_sys);
 }
 
 pub(crate) fn fetch_current_commit_nonces(
@@ -40,18 +33,14 @@ pub(crate) fn fetch_current_commit_nonces(
 ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
     MAGIC_SYS
         .read()
-        .expect(MAGIC_SYS_POISONED_MSG)
         .as_ref()
         .ok_or(InstructionError::UninitializedAccount)?
         .fetch_current_commit_nonces(commits)
 }
 
-pub(crate) fn validate_intent_size(
-    intent: &MagicIntentBundle,
-) -> Result<(), InstructionError> {
+pub(crate) fn validate_intent_size(intent: &MagicIntentBundle) -> Result<(), InstructionError> {
     MAGIC_SYS
         .read()
-        .expect(MAGIC_SYS_POISONED_MSG)
         .as_ref()
         .ok_or(InstructionError::UninitializedAccount)?
         .validate_intent_size(intent)

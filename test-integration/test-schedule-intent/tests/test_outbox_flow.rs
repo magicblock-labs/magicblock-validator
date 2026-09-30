@@ -1,25 +1,24 @@
 mod common;
 use std::{
-    sync::{Arc, Mutex, Once},
+    sync::{Arc, Once},
     time::{Duration, Instant},
 };
 
+use parking_lot::Mutex;
+
 use async_trait::async_trait;
 use common::*;
-use integration_test_tools::{
-    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
-};
+use integration_test_tools::{loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext};
 use magicblock_committor_service::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
-        build_stage_intent_executor, error::IntentExecutorResult,
-        intent_execution_client::IntentExecutionClient, ExecutionOutput,
-        IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
+        accepted_intent_executor::AcceptedIntentExecutor, build_stage_intent_executor,
+        error::IntentExecutorResult, intent_execution_client::IntentExecutionClient,
+        ExecutionOutput, IntentExecutionReport, IntentExecutor, IntentExecutorCtx,
     },
     outbox::{
         outbox_client::InternalOutboxClientError,
-        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
-        IntentSentTransaction, OutboxClient, ScheduledBaseIntentMeta,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader, IntentSentTransaction,
+        OutboxClient, ScheduledBaseIntentMeta,
     },
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
@@ -27,16 +26,10 @@ use magicblock_committor_service::{
 };
 use magicblock_core::{
     intent::{outbox::outbox_intent_pda, BaseActionCallback},
-    traits::{
-        ActionError, ActionResult, ActionsCallbackScheduler,
-        CallbackScheduleError,
-    },
+    traits::{ActionError, ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use magicblock_magic_program_api::{
-    args::{
-        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
-        UndelegateTypeArgs,
-    },
+    args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
     instruction::MagicBlockInstruction,
     outbox::{ExecutionStage, TwoStageProgress},
     MAGIC_CONTEXT_PUBKEY,
@@ -50,9 +43,7 @@ use magicblock_program::{
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
-use program_flexi_counter::{
-    instruction::create_transfer_intent_ix, state::FlexiCounter,
-};
+use program_flexi_counter::{instruction::create_transfer_intent_ix, state::FlexiCounter};
 use serial_test::serial;
 use solana_rpc_client::{
     http_sender::HttpSender,
@@ -72,14 +63,11 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 
-const ALREADY_PROCESSED_MESSAGE: &str =
-    "This transaction has already been processed";
-const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration =
-    Duration::from_millis(200);
+const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
+const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
-type CallbackRecord =
-    (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
+type CallbackRecord = (Vec<BaseActionCallback>, Option<Signature>, ActionResult);
 
 type TestIntentExecutorCtx = IntentExecutorCtx<
     TransactionPreparatorImpl,
@@ -108,14 +96,11 @@ impl TestEnv {
 
         let intent_client = IntentExecutionClient::new(chain_mb_rpc.clone());
         let gc_config = GarbageCollectorConfig::default();
-        let table_mania = TableMania::new(
+        let table_mania =
+            TableMania::new(chain_mb_rpc.clone(), &validator_authority, Some(gc_config));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
             chain_mb_rpc.clone(),
-            &validator_authority,
-            Some(gc_config),
-        );
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-            RpcTaskInfoFetcher::new(chain_mb_rpc.clone()),
-        ));
+        )));
 
         Self {
             ctx,
@@ -153,10 +138,7 @@ impl TestEnv {
         )
     }
 
-    fn intent_client_with_send_sleep(
-        &self,
-        sleep_duration: Duration,
-    ) -> IntentExecutionClient {
+    fn intent_client_with_send_sleep(&self, sleep_duration: Duration) -> IntentExecutionClient {
         let sender = SleepyRpcSender {
             inner: HttpSender::new(IntegrationTestContext::url_chain()),
             sleep_duration,
@@ -171,13 +153,10 @@ impl TestEnv {
 
 fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
     match err.kind() {
-        client_error::ErrorKind::TransactionError(
-            TransactionError::AlreadyProcessed,
-        ) => true,
-        client_error::ErrorKind::RpcError(RpcError::RpcResponseError {
-            message,
-            ..
-        }) => message.contains(ALREADY_PROCESSED_MESSAGE),
+        client_error::ErrorKind::TransactionError(TransactionError::AlreadyProcessed) => true,
+        client_error::ErrorKind::RpcError(RpcError::RpcResponseError { message, .. }) => {
+            message.contains(ALREADY_PROCESSED_MESSAGE)
+        }
         _ => false,
     }
 }
@@ -199,9 +178,7 @@ async fn wait_for_signature_success(
 
         if let Some(status) = status {
             return match status.err {
-                Some(err) => {
-                    Err(InternalOutboxClientError::TransactionError(err))
-                }
+                Some(err) => Err(InternalOutboxClientError::TransactionError(err)),
                 None => Ok(()),
             };
         }
@@ -266,10 +243,7 @@ fn schedule_commit_finalize(
 ) -> ScheduleAttempt<()> {
     let validator_keypair = ensure_validator_authority();
 
-    let schedule_ix = schedule_commit_instruction(
-        &validator_keypair.pubkey(),
-        counters.to_vec(),
-    );
+    let schedule_ix = schedule_commit_instruction(&validator_keypair.pubkey(), counters.to_vec());
     ScheduleAttempt {
         instructions: vec![schedule_ix],
         payer: validator_keypair.pubkey(),
@@ -290,8 +264,7 @@ fn schedule_intent_with_callback(
     amount: u64,
 ) -> ScheduleAttempt<(u64, Keypair)> {
     let destination = Keypair::new();
-    let payer_balance_before =
-        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
     let schedule_ix = create_transfer_intent_ix(
         payer.pubkey(),
@@ -320,17 +293,13 @@ fn fetch_outbox_bundle_after_accept(
     let start = Instant::now();
     loop {
         match ctx.fetch_ephem_account_data(pda) {
-            Ok(data) => {
-                return OutboxIntentBundle::try_from_bytes(&data).unwrap()
-            }
+            Ok(data) => return OutboxIntentBundle::try_from_bytes(&data).unwrap(),
             Err(err) if start.elapsed() < ACCEPT_FETCH_TIMEOUT => {
                 println!("outbox intent {intent_id} not visible yet: {err}");
                 std::thread::sleep(ACCEPT_FETCH_POLL_INTERVAL);
             }
             Err(err) => {
-                panic!(
-                    "failed to fetch accepted outbox intent {intent_id}: {err}"
-                )
+                panic!("failed to fetch accepted outbox intent {intent_id}: {err}")
             }
         }
     }
@@ -347,9 +316,11 @@ fn schedule_and_accept<T>(
     for attempt in 1..=MAX_ATTEMPTS {
         let intent_id = read_next_intent_id(ctx);
         let mut attempt_tx = schedule(ctx);
-        attempt_tx.instructions.push(
-            InstructionUtils::accept_scheduled_commits_instruction([intent_id]),
-        );
+        attempt_tx
+            .instructions
+            .push(InstructionUtils::accept_scheduled_commits_instruction([
+                intent_id,
+            ]));
 
         let validator_keypair = ensure_validator_authority();
         if !attempt_tx
@@ -360,10 +331,7 @@ fn schedule_and_accept<T>(
             attempt_tx.signers.push(validator_keypair);
         }
 
-        let mut tx = Transaction::new_with_payer(
-            &attempt_tx.instructions,
-            Some(&attempt_tx.payer),
-        );
+        let mut tx = Transaction::new_with_payer(&attempt_tx.instructions, Some(&attempt_tx.payer));
         let signer_refs = attempt_tx.signers.iter().collect::<Vec<&Keypair>>();
         match ctx.send_and_confirm_transaction_ephem(&mut tx, &signer_refs) {
             Ok((sig, true)) => {
@@ -379,9 +347,7 @@ fn schedule_and_accept<T>(
                 );
             }
             Err(err) => {
-                println!(
-                    "schedule_and_accept attempt {attempt}/{MAX_ATTEMPTS} failed: {err}"
-                );
+                println!("schedule_and_accept attempt {attempt}/{MAX_ATTEMPTS} failed: {err}");
             }
         }
     }
@@ -419,17 +385,14 @@ async fn test_pickup_executed_intent() {
         .executor_ctx_builder()
         .with_outbox_client(outbox_client.clone())
         .build();
-    let executor =
-        AcceptedIntentExecutor::new(executor_ctx, DEFAULT_ACTIONS_TIMEOUT);
-    let (result, cleanup_handle) = Box::new(executor)
-        .execute(outbox_bundle.inner.clone())
-        .await;
+    let executor = AcceptedIntentExecutor::new(executor_ctx, DEFAULT_ACTIONS_TIMEOUT);
+    let (result, cleanup_handle) = Box::new(executor).execute(outbox_bundle.inner.clone()).await;
     assert!(
         result.inner.is_err(),
         "notify_commit_sent failure should surface as overall execution failure"
     );
     assert_eq!(
-        outbox_client.sent_commits.lock().unwrap().as_slice(),
+        outbox_client.sent_commits.lock().as_slice(),
         [],
         "failed notify_commit_sent should not record a terminal outbox report"
     );
@@ -448,9 +411,9 @@ async fn test_pickup_executed_intent() {
         .expect("outbox bundle not found");
 
     let signature = match outbox_bundle.status() {
-        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
-            pending,
-        )) => pending.signature,
+        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(pending)) => {
+            pending.signature
+        }
         other => panic!("Invalid outbox state: {other:?}"),
     };
     // Builder executor, using a normal outbox client this time so the retry
@@ -460,9 +423,7 @@ async fn test_pickup_executed_intent() {
         outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
-    let (result, cleanup_handle) = Box::new(executor)
-        .execute(outbox_bundle.inner.clone())
-        .await;
+    let (result, cleanup_handle) = Box::new(executor).execute(outbox_bundle.inner.clone()).await;
     let ExecutionOutput::SingleStage(retried_signature) =
         result.inner.expect("recovery execution succeeded")
     else {
@@ -487,10 +448,7 @@ async fn test_pickup_executed_intent() {
     );
 
     // Validate on chain state
-    let counter = test_env
-        .ctx
-        .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
-        .unwrap();
+    let counter = test_env.ctx.fetch_chain_account_struct::<FlexiCounter>(counter_pda).unwrap();
     assert_eq!(counter.count, 42);
 }
 
@@ -529,10 +487,7 @@ async fn test_pickup_failed_intent() {
         .unwrap_err()
         .to_string()
         .contains("set_intent_execution_stage failed"));
-    cleanup_handle
-        .clean()
-        .await
-        .expect("Fail must succeed even after failure");
+    cleanup_handle.clean().await.expect("Fail must succeed even after failure");
 
     // Verify chain status is still accepted
     let chain_outbox_bundle = test_env
@@ -554,11 +509,8 @@ async fn test_pickup_failed_intent() {
         executor_ctx,
         DEFAULT_ACTIONS_TIMEOUT,
     ));
-    let (result, cleanup_handle) =
-        executor.execute(chain_outbox_bundle.inner).await;
-    let ExecutionOutput::SingleStage(_) =
-        result.inner.expect("execution succeeded")
-    else {
+    let (result, cleanup_handle) = executor.execute(chain_outbox_bundle.inner).await;
+    let ExecutionOutput::SingleStage(_) = result.inner.expect("execution succeeded") else {
         panic!("Unexpected execution strategy");
     };
     cleanup_handle.clean().await.expect("cleanup failed");
@@ -576,10 +528,7 @@ async fn test_pickup_failed_intent() {
     );
 
     // Validate on chain state
-    let counter = test_env
-        .ctx
-        .fetch_chain_account_struct::<FlexiCounter>(counter_pda)
-        .unwrap();
+    let counter = test_env.ctx.fetch_chain_account_struct::<FlexiCounter>(counter_pda).unwrap();
     assert_eq!(counter.count, 42);
 }
 
@@ -607,17 +556,14 @@ async fn test_pickup_after_timeout() {
         });
 
     let mut slow_outbox_client = test_env.outbox_client();
-    slow_outbox_client
-        .with_set_execution_stage_sleep(SET_EXECUTION_STAGE_SLEEP);
+    slow_outbox_client.with_set_execution_stage_sleep(SET_EXECUTION_STAGE_SLEEP);
     let executor_ctx = test_env
         .executor_ctx_builder()
         .with_outbox_client(slow_outbox_client.into())
         .build();
 
-    let executor =
-        Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
-    let (result, cleanup_handle) =
-        executor.execute(outbox_bundle.inner.clone()).await;
+    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
+    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
     cleanup_handle.clean().await.expect("cleanup failed");
 
@@ -638,19 +584,13 @@ async fn test_pickup_after_timeout() {
     );
 
     // Despite the callback timeout the commit tx still lands on chain
-    let payer_balance_after = test_env
-        .ctx
-        .fetch_ephem_account_balance(&payer.pubkey())
-        .unwrap();
+    let payer_balance_after = test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
     assert_eq!(
         payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE + TRANSFER_AMOUNT,
         payer_balance_before,
         "Payer fees not deducted correctly"
     );
-    let dest_balance = test_env
-        .ctx
-        .fetch_chain_account_balance(&destination.pubkey())
-        .unwrap();
+    let dest_balance = test_env.ctx.fetch_chain_account_balance(&destination.pubkey()).unwrap();
     assert_eq!(
         dest_balance, TRANSFER_AMOUNT,
         "Destination did not receive funds"
@@ -696,15 +636,11 @@ async fn test_pick_up_after_tx_submission() {
         });
 
     let slow_intent_client = test_env.intent_client_with_send_sleep(SEND_SLEEP);
-    let executor_ctx = test_env
-        .executor_ctx_builder()
-        .with_intent_client(slow_intent_client)
-        .build();
+    let executor_ctx =
+        test_env.executor_ctx_builder().with_intent_client(slow_intent_client).build();
 
-    let executor =
-        Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
-    let (result, cleanup_handle) =
-        executor.execute(outbox_bundle.inner.clone()).await;
+    let executor = Box::new(AcceptedIntentExecutor::new(executor_ctx, ACTIONS_TIMEOUT));
+    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
     assert!(result.inner.is_ok(), "Executor failed: {:?}", result.inner);
     cleanup_handle.clean().await.expect("cleanup failed");
 
@@ -725,19 +661,13 @@ async fn test_pick_up_after_tx_submission() {
     );
 
     // Despite the callback timeout the commit tx still lands on chain.
-    let payer_balance_after = test_env
-        .ctx
-        .fetch_ephem_account_balance(&payer.pubkey())
-        .unwrap();
+    let payer_balance_after = test_env.ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
     assert_eq!(
         payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE + TRANSFER_AMOUNT,
         payer_balance_before,
         "Payer fees not deducted correctly"
     );
-    let dest_balance = test_env
-        .ctx
-        .fetch_chain_account_balance(&destination.pubkey())
-        .unwrap();
+    let dest_balance = test_env.ctx.fetch_chain_account_balance(&destination.pubkey()).unwrap();
     assert_eq!(
         dest_balance, TRANSFER_AMOUNT,
         "Destination did not receive funds"
@@ -761,8 +691,7 @@ async fn test_pickup_after_committing() {
 
     let test_env = TestEnv::setup().await;
     let counters = setup_counters(&test_env.ctx, COUNTER_COUNT);
-    let counter_pdas: Vec<Pubkey> =
-        counters.iter().map(|(_, pda)| *pda).collect();
+    let counter_pdas: Vec<Pubkey> = counters.iter().map(|(_, pda)| *pda).collect();
 
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas)
@@ -783,8 +712,7 @@ async fn test_pickup_after_committing() {
         executor_ctx,
         DEFAULT_ACTIONS_TIMEOUT,
     ));
-    let (result, cleanup_handle) =
-        executor.execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
     assert!(
         result.inner.is_err(),
         "Expected failure on set_intent_execution_stage(Finalizing)"
@@ -793,7 +721,7 @@ async fn test_pickup_after_committing() {
 
     // Commit stage was recorded; outbox is TwoStage::Committing
     let commit_sig = {
-        let calls = stage_calls.lock().unwrap();
+        let calls = stage_calls.lock();
         assert_eq!(calls.len(), 1, "Only the commit stage should be recorded");
         let commit_sig = match &calls[0].1 {
             ExecutionStage::TwoStage(TwoStageProgress::Committing(sig)) => *sig,
@@ -828,9 +756,7 @@ async fn test_pickup_after_committing() {
         outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
-    let (result, cleanup_handle) = Box::new(executor)
-        .execute(outbox_bundle.inner.clone())
-        .await;
+    let (result, cleanup_handle) = Box::new(executor).execute(outbox_bundle.inner.clone()).await;
     let ExecutionOutput::TwoStage {
         commit_signature,
         finalize_signature: _,
@@ -842,10 +768,7 @@ async fn test_pickup_after_committing() {
         commit_signature, commit_sig.signature,
         "Commit sig must not change on recovery"
     );
-    cleanup_handle
-        .clean()
-        .await
-        .expect("cleanup after recovery");
+    cleanup_handle.clean().await.expect("cleanup after recovery");
 
     // Outbox record must be closed now that execution succeeded
     let closed = test_env
@@ -861,10 +784,7 @@ async fn test_pickup_after_committing() {
 
     // Counters should be finalized (undelegated) on chain
     for (_, pda) in &counters {
-        let counter = test_env
-            .ctx
-            .fetch_chain_account_struct::<FlexiCounter>(*pda)
-            .unwrap();
+        let counter = test_env.ctx.fetch_chain_account_struct::<FlexiCounter>(*pda).unwrap();
         assert!(counter.count > 0, "counter should be committed on chain");
     }
 }
@@ -885,8 +805,7 @@ async fn test_pickup_after_finalizing() {
 
     let test_env = TestEnv::setup().await;
     let counters = setup_counters(&test_env.ctx, COUNTER_COUNT);
-    let counter_pdas: Vec<Pubkey> =
-        counters.iter().map(|(_, pda)| *pda).collect();
+    let counter_pdas: Vec<Pubkey> = counters.iter().map(|(_, pda)| *pda).collect();
 
     let (outbox_bundle, ()) = schedule_and_accept(&test_env.ctx, |ctx| {
         schedule_commit_and_undelegate_bundle(ctx, &counter_pdas)
@@ -906,16 +825,12 @@ async fn test_pickup_after_finalizing() {
         executor_ctx,
         DEFAULT_ACTIONS_TIMEOUT,
     ));
-    let (result, cleanup_handle) =
-        executor.execute(outbox_bundle.inner.clone()).await;
+    let (result, cleanup_handle) = executor.execute(outbox_bundle.inner.clone()).await;
     assert!(
         result.inner.is_err(),
         "notify_commit_sent failure should surface as overall execution failure"
     );
-    cleanup_handle
-        .clean()
-        .await
-        .expect("cleanup after first run");
+    cleanup_handle.clean().await.expect("cleanup after first run");
 
     // Outbox should now show TwoStage::Finalizing
     let outbox_bundle = test_env
@@ -942,9 +857,7 @@ async fn test_pickup_after_finalizing() {
         outbox_bundle.status().clone(),
         DEFAULT_ACTIONS_TIMEOUT,
     );
-    let (result, cleanup_handle) = Box::new(executor)
-        .execute(outbox_bundle.inner.clone())
-        .await;
+    let (result, cleanup_handle) = Box::new(executor).execute(outbox_bundle.inner.clone()).await;
     let ExecutionOutput::TwoStage {
         commit_signature: retried_commit,
         finalize_signature: retried_finalize,
@@ -960,10 +873,7 @@ async fn test_pickup_after_finalizing() {
         retried_finalize, finalize_signature,
         "Finalize sig must not change on recovery"
     );
-    cleanup_handle
-        .clean()
-        .await
-        .expect("cleanup after recovery");
+    cleanup_handle.clean().await.expect("cleanup after recovery");
 
     // Outbox record must be closed now that execution + close both succeeded
     let closed = test_env
@@ -979,10 +889,7 @@ async fn test_pickup_after_finalizing() {
 
     // Counters are finalized and undelegated on chain
     for (_, pda) in &counters {
-        let counter = test_env
-            .ctx
-            .fetch_chain_account_struct::<FlexiCounter>(*pda)
-            .unwrap();
+        let counter = test_env.ctx.fetch_chain_account_struct::<FlexiCounter>(*pda).unwrap();
         assert!(counter.count > 0, "counter should be committed on chain");
     }
 }
@@ -994,7 +901,7 @@ struct RecordingCallbackScheduler {
 
 impl RecordingCallbackScheduler {
     fn recorded_calls(&self) -> Vec<CallbackRecord> {
-        self.calls.lock().unwrap().clone()
+        self.calls.lock().clone()
     }
 }
 
@@ -1006,10 +913,7 @@ impl ActionsCallbackScheduler for RecordingCallbackScheduler {
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
         let count = callbacks.len();
-        self.calls
-            .lock()
-            .unwrap()
-            .push((callbacks, signature, result));
+        self.calls.lock().push((callbacks, signature, result));
         (0..count).map(|_| Ok(Signature::new_unique())).collect()
     }
 }
@@ -1020,10 +924,7 @@ struct TestOutboxReader(Arc<AsyncRpcClient>);
 impl OutboxIntentBundlesReader for TestOutboxReader {
     type Error = anyhow::Error;
 
-    async fn read(
-        &mut self,
-        _n: usize,
-    ) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
+    async fn read(&mut self, _n: usize) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
         Ok(vec![])
     }
 
@@ -1094,10 +995,7 @@ impl OutboxClient for TestOutboxClient {
 
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<
-        Vec<ScheduledIntentBundle>,
-        (Vec<ScheduledIntentBundle>, Self::Error),
-    > {
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)> {
         Ok(vec![])
     }
 
@@ -1125,17 +1023,12 @@ impl OutboxClient for TestOutboxClient {
 
         if should_fail {
             return Err(Self::Error::RpcClientError(
-                client_error::ErrorKind::Custom(
-                    "set_intent_execution_stage failed".to_string(),
-                )
-                .into(),
+                client_error::ErrorKind::Custom("set_intent_execution_stage failed".to_string())
+                    .into(),
             ));
         }
 
-        self.stage_calls
-            .lock()
-            .unwrap()
-            .push((intent_id, stage.clone()));
+        self.stage_calls.lock().push((intent_id, stage.clone()));
         let blockhash = self
             .ephem_rpc
             .get_latest_blockhash()
@@ -1165,21 +1058,17 @@ impl OutboxClient for TestOutboxClient {
         result: &IntentExecutorResult<ExecutionOutput>,
         _execution_report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
-        let IntentSentTransaction::Known(_) = meta.intent_sent_transaction
-        else {
+        let IntentSentTransaction::Known(_) = meta.intent_sent_transaction else {
             panic!("should be known");
         };
         if self.fail_notify_commit_sent {
             return Err(Self::Error::RpcClientError(
-                client_error::ErrorKind::Custom(
-                    "notify_commit_sent failed".to_string(),
-                )
-                .into(),
+                client_error::ErrorKind::Custom("notify_commit_sent failed".to_string()).into(),
             ));
         }
 
         let succeeded = result.is_ok();
-        self.sent_commits.lock().unwrap().push((meta.id, succeeded));
+        self.sent_commits.lock().push((meta.id, succeeded));
         self.close_intent(meta.id).await?;
         Ok(())
     }
@@ -1201,7 +1090,7 @@ impl OutboxClient for TestOutboxClient {
                 err
             })?;
 
-        self.close_calls.lock().unwrap().push(intent_id);
+        self.close_calls.lock().push(intent_id);
         Ok(())
     }
 
@@ -1221,7 +1110,7 @@ impl RpcSender for SleepyRpcSender {
         &self,
         request: RpcRequest,
         params: serde_json::Value,
-    ) -> solana_rpc_client_api::client_error::Result<serde_json::Value> {
+    ) -> client_error::Result<serde_json::Value> {
         let result = self.inner.send(request, params).await;
         tokio::time::sleep(self.sleep_duration).await;
         result
@@ -1250,14 +1139,9 @@ fn read_next_intent_id(ctx: &IntegrationTestContext) -> u64 {
     MagicContext::intent_id(&data).unwrap()
 }
 
-pub fn schedule_commit_instruction(
-    payer: &Pubkey,
-    pdas: Vec<Pubkey>,
-) -> Instruction {
-    let mut account_metas = vec![
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-    ];
+pub fn schedule_commit_instruction(payer: &Pubkey, pdas: Vec<Pubkey>) -> Instruction {
+    let mut account_metas =
+        vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
     for pubkey in &pdas {
         account_metas.push(AccountMeta::new_readonly(*pubkey, false));
     }
@@ -1290,12 +1174,9 @@ fn schedule_commit_and_undelegate_bundle_instruction(
         commit_finalize_and_undelegate: None,
         standalone_actions: vec![],
     };
-    let mut account_metas = vec![
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-    ];
-    account_metas
-        .extend(counter_pdas.iter().map(|pk| AccountMeta::new(*pk, false)));
+    let mut account_metas =
+        vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
+    account_metas.extend(counter_pdas.iter().map(|pk| AccountMeta::new(*pk, false)));
     Instruction::new_with_bincode(
         magicblock_magic_program_api::id(),
         &MagicBlockInstruction::ScheduleIntentBundle(args),
@@ -1320,10 +1201,7 @@ fn schedule_commit_and_undelegate_bundle(
     }
 }
 
-fn setup_counters(
-    ctx: &IntegrationTestContext,
-    n: usize,
-) -> Vec<(Keypair, Pubkey)> {
+fn setup_counters(ctx: &IntegrationTestContext, n: usize) -> Vec<(Keypair, Pubkey)> {
     (0..n)
         .map(|i| {
             let payer = setup_payer(ctx);

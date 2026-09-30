@@ -70,15 +70,10 @@ fn clone_request_classification() {
     );
 
     let mut dependency = request(account());
-    dependency.post_delegation_mode =
-        ClonePostDelegationMode::from(DelegationActions::new(
-            Pubkey::new_unique(),
-            vec![Instruction::new_with_bytes(
-                system_program::id(),
-                &[1],
-                vec![],
-            )],
-        ));
+    dependency.post_delegation_mode = ClonePostDelegationMode::from(DelegationActions::new(
+        Pubkey::new_unique(),
+        vec![Instruction::new_with_bytes(system_program::id(), &[1], vec![])],
+    ));
     assert_eq!(
         TestFetchCloner::clone_intent_for_request(&dependency),
         ChainlinkCloneIntent::ActionDependency
@@ -118,10 +113,7 @@ fn post_delegation_dependency_fetch_policy() {
 #[tokio::test]
 async fn waiter_applies_newer_account_image() {
     let ctx = TestContext::init(11).await;
-    let fetch = ctx
-        .chainlink
-        .fetch_cloner()
-        .expect("test Chainlink has a fetch cloner");
+    let fetch = ctx.chainlink.fetch_cloner().expect("test Chainlink has a fetch cloner");
     let pubkey = Pubkey::new_unique();
     let build = |slot, byte| AccountCloneRequest {
         pubkey,
@@ -143,8 +135,7 @@ async fn waiter_applies_newer_account_image() {
         older,
         AccountFetchContext::rpc_get_multiple_accounts(),
     );
-    let newer = fetch
-        .clone_account(newer, AccountFetchContext::rpc_get_multiple_accounts());
+    let newer = fetch.clone_account(newer, AccountFetchContext::rpc_get_multiple_accounts());
     let (older, newer) = tokio::join!(older, newer);
     older.expect("older materialization succeeds");
     newer.expect("newer waiter materializes its own image");
@@ -205,12 +196,8 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
 
     ctx.rpc_client.set_slot(10);
     assert!(
-        ctx.send_and_receive_account_update(
-            pubkey,
-            remote_account(7),
-            Some(8_000),
-        )
-        .await,
+        ctx.send_and_receive_account_update(pubkey, remote_account(7), Some(8_000),)
+            .await,
         "completion update should be processed"
     );
     assert_eq!(
@@ -226,12 +213,8 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
 
     ctx.rpc_client.set_slot(11);
     assert!(
-        ctx.send_and_receive_account_update(
-            pubkey,
-            remote_account(9),
-            Some(8_000),
-        )
-        .await,
+        ctx.send_and_receive_account_update(pubkey, remote_account(9), Some(8_000),)
+            .await,
         "follow-up base update should be processed"
     );
     assert_eq!(
@@ -299,21 +282,14 @@ mod aml_check_strategy {
         ] {
             let actions = vec![action_for_program(program)];
             assert!(
-                delegation_actions_require_risk_check(
-                    AmlCheckStrategy::RelevantPrograms,
-                    &actions,
-                ),
+                delegation_actions_require_risk_check(AmlCheckStrategy::RelevantPrograms, &actions,),
                 "program {program} invoked as program_id should require check",
             );
 
             // Referenced as a CPI target account, not the invoked program.
-            let actions =
-                vec![action_referencing(Pubkey::new_unique(), program)];
+            let actions = vec![action_referencing(Pubkey::new_unique(), program)];
             assert!(
-                delegation_actions_require_risk_check(
-                    AmlCheckStrategy::RelevantPrograms,
-                    &actions,
-                ),
+                delegation_actions_require_risk_check(AmlCheckStrategy::RelevantPrograms, &actions,),
                 "program {program} referenced as account should require check",
             );
         }
@@ -341,10 +317,8 @@ mod aml_check_strategy {
 
     #[test]
     fn relevant_programs_strategy_matches_when_any_action_is_relevant() {
-        let actions = vec![
-            action_for_program(Pubkey::new_unique()),
-            action_for_program(EATA_PROGRAM_ID),
-        ];
+        let actions =
+            vec![action_for_program(Pubkey::new_unique()), action_for_program(EATA_PROGRAM_ID)];
         assert!(delegation_actions_require_risk_check(
             AmlCheckStrategy::RelevantPrograms,
             &actions,

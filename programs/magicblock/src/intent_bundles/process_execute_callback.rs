@@ -18,21 +18,13 @@ const CALLBACK_SIGNER_IDX: u16 = 1;
 /// a source supplied in this instruction would not independently prove provenance.
 pub(crate) fn process_execute_callback(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     instruction: Instruction,
 ) -> Result<(), InstructionError> {
     validate(signers, invoke_context)?;
-    validate_callback_accounts(
-        invoke_context,
-        &instruction.accounts,
-        "ExecuteCallback ERR",
-    )?;
+    validate_callback_accounts(invoke_context, &instruction.accounts, "ExecuteCallback ERR")?;
 
-    invoke_context.native_invoke_as(
-        crate::id(),
-        instruction,
-        &[CALLBACK_SIGNER],
-    )
+    invoke_context.native_invoke_as(crate::id(), instruction, &[CALLBACK_SIGNER])
 }
 
 /// Checks if callback is correctly authorized
@@ -41,7 +33,7 @@ pub(crate) fn process_execute_callback(
 /// 3. Account presence required by inner instruction are checked by `invokeContext::native_invoke`
 fn validate(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -58,8 +50,7 @@ fn validate(
 
     // Assert Validator is signer
     // Only the validator can execute a callback
-    let validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
+    let validator_pubkey = get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
     let validator_authority = authority();
     if validator_pubkey != &validator_authority {
         ic_msg!(
@@ -79,10 +70,8 @@ fn validate(
     }
 
     // Assert Callback signer is provided
-    let callback_signer_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        CALLBACK_SIGNER_IDX,
-    )?;
+    let callback_signer_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, CALLBACK_SIGNER_IDX)?;
     if callback_signer_pubkey != &CALLBACK_SIGNER {
         ic_msg!(
             invoke_context,
@@ -98,33 +87,26 @@ fn validate(
 #[cfg(test)]
 mod tests {
     use magicblock_magic_program_api::{
-        CALLBACK_PROGRAM_ID, instruction::CallbackInstruction,
-        pda::CALLBACK_SIGNER,
+        CALLBACK_PROGRAM_ID, instruction::CallbackInstruction, pda::CALLBACK_SIGNER,
     };
     use serial_test::serial;
     use solana_account::AccountSharedData;
     use solana_instruction::{AccountMeta, error::InstructionError};
     use solana_program_runtime::{
-        invoke_context::mock_process_instruction,
-        solana_sbpf::program::BuiltinFunctionDefinition,
+        invoke_context::mock_process_instruction, solana_sbpf::program::BuiltinFunctionDefinition,
     };
     use solana_pubkey::Pubkey;
 
     use crate::{
         instruction_utils::InstructionUtils,
         magicblock_processor::CallbackEntrypoint,
-        validator::{
-            generate_validator_authority_if_needed, validator_authority_id,
-        },
+        validator::{generate_validator_authority_if_needed, validator_authority_id},
     };
 
     fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
         let mut instruction = InstructionUtils::noop_instruction(0);
         instruction.accounts = inner_accounts;
-        wincode::serialize(&CallbackInstruction::ExecuteCallback {
-            instruction,
-        })
-        .unwrap()
+        wincode::serialize(&CallbackInstruction::ExecuteCallback { instruction }).unwrap()
     }
 
     fn setup_validator() -> Pubkey {

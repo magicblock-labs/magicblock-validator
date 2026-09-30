@@ -7,7 +7,7 @@ use solana_sdk::{
 /// Attempts to commit the PDAs twice as follows:
 /// - via the program owning the PDAs
 /// - directly via the MagicBlock program schedule commit
-pub fn create_sibling_schedule_cpis_instruction(
+pub(crate) fn create_sibling_schedule_cpis_instruction(
     payer: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
@@ -31,16 +31,14 @@ pub fn create_sibling_schedule_cpis_instruction(
     }
     Instruction::new_with_borsh(
         program_schedulecommit_security::id(),
-        &ScheduleCommitSecurityInstruction::SiblingScheduleCommitCpis(
-            player_pubkeys.to_vec(),
-        ),
+        &ScheduleCommitSecurityInstruction::SiblingScheduleCommitCpis(player_pubkeys.to_vec()),
         account_metas,
     )
 }
 
 /// Attempts to commit the CPI directly via MagicBlock program, but should fail since
 /// it is not the owner of the PDAs it is committing.
-pub fn create_nested_schedule_cpis_instruction(
+pub(crate) fn create_nested_schedule_cpis_instruction(
     payer: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
@@ -63,16 +61,14 @@ pub fn create_nested_schedule_cpis_instruction(
     }
     Instruction::new_with_borsh(
         program_schedulecommit_security::id(),
-        &ScheduleCommitSecurityInstruction::DirectScheduleCommitCpi(
-            player_pubkeys.to_vec(),
-        ),
+        &ScheduleCommitSecurityInstruction::DirectScheduleCommitCpi(player_pubkeys.to_vec()),
         account_metas,
     )
 }
 
 /// Creates basically a noop instruction that does nothing.
 /// It could be added to confuse our algorithm to detect the invoking program.
-pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
+pub(crate) fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
     let account_metas = vec![AccountMeta::new(payer, true)];
     Instruction::new_with_borsh(
         program_schedulecommit_security::id(),

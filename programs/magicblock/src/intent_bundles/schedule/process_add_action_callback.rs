@@ -14,14 +14,12 @@ use solana_pubkey::Pubkey;
 use crate::{
     MagicContext,
     schedule_transactions::{
-        MAGIC_CONTEXT_IDX, PAYER_IDX, check_magic_context_id, get_clock,
-        get_parent_program_id, try_get_fee_vault, validate_callback_accounts,
+        MAGIC_CONTEXT_IDX, PAYER_IDX, check_magic_context_id, get_clock, get_parent_program_id,
+        try_get_fee_vault, validate_callback_accounts,
     },
     utils::{
         account_actions::charge_delegated_payer,
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
+        accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     },
 };
 
@@ -29,7 +27,7 @@ const CALLBACK_FEE_LAMPORTS: u64 = 5_000;
 
 pub(crate) fn process_add_action_callback(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     args: AddActionCallbackArgs,
 ) -> Result<(), InstructionError> {
     // This function requires vault to be present
@@ -51,10 +49,8 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::UnsupportedProgramId);
     }
 
-    let payer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
-    let payer_acc =
-        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_pubkey = get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_acc = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
     if !signers.contains(payer_pubkey) {
         ic_msg!(
             invoke_context,
@@ -64,10 +60,7 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
+    let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     let magic_fee_vault = try_get_fee_vault(
         transaction_context,
         invoke_context,
@@ -84,14 +77,9 @@ pub(crate) fn process_add_action_callback(
     })?;
 
     // Charge User for callback
-    charge_delegated_payer(
-        &payer_acc,
-        &magic_fee_vault,
-        CALLBACK_FEE_LAMPORTS,
-    )?;
+    charge_delegated_payer(&payer_acc, &magic_fee_vault, CALLBACK_FEE_LAMPORTS)?;
 
-    let mut context = MagicContext::deserialize(context_acc.borrow()?.data())
-        .map_err(|err| {
+    let mut context = MagicContext::deserialize(context_acc.borrow()?.data()).map_err(|err| {
         ic_msg!(
             invoke_context,
             "AddActionCallback ERR: Failed to deserialize MagicContext: {}",
@@ -100,14 +88,13 @@ pub(crate) fn process_add_action_callback(
         InstructionError::GenericError
     })?;
 
-    let latest_intent =
-        context.scheduled_base_intents.last_mut().ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "AddActionCallback ERR: no scheduled intents found"
-            );
-            InstructionError::InvalidAccountData
-        })?;
+    let latest_intent = context.scheduled_base_intents.last_mut().ok_or_else(|| {
+        ic_msg!(
+            invoke_context,
+            "AddActionCallback ERR: no scheduled intents found"
+        );
+        InstructionError::InvalidAccountData
+    })?;
 
     if latest_intent.payer != *payer_pubkey {
         ic_msg!(
@@ -157,8 +144,7 @@ pub(crate) fn process_add_action_callback(
         return Err(InstructionError::InvalidAccountData);
     }
     if latest_intent.slot != clock.slot
-        || latest_intent.blockhash
-            != invoke_context.environment_config.blockhash
+        || latest_intent.blockhash != invoke_context.environment_config.blockhash
     {
         ic_msg!(
             invoke_context,
@@ -183,23 +169,14 @@ pub(crate) fn process_add_action_callback(
         .accounts
         .iter()
         .map(
-            |ShortAccountMeta {
-                 pubkey,
-                 is_writable,
-             }| {
-                solana_instruction::AccountMeta {
-                    pubkey: *pubkey,
-                    is_signer: pubkey == &CALLBACK_SIGNER,
-                    is_writable: *is_writable,
-                }
+            |ShortAccountMeta { pubkey, is_writable }| solana_instruction::AccountMeta {
+                pubkey: *pubkey,
+                is_signer: pubkey == &CALLBACK_SIGNER,
+                is_writable: *is_writable,
             },
         )
         .collect();
-    validate_callback_accounts(
-        invoke_context,
-        &accounts_meta,
-        "AddActionCallback ERR",
-    )?;
+    validate_callback_accounts(invoke_context, &accounts_meta, "AddActionCallback ERR")?;
 
     action.callback = Some(BaseActionCallback {
         destination_program: args.destination_program,

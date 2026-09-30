@@ -1,7 +1,8 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use helius_laserstream::{LaserstreamError, grpc::SubscribeRequest};
+use parking_lot::Mutex;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -14,7 +15,7 @@ use crate::remote_account_provider::{
 /// A test mock that captures subscription requests and allows driving
 /// streams programmatically.
 #[derive(Clone)]
-pub struct MockStreamFactory {
+pub(super) struct MockStreamFactory {
     /// Every `SubscribeRequest` passed to `subscribe()` is recorded
     /// here so tests can assert on filter contents, commitment levels,
     /// etc.
@@ -42,7 +43,7 @@ pub struct MockStreamFactory {
 
 impl MockStreamFactory {
     /// Create a new mock stream factory
-    pub fn new() -> Self {
+    pub(super) fn new() -> Self {
         Self {
             captured_requests: Arc::new(Mutex::new(Vec::new())),
             handle_requests: Arc::new(Mutex::new(Vec::new())),
@@ -55,62 +56,62 @@ impl MockStreamFactory {
 
     /// Fail the given 1-based `subscribe()` call number.
     #[allow(dead_code)]
-    pub fn fail_on_subscribe_call(&self, call_number: usize) {
+    pub(super) fn fail_on_subscribe_call(&self, call_number: usize) {
         assert!(call_number > 0, "subscribe call numbers are 1-based");
-        *self.fail_on_subscribe_call.lock().unwrap() = Some(call_number);
+        *self.fail_on_subscribe_call.lock() = Some(call_number);
     }
 
     /// Clear any configured `subscribe()` failure.
     #[allow(dead_code)]
-    pub fn clear_subscribe_failure(&self) {
-        *self.fail_on_subscribe_call.lock().unwrap() = None;
+    pub(super) fn clear_subscribe_failure(&self) {
+        *self.fail_on_subscribe_call.lock() = None;
     }
 
     /// Return the number of `subscribe()` calls seen so far.
     #[allow(dead_code)]
-    pub fn subscribe_call_count(&self) -> usize {
-        *self.subscribe_calls.lock().unwrap()
+    pub(super) fn subscribe_call_count(&self) -> usize {
+        *self.subscribe_calls.lock()
     }
 
     /// Get the captured subscription requests (from `subscribe()`)
-    pub fn captured_requests(&self) -> Vec<SubscribeRequest> {
-        self.captured_requests.lock().unwrap().clone()
+    pub(super) fn captured_requests(&self) -> Vec<SubscribeRequest> {
+        self.captured_requests.lock().clone()
     }
 
-    pub fn fail_next_handle_writes(&self, n: usize) {
-        *self.pending_handle_write_failures.lock().unwrap() = n;
+    pub(super) fn fail_next_handle_writes(&self, n: usize) {
+        *self.pending_handle_write_failures.lock() = n;
     }
 
     /// Get the requests sent through stream handles (from
     /// `handle.write()`)
-    pub fn handle_requests(&self) -> Vec<SubscribeRequest> {
-        self.handle_requests.lock().unwrap().clone()
+    pub(super) fn handle_requests(&self) -> Vec<SubscribeRequest> {
+        self.handle_requests.lock().clone()
     }
 
     /// Push an error update to a specific stream
-    pub fn push_error_to_stream(&self, idx: usize, error: LaserstreamError) {
-        let senders = self.stream_senders.lock().unwrap();
+    pub(super) fn push_error_to_stream(&self, idx: usize, error: LaserstreamError) {
+        let senders = self.stream_senders.lock();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(Err(error));
         }
     }
 
     /// Push an update to a specific stream by index
-    pub fn push_update_to_stream(&self, idx: usize, update: LaserResult) {
-        let senders = self.stream_senders.lock().unwrap();
+    pub(super) fn push_update_to_stream(&self, idx: usize, update: LaserResult) {
+        let senders = self.stream_senders.lock();
         if let Some(sender) = senders.get(idx) {
             let _ = sender.send(update);
         }
     }
 
     /// Get the number of active streams
-    pub fn active_stream_count(&self) -> usize {
-        self.stream_senders.lock().unwrap().len()
+    pub(super) fn active_stream_count(&self) -> usize {
+        self.stream_senders.lock().len()
     }
 
     /// Close a specific stream by index
-    pub fn close_stream(&self, idx: usize) {
-        let mut senders = self.stream_senders.lock().unwrap();
+    pub(super) fn close_stream(&self, idx: usize) {
+        let mut senders = self.stream_senders.lock();
         if idx < senders.len() {
             senders.remove(idx);
         }
@@ -126,20 +127,16 @@ impl Default for MockStreamFactory {
 /// Mock handle that records write requests and drains them into the
 /// shared `handle_requests` vec on the factory.
 #[derive(Clone)]
-pub struct MockStreamHandle {
+pub(super) struct MockStreamHandle {
     handle_requests: Arc<Mutex<Vec<SubscribeRequest>>>,
     pending_handle_write_failures: Arc<Mutex<usize>>,
 }
 
 #[async_trait]
 impl StreamHandle for MockStreamHandle {
-    async fn write(
-        &self,
-        request: SubscribeRequest,
-    ) -> Result<(), LaserstreamError> {
+    async fn write(&self, request: SubscribeRequest) -> Result<(), LaserstreamError> {
         {
-            let mut to_fail =
-                self.pending_handle_write_failures.lock().unwrap();
+            let mut to_fail = self.pending_handle_write_failures.lock();
             if *to_fail > 0 {
                 *to_fail -= 1;
                 return Err(LaserstreamError::Status(tonic::Status::new(
@@ -149,7 +146,7 @@ impl StreamHandle for MockStreamHandle {
             }
         }
 
-        self.handle_requests.lock().unwrap().push(request);
+        self.handle_requests.lock().push(request);
         Ok(())
     }
 }
@@ -159,10 +156,9 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
     async fn subscribe(
         &self,
         request: SubscribeRequest,
-    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<MockStreamHandle>>
-    {
+    ) -> RemoteAccountProviderResult<LaserStreamWithHandle<MockStreamHandle>> {
         let call_number = {
-            let mut calls = self.subscribe_calls.lock().unwrap();
+            let mut calls = self.subscribe_calls.lock();
             *calls += 1;
             *calls
         };
@@ -170,20 +166,17 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         if self
             .fail_on_subscribe_call
             .lock()
-            .unwrap()
             .is_some_and(|fail_call| fail_call == call_number)
         {
-            return Err(
-                RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
-                    "mock subscribe".to_string(),
-                    0,
-                    format!("mock subscribe failure on call {call_number}"),
-                ),
-            );
+            return Err(RemoteAccountProviderError::GrpcSubscriptionUpdateFailed(
+                "mock subscribe".to_string(),
+                0,
+                format!("mock subscribe failure on call {call_number}"),
+            ));
         }
 
         // Record the initial subscribe request
-        self.captured_requests.lock().unwrap().push(request.clone());
+        self.captured_requests.lock().push(request.clone());
 
         // Create a channel for driving LaserResult items into the
         // stream
@@ -191,15 +184,13 @@ impl StreamFactory<MockStreamHandle> for MockStreamFactory {
         let stream = Box::pin(UnboundedReceiverStream::new(stream_rx));
 
         let stream_tx = Arc::new(stream_tx);
-        self.stream_senders.lock().unwrap().push(stream_tx);
+        self.stream_senders.lock().push(stream_tx);
 
         // The handle shares the factory's handle_requests vec so
         // every write is visible to tests immediately.
         let handle = MockStreamHandle {
             handle_requests: Arc::clone(&self.handle_requests),
-            pending_handle_write_failures: Arc::clone(
-                &self.pending_handle_write_failures,
-            ),
+            pending_handle_write_failures: Arc::clone(&self.pending_handle_write_failures),
         };
 
         // Write the actual request to the handle (mirroring

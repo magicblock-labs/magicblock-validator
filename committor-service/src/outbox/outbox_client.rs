@@ -11,12 +11,9 @@ use magicblock_program::{
 };
 use solana_account::ReadableAccount;
 use solana_keypair::Address as Pubkey;
-use solana_rpc_client::{
-    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
-};
+use solana_rpc_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
 use solana_rpc_client_api::{
-    client_error, client_error::ErrorKind as RpcClientErrorKind,
-    request::RpcError,
+    client_error, client_error::ErrorKind as RpcClientErrorKind, request::RpcError,
 };
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
@@ -24,20 +21,15 @@ use tokio::time::{Instant, sleep};
 use tracing::{debug, error, warn};
 
 use crate::{
-    intent_executor::{
-        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
-    },
+    intent_executor::{ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult},
     outbox::{
         IntentSentTransaction, OutboxClient, ScheduledBaseIntentMeta,
-        outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
-        utils::build_sent_commit,
+        outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader, utils::build_sent_commit,
     },
 };
 
-const ALREADY_PROCESSED_MESSAGE: &str =
-    "This transaction has already been processed";
-const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration =
-    Duration::from_millis(200);
+const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
+const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// Implementation of `OutboxClient` that uses ER internals.
@@ -66,15 +58,12 @@ impl InternalOutboxClient {
             match self.rpc_client.send_and_confirm_transaction(tx).await {
                 Ok(_) => Ok(()),
                 Err(err) if is_already_processed_rpc_error(&err) => {
-                    self.wait_for_rpc_signature_success(*tx.get_signature())
-                        .await
+                    self.wait_for_rpc_signature_success(*tx.get_signature()).await
                 }
                 Err(err) => Err(err),
             }
             .map_err(|err| match err.kind() {
-                RpcClientErrorKind::TransactionError(_) => {
-                    backoff::Error::Permanent(err)
-                }
+                RpcClientErrorKind::TransactionError(_) => backoff::Error::Permanent(err),
                 _ => backoff::Error::transient(err),
             })
         })
@@ -100,9 +89,7 @@ impl InternalOutboxClient {
 
             if let Some(status) = status {
                 return match status.err {
-                    Some(err) => {
-                        Err(RpcClientErrorKind::TransactionError(err).into())
-                    }
+                    Some(err) => Err(RpcClientErrorKind::TransactionError(err).into()),
                     None => Ok(()),
                 };
             }
@@ -124,22 +111,16 @@ impl InternalOutboxClient {
     ) -> Result<(), InternalOutboxClientError> {
         let start = Instant::now();
         loop {
-            if let Some(status) = self
-                .engine
-                .transactions()
-                .status(signature)
-                .await
-                .map_err(EngineError::from)?
+            if let Some(status) =
+                self.engine.transactions().status(signature).await.map_err(EngineError::from)?
             {
                 return status.result.map_err(Into::into);
             }
 
             if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
-                return Err(
-                    InternalOutboxClientError::TransactionStatusMissing(
-                        signature,
-                    ),
-                );
+                return Err(InternalOutboxClientError::TransactionStatusMissing(
+                    signature,
+                ));
             }
 
             sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
@@ -169,10 +150,8 @@ impl InternalOutboxClient {
     async fn send_accept_tx(
         &self,
         scheduled_intents: Vec<ScheduledIntentBundle>,
-    ) -> Result<
-        Vec<ScheduledIntentBundle>,
-        (Vec<ScheduledIntentBundle>, InternalOutboxClientError),
-    > {
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, InternalOutboxClientError)>
+    {
         const CHUNK_SIZE: usize = 50;
 
         let mut remaining = scheduled_intents;
@@ -210,23 +189,17 @@ impl InternalOutboxClient {
         &self,
         intent_id: u64,
     ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::scheduled_commit_sent(
-            intent_id,
-            self.engine.blockhash(),
-        );
+        let tx = InstructionUtils::scheduled_commit_sent(intent_id, self.engine.blockhash());
         self.execute_via_engine(tx).await
     }
 }
 
 fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
     match err.kind() {
-        RpcClientErrorKind::TransactionError(
-            TransactionError::AlreadyProcessed,
-        ) => true,
-        RpcClientErrorKind::RpcError(RpcError::RpcResponseError {
-            message,
-            ..
-        }) => message.contains(ALREADY_PROCESSED_MESSAGE),
+        RpcClientErrorKind::TransactionError(TransactionError::AlreadyProcessed) => true,
+        RpcClientErrorKind::RpcError(RpcError::RpcResponseError { message, .. }) => {
+            message.contains(ALREADY_PROCESSED_MESSAGE)
+        }
         _ => false,
     }
 }
@@ -239,8 +212,7 @@ mod tests {
 
     #[test]
     fn detects_already_processed_transaction_error() {
-        let err: client_error::Error =
-            TransactionError::AlreadyProcessed.into();
+        let err: client_error::Error = TransactionError::AlreadyProcessed.into();
 
         assert!(is_already_processed_rpc_error(&err));
     }
@@ -249,9 +221,7 @@ mod tests {
     fn detects_already_processed_rpc_response_message() {
         let err: client_error::Error = RpcError::RpcResponseError {
             code: -32002,
-            message: format!(
-                "transaction verification error: {ALREADY_PROCESSED_MESSAGE}"
-            ),
+            message: format!("transaction verification error: {ALREADY_PROCESSED_MESSAGE}"),
             data: RpcResponseErrorData::Empty,
         }
         .into();
@@ -263,8 +233,7 @@ mod tests {
     fn ignores_unrelated_rpc_response_message() {
         let err: client_error::Error = RpcError::RpcResponseError {
             code: -32002,
-            message: "transaction verification error: blockhash not found"
-                .to_string(),
+            message: "transaction verification error: blockhash not found".to_string(),
             data: RpcResponseErrorData::Empty,
         }
         .into();
@@ -280,10 +249,7 @@ impl OutboxClient for InternalOutboxClient {
 
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<
-        Vec<ScheduledIntentBundle>,
-        (Vec<ScheduledIntentBundle>, Self::Error),
-    > {
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)> {
         // If accounts were scheduled to be committed, we accept them here
         // and processs the commits
         let magic_context = self
@@ -297,8 +263,7 @@ impl OutboxClient for InternalOutboxClient {
             .ok_or((vec![], InternalOutboxClientError::MagicContextMissing))?
             .map_err(|err| (vec![], err.into()))?;
 
-        self.send_accept_tx(magic_context.scheduled_base_intents)
-            .await
+        self.send_accept_tx(magic_context.scheduled_base_intents).await
     }
 
     async fn set_intent_execution_stage(
@@ -335,10 +300,7 @@ impl OutboxClient for InternalOutboxClient {
     }
 
     async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
-        let tx = InstructionUtils::close_outbox_intent(
-            intent_id,
-            self.engine.blockhash(),
-        );
+        let tx = InstructionUtils::close_outbox_intent(intent_id, self.engine.blockhash());
 
         self.send_with_backoff(
             ExponentialBackoff {

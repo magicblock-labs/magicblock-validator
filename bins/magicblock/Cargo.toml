@@ -37,3 +37,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
 v42-calculator-interface = { workspace = true, features = ["builder"] }
+
+[lints]
+workspace = true

@@ -2,12 +2,8 @@ use std::{fmt, sync::Arc, time::Duration};
 
 use dlp_api::pda::undelegation_request_pda_from_delegated_account;
 use engine::Engine;
-use magicblock_chainlink::{
-    AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink,
-};
-use magicblock_metrics::metrics::{
-    AccountFetchContext, AccountFetchEntrypoint,
-};
+use magicblock_chainlink::{AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink};
+use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 use magicblock_program::instruction_utils::InstructionUtils;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_transaction_error::TransactionError;
@@ -20,8 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 const UNDELEGATION_REQUEST_MAX_ATTEMPTS: usize = 3;
-const UNDELEGATION_REQUEST_RETRY_BASE_DELAY: Duration =
-    Duration::from_millis(100);
+const UNDELEGATION_REQUEST_RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
 
 pub type ChainlinkImpl = ProdChainlink;
 
@@ -116,9 +111,7 @@ impl UndelegationRequestService {
         engine: Engine,
     ) {
         if poll_interval.is_zero() {
-            debug!(
-                "DLP undelegation request polling is disabled by configuration"
-            );
+            debug!("DLP undelegation request polling is disabled by configuration");
             return;
         }
 
@@ -165,20 +158,14 @@ impl UndelegationRequestService {
     ) {
         let mut attempt = 1;
         loop {
-            let result = Self::process_observed_undelegation_request(
-                request.clone(),
-                chainlink,
-                engine,
-            )
-            .await;
+            let result =
+                Self::process_observed_undelegation_request(request.clone(), chainlink, engine)
+                    .await;
             match result {
                 Ok(()) => return,
-                Err(err)
-                    if err.retryable()
-                        && attempt < UNDELEGATION_REQUEST_MAX_ATTEMPTS =>
-                {
-                    let delay = UNDELEGATION_REQUEST_RETRY_BASE_DELAY
-                        * 2_u32.pow((attempt - 1) as u32);
+                Err(err) if err.retryable() && attempt < UNDELEGATION_REQUEST_MAX_ATTEMPTS => {
+                    let delay =
+                        UNDELEGATION_REQUEST_RETRY_BASE_DELAY * 2_u32.pow((attempt - 1) as u32);
                     warn!(
                         request_pda = %request.request_pda,
                         delegated_account = %request.delegated_account,
@@ -233,9 +220,7 @@ impl UndelegationRequestService {
         }
 
         let expected_request_pda =
-            undelegation_request_pda_from_delegated_account(
-                &request.delegated_account,
-            );
+            undelegation_request_pda_from_delegated_account(&request.delegated_account);
         if expected_request_pda != request.request_pda {
             error!(
                 request_pda = %request.request_pda,
@@ -319,8 +304,8 @@ impl UndelegationRequestService {
             };
         }
 
-        let delegated_on_base_and_er = delegation_status.delegated_on_base
-            && delegation_status.account_on_er.is_delegated();
+        let delegated_on_base_and_er =
+            delegation_status.delegated_on_base && delegation_status.account_on_er.is_delegated();
         if !delegated_on_base_and_er {
             warn!(
                 request_pda = %request.request_pda,
@@ -335,10 +320,7 @@ impl UndelegationRequestService {
             return Ok(());
         }
 
-        if let Err(err) = chainlink
-            .undelegation_requested(request.delegated_account)
-            .await
-        {
+        if let Err(err) = chainlink.undelegation_requested(request.delegated_account).await {
             error!(
                 request_pda = %request.request_pda,
                 delegated_account = %request.delegated_account,
@@ -400,10 +382,7 @@ impl UndelegationRequestService {
         let chainlink = self.chainlink.clone();
         let engine = self.engine.clone();
         workers.spawn(async move {
-            Self::undelegation_request_processor(
-                requests, token, chainlink, engine,
-            )
-            .await;
+            Self::undelegation_request_processor(requests, token, chainlink, engine).await;
             "subscription processor"
         });
 
@@ -415,13 +394,8 @@ impl UndelegationRequestService {
             let engine = self.engine;
             let poll_interval = self.undelegation_request_poll_interval;
             workers.spawn(async move {
-                Self::undelegation_request_poll_processor(
-                    poll_interval,
-                    token,
-                    chainlink,
-                    engine,
-                )
-                .await;
+                Self::undelegation_request_poll_processor(poll_interval, token, chainlink, engine)
+                    .await;
                 "poll processor"
             });
         }
@@ -430,9 +404,10 @@ impl UndelegationRequestService {
             biased;
             _ = cancellation_token.cancelled() => {}
             result = workers.join_next() => {
-                let failure = match result.expect("undelegation workers are registered") {
-                    Ok(worker) => UndelegationRequestServiceError::WorkerStopped(worker),
-                    Err(error) => UndelegationRequestServiceError::WorkerJoin(error),
+                let failure = match result {
+                    Some(Ok(worker)) => UndelegationRequestServiceError::WorkerStopped(worker),
+                    Some(Err(error)) => UndelegationRequestServiceError::WorkerJoin(error),
+                    None => UndelegationRequestServiceError::WorkerStopped("all undelegation workers"),
                 };
                 cancellation_token.cancel();
                 workers.shutdown().await;

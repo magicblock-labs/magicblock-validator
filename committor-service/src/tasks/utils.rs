@@ -7,9 +7,7 @@ use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
-use solana_message::{
-    AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message,
-};
+use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message};
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
@@ -34,18 +32,14 @@ pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 /// and [`crate::tasks::intent_size_validator::IntentSizeValidator`] (size
 /// estimation) -- actions carry no unknowns that need fetching, so both
 /// build them identically.
-pub fn create_action_tasks(
-    actions: &[BaseAction],
-) -> impl Iterator<Item = BaseTaskImpl> + '_ {
+pub fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = BaseTaskImpl> + '_ {
     actions.iter().map(|action| {
         let task = match action.source_program {
             Some(source_program) => BaseActionTask::V2(BaseActionTaskV2 {
                 action: action.clone(),
                 source_program,
             }),
-            None => BaseActionTask::V1(BaseActionTaskV1 {
-                action: action.clone(),
-            }),
+            None => BaseActionTask::V1(BaseActionTaskV1 { action: action.clone() }),
         };
         task.into()
     })
@@ -56,16 +50,12 @@ pub fn create_action_tasks(
 /// `base_account` (when available), everything else is sent as full state.
 /// Shared by [`create_commit_task`] and [`create_commit_finalize_task`] so
 /// the two never drift apart.
-fn commit_delivery(
-    account: &CommittedAccount,
-    base_account: Option<Account>,
-) -> CommitDelivery {
-    let base_account =
-        if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-            base_account
-        } else {
-            None
-        };
+fn commit_delivery(account: &CommittedAccount, base_account: Option<Account>) -> CommitDelivery {
+    let base_account = if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
+        base_account
+    } else {
+        None
+    };
 
     if let Some(base_account) = base_account {
         CommitDelivery::DiffInArgs { base_account }
@@ -118,9 +108,7 @@ impl TransactionUtils {
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
-    pub fn dummy_lookup_table(
-        pubkeys: &[Pubkey],
-    ) -> Vec<AddressLookupTableAccount> {
+    pub fn dummy_lookup_table(pubkeys: &[Pubkey]) -> Vec<AddressLookupTableAccount> {
         pubkeys
             .chunks(256)
             .map(|addresses| AddressLookupTableAccount {
@@ -136,10 +124,8 @@ impl TransactionUtils {
         budget_instructions: &[Instruction],
     ) -> Vec<Pubkey> {
         // Collect all unique pubkeys from tasks and budget instructions
-        let mut all_pubkeys: HashSet<Pubkey> = tasks
-            .iter()
-            .flat_map(|task| task.involved_accounts(validator))
-            .collect();
+        let mut all_pubkeys: HashSet<Pubkey> =
+            tasks.iter().flat_map(|task| task.involved_accounts(validator)).collect();
 
         all_pubkeys.extend(
             budget_instructions
@@ -150,14 +136,8 @@ impl TransactionUtils {
         all_pubkeys.into_iter().collect::<Vec<_>>()
     }
 
-    pub fn tasks_instructions(
-        validator: &Pubkey,
-        tasks: &[BaseTaskImpl],
-    ) -> Vec<Instruction> {
-        tasks
-            .iter()
-            .map(|task| task.instruction(validator))
-            .collect()
+    pub fn tasks_instructions(validator: &Pubkey, tasks: &[BaseTaskImpl]) -> Vec<Instruction> {
+        tasks.iter().map(|task| task.instruction(validator)).collect()
     }
 
     pub fn assemble_tasks_tx(
@@ -191,12 +171,7 @@ impl TransactionUtils {
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
-        Self::assemble_tx_raw(
-            authority,
-            &ixs,
-            &budget_instructions,
-            lookup_tables,
-        )
+        Self::assemble_tx_raw(authority, &ixs, &budget_instructions, lookup_tables)
     }
 
     pub fn assemble_tx_raw(
@@ -225,23 +200,11 @@ impl TransactionUtils {
             | Err(CompileError::AddressTableLookupIndexOverflow) => {
                 Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
             }
-            Err(CompileError::UnknownInstructionKey(pubkey)) => {
-                // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
-                // when User's pubkeys in Instruction doesn't exist in AccountKeys.
-                // This is impossible in our case since AccountKeys created on keys of our Ixs
-                // that means that all keys from out ixs exist in AccountKeys
-                panic!(
-                    "Supplied instruction has to be valid: {}",
-                    CompileError::UnknownInstructionKey(pubkey)
-                );
-            }
+            Err(err @ CompileError::UnknownInstructionKey(_)) => Err(err.into()),
         }?;
 
         // SignerError is critical
-        let tx = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[authority],
-        )?;
+        let tx = VersionedTransaction::try_new(VersionedMessage::V0(message), &[authority])?;
 
         Ok(tx)
     }
@@ -265,19 +228,14 @@ impl TransactionUtils {
             return 0;
         }
 
-        let total_budget: u32 =
-            tasks.iter().map(|task| task.accounts_size_budget()).sum();
+        let total_budget: u32 = tasks.iter().map(|task| task.accounts_size_budget()).sum();
 
-        let dlp_task_count: u32 = tasks
-            .iter()
-            .filter(|task| task.program_id() == dlp_api::id())
-            .count() as u32;
+        let dlp_task_count: u32 =
+            tasks.iter().filter(|task| task.program_id() == dlp_api::id()).count() as u32;
 
         if dlp_task_count > 0 {
             let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
-            let deduction = dlp_task_count
-                .saturating_sub(1)
-                .saturating_mul(dlp_program_budget);
+            let deduction = dlp_task_count.saturating_sub(1).saturating_mul(dlp_program_budget);
             total_budget.saturating_sub(deduction)
         } else {
             total_budget
@@ -291,9 +249,7 @@ impl TransactionUtils {
     ) -> [Instruction; 2] {
         [
             ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
-            ComputeBudgetInstruction::set_compute_unit_price(
-                compute_unit_price,
-            ),
+            ComputeBudgetInstruction::set_compute_unit_price(compute_unit_price),
         ]
     }
 }

@@ -21,10 +21,7 @@ use crate::{
 const DEFAULT_SIGNATURES_LIMIT: usize = 1_000;
 
 impl HttpDispatcher {
-    pub(crate) async fn get_signatures_for_address(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) async fn get_signatures_for_address(&self, request: &JsonRequest) -> HandlerResult {
         #[derive(serde::Deserialize, Default)]
         #[serde(rename_all = "camelCase")]
         struct Config {
@@ -35,10 +32,7 @@ impl HttpDispatcher {
 
         let address = request.required::<Serde32Bytes>(0)?.into();
         let config = request.optional::<Config>(1)?.unwrap_or_default();
-        let limit = config
-            .limit
-            .unwrap_or(DEFAULT_SIGNATURES_LIMIT)
-            .min(DEFAULT_SIGNATURES_LIMIT);
+        let limit = config.limit.unwrap_or(DEFAULT_SIGNATURES_LIMIT).min(DEFAULT_SIGNATURES_LIMIT);
         let before = config.before.map(Into::into);
         let until = config.until.map(Into::into);
 
@@ -109,8 +103,7 @@ impl HttpDispatcher {
                         slot: info.slot,
                         err: info.result.err(),
                         memo: None,
-                        block_time: (info.blocktime != 0)
-                            .then_some(info.blocktime),
+                        block_time: (info.blocktime != 0).then_some(info.blocktime),
                         // The engine does not retain an intra-block transaction index.
                         index: 0,
                     },
@@ -119,11 +112,7 @@ impl HttpDispatcher {
             })
             .chain(legacy.into_iter().map(|info| (info, false)))
             .collect::<Vec<_>>();
-        merged.sort_by(|a, b| {
-            b.0.slot
-                .cmp(&a.0.slot)
-                .then_with(|| b.0.index.cmp(&a.0.index))
-        });
+        merged.sort_by(|a, b| b.0.slot.cmp(&a.0.slot).then_with(|| b.0.index.cmp(&a.0.index)));
         let mut seen = HashSet::with_capacity(merged.len());
         merged.retain(|info| seen.insert(info.0.signature));
         merged.truncate(limit);
@@ -131,10 +120,8 @@ impl HttpDispatcher {
         let signatures = merged
             .into_iter()
             .map(|(info, from_engine)| {
-                let mut rpc =
-                    RpcConfirmedTransactionStatusWithSignature::from(info);
-                rpc.confirmation_status =
-                    Some(TransactionConfirmationStatus::Finalized);
+                let mut rpc = RpcConfirmedTransactionStatusWithSignature::from(info);
+                rpc.confirmation_status = Some(TransactionConfirmationStatus::Finalized);
                 if from_engine {
                     // Preserve the documented engine placeholder instead of
                     // presenting a fabricated transaction index.

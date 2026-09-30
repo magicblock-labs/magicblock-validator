@@ -5,18 +5,18 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
-    7, 83, 184, 55, 200, 223, 238, 137, 166, 244, 107, 126, 189, 16, 194, 36,
-    228, 68, 43, 143, 13, 91, 3, 81, 53, 253, 26, 36, 50, 198, 40, 159, 11, 80,
-    9, 208, 183, 189, 108, 200, 89, 77, 168, 76, 233, 197, 132, 22, 21, 186,
-    202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
+    7, 83, 184, 55, 200, 223, 238, 137, 166, 244, 107, 126, 189, 16, 194, 36, 228, 68, 43, 143, 13,
+    91, 3, 81, 53, 253, 26, 36, 50, 198, 40, 159, 11, 80, 9, 208, 183, 189, 108, 200, 89, 77, 168,
+    76, 233, 197, 132, 22, 21, 186, 202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83,
+    87,
 ];
 // tEsT3eV6RFCWs1BZ7AXTzasHqTtMnMLCB2tjQ42TDXD
 // 62LxqpAW6SWhp7iKBjCQneapn1w6btAhW7xHeREWSpPzw3xZbHCfAFesSR4R76ejQXCLWrndn37cKCCLFvx6Swps
 pub const DLP_TEST_AUTHORITY_BYTES: [u8; 64] = [
-    251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247, 92,
-    56, 158, 145, 53, 51, 226, 202, 96, 178, 248, 195, 133, 133, 237, 237, 146,
-    13, 32, 77, 204, 244, 56, 166, 172, 66, 113, 150, 218, 112, 42, 110, 181,
-    98, 158, 222, 194, 130, 93, 175, 100, 190, 106, 9, 69, 156, 80, 96, 72,
+    251, 62, 129, 184, 107, 49, 62, 184, 1, 147, 178, 128, 185, 157, 247, 92, 56, 158, 145, 53, 51,
+    226, 202, 96, 178, 248, 195, 133, 133, 237, 237, 146, 13, 32, 77, 204, 244, 56, 166, 172, 66,
+    113, 150, 218, 112, 42, 110, 181, 98, 158, 222, 194, 130, 93, 175, 100, 190, 106, 9, 69, 156,
+    80, 96, 72,
 ];
 
 pub struct LoadedAccounts {
@@ -30,9 +30,7 @@ impl Default for LoadedAccounts {
         Self {
             validator_authority_kp: Keypair::try_from(&TEST_KEYPAIR_BYTES[..])
                 .expect("Failed to create validator authority keypair"),
-            luzid_authority: pubkey!(
-                "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
-            ),
+            luzid_authority: pubkey!("LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"),
             extra_accounts: vec![],
         }
     }
@@ -42,9 +40,7 @@ impl LoadedAccounts {
     pub fn new_with_new_validator_authority() -> Self {
         Self {
             validator_authority_kp: Keypair::new(),
-            luzid_authority: pubkey!(
-                "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
-            ),
+            luzid_authority: pubkey!("LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"),
             extra_accounts: vec![],
         }
     }
@@ -57,13 +53,9 @@ impl LoadedAccounts {
     /// `cargo build-sbf --features=unit_test_config`
     pub fn with_delegation_program_test_authority() -> Self {
         Self {
-            validator_authority_kp: Keypair::try_from(
-                &DLP_TEST_AUTHORITY_BYTES[..],
-            )
-            .expect("Failed to create validator authority keypair"),
-            luzid_authority: pubkey!(
-                "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"
-            ),
+            validator_authority_kp: Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+                .expect("Failed to create validator authority keypair"),
+            luzid_authority: pubkey!("LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm"),
             extra_accounts: vec![],
         }
     }
@@ -85,9 +77,7 @@ impl LoadedAccounts {
     }
 
     pub fn validator_fees_vault(&self) -> Pubkey {
-        dlp_api::pda::validator_fees_vault_pda_from_validator(
-            &self.validator_authority(),
-        )
+        dlp_api::pda::validator_fees_vault_pda_from_validator(&self.validator_authority())
     }
 
     pub fn protocol_fees_vault(&self) -> Pubkey {
@@ -95,9 +85,7 @@ impl LoadedAccounts {
     }
 
     pub fn magic_fee_vault(&self) -> Pubkey {
-        dlp_api::pda::magic_fee_vault_pda_from_validator(
-            &self.validator_authority(),
-        )
+        dlp_api::pda::magic_fee_vault_pda_from_validator(&self.validator_authority())
     }
 
     pub fn extra_accounts(
@@ -110,11 +98,8 @@ impl LoadedAccounts {
             .map(|(k, v)| {
                 // Either we have a relative path to the root dir or
                 // just a filename of an account in the accounts dir
-                let path = if v.contains("/") {
-                    workspace_dir.join(v)
-                } else {
-                    accounts_dir.join(v)
-                };
+                let path =
+                    if v.contains("/") { workspace_dir.join(v) } else { accounts_dir.join(v) };
                 (k.clone(), path.to_string_lossy().to_string())
             })
             .collect::<Vec<_>>()
@@ -122,8 +107,7 @@ impl LoadedAccounts {
 
     pub fn add(&mut self, accounts: &[(&str, &str)]) {
         for (pubkey, filename) in accounts {
-            self.extra_accounts
-                .push((pubkey.to_string(), filename.to_string()));
+            self.extra_accounts.push((pubkey.to_string(), filename.to_string()));
         }
     }
 }

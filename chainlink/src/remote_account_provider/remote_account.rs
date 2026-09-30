@@ -1,6 +1,4 @@
-use solana_account::{
-    Account, AccountBuilder, AccountSharedData, ReadableAccount,
-};
+use solana_account::{Account, AccountBuilder, AccountSharedData, ReadableAccount};
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
 
@@ -46,10 +44,7 @@ impl RemoteAccount {
         account: AccountBuilder,
         source: RemoteAccountUpdateSource,
     ) -> Self {
-        RemoteAccount::Found(RemoteAccountState {
-            account: account.build(),
-            source,
-        })
+        RemoteAccount::Found(RemoteAccountState { account: account.build(), source })
     }
     pub fn slot(&self) -> u64 {
         match self {
@@ -59,9 +54,7 @@ impl RemoteAccount {
     }
     pub fn source(&self) -> Option<RemoteAccountUpdateSource> {
         match self {
-            RemoteAccount::Found(RemoteAccountState { source, .. }) => {
-                Some(source.clone())
-            }
+            RemoteAccount::Found(RemoteAccountState { source, .. }) => Some(source.clone()),
             RemoteAccount::NotFound(_) => None,
         }
     }

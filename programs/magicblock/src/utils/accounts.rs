@@ -25,9 +25,7 @@ impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
             .map_err(|_| InstructionError::AccountBorrowFailed)
     }
 
-    pub(crate) fn borrow_mut(
-        &self,
-    ) -> Result<AccountRefMut<'_>, InstructionError> {
+    pub(crate) fn borrow_mut(&self) -> Result<AccountRefMut<'_>, InstructionError> {
         self.transaction_context
             .accounts()
             .try_borrow_mut(self.tx_idx)
@@ -36,7 +34,7 @@ impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
 }
 
 pub(crate) fn find_instruction_account<'a, 'ix_data>(
-    invoke_context: &'a InvokeContext,
+    invoke_context: &'a InvokeContext<'_, '_>,
     transaction_context: &'a TransactionContext<'ix_data>,
     not_found_msg: &str,
     pubkey: &Pubkey,
@@ -55,17 +53,12 @@ pub(crate) fn find_instruction_account<'a, 'ix_data>(
 }
 
 pub(crate) fn find_instruction_account_owner<'a>(
-    invoke_context: &'a InvokeContext,
+    invoke_context: &'a InvokeContext<'_, '_>,
     transaction_context: &'a TransactionContext<'_>,
     not_found_msg: &str,
     pubkey: &Pubkey,
 ) -> Result<Pubkey, InstructionError> {
-    let acc = find_instruction_account(
-        invoke_context,
-        transaction_context,
-        not_found_msg,
-        pubkey,
-    )?;
+    let acc = find_instruction_account(invoke_context, transaction_context, not_found_msg, pubkey)?;
     Ok(*acc.borrow()?.owner())
 }
 
@@ -118,10 +111,7 @@ pub(crate) fn get_instruction_account_short_meta_with_idx(
 
     let pubkey = *transaction_context.get_key_of_account_at_index(tx_idx)?;
     let is_writable = ix_ctx.is_instruction_account_writable(idx)?;
-    Ok(ShortAccountMeta {
-        pubkey,
-        is_writable,
-    })
+    Ok(ShortAccountMeta { pubkey, is_writable })
 }
 
 pub(crate) fn debit_instruction_account_at_index(

@@ -17,6 +17,4 @@ pub(crate) mod utils;
 
 pub use compute_budget::ComputeBudgetConfig;
 pub use config::DEFAULT_ACTIONS_TIMEOUT;
-pub use magicblock_committor_program::{
-    ChangedAccount, Changeset, ChangesetMeta,
-};
+pub use magicblock_committor_program::{ChangedAccount, Changeset, ChangesetMeta};

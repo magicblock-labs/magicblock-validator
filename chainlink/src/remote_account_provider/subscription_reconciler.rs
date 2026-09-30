@@ -10,9 +10,8 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use super::{
-    ChainPubsubClient, SubscribedAccounts, SubscriptionKeyLocks,
-    SubscriptionOwnershipMap, SubscriptionReason,
-    subscription_key_owned_guard_from_map,
+    ChainPubsubClient, SubscribedAccounts, SubscriptionKeyLocks, SubscriptionOwnershipMap,
+    SubscriptionReason, subscription_key_owned_guard_from_map,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -92,9 +91,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
     let tracked_pubkeys = subscribed_accounts.pubkeys();
     let tracked_count = tracked_pubkeys.len();
 
-    let Some(pubsub_snapshot) =
-        pubsub_client.subscription_reconciliation_snapshot()
-    else {
+    let Some(pubsub_snapshot) = pubsub_client.subscription_reconciliation_snapshot() else {
         debug!(
             tracked_count = tracked_count,
             internally_managed_count = internally_managed.len(),
@@ -123,13 +120,11 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         .collect();
 
     // A) pubsub tracking subs that are not ensured by all clients
-    let missing_in_pubsub: HashSet<_> = tracked_pubkeys
-        .difference(&ensured_subs_without_never_evict)
-        .collect();
+    let missing_in_pubsub: HashSet<_> =
+        tracked_pubkeys.difference(&ensured_subs_without_never_evict).collect();
     // B) Subs not in pubsub tracking that some clients are subscribed to
-    let extra_in_pubsub: HashSet<_> = partial_subs_without_never_evict
-        .difference(&tracked_pubkeys)
-        .collect();
+    let extra_in_pubsub: HashSet<_> =
+        partial_subs_without_never_evict.difference(&tracked_pubkeys).collect();
 
     trace!(
         tracked_count = tracked_count,
@@ -149,8 +144,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         );
         for pubkey in missing_internally_managed {
             let _subscription_guard =
-                acquire_subscription_key_guard(subscription_key_locks, pubkey)
-                    .await;
+                acquire_subscription_key_guard(subscription_key_locks, pubkey).await;
             if let Err(e) = pubsub_client.subscribe(pubkey, None).await {
                 warn!(
                     pubkey = %pubkey,
@@ -169,9 +163,9 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         // If this happens a lot then this is serious since that means that some clients
         // were not subscribed to all accounts
         let len = missing_in_pubsub.len();
-        let err = RemoteAccountProviderError::AccountSubscriptionsOutOfSync(
-            format!("{len} accounts in pubsub tracking but not in pubsub"),
-        );
+        let err = RemoteAccountProviderError::AccountSubscriptionsOutOfSync(format!(
+            "{len} accounts in pubsub tracking but not in pubsub"
+        ));
         log_trace_warn(
             "Consolidating missing subscriptions",
             "Consolidated missing subscriptions repeatedly",
@@ -184,8 +178,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         for pubkey in missing_in_pubsub {
             let pubkey = *pubkey;
             let _subscription_guard =
-                acquire_subscription_key_guard(subscription_key_locks, pubkey)
-                    .await;
+                acquire_subscription_key_guard(subscription_key_locks, pubkey).await;
 
             if !subscribed_accounts.contains(&pubkey) {
                 trace!(
@@ -195,9 +188,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            let Some(pubsub_snapshot) =
-                pubsub_client.subscription_reconciliation_snapshot()
-            else {
+            let Some(pubsub_snapshot) = pubsub_client.subscription_reconciliation_snapshot() else {
                 trace!(
                     pubkey = %pubkey,
                     "Skipping resubscribe because no connected pubsub client is available after reconciliation snapshot"
@@ -230,9 +221,11 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
             // Undelegation tracking must stay watched until undelegation
             // completes; keep the entry and retry next cycle.
             if let Some(ownership) = subscription_ownership
-                && ownership.lock().await.get(&pubkey).is_some_and(|own| {
-                    own.contains(SubscriptionReason::UndelegationTracking)
-                })
+                && ownership
+                    .lock()
+                    .await
+                    .get(&pubkey)
+                    .is_some_and(|own| own.contains(SubscriptionReason::UndelegationTracking))
             {
                 continue;
             }
@@ -277,8 +270,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
         for pubkey in extra_in_pubsub {
             let pubkey = *pubkey;
             let _subscription_guard =
-                acquire_subscription_key_guard(subscription_key_locks, pubkey)
-                    .await;
+                acquire_subscription_key_guard(subscription_key_locks, pubkey).await;
 
             if subscribed_accounts.contains(&pubkey) {
                 trace!(
@@ -288,9 +280,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            let Some(pubsub_snapshot) =
-                pubsub_client.subscription_reconciliation_snapshot()
-            else {
+            let Some(pubsub_snapshot) = pubsub_client.subscription_reconciliation_snapshot() else {
                 trace!(
                     pubkey = %pubkey,
                     "Skipping stale unsubscribe because no connected pubsub client is available after reconciliation snapshot"
@@ -306,12 +296,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
                 continue;
             }
 
-            unsubscribe_account(
-                pubkey,
-                pubsub_client,
-                SubscriptionCleanupSource::Reconciler,
-            )
-            .await;
+            unsubscribe_account(pubkey, pubsub_client, SubscriptionCleanupSource::Reconciler).await;
         }
     }
     // We assume that reconciling worked and now our subscribed accounts are up to date
@@ -327,9 +312,7 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 /// watches, discard the local mirror so the next access must refetch from RPC.
 /// Undelegation-tracked accounts are kept because their dedicated refresher
 /// performs RPC catch-up while undelegation is in flight.
-pub(crate) async fn evict_uncovered_subscriptions<
-    PubsubClient: ChainPubsubClient,
->(
+pub(crate) async fn evict_uncovered_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &SubscribedAccounts,
     pubsub_client: &PubsubClient,
     gap_candidates: Option<HashSet<Pubkey>>,
@@ -338,8 +321,7 @@ pub(crate) async fn evict_uncovered_subscriptions<
     subscription_ownership: Option<&SubscriptionOwnershipMap>,
 ) -> usize {
     let from_reconnect_gap = gap_candidates.is_some();
-    let tracked_pubkeys =
-        gap_candidates.unwrap_or_else(|| subscribed_accounts.pubkeys());
+    let tracked_pubkeys = gap_candidates.unwrap_or_else(|| subscribed_accounts.pubkeys());
     let tracked_count = tracked_pubkeys.len();
     if tracked_pubkeys.is_empty() {
         return 0;
@@ -352,10 +334,7 @@ pub(crate) async fn evict_uncovered_subscriptions<
             .subscription_reconciliation_snapshot()
             .map(|snapshot| snapshot.union)
             .unwrap_or_default();
-        tracked_pubkeys
-            .difference(&covered)
-            .copied()
-            .collect::<Vec<_>>()
+        tracked_pubkeys.difference(&covered).copied().collect::<Vec<_>>()
     };
 
     if uncovered.is_empty() {
@@ -372,8 +351,7 @@ pub(crate) async fn evict_uncovered_subscriptions<
     let mut evicted = 0;
     for pubkey in uncovered {
         let _subscription_guard =
-            acquire_subscription_key_guard(subscription_key_locks, pubkey)
-                .await;
+            acquire_subscription_key_guard(subscription_key_locks, pubkey).await;
 
         if !subscribed_accounts.contains(&pubkey) {
             continue;
@@ -389,9 +367,11 @@ pub(crate) async fn evict_uncovered_subscriptions<
         }
 
         if let Some(ownership) = subscription_ownership
-            && ownership.lock().await.get(&pubkey).is_some_and(|own| {
-                own.contains(SubscriptionReason::UndelegationTracking)
-            })
+            && ownership
+                .lock()
+                .await
+                .get(&pubkey)
+                .is_some_and(|own| own.contains(SubscriptionReason::UndelegationTracking))
         {
             trace!(
                 pubkey = %pubkey,
@@ -426,13 +406,9 @@ async fn acquire_subscription_key_guard(
     pubkey: Pubkey,
 ) -> Option<tokio::sync::OwnedMutexGuard<()>> {
     match subscription_key_locks {
-        Some(subscription_key_locks) => Some(
-            subscription_key_owned_guard_from_map(
-                subscription_key_locks,
-                pubkey,
-            )
-            .await,
-        ),
+        Some(subscription_key_locks) => {
+            Some(subscription_key_owned_guard_from_map(subscription_key_locks, pubkey).await)
+        }
         None => None,
     }
 }
@@ -447,8 +423,7 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::{
-            chain_pubsub_client::mock::ChainPubsubClientMock,
-            pubsub_common::SubscriptionUpdate,
+            chain_pubsub_client::mock::ChainPubsubClientMock, pubsub_common::SubscriptionUpdate,
             subscribed_accounts::SubscribedAccounts,
         },
         testing::init_logger,
@@ -483,13 +458,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify subscriptions are unchanged
         let subs = mock_client.subscriptions_union();
@@ -523,13 +492,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify pk3 was resubscribed
         let subs = mock_client.subscriptions_union();
@@ -609,13 +572,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify pk3 was resubscribed
         let subs = mock_client.subscriptions_union();
@@ -638,13 +595,7 @@ mod tests {
         subscriptions.add(pk);
 
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         assert!(mock_client.subscriptions_union().contains(&pk));
         assert!(subscriptions.contains(&pk));
@@ -667,13 +618,7 @@ mod tests {
         mock_client.silently_noop_next_subscriptions(1);
 
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         assert!(!mock_client.subscriptions_union().contains(&pk));
         assert!(!subscriptions.contains(&pk));
@@ -735,13 +680,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify state unchanged (both empty)
         let subs = mock_client.subscriptions_union();
@@ -770,13 +709,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify all subscriptions added
         let subs = mock_client.subscriptions_union();
@@ -814,13 +747,7 @@ mod tests {
         let (removed_tx, _removed_rx) = mpsc::channel::<Pubkey>(10);
 
         // Reconcile
-        reconcile_subscriptions_local(
-            &subscriptions,
-            &mock_client,
-            &[],
-            &removed_tx,
-        )
-        .await;
+        reconcile_subscriptions_local(&subscriptions, &mock_client, &[], &removed_tx).await;
 
         // Verify all accounts are now subscribed
         let subs = mock_client.subscriptions_union();
@@ -872,9 +799,7 @@ mod tests {
         assert_eq!(subs.len(), 3);
     }
 
-    fn drain_removed_account_rx(
-        rx: &mut mpsc::Receiver<Pubkey>,
-    ) -> Vec<Pubkey> {
+    fn drain_removed_account_rx(rx: &mut mpsc::Receiver<Pubkey>) -> Vec<Pubkey> {
         let mut removed_accounts = Vec::new();
         while let Ok(pubkey) = rx.try_recv() {
             removed_accounts.push(pubkey);

@@ -18,22 +18,16 @@ use serde_json::json;
 use signature_confirmer::{SignatureConfirmer, SignatureConfirmerConfig};
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;
-use solana_address_lookup_table_interface::state::{
-    AddressLookupTable, LookupTableMeta,
-};
+use solana_address_lookup_table_interface::state::{AddressLookupTable, LookupTableMeta};
 use solana_clock::Slot;
 use solana_commitment_config::{CommitmentConfig, CommitmentLevel};
 use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use solana_rpc_client::{
-    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
-};
+use solana_rpc_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
 use solana_rpc_client_api::{
     client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
-    config::{
-        RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig,
-    },
+    config::{RpcAccountInfoConfig, RpcSendTransactionConfig, RpcTransactionConfig},
     request::{RpcError, RpcRequest},
     response::{Response, RpcBlockhash},
 };
@@ -46,18 +40,16 @@ use tokio::sync::Mutex as TMutex;
 use tracing::*;
 
 /// The encoding to use when sending transactions
-pub const SEND_TRANSACTION_ENCODING: UiTransactionEncoding =
-    UiTransactionEncoding::Base64;
+pub const SEND_TRANSACTION_ENCODING: UiTransactionEncoding = UiTransactionEncoding::Base64;
 
 /// The configuration to use when sending transactions
-pub const SEND_TRANSACTION_CONFIG: RpcSendTransactionConfig =
-    RpcSendTransactionConfig {
-        preflight_commitment: None,
-        skip_preflight: true,
-        encoding: Some(SEND_TRANSACTION_ENCODING),
-        max_retries: None,
-        min_context_slot: None,
-    };
+pub const SEND_TRANSACTION_CONFIG: RpcSendTransactionConfig = RpcSendTransactionConfig {
+    preflight_commitment: None,
+    skip_preflight: true,
+    encoding: Some(SEND_TRANSACTION_ENCODING),
+    max_retries: None,
+    min_context_slot: None,
+};
 
 // -----------------
 // MagicBlockRpcClientError
@@ -82,18 +74,14 @@ pub enum MagicBlockRpcClientError {
     #[error("Error getting signature status for: {0} {1}")]
     CannotGetTransactionSignatureStatus(Signature, String),
 
-    #[error(
-        "Error confirming signature status of {0} at desired commitment level {1}"
-    )]
+    #[error("Error confirming signature status of {0} at desired commitment level {1}")]
     CannotConfirmTransactionSignatureStatus(Signature, CommitmentLevel),
 
     #[error("Sent transaction {1} but got error: {0:?}")]
     SentTransactionError(TransactionError, Signature),
 }
 
-impl From<solana_rpc_client_api::client_error::Error>
-    for MagicBlockRpcClientError
-{
+impl From<solana_rpc_client_api::client_error::Error> for MagicBlockRpcClientError {
     fn from(e: solana_rpc_client_api::client_error::Error) -> Self {
         Self::RpcClientError(Box::new(e))
     }
@@ -126,9 +114,7 @@ impl MagicBlockRpcClientError {
 
         match self {
             MagicBlockRpcClientError::RpcClientError(err)
-            | MagicBlockRpcClientError::SendTransaction(err) => {
-                is_send_transaction_too_large(err)
-            }
+            | MagicBlockRpcClientError::SendTransaction(err) => is_send_transaction_too_large(err),
             _ => false,
         }
     }
@@ -149,8 +135,7 @@ impl MagicBlockRpcClientError {
     }
 }
 
-pub type MagicBlockRpcClientResult<T> =
-    std::result::Result<T, MagicBlockRpcClientError>;
+pub type MagicBlockRpcClientResult<T> = Result<T, MagicBlockRpcClientError>;
 
 // -----------------
 // SendAndConfirmTransaction Config and Outcome
@@ -193,9 +178,7 @@ impl MagicBlockSendTransactionConfig {
 
     pub fn ensure_processed() -> Self {
         Self::SendAndConfirm {
-            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
-                2_000,
-            )),
+            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(2_000)),
             wait_for_processed_level: Some(DEFAULT_MAX_TIME_TO_PROCESSED),
             check_for_processed_interval: Some(Duration::from_millis(400)),
             wait_for_commitment_level: None,
@@ -207,9 +190,7 @@ impl MagicBlockSendTransactionConfig {
     /// NOTE: processed may fail, while committed - succeeds
     pub fn ensure_processed_and_committed() -> Self {
         Self::SendAndConfirm {
-            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
-                2_000,
-            )),
+            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(2_000)),
             wait_for_processed_level: Some(DEFAULT_MAX_TIME_TO_PROCESSED),
             check_for_processed_interval: Some(Duration::from_millis(400)),
             // NOTE: that this time is after we already verified that the transaction was
@@ -222,9 +203,7 @@ impl MagicBlockSendTransactionConfig {
     /// Waits for committed stage results
     pub fn ensure_committed() -> Self {
         Self::SendAndConfirm {
-            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(
-                2_000,
-            )),
+            wait_for_blockhash_to_become_valid: Some(Duration::from_millis(2_000)),
             wait_for_processed_level: None,
             check_for_processed_interval: None,
             // NOTE: we skip the processed check here and wait directly for
@@ -240,10 +219,7 @@ impl MagicBlockSendTransactionConfig {
         use MagicBlockSendTransactionConfig::*;
         match self {
             Send => false,
-            SendAndConfirm {
-                wait_for_commitment_level,
-                ..
-            } => wait_for_commitment_level.is_some(),
+            SendAndConfirm { wait_for_commitment_level, .. } => wait_for_commitment_level.is_some(),
         }
     }
 }
@@ -260,9 +236,7 @@ impl MagicBlockSendTransactionOutcome {
         self.signature
     }
 
-    pub fn into_signature_and_error(
-        self,
-    ) -> (Signature, Option<TransactionError>) {
+    pub fn into_signature_and_error(self) -> (Signature, Option<TransactionError>) {
         (self.signature, self.confirmed_err.or(self.processed_err))
     }
 
@@ -346,17 +320,11 @@ impl MagicblockRpcClient {
         Self::new_with_options(client, None, None)
     }
 
-    pub fn new_with_chain_slot(
-        client: Arc<RpcClient>,
-        chain_slot: Arc<AtomicU64>,
-    ) -> Self {
+    pub fn new_with_chain_slot(client: Arc<RpcClient>, chain_slot: Arc<AtomicU64>) -> Self {
         Self::new_with_options(client, Some(chain_slot), None)
     }
 
-    pub fn new_with_websocket(
-        client: Arc<RpcClient>,
-        websocket_url: Option<String>,
-    ) -> Self {
+    pub fn new_with_websocket(client: Arc<RpcClient>, websocket_url: Option<String>) -> Self {
         Self::new_with_options(client, None, websocket_url)
     }
 
@@ -385,9 +353,7 @@ impl MagicblockRpcClient {
         }
     }
 
-    pub async fn get_latest_blockhash(
-        &self,
-    ) -> MagicBlockRpcClientResult<Hash> {
+    pub async fn get_latest_blockhash(&self) -> MagicBlockRpcClientResult<Hash> {
         let mut cached = self.cache.blockhash.lock().await;
         if let Some(blockhash) = Self::fresh_cached_blockhash(&cached) {
             return Ok(blockhash);
@@ -418,15 +384,11 @@ impl MagicblockRpcClient {
             .client
             .send(RpcRequest::GetLatestBlockhash, json!([self.commitment()]))
             .await
-            .map_err(|e| {
-                MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e))
-            })?;
+            .map_err(|e| MagicBlockRpcClientError::GetLatestBlockhash(Box::new(e)))?;
         let blockhash = resp.value.blockhash.parse().map_err(|_| {
             MagicBlockRpcClientError::GetLatestBlockhash(Box::new(
                 RpcClientError::new_with_request(
-                    RpcClientErrorKind::RpcError(RpcError::ParseError(
-                        "Hash".to_string(),
-                    )),
+                    RpcClientErrorKind::RpcError(RpcError::ParseError("Hash".to_string())),
                     RpcRequest::GetLatestBlockhash,
                 ),
             ))
@@ -487,21 +449,15 @@ impl MagicblockRpcClient {
             })
     }
 
-    fn cache_blockhash(
-        cached: &mut BlockhashCache,
-        blockhash: CachedBlockhash,
-    ) {
+    fn cache_blockhash(cached: &mut BlockhashCache, blockhash: CachedBlockhash) {
         cached.latest = Some(blockhash);
         cached.recent.insert(blockhash.blockhash, blockhash);
-        cached.recent.retain(|_, value| {
-            value.fetched_at.elapsed() < DEFAULT_MAX_TIME_TO_PROCESSED
-        });
+        cached
+            .recent
+            .retain(|_, value| value.fetched_at.elapsed() < DEFAULT_MAX_TIME_TO_PROCESSED);
     }
 
-    async fn cached_blockhash_metadata(
-        &self,
-        blockhash: &Hash,
-    ) -> Option<CachedBlockhash> {
+    async fn cached_blockhash_metadata(&self, blockhash: &Hash) -> Option<CachedBlockhash> {
         let cached = self.cache.blockhash.lock().await;
         cached.recent.get(blockhash).copied()
     }
@@ -521,10 +477,7 @@ impl MagicblockRpcClient {
 
     fn cache_slot(cached: &mut Option<CachedSlot>, slot: Slot) {
         if cached.as_ref().is_none_or(|value| slot >= value.slot) {
-            *cached = Some(CachedSlot {
-                slot,
-                fetched_at: Instant::now(),
-            });
+            *cached = Some(CachedSlot { slot, fetched_at: Instant::now() });
         }
     }
 
@@ -541,10 +494,7 @@ impl MagicblockRpcClient {
         }
     }
 
-    pub async fn get_account(
-        &self,
-        pubkey: &Pubkey,
-    ) -> MagicBlockRpcClientResult<Option<Account>> {
+    pub async fn get_account(&self, pubkey: &Pubkey) -> MagicBlockRpcClientResult<Option<Account>> {
         let err = match self.client.get_account(pubkey).await {
             Ok(acc) => return Ok(Some(acc)),
             Err(err) => match err.kind() {
@@ -566,12 +516,8 @@ impl MagicblockRpcClient {
         pubkeys: &[Pubkey],
         max_per_fetch: Option<usize>,
     ) -> MagicBlockRpcClientResult<Vec<Option<Account>>> {
-        self.get_multiple_accounts_with_commitment(
-            pubkeys,
-            self.commitment(),
-            max_per_fetch,
-        )
-        .await
+        self.get_multiple_accounts_with_commitment(pubkeys, self.commitment(), max_per_fetch)
+            .await
     }
 
     pub async fn get_multiple_accounts_with_commitment(
@@ -625,10 +571,8 @@ impl MagicblockRpcClient {
         let acc = self.get_account(pubkey).await?;
         let Some(acc) = acc else { return Ok(None) };
 
-        let table =
-            AddressLookupTable::deserialize(&acc.data).map_err(|err| {
-                MagicBlockRpcClientError::LookupTableDeserialize(err)
-            })?;
+        let table = AddressLookupTable::deserialize(&acc.data)
+            .map_err(MagicBlockRpcClientError::LookupTableDeserialize)?;
         Ok(Some(table.meta))
     }
 
@@ -639,10 +583,8 @@ impl MagicblockRpcClient {
         let acc = self.get_account(pubkey).await?;
         let Some(acc) = acc else { return Ok(None) };
 
-        let table =
-            AddressLookupTable::deserialize(&acc.data).map_err(|err| {
-                MagicBlockRpcClientError::LookupTableDeserialize(err)
-            })?;
+        let table = AddressLookupTable::deserialize(&acc.data)
+            .map_err(MagicBlockRpcClientError::LookupTableDeserialize)?;
         Ok(Some(table.addresses.to_vec()))
     }
 
@@ -674,13 +616,9 @@ impl MagicblockRpcClient {
         self.wait_for_higher_slot(slot).await
     }
 
-    pub async fn wait_for_higher_slot(
-        &self,
-        slot: Slot,
-    ) -> MagicBlockRpcClientResult<Slot> {
+    pub async fn wait_for_higher_slot(&self, slot: Slot) -> MagicBlockRpcClientResult<Slot> {
         let higher_slot = loop {
-            let next_slot = if let Some(next_slot) = self.observed_chain_slot()
-            {
+            let next_slot = if let Some(next_slot) = self.observed_chain_slot() {
                 next_slot
             } else {
                 self.get_cached_slot().await?
@@ -710,9 +648,7 @@ impl MagicblockRpcClient {
             .client
             .send_transaction_with_config(tx, SEND_TRANSACTION_CONFIG)
             .await
-            .map_err(|e| {
-                MagicBlockRpcClientError::SendTransaction(Box::new(e))
-            })?;
+            .map_err(|e| MagicBlockRpcClientError::SendTransaction(Box::new(e)))?;
 
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,
@@ -730,9 +666,7 @@ impl MagicblockRpcClient {
         };
 
         // 1. Wait for processed status
-        let processed_status = if let Some(wait_for_processed_level) =
-            wait_for_processed_level
-        {
+        let processed_status = if let Some(wait_for_processed_level) = wait_for_processed_level {
             let processed_status = self
                 .wait_for_processed_status(
                     &sig,
@@ -744,9 +678,7 @@ impl MagicblockRpcClient {
                 .await?;
 
             if let Err(err) = processed_status {
-                return Err(MagicBlockRpcClientError::SentTransactionError(
-                    err, sig,
-                ));
+                return Err(MagicBlockRpcClientError::SentTransactionError(err, sig));
             }
 
             Some(processed_status)
@@ -755,9 +687,7 @@ impl MagicblockRpcClient {
         };
 
         // 2. Wait for confirmed status if configured
-        let confirmed_status = if let Some(wait_for_commitment_level) =
-            wait_for_commitment_level
-        {
+        let confirmed_status = if let Some(wait_for_commitment_level) = wait_for_commitment_level {
             Some(
                 self.wait_for_confirmed_status(
                     &sig,
@@ -794,8 +724,7 @@ impl MagicblockRpcClient {
         check_interval: &Option<Duration>,
         _blockhash_valid_timeout: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
-        let check_interval =
-            check_interval.unwrap_or_else(|| Duration::from_millis(200));
+        let check_interval = check_interval.unwrap_or_else(|| Duration::from_millis(200));
         if let Some(status) = Box::pin(self.confirmer.wait_for_status(
             signature,
             CommitmentConfig::processed(),
@@ -811,14 +740,10 @@ impl MagicblockRpcClient {
             self.cached_blockhash_metadata(recent_blockhash).await,
             self.observed_chain_slot(),
         ) {
-            (Some(blockhash), Some(slot))
-                if slot <= blockhash.last_valid_block_height =>
-            {
+            (Some(blockhash), Some(slot)) if slot <= blockhash.last_valid_block_height => {
                 "timed out while blockhash was still within observed slot window"
             }
-            (Some(_), Some(_)) => {
-                "timed out waiting for processed signature status"
-            }
+            (Some(_), Some(_)) => "timed out waiting for processed signature status",
             _ => "timed out waiting for processed signature status",
         };
 
@@ -837,8 +762,7 @@ impl MagicblockRpcClient {
         timeout: &Duration,
         check_interval: &Option<Duration>,
     ) -> MagicBlockRpcClientResult<TransactionResult<()>> {
-        let check_interval =
-            check_interval.unwrap_or_else(|| Duration::from_millis(200));
+        let check_interval = check_interval.unwrap_or_else(|| Duration::from_millis(200));
 
         if let Some(status) = Box::pin(self.confirmer.wait_for_status(
             signature,
@@ -863,8 +787,7 @@ impl MagicblockRpcClient {
         &self,
         signature: &Signature,
         config: Option<RpcTransactionConfig>,
-    ) -> MagicBlockRpcClientResult<EncodedConfirmedTransactionWithStatusMeta>
-    {
+    ) -> MagicBlockRpcClientResult<EncodedConfirmedTransactionWithStatusMeta> {
         let config = config.unwrap_or_else(|| RpcTransactionConfig {
             commitment: Some(self.commitment()),
             ..Default::default()
@@ -890,15 +813,8 @@ impl MagicblockRpcClient {
         Ok(Self::get_logs_from_transaction(&tx))
     }
 
-    pub fn get_cus_from_transaction(
-        tx: &EncodedConfirmedTransactionWithStatusMeta,
-    ) -> Option<u64> {
-        tx.transaction
-            .meta
-            .as_ref()?
-            .compute_units_consumed
-            .clone()
-            .into()
+    pub fn get_cus_from_transaction(tx: &EncodedConfirmedTransactionWithStatusMeta) -> Option<u64> {
+        tx.transaction.meta.as_ref()?.compute_units_consumed.clone().into()
     }
 
     pub async fn get_transaction_cus(

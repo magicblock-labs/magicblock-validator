@@ -16,12 +16,11 @@ use crate::utils::account_actions::set_account_mode;
 
 /// Closes an ephemeral account, refunding rent to the sponsor.
 pub(crate) fn process_close_ephemeral_account(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &InvokeContext<'_, '_>,
+    transaction_context: &TransactionContext<'_>,
 ) -> Result<(), InstructionError> {
     let caller_program_id = validate_common(invoke_context)?;
-    let ephemeral =
-        validate_existing_ephemeral(transaction_context, &caller_program_id)?;
+    let ephemeral = validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
     let data_len = get_ephemeral_data_len(&ephemeral)?;
     let refund = ephemeral::rent_for(data_len)?;

@@ -3,25 +3,19 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::PendingTransaction,
+    magic_scheduled_base_intent::ScheduledIntentBundle, outbox::PendingTransaction,
 };
 use solana_keypair::Keypair;
 use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult, IntentExecutor,
+        IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::utils::{
-            requires_uniqueness_nonce, resolve_pending_signature,
-        },
-        utils::{
-            build_commit_finalize_tasks, execute_single_stage_flow,
-            report_and_close_intent,
-        },
+        strategy_executor::utils::{requires_uniqueness_nonce, resolve_pending_signature},
+        utils::{build_commit_finalize_tasks, execute_single_stage_flow, report_and_close_intent},
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
@@ -77,11 +71,8 @@ where
         intent_bundle: ScheduledIntentBundle,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let succeeded = resolve_pending_signature(
-            &self.ctx.intent_client,
-            &self.pending_transaction,
-        )
-        .await?;
+        let succeeded =
+            resolve_pending_signature(&self.ctx.intent_client, &self.pending_transaction).await?;
         match succeeded {
             // Intent was already executed on a previous run - report it so
             // the outbox isn't left pending and rediscovered again.
@@ -91,17 +82,12 @@ where
             false => {
                 // It we're here so previous run determined this should be single stage
                 let (commit_tasks, finalize_tasks) =
-                    build_commit_finalize_tasks(
-                        &intent_bundle,
-                        &self.ctx.task_info_fetcher,
-                    )
-                    .await?;
+                    build_commit_finalize_tasks(&intent_bundle, &self.ctx.task_info_fetcher)
+                        .await?;
 
-                let single_stage_tasks =
-                    [commit_tasks, finalize_tasks].concat();
-                let uniqueness_nonce =
-                    requires_uniqueness_nonce(&single_stage_tasks)
-                        .then_some(intent_bundle.intent_id);
+                let single_stage_tasks = [commit_tasks, finalize_tasks].concat();
+                let uniqueness_nonce = requires_uniqueness_nonce(&single_stage_tasks)
+                    .then_some(intent_bundle.intent_id);
                 let transaction_strategy = TaskStrategist::build_strategy(
                     single_stage_tasks,
                     &self.authority.pubkey(),
@@ -141,8 +127,7 @@ where
         let undelegated_pubkeys = base_intent.get_undelegated_pubkeys();
 
         let mut execution_report = IntentExecutionReport::default();
-        let result =
-            self.execute_inner(base_intent, &mut execution_report).await;
+        let result = self.execute_inner(base_intent, &mut execution_report).await;
         let result = report_and_close_intent(
             result,
             meta,
@@ -153,16 +138,12 @@ where
         if !pubkeys.is_empty() {
             if result.is_err() {
                 // We can't know what landed on chain, resync everything
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             } else if !undelegated_pubkeys.is_empty() {
                 // Only undelegated accounts' nonces become stale. Keep the
                 // rest cached: a chain re-fetch can race the just-landed
                 // finalize and reuse a nonce (buffer PDA collision).
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&undelegated_pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&undelegated_pubkeys));
             }
         }
 
@@ -170,9 +151,7 @@ where
         let intent_client = self.ctx.intent_client.clone();
         let result = result.inspect(|output| {
             let output_copy = *output;
-            tokio::spawn(async move {
-                intent_client.intent_metrics(output_copy).await
-            });
+            tokio::spawn(async move { intent_client.intent_metrics(output_copy).await });
         });
 
         let close_buffers = result.is_ok();
@@ -182,8 +161,7 @@ where
             patched_errors: execution_report.patched_errors,
             callbacks_report: execution_report.callbacks_report,
             #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: execution_report
-                .successful_transaction_strategies,
+            successful_transaction_strategies: execution_report.successful_transaction_strategies,
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,

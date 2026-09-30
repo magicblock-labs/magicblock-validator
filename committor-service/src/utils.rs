@@ -1,8 +1,7 @@
 // https://solana.com/docs/core/transactions#transaction-size
 
 use magicblock_committor_program::{
-    consts::MAX_INSTRUCTION_DATA_SIZE,
-    instruction::IX_WRITE_SIZE_WITHOUT_CHUNKS,
+    consts::MAX_INSTRUCTION_DATA_SIZE, instruction::IX_WRITE_SIZE_WITHOUT_CHUNKS,
 };
 use solana_packet::PACKET_DATA_SIZE;
 use wincode::{SchemaWrite, config::DefaultConfig};
@@ -17,7 +16,7 @@ pub(crate) const MAX_WRITE_CHUNK_SIZE: u16 = MAX_INSTRUCTION_DATA_SIZE
 /// Maximum serialized transaction size that can be sent over the wire.
 pub(crate) const MAX_TRANSACTION_WIRE_SIZE: usize = PACKET_DATA_SIZE;
 
-pub fn serialized_transaction_size<T>(transaction: &T) -> usize
+pub(crate) fn serialized_transaction_size<T>(transaction: &T) -> usize
 where
     T: SchemaWrite<DefaultConfig, Src = T> + ?Sized,
 {

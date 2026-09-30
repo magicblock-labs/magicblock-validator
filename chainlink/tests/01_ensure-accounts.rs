@@ -1,9 +1,10 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use assert_matches::assert_matches;
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
-    AccountFetchEntrypoint, assert_cloned_as_delegated,
-    assert_cloned_as_empty_placeholder, assert_cloned_as_undelegated,
-    assert_not_cloned, assert_not_subscribed,
+    AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_empty_placeholder,
+    assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
     assert_subscribed_without_delegation_record,
     testing::{context::TestContext, deleg::add_delegation_record_for},
 };
@@ -34,24 +35,15 @@ async fn resident_accounts_reconcile_by_mode(ctx: &TestContext) {
     let accounts = [
         (
             pubkeys[0],
-            AccountBuilder::default()
-                .lamports(1)
-                .mode(AccountMode::Delegated)
-                .build(),
+            AccountBuilder::default().lamports(1).mode(AccountMode::Delegated).build(),
         ),
         (
             pubkeys[1],
-            AccountBuilder::default()
-                .lamports(1)
-                .mode(AccountMode::Magic)
-                .build(),
+            AccountBuilder::default().lamports(1).mode(AccountMode::Magic).build(),
         ),
         (
             pubkeys[2],
-            AccountBuilder::default()
-                .lamports(1)
-                .mode(AccountMode::ReadOnly)
-                .build(),
+            AccountBuilder::default().lamports(1).mode(AccountMode::ReadOnly).build(),
         ),
         (
             pubkeys[3],
@@ -59,9 +51,7 @@ async fn resident_accounts_reconcile_by_mode(ctx: &TestContext) {
         ),
         (
             pubkeys[4],
-            AccountBuilder::default()
-                .mode(AccountMode::Transient)
-                .build(),
+            AccountBuilder::default().mode(AccountMode::Transient).build(),
         ),
     ];
     ctx.bank.accounts().store(&accounts).unwrap();
@@ -83,10 +73,7 @@ async fn resident_accounts_reconcile_by_mode(ctx: &TestContext) {
     let transient = pubkeys[4];
     let claims = ctx
         .chainlink
-        .ensure_accounts(
-            &[transient],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[transient], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
     assert_eq!(claims, 1);
@@ -106,10 +93,7 @@ async fn write_non_existing_account(ctx: &TestContext) {
     let pubkey = Pubkey::new_unique();
     let pubkeys = [pubkey];
     let claims = chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -138,10 +122,7 @@ async fn existing_account_undelegated(ctx: &TestContext) {
 
     let pubkeys = [pubkey];
     chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -168,10 +149,7 @@ async fn existing_account_missing_delegation_record(ctx: &TestContext) {
 
     let pubkeys = [pubkey];
     chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -210,10 +188,7 @@ async fn write_existing_account_valid_delegation_record(ctx: &TestContext) {
 
     let pubkeys = [pubkey];
     chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -221,10 +196,7 @@ async fn write_existing_account_valid_delegation_record(ctx: &TestContext) {
     assert_cloned_as_delegated!(bank, &[pubkey], CURRENT_SLOT, owner);
     assert_not_cloned!(bank, &[deleg_record_pubkey]);
 
-    assert_not_subscribed!(
-        chainlink,
-        &[&deleg_record_pubkey, &validator_pubkey]
-    );
+    assert_not_subscribed!(chainlink, &[&deleg_record_pubkey, &validator_pubkey]);
 }
 
 // -----------------
@@ -244,15 +216,11 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
 
     let owner = Pubkey::new_unique();
     let authority = Pubkey::new_unique();
-    let deleg_record_pubkey =
-        add_delegation_record_for(rpc_client, pubkey, authority, owner);
+    let deleg_record_pubkey = add_delegation_record_for(rpc_client, pubkey, authority, owner);
 
     let pubkeys = [pubkey];
     chainlink
-        .ensure_accounts(
-            &pubkeys,
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&pubkeys, AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -286,8 +254,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
             ..Default::default()
         },
     );
-    let deleg_record_pubkey =
-        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
@@ -298,10 +265,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
     );
 
     let res = chainlink
-        .ensure_accounts(
-            &[pubkey],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await;
 
     assert_matches!(res, Err(_));

@@ -5,10 +5,7 @@ use errors::ClonerResult;
 use keeper::error::KeeperError;
 use magicblock_magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
-    args::{
-        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
-        UndelegateTypeArgs,
-    },
+    args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
     instruction::MagicBlockInstruction,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
@@ -32,14 +29,8 @@ pub(crate) struct DelegationActions {
 
 impl DelegationActions {
     /// Returns a provenance-bearing bundle, or `None` when there are no actions.
-    pub(crate) fn new(
-        source_program: Pubkey,
-        actions: Vec<Instruction>,
-    ) -> Option<Self> {
-        (!actions.is_empty()).then_some(Self {
-            source_program,
-            actions,
-        })
+    pub(crate) fn new(source_program: Pubkey, actions: Vec<Instruction>) -> Option<Self> {
+        (!actions.is_empty()).then_some(Self { source_program, actions })
     }
 
     /// Program that owned the delegated account at the matched base-layer slot.
@@ -53,18 +44,12 @@ impl DelegationActions {
     }
 
     /// Yields non-target program and account dependencies with their writability.
-    pub(crate) fn dependencies(
-        &self,
-        target: Pubkey,
-    ) -> impl Iterator<Item = (Pubkey, bool)> + '_ {
+    pub(crate) fn dependencies(&self, target: Pubkey) -> impl Iterator<Item = (Pubkey, bool)> + '_ {
         self.actions
             .iter()
             .flat_map(|ix| {
-                iter::once((ix.program_id, false)).chain(
-                    ix.accounts
-                        .iter()
-                        .map(|meta| (meta.pubkey, meta.is_writable)),
-                )
+                iter::once((ix.program_id, false))
+                    .chain(ix.accounts.iter().map(|meta| (meta.pubkey, meta.is_writable)))
             })
             .filter(move |(pubkey, _)| *pubkey != target)
     }
@@ -131,9 +116,8 @@ pub struct AccountCloneRequest {
 
 impl AccountCloneRequest {
     pub(crate) fn source_slots(&self) -> CloneSourceSlots {
-        self.source_slots.unwrap_or_else(|| {
-            CloneSourceSlots::single(self.account.read().slot())
-        })
+        self.source_slots
+            .unwrap_or_else(|| CloneSourceSlots::single(self.account.read().slot()))
     }
 }
 
@@ -148,17 +132,11 @@ pub struct CloneSourceSlots {
 
 impl CloneSourceSlots {
     pub fn single(slot: u64) -> Self {
-        Self {
-            data: slot,
-            view: slot,
-        }
+        Self { data: slot, view: slot }
     }
 
     pub(crate) fn projected(ata: u64, eata: u64) -> Self {
-        Self {
-            data: ata,
-            view: ata.max(eata),
-        }
+        Self { data: ata, view: ata.max(eata) }
     }
 }
 
@@ -212,28 +190,19 @@ pub(crate) async fn clone_account(
     }
     let actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
-        ClonePostDelegationMode::ExecuteActions(actions) => {
-            Some(actions.into_post_finalize())
-        }
-        ClonePostDelegationMode::RescueUndelegate(source_program) => {
-            Some(PostFinalize {
-                source_program,
-                actions: vec![undelegation_action(engine, request.pubkey)],
-            })
-        }
+        ClonePostDelegationMode::ExecuteActions(actions) => Some(actions.into_post_finalize()),
+        ClonePostDelegationMode::RescueUndelegate(source_program) => Some(PostFinalize {
+            source_program,
+            actions: vec![undelegation_action(engine, request.pubkey)],
+        }),
     };
     let account = request.account;
     accessor.materialize(account, actions).await.map_err(|err| {
-        errors::ClonerError::FailedToCloneRegularAccount(
-            request.pubkey,
-            Box::new(err.into()),
-        )
+        errors::ClonerError::FailedToCloneRegularAccount(request.pubkey, Box::new(err.into()))
     })
 }
 
-pub(crate) fn resolve_program(
-    program: LoadedProgram,
-) -> Option<AccountCloneRequest> {
+pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequest> {
     let program_id = program.program_id;
     if matches!(program.loader_status, LoaderV4Status::Retracted) {
         debug!(%program_id, "Program is retracted on chain");
@@ -242,9 +211,7 @@ pub(crate) fn resolve_program(
 
     let owner = match program.loader {
         RemoteProgramLoader::V1 => LOADER_V1,
-        RemoteProgramLoader::V2
-        | RemoteProgramLoader::V3
-        | RemoteProgramLoader::V4 => LOADER_V4,
+        RemoteProgramLoader::V2 | RemoteProgramLoader::V3 | RemoteProgramLoader::V4 => LOADER_V4,
     };
     let account = AccountBuilder::default()
         .lamports(program.lamports())
@@ -271,18 +238,10 @@ pub(crate) async fn clone_program(
     accessor
         .materialize(request.account, None)
         .await
-        .map_err(|err| {
-            errors::ClonerError::FailedToCloneProgram(
-                program_id,
-                Box::new(err.into()),
-            )
-        })
+        .map_err(|err| errors::ClonerError::FailedToCloneProgram(program_id, Box::new(err.into())))
 }
 
-pub(crate) async fn evict_account(
-    engine: &Engine,
-    pubkey: Pubkey,
-) -> ClonerResult<()> {
+pub(crate) async fn evict_account(engine: &Engine, pubkey: Pubkey) -> ClonerResult<()> {
     let Some(accessor) = claim_account_eviction(engine, pubkey).await? else {
         return Ok(());
     };
@@ -293,9 +252,10 @@ pub(crate) async fn delete_claimed_account(
     accessor: AccountAccessor<'_>,
     pubkey: Pubkey,
 ) -> ClonerResult<()> {
-    accessor.delete().await.map_err(|err| {
-        errors::ClonerError::FailedToEvictAccount(pubkey, Box::new(err.into()))
-    })
+    accessor
+        .delete()
+        .await
+        .map_err(|err| errors::ClonerError::FailedToEvictAccount(pubkey, Box::new(err.into())))
 }
 
 /// Claims an account displaced from Engine recency, unless a later completion
@@ -345,9 +305,7 @@ mod tests {
             .await
             .unwrap()
             .materialize(
-                AccountBuilder::default()
-                    .lamports(1_000_000)
-                    .mode(AccountMode::ReadOnly),
+                AccountBuilder::default().lamports(1_000_000).mode(AccountMode::ReadOnly),
                 None,
             )
             .await
@@ -371,9 +329,7 @@ mod tests {
             .await
             .unwrap()
             .materialize(
-                AccountBuilder::default()
-                    .lamports(1_000_000)
-                    .mode(AccountMode::Magic),
+                AccountBuilder::default().lamports(1_000_000).mode(AccountMode::Magic),
                 None,
             )
             .await

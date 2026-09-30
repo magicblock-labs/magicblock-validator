@@ -49,14 +49,11 @@ pub struct ChainRpcClientImpl {
 
 impl ChainRpcClientImpl {
     pub fn new(rpc_client: RpcClient) -> Self {
-        Self {
-            rpc_client: Arc::new(rpc_client),
-        }
+        Self { rpc_client: Arc::new(rpc_client) }
     }
 
     pub fn new_from_url(rpc_url: &str, commitment: CommitmentConfig) -> Self {
-        let client =
-            RpcClient::new_with_commitment(rpc_url.to_string(), commitment);
+        let client = RpcClient::new_with_commitment(rpc_url.to_string(), commitment);
         Self::new(client)
     }
 }
@@ -76,10 +73,7 @@ impl ChainRpcClient for ChainRpcClientImpl {
         pubkey: &Pubkey,
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Option<Account>> {
-        let resp = self
-            .rpc_client
-            .get_ui_account_with_config(pubkey, config)
-            .await?;
+        let resp = self.rpc_client.get_ui_account_with_config(pubkey, config).await?;
         Ok(Response {
             context: resp.context,
             value: resp.value.and_then(|ui| ui.to_account()),
@@ -90,17 +84,10 @@ impl ChainRpcClient for ChainRpcClientImpl {
         pubkeys: &[Pubkey],
         config: RpcAccountInfoConfig,
     ) -> RpcResult<Vec<Option<Account>>> {
-        let resp = self
-            .rpc_client
-            .get_multiple_ui_accounts_with_config(pubkeys, config)
-            .await?;
+        let resp = self.rpc_client.get_multiple_ui_accounts_with_config(pubkeys, config).await?;
         Ok(Response {
             context: resp.context,
-            value: resp
-                .value
-                .into_iter()
-                .map(|opt| opt.and_then(|ui| ui.to_account()))
-                .collect(),
+            value: resp.value.into_iter().map(|opt| opt.and_then(|ui| ui.to_account())).collect(),
         })
     }
 
@@ -119,12 +106,11 @@ impl ChainRpcClient for ChainRpcClientImpl {
                         "failed to decode program account {pubkey} data"
                     ))
                 })?;
-                let owner =
-                    Pubkey::from_str(&account.owner).map_err(|err| {
-                        client_error::ErrorKind::Custom(format!(
+                let owner = Pubkey::from_str(&account.owner).map_err(|err| {
+                    client_error::ErrorKind::Custom(format!(
                         "failed to decode program account {pubkey} owner: {err}"
                     ))
-                    })?;
+                })?;
                 Ok((
                     pubkey,
                     Account {

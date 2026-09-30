@@ -4,9 +4,7 @@ use magicblock_committor_program::{
     instruction_builder::{
         close_buffer::{CreateCloseIxArgs, create_close_ix},
         init_buffer::{CreateInitIxArgs, create_init_ix},
-        realloc_buffer::{
-            CreateReallocBufferIxArgs, create_realloc_buffer_ixs,
-        },
+        realloc_buffer::{CreateReallocBufferIxArgs, create_realloc_buffer_ixs},
         write_buffer::{CreateWriteIxArgs, create_write_ix},
     },
     pdas,
@@ -34,15 +32,10 @@ pub struct PreparationTask<'a> {
 impl<'a> PreparationTask<'a> {
     pub fn from_commit(task: &'a mut CommitTask) -> Option<Self> {
         match &mut task.delivery_details {
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
-                None
-            }
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
             CommitDelivery::StateInBuffer { prepared } => {
                 let buffer_data = task.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(
-                    buffer_data.len(),
-                    MAX_WRITE_CHUNK_SIZE,
-                );
+                let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
                 Some(Self {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
@@ -51,17 +44,13 @@ impl<'a> PreparationTask<'a> {
                     prepared,
                 })
             }
-            CommitDelivery::DiffInBuffer {
-                base_account,
-                prepared,
-            } => {
+            CommitDelivery::DiffInBuffer { base_account, prepared } => {
                 let diff = compute_diff(
                     base_account.data.as_ref(),
                     &task.committed_account.account.data,
                 )
                 .to_vec();
-                let chunks =
-                    Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
+                let chunks = Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
                 Some(Self {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
@@ -73,19 +62,12 @@ impl<'a> PreparationTask<'a> {
         }
     }
 
-    pub fn from_commit_finalize(
-        task: &'a mut CommitFinalizeTask,
-    ) -> Option<Self> {
+    pub fn from_commit_finalize(task: &'a mut CommitFinalizeTask) -> Option<Self> {
         match &mut task.delivery {
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
-                None
-            }
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
             CommitDelivery::StateInBuffer { prepared } => {
                 let buffer_data = task.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(
-                    buffer_data.len(),
-                    MAX_WRITE_CHUNK_SIZE,
-                );
+                let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
                 Some(Self {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
@@ -94,17 +76,13 @@ impl<'a> PreparationTask<'a> {
                     prepared,
                 })
             }
-            CommitDelivery::DiffInBuffer {
-                base_account,
-                prepared,
-            } => {
+            CommitDelivery::DiffInBuffer { base_account, prepared } => {
                 let diff = compute_diff(
                     base_account.data.as_ref(),
                     &task.committed_account.account.data,
                 )
                 .to_vec();
-                let chunks =
-                    Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
+                let chunks = Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
                 Some(Self {
                     commit_id: task.commit_id,
                     pubkey: task.committed_account.pubkey,
@@ -118,13 +96,7 @@ impl<'a> PreparationTask<'a> {
 
     /// Returns initialization [`Instruction`]
     pub fn init_instruction(&self, authority: &Pubkey) -> Instruction {
-        // // SAFETY: as object_length internally uses only already allocated or static buffers,
-        // // and we don't use any fs writers, so the only error that may occur here is of kind
-        // // OutOfMemory or WriteZero. This is impossible due to:
-        // // Chunks::new panics if its size exceeds MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE or 10_240
-        // // https://github.com/near/borsh-rs/blob/f1b75a6b50740bfb6231b7d0b1bd93ea58ca5452/borsh/src/ser/helpers.rs#L59
-        let chunks_account_size =
-            borsh::object_length(&self.chunks).unwrap() as u64;
+        let chunks_account_size = self.chunks.serialized_size() as u64;
         let buffer_account_size = self.buffer_data.len() as u64;
 
         let (instruction, _, _) = create_init_ix(CreateInitIxArgs {
@@ -149,13 +121,12 @@ impl<'a> PreparationTask<'a> {
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let buffer_account_size = self.buffer_data.len() as u64;
-        let realloc_instructions =
-            create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
-                authority: *authority,
-                pubkey: self.pubkey,
-                buffer_account_size,
-                commit_id: self.commit_id,
-            });
+        let realloc_instructions = create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
+            authority: *authority,
+            pubkey: self.pubkey,
+            buffer_account_size,
+            commit_id: self.commit_id,
+        });
 
         realloc_instructions
     }
@@ -169,8 +140,7 @@ impl<'a> PreparationTask<'a> {
     #[allow(clippy::let_and_return)]
     pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let chunks_iter =
-            ChangesetChunks::new(&self.chunks, self.chunks.chunk_size())
-                .iter(&self.buffer_data);
+            ChangesetChunks::new(&self.chunks, self.chunks.chunk_size()).iter(&self.buffer_data);
         let write_instructions = chunks_iter
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {
@@ -235,12 +205,10 @@ impl CleanupTask {
     pub fn from_commit(task: &CommitTask) -> Option<Self> {
         match &task.delivery_details {
             CommitDelivery::StateInBuffer { prepared: true }
-            | CommitDelivery::DiffInBuffer { prepared: true, .. } => {
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                })
-            }
+            | CommitDelivery::DiffInBuffer { prepared: true, .. } => Some(Self {
+                commit_id: task.commit_id,
+                pubkey: task.committed_account.pubkey,
+            }),
             _ => None,
         }
     }
@@ -248,12 +216,10 @@ impl CleanupTask {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
             CommitDelivery::StateInBuffer { prepared: true }
-            | CommitDelivery::DiffInBuffer { prepared: true, .. } => {
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                })
-            }
+            | CommitDelivery::DiffInBuffer { prepared: true, .. } => Some(Self {
+                commit_id: task.commit_id,
+                pubkey: task.committed_account.pubkey,
+            }),
             _ => None,
         }
     }
@@ -338,18 +304,12 @@ mod tests {
         instructions.push(write_instruction);
         instructions.push(TransactionUtils::uniqueness_noop_instruction(42));
 
-        let message = Message::try_compile(
-            &authority.pubkey(),
-            &instructions,
-            &[],
-            Hash::new_unique(),
-        )
-        .expect("compile write transaction");
-        let transaction = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[&authority],
-        )
-        .expect("sign write transaction");
+        let message =
+            Message::try_compile(&authority.pubkey(), &instructions, &[], Hash::new_unique())
+                .expect("compile write transaction");
+        let transaction =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&authority])
+                .expect("sign write transaction");
         let transaction_size = serialized_transaction_size(&transaction);
         info!(transaction_size, "Buffer write transaction size");
         assert!(transaction_size <= MAX_TRANSACTION_WIRE_SIZE);

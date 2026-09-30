@@ -19,13 +19,13 @@ use self::client::Client;
 use crate::ConfigArgs;
 
 #[derive(ClapArgs)]
-pub struct Args {
+pub(crate) struct Args {
     #[command(subcommand)]
     command: Command,
 }
 
 impl Args {
-    pub async fn run(self) -> Result<()> {
+    pub(crate) async fn run(self) -> Result<()> {
         match self.command {
             Command::Register(args) => {
                 let (operator, record) = args.load()?;
@@ -67,22 +67,13 @@ struct RecordArgs {
 
 impl RecordArgs {
     fn load(self) -> Result<(Operator, ErRecord)> {
-        let Self {
-            common,
-            country_code,
-            fqdn,
-        } = self;
+        let Self { common, country_code, fqdn } = self;
         let operator = Operator::new(common.load()?);
         let country = IsoCountryCode::for_alpha2_caseless(&country_code)
-            .with_context(|| {
-                format!("invalid ISO alpha-2 country code {country_code}")
-            })?;
-        let fqdn = url::Url::parse(&fqdn)
-            .with_context(|| format!("invalid FQDN URL {fqdn}"))?;
+            .with_context(|| format!("invalid ISO alpha-2 country code {country_code}"))?;
+        let fqdn = url::Url::parse(&fqdn).with_context(|| format!("invalid FQDN URL {fqdn}"))?;
         let block_time_ms = u16::try_from(operator.block_time.as_millis())
-            .context(
-                "leader block time exceeds the domain program u16 range",
-            )?;
+            .context("leader block time exceeds the domain program u16 range")?;
         let record = ErRecord::V0(RecordV0 {
             identity: operator.signer.pubkey(),
             status: ErStatus::Active,

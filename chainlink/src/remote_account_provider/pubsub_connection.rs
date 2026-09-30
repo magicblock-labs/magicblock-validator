@@ -5,9 +5,7 @@ use async_trait::async_trait;
 use futures_util::stream::BoxStream;
 use solana_account_decoder::UiAccount;
 use solana_pubkey::Pubkey;
-use solana_pubsub_client::nonblocking::pubsub_client::{
-    PubsubClient, PubsubClientResult,
-};
+use solana_pubsub_client::nonblocking::pubsub_client::{PubsubClient, PubsubClientResult};
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::{Response, RpcKeyedAccount},
@@ -17,20 +15,14 @@ use tracing::warn;
 
 use super::errors::RemoteAccountProviderResult;
 
-pub type UnsubscribeFn =
-    Box<dyn FnOnce() -> futures_util::future::BoxFuture<'static, ()> + Send>;
-pub type SubscribeResult = PubsubClientResult<(
-    BoxStream<'static, Response<UiAccount>>,
-    UnsubscribeFn,
-)>;
-pub type ProgramSubscribeResult = PubsubClientResult<(
-    BoxStream<'static, Response<RpcKeyedAccount>>,
-    UnsubscribeFn,
-)>;
+pub type UnsubscribeFn = Box<dyn FnOnce() -> futures_util::future::BoxFuture<'static, ()> + Send>;
+pub type SubscribeResult =
+    PubsubClientResult<(BoxStream<'static, Response<UiAccount>>, UnsubscribeFn)>;
+pub type ProgramSubscribeResult =
+    PubsubClientResult<(BoxStream<'static, Response<RpcKeyedAccount>>, UnsubscribeFn)>;
 
 const MAX_RECONNECT_ATTEMPTS: usize = 5;
-const RECONNECT_ATTEMPT_DELAY: std::time::Duration =
-    std::time::Duration::from_millis(500);
+const RECONNECT_ATTEMPT_DELAY: std::time::Duration = std::time::Duration::from_millis(500);
 
 #[async_trait]
 pub trait PubsubConnection: Send + Sync + 'static {
@@ -62,11 +54,7 @@ impl PubsubConnection for PubsubConnectionImpl {
     async fn new(url: String) -> RemoteAccountProviderResult<Self> {
         let client = Arc::new(PubsubClient::new(&url).await?).into();
         let reconnect_guard = AsyncMutex::new(());
-        Ok(Self {
-            client,
-            url,
-            reconnect_guard,
-        })
+        Ok(Self { client, url, reconnect_guard })
     }
     fn url(&self) -> &str {
         &self.url
@@ -101,8 +89,7 @@ impl PubsubConnection for PubsubConnectionImpl {
     ) -> ProgramSubscribeResult {
         let client = self.client.load();
         let config = Some(config.clone());
-        let (stream, unsub) =
-            client.program_subscribe(program_id, config).await?;
+        let (stream, unsub) = client.program_subscribe(program_id, config).await?;
 
         // SAFETY:
         // the returned stream depends on the used client, which is only ever
@@ -134,10 +121,7 @@ impl PubsubConnection for PubsubConnectionImpl {
             match PubsubClient::new(&self.url).await {
                 Ok(c) => break Arc::new(c),
                 Err(error) => {
-                    warn!(
-                        "failed to reconnect to ws endpoint at {} {error}",
-                        self.url
-                    );
+                    warn!("failed to reconnect to ws endpoint at {} {error}", self.url);
                     if attempt == MAX_RECONNECT_ATTEMPTS {
                         return Err(error);
                     }
@@ -153,7 +137,9 @@ impl PubsubConnection for PubsubConnectionImpl {
 
 #[cfg(test)]
 pub mod mock {
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
+
+    use parking_lot::Mutex;
 
     use super::*;
 
@@ -172,16 +158,16 @@ pub mod mock {
         }
 
         pub fn account_subs(&self) -> Vec<Pubkey> {
-            self.account_subscriptions.lock().unwrap().clone()
+            self.account_subscriptions.lock().clone()
         }
 
         pub fn program_subs(&self) -> Vec<Pubkey> {
-            self.program_subscriptions.lock().unwrap().clone()
+            self.program_subscriptions.lock().clone()
         }
 
         pub fn clear(&self) {
-            self.account_subscriptions.lock().unwrap().clear();
-            self.program_subscriptions.lock().unwrap().clear();
+            self.account_subscriptions.lock().clear();
+            self.program_subscriptions.lock().clear();
         }
     }
 
@@ -208,7 +194,7 @@ pub mod mock {
             pubkey: &Pubkey,
             _config: RpcAccountInfoConfig,
         ) -> SubscribeResult {
-            self.account_subscriptions.lock().unwrap().push(*pubkey);
+            self.account_subscriptions.lock().push(*pubkey);
 
             // Return empty stream with no-op unsubscribe
             let stream = Box::pin(futures_util::stream::empty());
@@ -221,7 +207,7 @@ pub mod mock {
             program_id: &Pubkey,
             _config: RpcProgramAccountsConfig,
         ) -> ProgramSubscribeResult {
-            self.program_subscriptions.lock().unwrap().push(*program_id);
+            self.program_subscriptions.lock().push(*program_id);
 
             // Return empty stream with no-op unsubscribe
             let stream = Box::pin(futures_util::stream::empty());

@@ -1,6 +1,4 @@
-use magicblock_magic_program_api::{
-    pda::CALLBACK_SIGNER, response::MagicResponse,
-};
+use magicblock_magic_program_api::{pda::CALLBACK_SIGNER, response::MagicResponse};
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
@@ -10,12 +8,12 @@ use solana_system_interface::instruction as system_instruction;
 /// Discriminator prefix for the transfer callback instruction.
 /// Checked before borsh parsing since the callback carries bincode-encoded
 /// `MagicResponse` rather than a borsh instruction.
-pub const TRANSFER_CALLBACK_DISCRIMINATOR: &[u8] =
+pub(crate) const TRANSFER_CALLBACK_DISCRIMINATOR: &[u8] =
     &[0xFE, 0xCA, 0xCB, 0x01, 0x00, 0x00, 0x00, 0x00];
 
 /// Custom error code returned when the transfer action intentionally fails,
 /// used to exercise the callback refund path in tests.
-pub const TRANSFER_FAIL_CODE: u32 = 0xFA11;
+pub(crate) const TRANSFER_FAIL_CODE: u32 = 0xFA11;
 
 /// Post-commit action: transfers `amount` lamports from the payer's escrow to
 /// `destination` on Base. If `fail` is set the instruction returns an error
@@ -27,16 +25,14 @@ pub const TRANSFER_FAIL_CODE: u32 = 0xFA11;
 /// 2. []      source program (auto-prepended, validated)
 /// 3. []      escrow authority (auto)
 /// 4. [signer, write] escrow account (ephemeral_balance_pda)
-pub fn process_transfer_action_handler(
-    accounts: &[AccountInfo],
+pub(crate) fn process_transfer_action_handler(
+    accounts: &[AccountInfo<'_>],
     amount: u64,
     fail: bool,
 ) -> ProgramResult {
     msg!("TransferActionHandler: amount={}, fail={}", amount, fail);
 
-    let [destination, system_program, source_program, _, escrow_account] =
-        accounts
-    else {
+    let [destination, system_program, source_program, _, escrow_account] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -57,16 +53,8 @@ pub fn process_transfer_action_handler(
     }
 
     invoke(
-        &system_instruction::transfer(
-            escrow_account.key,
-            destination.key,
-            amount,
-        ),
-        &[
-            escrow_account.clone(),
-            destination.clone(),
-            system_program.clone(),
-        ],
+        &system_instruction::transfer(escrow_account.key, destination.key, amount),
+        &[escrow_account.clone(), destination.clone(), system_program.clone()],
     )
 }
 
@@ -88,14 +76,13 @@ pub fn process_transfer_action_handler(
 /// 1. [write] counter PDA (pre-payment source / refund sender)
 /// 2. [write] payer (refund recipient on failure)
 /// 3. []      system program
-pub fn process_transfer_callback(
-    accounts: &[AccountInfo],
+pub(crate) fn process_transfer_callback(
+    accounts: &[AccountInfo<'_>],
     data: &[u8],
 ) -> ProgramResult {
     msg!("TransferCallback");
 
-    let [callback_signer, counter_pda, payer, _system_program] = accounts
-    else {
+    let [callback_signer, counter_pda, payer, _system_program] = accounts else {
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
@@ -113,8 +100,8 @@ pub fn process_transfer_callback(
         return Err(ProgramError::IncorrectAuthority);
     }
 
-    let response: MagicResponse = bincode::deserialize(data)
-        .map_err(|_| ProgramError::InvalidInstructionData)?;
+    let response: MagicResponse =
+        bincode::deserialize(data).map_err(|_| ProgramError::InvalidInstructionData)?;
 
     msg!(
         "TransferCallback: ok={}, error={}",
@@ -124,10 +111,7 @@ pub fn process_transfer_callback(
 
     if !response.ok() {
         let amount = u64::from_le_bytes(
-            response
-                .data()
-                .try_into()
-                .map_err(|_| ProgramError::InvalidInstructionData)?,
+            response.data().try_into().map_err(|_| ProgramError::InvalidInstructionData)?,
         );
         msg!("TransferCallback: refunding {} lamports to payer", amount);
         **counter_pda.try_borrow_mut_lamports()? -= amount;

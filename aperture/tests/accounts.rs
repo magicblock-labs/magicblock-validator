@@ -1,10 +1,10 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::collections::HashSet;
 
 use json::JsonValueTrait;
 use keeper::testkit::{load_v42_lamports, store_v42};
-use setup::{
-    PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header,
-};
+use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
 use solana_account::{AccountMode, accounts_equal};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::request::TokenAccountsFilter;
@@ -19,11 +19,7 @@ async fn test_get_account_info() {
     // Test for an existing account
     let key = store_v42(&env.engine, 0, AccountMode::Magic);
     let expected = env.engine.get_account(key).expect("stored account");
-    let account = env
-        .rpc
-        .get_account(&key)
-        .await
-        .expect("failed to fetch created account");
+    let account = env.rpc.get_account(&key).await.expect("failed to fetch created account");
     assert!(
         accounts_equal(&account, &expected),
         "created account doesn't match the rpc response"
@@ -71,8 +67,7 @@ async fn test_get_account_info() {
 }
 
 #[tokio::test]
-async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_hit()
- {
+async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_hit() {
     let env = RpcTestEnv::new().await;
     let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
@@ -92,13 +87,9 @@ async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_
 
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
-    let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("getAccountInfo response body should decode"),
-    )
-    .expect("getAccountInfo response body should be valid JSON");
+    let body: json::Value =
+        json::from_str(&response.text().await.expect("getAccountInfo response body should decode"))
+            .expect("getAccountInfo response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
 }
 
@@ -139,9 +130,7 @@ async fn test_get_multiple_accounts() {
         .rpc
         .get_multiple_accounts(&[acc1, missing_pubkey, acc2])
         .await
-        .expect(
-            "rpc request for mixed existing and non-existent accounts failed",
-        );
+        .expect("rpc request for mixed existing and non-existent accounts failed");
     assert_eq!(
         mixed.len(),
         3,
@@ -149,13 +138,8 @@ async fn test_get_multiple_accounts() {
     );
     assert!(
         accounts_equal(
-            mixed[0]
-                .as_ref()
-                .expect("existing first account should be returned"),
-            env.engine
-                .get_account(acc1)
-                .as_ref()
-                .expect("stored account")
+            mixed[0].as_ref().expect("existing first account should be returned"),
+            env.engine.get_account(acc1).as_ref().expect("stored account")
         ),
         "first result should match the first requested account"
     );
@@ -165,21 +149,15 @@ async fn test_get_multiple_accounts() {
     );
     assert!(
         accounts_equal(
-            mixed[2]
-                .as_ref()
-                .expect("existing last account should be returned"),
-            env.engine
-                .get_account(acc2)
-                .as_ref()
-                .expect("stored account")
+            mixed[2].as_ref().expect("existing last account should be returned"),
+            env.engine.get_account(acc2).as_ref().expect("stored account")
         ),
         "last result should match the last requested account"
     );
 }
 
 #[tokio::test]
-async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_bank_hits()
- {
+async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_bank_hits() {
     let env = RpcTestEnv::new().await;
     let acc1 = store_v42(&env.engine, 0, AccountMode::Magic);
     let acc2 = store_v42(&env.engine, 0, AccountMode::Magic);
@@ -201,10 +179,7 @@ async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("getMultipleAccounts response body should decode"),
+        &response.text().await.expect("getMultipleAccounts response body should decode"),
     )
     .expect("getMultipleAccounts response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
@@ -241,8 +216,7 @@ async fn test_get_balance() {
 }
 
 #[tokio::test]
-async fn test_get_balance_emits_remote_account_claims_header_zero_for_bank_hit()
-{
+async fn test_get_balance_emits_remote_account_claims_header_zero_for_bank_hit() {
     let env = RpcTestEnv::new().await;
     let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
@@ -262,13 +236,9 @@ async fn test_get_balance_emits_remote_account_claims_header_zero_for_bank_hit()
 
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
-    let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("getBalance response body should decode"),
-    )
-    .expect("getBalance response body should be valid JSON");
+    let body: json::Value =
+        json::from_str(&response.text().await.expect("getBalance response body should decode"))
+            .expect("getBalance response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
 }
 
@@ -291,10 +261,7 @@ async fn test_get_token_account_balance() {
 
     // Test a non-existent account, which should error.
     // This differs from `getBalance` which returns 0 for any pubkey.
-    let nonexistent_result = env
-        .rpc
-        .get_token_account_balance(&Pubkey::new_unique())
-        .await;
+    let nonexistent_result = env.rpc.get_token_account_balance(&Pubkey::new_unique()).await;
     assert!(
         nonexistent_result.is_err(),
         "fetching balance of a non-token account should result in an error"
@@ -302,11 +269,9 @@ async fn test_get_token_account_balance() {
 }
 
 #[tokio::test]
-async fn test_get_token_account_balance_emits_remote_account_claims_header_zero_for_bank_hit()
- {
+async fn test_get_token_account_balance_emits_remote_account_claims_header_zero_for_bank_hit() {
     let env = RpcTestEnv::new().await;
-    let token_account =
-        env.create_token_account(Pubkey::new_unique(), Pubkey::new_unique());
+    let token_account = env.create_token_account(Pubkey::new_unique(), Pubkey::new_unique());
     let client = reqwest::Client::new();
     let request = json::json!({
         "jsonrpc": "2.0",
@@ -335,8 +300,7 @@ async fn test_get_token_account_balance_emits_remote_account_claims_header_zero_
 }
 
 #[tokio::test]
-async fn test_get_delegation_status_emits_remote_account_claims_header_zero_for_bank_hit()
- {
+async fn test_get_delegation_status_emits_remote_account_claims_header_zero_for_bank_hit() {
     let env = RpcTestEnv::new().await;
     let acc = store_v42(&env.engine, 0, AccountMode::Magic);
     let client = reqwest::Client::new();
@@ -357,10 +321,7 @@ async fn test_get_delegation_status_emits_remote_account_claims_header_zero_for_
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("getDelegationStatus response body should decode"),
+        &response.text().await.expect("getDelegationStatus response body should decode"),
     )
     .expect("getDelegationStatus response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
@@ -393,11 +354,7 @@ async fn test_get_program_accounts() {
     }
 
     // Test a program with no accounts
-    let empty_program_accounts = env
-        .rpc
-        .get_program_accounts(&Pubkey::new_unique())
-        .await
-        .unwrap();
+    let empty_program_accounts = env.rpc.get_program_accounts(&Pubkey::new_unique()).await.unwrap();
     assert!(
         empty_program_accounts.is_empty(),
         "should return an empty list for a program with no accounts"
@@ -433,10 +390,7 @@ async fn test_get_token_accounts_by_owner() {
     // Test with a non-existent mint
     let nonexistent = env
         .rpc
-        .get_token_accounts_by_owner(
-            &owner,
-            TokenAccountsFilter::Mint(Pubkey::new_unique()),
-        )
+        .get_token_accounts_by_owner(&owner, TokenAccountsFilter::Mint(Pubkey::new_unique()))
         .await;
     assert!(nonexistent.is_err(), "a missing mint should be rejected");
 }

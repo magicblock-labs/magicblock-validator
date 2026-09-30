@@ -14,7 +14,7 @@ use crate::validator::authority as engine_authority;
 // Assert they don't use the validator either
 // Assert they are not a privileged instruction
 pub(crate) fn validate_cranks_instructions(
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     instructions: &[Instruction],
 ) -> Result<(), InstructionError> {
     for instruction in instructions {

@@ -61,14 +61,10 @@ impl Serialize for Serde32Bytes {
     {
         // 32 bytes will expand to at most 44 base58 characters
         let mut buf = [0u8; 44];
-        let size = bs58::encode(&self.0)
-            .onto(buf.as_mut_slice())
-            .map_err(S::Error::custom)?;
+        let size = bs58::encode(&self.0).onto(buf.as_mut_slice()).map_err(S::Error::custom)?;
         // SAFETY:
         // The `bs58` crate guarantees that its encoded output is valid UTF-8.
-        serializer.serialize_str(unsafe {
-            std::str::from_utf8_unchecked(&buf[..size])
-        })
+        serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buf[..size]) })
     }
 }
 
@@ -84,9 +80,8 @@ impl<'de> Deserialize<'de> for Serde32Bytes {
         impl Visitor<'_> for Serde32BytesVisitor {
             type Value = Serde32Bytes;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter
-                    .write_str("a Base58 string representing a 32-byte array")
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a Base58 string representing a 32-byte array")
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -94,9 +89,8 @@ impl<'de> Deserialize<'de> for Serde32Bytes {
                 E: de::Error,
             {
                 let mut buffer = [0u8; 32];
-                let decoded_len = bs58::decode(value)
-                    .onto(&mut buffer)
-                    .map_err(de::Error::custom)?;
+                let decoded_len =
+                    bs58::decode(value).onto(&mut buffer).map_err(de::Error::custom)?;
                 if decoded_len != 32 {
                     return Err(de::Error::custom(format!(
                         "expected 32 bytes, got {}",
@@ -118,14 +112,10 @@ impl Serialize for SerdeSignature {
     {
         // 64 bytes will expand to at most 88 base58 characters
         let mut buf = [0u8; 88];
-        let size = bs58::encode(&self.0)
-            .onto(buf.as_mut_slice())
-            .expect("bs58 buffer is correctly sized");
+        let size = bs58::encode(&self.0).onto(buf.as_mut_slice()).map_err(S::Error::custom)?;
         // SAFETY:
         // The `bs58` crate guarantees that its encoded output is valid UTF-8.
-        serializer.serialize_str(unsafe {
-            std::str::from_utf8_unchecked(&buf[..size])
-        })
+        serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buf[..size]) })
     }
 }
 
@@ -141,10 +131,8 @@ impl<'de> Deserialize<'de> for SerdeSignature {
         impl Visitor<'_> for SerdeSignatureVisitor {
             type Value = SerdeSignature;
 
-            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-                formatter.write_str(
-                    "a Base58 encoded string representing a 64-byte signature",
-                )
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("a Base58 encoded string representing a 64-byte signature")
             }
 
             fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
@@ -152,9 +140,8 @@ impl<'de> Deserialize<'de> for SerdeSignature {
                 E: de::Error,
             {
                 let mut buffer = [0u8; SIGNATURE_BYTES];
-                let decoded_len = bs58::decode(value)
-                    .onto(&mut buffer)
-                    .map_err(de::Error::custom)?;
+                let decoded_len =
+                    bs58::decode(value).onto(&mut buffer).map_err(de::Error::custom)?;
                 if decoded_len != SIGNATURE_BYTES {
                     return Err(de::Error::custom(format!(
                         "expected {} bytes, got {}",

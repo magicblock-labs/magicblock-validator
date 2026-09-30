@@ -7,9 +7,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_config::{
-    config::LoadableProgram, types::BindAddress, LeaderParams,
-};
+use magicblock_config::{config::LoadableProgram, types::BindAddress, LeaderParams};
 use rand::{thread_rng, Rng};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -19,10 +17,7 @@ use tempfile::TempDir;
 use crate::{
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
-    toml_to_args::{
-        config_to_args, program_ids_from_config, rpc_port_from_config,
-        ProgramLoader,
-    },
+    toml_to_args::{config_to_args, program_ids_from_config, rpc_port_from_config, ProgramLoader},
     workspace_paths::path_relative_to_workspace,
 };
 
@@ -31,16 +26,11 @@ pub fn start_magic_block_validator_with_config(
     log_suffix: &str,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> Option<Child> {
-    let TestRunnerPaths {
-        config_path,
-        root_dir,
-        ..
-    } = test_runner_paths;
+    let TestRunnerPaths { config_path, root_dir, .. } = test_runner_paths;
 
     let rpc_port = rpc_port_from_config(config_path);
     let metrics_port = resolve_port("127.0.0.1".parse().unwrap(), &[rpc_port]);
-    let replication_port =
-        resolve_port("127.0.0.1".parse().unwrap(), &[rpc_port, metrics_port]);
+    let replication_port = resolve_port("127.0.0.1".parse().unwrap(), &[rpc_port, metrics_port]);
     let storage = tempfile::Builder::new()
         .prefix("mbv-integration-")
         .tempdir()
@@ -51,18 +41,16 @@ pub fn start_magic_block_validator_with_config(
     // In CI we ship a prebuilt validator binary as an artifact so we never
     // pay for `cargo build` here. Locally we keep the convenient
     // `cargo build` + `cargo run` flow so source changes are picked up.
-    let prebuilt = std::env::var("MAGICBLOCK_VALIDATOR_BIN")
-        .ok()
-        .filter(|p| {
-            let exists = Path::new(p).is_file();
-            if !exists {
-                eprintln!(
-                    "MAGICBLOCK_VALIDATOR_BIN={} does not exist, falling back to cargo run",
-                    p
-                );
-            }
-            exists
-        });
+    let prebuilt = std::env::var("MAGICBLOCK_VALIDATOR_BIN").ok().filter(|p| {
+        let exists = Path::new(p).is_file();
+        if !exists {
+            eprintln!(
+                "MAGICBLOCK_VALIDATOR_BIN={} does not exist, falling back to cargo run",
+                p
+            );
+        }
+        exists
+    });
 
     let mut command = if let Some(bin) = prebuilt.as_deref() {
         let mut c = process::Command::new(bin);
@@ -78,13 +66,11 @@ pub fn start_magic_block_validator_with_config(
         }
 
         let mut c = process::Command::new("cargo");
-        c.args(["run", "-p", "magicblock-validator", "--"])
-            .arg(config_path);
+        c.args(["run", "-p", "magicblock-validator", "--"]).arg(config_path);
         c
     };
 
-    let rust_log_style =
-        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
+    let rust_log_style = std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .env("RUST_LOG_STYLE", rust_log_style)
         .env("MBV_ENGINE__AUTHORITY__LOCAL", keypair_base58)
@@ -116,7 +102,7 @@ pub fn start_test_validator_with_config(
     program_loader: Option<ProgramLoader>,
     loaded_accounts: &LoadedAccounts,
     log_suffix: &str,
-) -> Option<process::Child> {
+) -> Option<Child> {
     let TestRunnerPaths {
         config_path,
         root_dir,
@@ -172,8 +158,7 @@ pub fn start_test_validator_with_config(
             "non-delegated-cloneable-account4.json".to_string(),
         ),
     ];
-    let resolved_extra_accounts =
-        loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
+    let resolved_extra_accounts = loaded_accounts.extra_accounts(workspace_dir, &accounts_dir);
     let readiness_program_pubkeys = program_ids_from_config(config_path)
         .into_iter()
         .filter_map(|pubkey| {
@@ -226,8 +211,7 @@ pub fn start_test_validator_with_config(
         script.push_str(&format!(" \\\n  {}", arg));
     }
     let mut command = process::Command::new("solana-test-validator");
-    let rust_log_style =
-        std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
+    let rust_log_style = std::env::var("RUST_LOG_STYLE").unwrap_or(log_suffix.to_string());
     command
         .args(args)
         .env("RUST_LOG", "solana=warn")
@@ -256,10 +240,7 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
             return Some(validator);
         }
 
-        if let Some(status) = validator
-            .try_wait()
-            .expect("Failed to poll validator process")
-        {
+        if let Some(status) = validator.try_wait().expect("Failed to poll validator process") {
             eprintln!(
                 "Validator RPC on port {} never listened; process exited early with {}",
                 port, status
@@ -297,25 +278,16 @@ fn wait_for_required_accounts(
         CommitmentConfig::processed(),
     );
     let mut last_rpc_error = None;
-    let pubkeys = program_pubkeys
-        .iter()
-        .chain(account_pubkeys)
-        .copied()
-        .collect::<Vec<_>>();
+    let pubkeys = program_pubkeys.iter().chain(account_pubkeys).copied().collect::<Vec<_>>();
 
     for _ in 0..max_retries {
         match rpc_client.get_multiple_accounts(&pubkeys) {
             Ok(accounts) => {
                 last_rpc_error = None;
-                let programs_ready =
-                    accounts[..program_pubkeys.len()].iter().all(|account| {
-                        account
-                            .as_ref()
-                            .is_some_and(|account| account.executable)
-                    });
-                let accounts_ready = accounts[program_pubkeys.len()..]
+                let programs_ready = accounts[..program_pubkeys.len()]
                     .iter()
-                    .all(Option::is_some);
+                    .all(|account| account.as_ref().is_some_and(|account| account.executable));
+                let accounts_ready = accounts[program_pubkeys.len()..].iter().all(Option::is_some);
                 if programs_ready && accounts_ready {
                     return true;
                 }
@@ -323,10 +295,7 @@ fn wait_for_required_accounts(
             Err(err) => last_rpc_error = Some(err.to_string()),
         }
 
-        if let Some(status) = validator
-            .try_wait()
-            .expect("Failed to poll validator process")
-        {
+        if let Some(status) = validator.try_wait().expect("Failed to poll validator process") {
             eprintln!(
                 "Validator RPC on port {} listened, but required accounts never became ready; process exited with {}; last RPC error: {:?}",
                 port, status, last_rpc_error
@@ -406,7 +375,7 @@ fn resolve_port(bind_ip: IpAddr, exclude: &[u16]) -> u16 {
 pub fn start_magicblock_validator_with_config_struct(
     config: LeaderParams,
     loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>, u16) {
+) -> (TempDir, Option<Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
     let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
     let replication_port = resolve_port(
@@ -415,8 +384,7 @@ pub fn start_magicblock_validator_with_config_struct(
     );
 
     let mut config = config.clone();
-    config.aperture.listen =
-        BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
+    config.aperture.listen = BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
     config.engine.replication.bind_address = BindAddress(SocketAddr::new(
@@ -432,11 +400,7 @@ pub fn start_magicblock_validator_with_config_struct(
     let config_toml = toml::to_string(&config).unwrap();
     fs::write(&config_path, config_toml).unwrap();
 
-    let root_dir = Path::new(&workspace_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf();
+    let root_dir = Path::new(&workspace_dir).join("..").canonicalize().unwrap().to_path_buf();
     let paths = TestRunnerPaths {
         config_path,
         root_dir,
@@ -444,11 +408,7 @@ pub fn start_magicblock_validator_with_config_struct(
     };
     (
         default_tmpdir,
-        start_magic_block_validator_with_config(
-            &paths,
-            "TEST",
-            loaded_chain_accounts,
-        ),
+        start_magic_block_validator_with_config(&paths, "TEST", loaded_chain_accounts),
         rpc_port,
     )
 }
@@ -458,7 +418,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     loaded_chain_accounts: &LoadedAccounts,
     default_tmpdir: TempDir,
     temp_dir: PathBuf,
-) -> (TempDir, Option<process::Child>, u16) {
+) -> (TempDir, Option<Child>, u16) {
     let rpc_port = resolve_port(config.aperture.listen.ip(), &[]);
     let metrics_port = resolve_port(config.metrics.address.ip(), &[rpc_port]);
     let replication_port = resolve_port(
@@ -467,8 +427,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     );
 
     let mut config = config.clone();
-    config.aperture.listen =
-        BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
+    config.aperture.listen = BindAddress(SocketAddr::new(config.aperture.listen.ip(), rpc_port));
     config.metrics.address =
         BindAddress(SocketAddr::new(config.metrics.address.ip(), metrics_port));
     config.engine.replication.bind_address = BindAddress(SocketAddr::new(
@@ -484,11 +443,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     let config_toml = toml::to_string(&config).unwrap();
     fs::write(&config_path, config_toml).unwrap();
 
-    let root_dir = Path::new(&workspace_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf();
+    let root_dir = Path::new(&workspace_dir).join("..").canonicalize().unwrap().to_path_buf();
     let paths = TestRunnerPaths {
         config_path,
         root_dir,
@@ -496,11 +451,7 @@ pub fn start_magicblock_validator_with_config_struct_and_temp_dir(
     };
     (
         default_tmpdir,
-        start_magic_block_validator_with_config(
-            &paths,
-            "TEST",
-            loaded_chain_accounts,
-        ),
+        start_magic_block_validator_with_config(&paths, "TEST", loaded_chain_accounts),
         rpc_port,
     )
 }
@@ -539,16 +490,10 @@ pub struct TestRunnerPaths {
 
 pub fn resolve_workspace_dir() -> PathBuf {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    Path::new(&manifest_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf()
+    Path::new(&manifest_dir).join("..").canonicalize().unwrap().to_path_buf()
 }
 
-pub fn resolve_programs(
-    programs: Option<Vec<LoadableProgram>>,
-) -> Vec<LoadableProgram> {
+pub fn resolve_programs(programs: Option<Vec<LoadableProgram>>) -> Vec<LoadableProgram> {
     programs
         .map(|programs| {
             programs

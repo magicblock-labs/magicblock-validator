@@ -1,15 +1,15 @@
 use magicblock_core::traits::ActionError;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicBlockRpcClientError;
+use solana_message::CompileError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 
 use crate::{
+    intent_engine::intent_scheduler::IntentSchedulerError,
     intent_executor::strategy_executor::error::TransactionStrategyExecutionError,
     outbox::outbox_client::InternalOutboxClientError,
-    tasks::{
-        task_builder::TaskBuilderError, task_strategist::TaskStrategistError,
-    },
+    tasks::{task_builder::TaskBuilderError, task_strategist::TaskStrategistError},
     transaction_preparator::error::TransactionPreparatorError,
 };
 
@@ -46,9 +46,7 @@ impl InternalError {
 
     pub fn is_transaction_too_large(&self) -> bool {
         match self {
-            Self::MagicBlockRpcClientError(err) => {
-                err.is_transaction_too_large()
-            }
+            Self::MagicBlockRpcClientError(err) => err.is_transaction_too_large(),
             Self::SignerError(_) => false,
         }
     }
@@ -56,10 +54,14 @@ impl InternalError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum IntentExecutorError {
+    #[error("Intent scheduler state is inconsistent: {0}")]
+    SchedulerError(#[from] IntentSchedulerError),
     #[error("EmptyIntentError")]
     EmptyIntentError,
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("Failed to compile transaction: {0}")]
+    CompileError(#[from] CompileError),
     /// This doesn't mean permanent failure
     /// This means that some ancestor failed
     /// to execute with multiple retries
@@ -99,10 +101,7 @@ impl IntentExecutorError {
         error: TransactionStrategyExecutionError,
     ) -> IntentExecutorError {
         let signature = error.signature();
-        IntentExecutorError::FailedToCommitError {
-            err: error,
-            signature,
-        }
+        IntentExecutorError::FailedToCommitError { err: error, signature }
     }
 
     pub fn from_finalize_execution_error(
@@ -124,7 +123,9 @@ impl IntentExecutorError {
     pub fn is_transient(&self) -> bool {
         match self {
             Self::EmptyIntentError
+            | Self::SchedulerError(_)
             | Self::FailedToFitError
+            | Self::CompileError(_)
             | Self::PoisonedIntentError
             | Self::SignerError(_)
             | Self::OutboxClientError(_)
@@ -155,9 +156,7 @@ impl IntentExecutorError {
             | IntentExecutorError::FailedFinalizePreparationError(err) => {
                 err.signature().map(|el| (el, None))
             }
-            IntentExecutorError::TaskBuilderError(err) => {
-                err.signature().map(|el| (el, None))
-            }
+            IntentExecutorError::TaskBuilderError(err) => err.signature().map(|el| (el, None)),
             IntentExecutorError::FailedToFinalizeError {
                 err: _,
                 commit_signature,
@@ -167,7 +166,9 @@ impl IntentExecutorError {
                 Some((*signature, None))
             }
             IntentExecutorError::EmptyIntentError
+            | IntentExecutorError::SchedulerError(_)
             | IntentExecutorError::FailedToFitError
+            | IntentExecutorError::CompileError(_)
             | IntentExecutorError::PoisonedIntentError
             | IntentExecutorError::SignerError(_)
             | IntentExecutorError::OutboxClientError(_)
@@ -179,9 +180,7 @@ impl IntentExecutorError {
 impl metrics::LabelValue for IntentExecutorError {
     fn value(&self) -> &str {
         match self {
-            IntentExecutorError::FailedToCommitError { err, signature: _ } => {
-                err.value()
-            }
+            IntentExecutorError::FailedToCommitError { err, signature: _ } => err.value(),
             IntentExecutorError::FailedToFinalizeError {
                 err,
                 commit_signature: _,
@@ -196,9 +195,7 @@ impl From<&IntentExecutorError> for ActionError {
     fn from(value: &IntentExecutorError) -> Self {
         match value {
             IntentExecutorError::FailedToCommitError { err, .. }
-            | IntentExecutorError::FailedToFinalizeError { err, .. } => {
-                err.into()
-            }
+            | IntentExecutorError::FailedToFinalizeError { err, .. } => err.into(),
             err => ActionError::IntentFailedError(err.to_string()),
         }
     }
@@ -208,6 +205,7 @@ impl From<TaskStrategistError> for IntentExecutorError {
     fn from(value: TaskStrategistError) -> Self {
         match value {
             TaskStrategistError::FailedToFitError => Self::FailedToFitError,
+            TaskStrategistError::CompileError(err) => Self::CompileError(err),
             TaskStrategistError::SignerError(err) => Self::SignerError(err),
         }
     }
@@ -218,9 +216,7 @@ pub type IntentExecutorResult<T, E = IntentExecutorError> = Result<T, E>;
 mod tests {
     use magicblock_rpc_client::MagicBlockRpcClientError;
     use solana_rpc_client_api::{
-        client_error::{
-            Error as RpcClientError, ErrorKind as RpcClientErrorKind,
-        },
+        client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
         request::{RpcError, RpcRequest, RpcResponseErrorData},
     };
 
@@ -233,13 +229,11 @@ mod tests {
     fn make_send_transaction_error(message: &str) -> InternalError {
         let rpc_error = RpcClientError {
             request: Some(RpcRequest::SendTransaction),
-            kind: Box::new(RpcClientErrorKind::RpcError(
-                RpcError::RpcResponseError {
-                    code: -32602,
-                    message: message.to_string(),
-                    data: RpcResponseErrorData::Empty,
-                },
-            )),
+            kind: Box::new(RpcClientErrorKind::RpcError(RpcError::RpcResponseError {
+                code: -32602,
+                message: message.to_string(),
+                data: RpcResponseErrorData::Empty,
+            })),
         };
         InternalError::MagicBlockRpcClientError(Box::new(
             MagicBlockRpcClientError::SendTransaction(Box::new(rpc_error)),
@@ -261,16 +255,15 @@ mod tests {
     #[test]
     fn transaction_too_large_error_is_recoverable_by_two_stage() {
         let inner = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
-        let err =
-            TransactionStrategyExecutionError::TransactionTooLargeError(inner);
+        let err = TransactionStrategyExecutionError::TransactionTooLargeError(inner);
         assert!(err.is_recoverable_by_two_stage());
     }
 
     #[test]
     fn transport_errors_are_transient() {
-        let err = TransactionStrategyExecutionError::InternalError(
-            make_send_transaction_error("connection reset"),
-        );
+        let err = TransactionStrategyExecutionError::InternalError(make_send_transaction_error(
+            "connection reset",
+        ));
         assert!(err.is_transient());
 
         let err = TransactionStrategyExecutionError::InternalError(
@@ -300,11 +293,9 @@ mod tests {
         );
         assert!(!err.is_transient());
 
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::SignerError(solana_signer::SignerError::Custom(
-                "oops".to_string(),
-            )),
-        );
+        let err = TransactionStrategyExecutionError::InternalError(InternalError::SignerError(
+            solana_signer::SignerError::Custom("oops".to_string()),
+        ));
         assert!(!err.is_transient());
 
         assert!(!super::IntentExecutorError::EmptyIntentError.is_transient());
@@ -314,56 +305,43 @@ mod tests {
     #[test]
     fn builder_and_preparation_error_transience() {
         use crate::{
-            tasks::{
-                task_builder::TaskBuilderError,
-                task_info_fetcher::TaskInfoFetcherError,
-            },
+            tasks::{task_builder::TaskBuilderError, task_info_fetcher::TaskInfoFetcherError},
             transaction_preparator::{
                 delivery_preparator::{
-                    DeliveryPreparatorError,
-                    InternalError as DeliveryInternalError,
+                    DeliveryPreparatorError, InternalError as DeliveryInternalError,
                 },
                 error::TransactionPreparatorError,
             },
         };
 
         fn transient_rpc_client_error() -> MagicBlockRpcClientError {
-            MagicBlockRpcClientError::SendTransaction(Box::new(
-                RpcClientError {
-                    request: Some(RpcRequest::SendTransaction),
-                    kind: Box::new(RpcClientErrorKind::Custom(
-                        "io".to_string(),
-                    )),
-                },
-            ))
+            MagicBlockRpcClientError::SendTransaction(Box::new(RpcClientError {
+                request: Some(RpcRequest::SendTransaction),
+                kind: Box::new(RpcClientErrorKind::Custom("io".to_string())),
+            }))
         }
         fn transient_delivery_error() -> TransactionPreparatorError {
-            TransactionPreparatorError::from(
-                DeliveryPreparatorError::FailedToCreateALTError(
-                    DeliveryInternalError::MagicBlockRpcClientError(Box::new(
-                        transient_rpc_client_error(),
-                    )),
-                ),
-            )
+            TransactionPreparatorError::from(DeliveryPreparatorError::FailedToCreateALTError(
+                DeliveryInternalError::MagicBlockRpcClientError(Box::new(
+                    transient_rpc_client_error(),
+                )),
+            ))
         }
 
         // RPC-side commit-id fetch failures are transient
-        let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::CommitTasksBuildError(
+        let err =
+            super::IntentExecutorError::TaskBuilderError(TaskBuilderError::CommitTasksBuildError(
                 TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(
                     transient_rpc_client_error(),
                 )),
-            ),
-        );
+            ));
         assert!(err.is_transient());
 
         // Not-found on fetch is transient (may be a stale RPC read)
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::FinalizedTasksBuildError(
-                TaskInfoFetcherError::AccountNotFoundError(
-                    solana_pubkey::Pubkey::new_unique(),
-                ),
-            ),
+            TaskBuilderError::FinalizedTasksBuildError(TaskInfoFetcherError::AccountNotFoundError(
+                solana_pubkey::Pubkey::new_unique(),
+            )),
         );
         assert!(err.is_transient());
 
@@ -381,16 +359,13 @@ mod tests {
 
         // Missing delegation metadata is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::MissingDelegationMetadata(
-                solana_pubkey::Pubkey::new_unique(),
-            ),
+            TaskBuilderError::MissingDelegationMetadata(solana_pubkey::Pubkey::new_unique()),
         );
         assert!(!err.is_transient());
 
         // Commit-stage delivery preparation RPC failures are transient
-        let err = super::IntentExecutorError::FailedCommitPreparationError(
-            transient_delivery_error(),
-        );
+        let err =
+            super::IntentExecutorError::FailedCommitPreparationError(transient_delivery_error());
         assert!(err.is_transient());
 
         // Oversized strategies are deterministic
@@ -400,18 +375,17 @@ mod tests {
         assert!(!err.is_transient());
 
         // Finalize preparation runs after a landed commit - always terminal
-        let err = super::IntentExecutorError::FailedFinalizePreparationError(
-            transient_delivery_error(),
-        );
+        let err =
+            super::IntentExecutorError::FailedFinalizePreparationError(transient_delivery_error());
         assert!(!err.is_transient());
     }
 
     #[test]
     fn finalize_failure_after_landed_commit_is_not_transient() {
         let transient_err = || {
-            TransactionStrategyExecutionError::InternalError(
-                make_send_transaction_error("connection reset"),
-            )
+            TransactionStrategyExecutionError::InternalError(make_send_transaction_error(
+                "connection reset",
+            ))
         };
 
         // Single-stage: nothing landed, safe to re-execute

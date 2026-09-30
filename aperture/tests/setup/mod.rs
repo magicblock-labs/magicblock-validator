@@ -1,3 +1,4 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 #![allow(dead_code)]
 
 use std::sync::{Arc, OnceLock};
@@ -21,12 +22,12 @@ use spl_token_2022::state::{Account as TokenAccount, AccountState, Mint};
 use tokio_util::sync::CancellationToken;
 use v42_calculator_interface::builder::Expr;
 
-pub const TOKEN_PROGRAM_ID: Pubkey =
+pub(crate) const TOKEN_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
-pub const PROGRAM_ID: Pubkey = V42_ID;
-pub const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
+pub(crate) const PROGRAM_ID: Pubkey = V42_ID;
+pub(crate) const REMOTE_ACCOUNT_CLAIMS_HEADER: &str = "X-MB-Remote-Account-Claims";
 
-pub fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
+pub(crate) fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
     response
         .headers()
         .get(REMOTE_ACCOUNT_CLAIMS_HEADER)
@@ -37,12 +38,12 @@ pub fn remote_account_claims_header(response: &reqwest::Response) -> u64 {
         .expect("remote account claims header should be an integer")
 }
 
-pub fn transfer(from: Pubkey, to: Pubkey, amount: u64) -> Instruction {
+pub(crate) fn transfer(from: Pubkey, to: Pubkey, amount: u64) -> Instruction {
     let delta = i64::try_from(amount).expect("test transfer fits i64");
     v42_calculator_interface::builder::transfer(from, to, delta)
 }
 
-pub struct RpcTestEnv {
+pub(crate) struct RpcTestEnv {
     pub engine: TestEngine,
     pub rpc: RpcClient,
     pub pubsub: PubsubClient,
@@ -62,26 +63,19 @@ fn shared_ledger() -> Arc<Ledger> {
 }
 
 fn chainlink(engine: &Engine) -> Arc<ProdChainlink> {
-    Arc::new(
-        ProdChainlink::try_new(engine.clone(), None).expect("create chainlink"),
-    )
+    Arc::new(ProdChainlink::try_new(engine.clone(), None).expect("create chainlink"))
 }
 
 impl RpcTestEnv {
-    pub const TRANSFER_AMOUNT: u64 = 1_000;
-    pub const TOKEN_AMOUNT: u64 = 10_000_000_000;
+    pub(crate) const TRANSFER_AMOUNT: u64 = 1_000;
+    pub(crate) const TOKEN_AMOUNT: u64 = 10_000_000_000;
 
-    pub async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         Self::with_engine(TestEngine::new().await).await
     }
 
-    pub async fn with_engine(engine: TestEngine) -> Self {
-        let state = SharedState::new(
-            (*engine).clone(),
-            shared_ledger(),
-            chainlink(&engine),
-            100,
-        );
+    pub(crate) async fn with_engine(engine: TestEngine) -> Self {
+        let state = SharedState::new((*engine).clone(), shared_ledger(), chainlink(&engine), 100);
         let cancel = CancellationToken::new();
         let server = initialize_aperture(
             &ApertureConfig {
@@ -100,15 +94,13 @@ impl RpcTestEnv {
         Self {
             engine,
             rpc: RpcClient::new(rpc_url),
-            pubsub: PubsubClient::new(&pubsub_url)
-                .await
-                .expect("connect to aperture pubsub"),
+            pubsub: PubsubClient::new(&pubsub_url).await.expect("connect to aperture pubsub"),
             cancel,
         }
     }
 
     /// Builds the client-side Solana envelope used at the JSON-RPC boundary.
-    pub fn rpc_transaction(&self, ixs: &[Instruction]) -> Transaction {
+    pub(crate) fn rpc_transaction(&self, ixs: &[Instruction]) -> Transaction {
         let payer = self.engine.signer();
         Transaction::new_signed_with_payer(
             ixs,
@@ -119,7 +111,7 @@ impl RpcTestEnv {
     }
 
     /// Creates two v42 accounts and a client-side transfer between them.
-    pub fn rpc_transfer(&self, amount: u64) -> (Transaction, Pubkey, Pubkey) {
+    pub(crate) fn rpc_transfer(&self, amount: u64) -> (Transaction, Pubkey, Pubkey) {
         let sender = store_v42(&self.engine, 0, AccountMode::Magic);
         let recipient = store_v42(&self.engine, 0, AccountMode::Magic);
         let ix = transfer(sender, recipient, amount);
@@ -127,10 +119,9 @@ impl RpcTestEnv {
     }
 
     /// Executes the standard v42 write used by RPC history and notification tests.
-    pub async fn execute_write(&self) -> Signature {
+    pub(crate) async fn execute_write(&self) -> Signature {
         let output = store_v42(&self.engine, 0, AccountMode::Magic);
-        let (signature, view) =
-            signed_view(&self.engine, None, Expr::lit(42).compose(output, &[]));
+        let (signature, view) = signed_view(&self.engine, None, Expr::lit(42).compose(output, &[]));
         self.engine
             .transaction(view)
             .expect("compose transaction view")
@@ -141,17 +132,12 @@ impl RpcTestEnv {
         signature
     }
 
-    pub async fn execute_failing_transfer(&self) -> Signature {
+    pub(crate) async fn execute_failing_transfer(&self) -> Signature {
         let sender = store_v42(&self.engine, 0, AccountMode::Magic);
         let recipient = store_v42(&self.engine, 0, AccountMode::Magic);
-        let amount = load_v42_lamports(&self.engine, sender)
-            .expect("stored balance")
-            + 1;
-        let (signature, view) = signed_view(
-            &self.engine,
-            None,
-            transfer(sender, recipient, amount),
-        );
+        let amount = load_v42_lamports(&self.engine, sender).expect("stored balance") + 1;
+        let (signature, view) =
+            signed_view(&self.engine, None, transfer(sender, recipient, amount));
         let result = self
             .engine
             .transaction(view)
@@ -163,7 +149,7 @@ impl RpcTestEnv {
         signature
     }
 
-    pub fn create_token_account(&self, mint: Pubkey, owner: Pubkey) -> Pubkey {
+    pub(crate) fn create_token_account(&self, mint: Pubkey, owner: Pubkey) -> Pubkey {
         if self.engine.get_account(mint).is_none() {
             let mut data = vec![0; Mint::LEN];
             Mint::pack(
@@ -207,10 +193,7 @@ impl RpcTestEnv {
             .data(data)
             .mode(AccountMode::Magic)
             .build();
-        self.engine
-            .accounts()
-            .store(&[(key, account)])
-            .expect("store test account");
+        self.engine.accounts().store(&[(key, account)]).expect("store test account");
     }
 }
 

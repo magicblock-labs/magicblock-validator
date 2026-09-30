@@ -16,8 +16,7 @@ use crate::{
         strategy_executor::{
             patcher::SingleStagePatcher,
             utils::{
-                ExecutionState, handle_actions_result, single_stage_pending,
-                stage_execution_loop,
+                ExecutionState, handle_actions_result, single_stage_pending, stage_execution_loop,
             },
         },
     },

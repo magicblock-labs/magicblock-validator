@@ -1,23 +1,21 @@
 use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 
-pub fn url_encode(s: &str) -> String {
+pub(crate) fn url_encode(s: &str) -> String {
     utf8_percent_encode(s, NON_ALPHANUMERIC).to_string()
 }
 
-pub fn is_localhost_url(url: &str) -> bool {
-    reqwest::Url::parse(url)
-        .ok()
-        .is_some_and(|url| is_loopback_host(&url))
+pub(crate) fn is_localhost_url(url: &str) -> bool {
+    reqwest::Url::parse(url).ok().is_some_and(|url| is_loopback_host(&url))
 }
 
-pub fn is_localhost_http_url(url: &str) -> bool {
+pub(crate) fn is_localhost_http_url(url: &str) -> bool {
     is_localhost_url(url)
         && reqwest::Url::parse(url)
             .ok()
             .is_some_and(|url| matches!(url.scheme(), "http" | "https"))
 }
 
-pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
+pub(crate) fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
     let mut url = reqwest::Url::parse(url).ok()?;
     let explicit_port = url.port();
     match url.scheme() {
@@ -41,24 +39,13 @@ pub fn websocket_url_from_rpc_url(url: &str) -> Option<String> {
 
 fn is_loopback_host(url: &reqwest::Url) -> bool {
     url.host_str()
-        .map(|host| {
-            host.trim_start_matches('[')
-                .trim_end_matches(']')
-                .to_ascii_lowercase()
-        })
-        .is_some_and(|host| {
-            matches!(
-                host.as_str(),
-                "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"
-            )
-        })
+        .map(|host| host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase())
+        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "0.0.0.0" | "::1"))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        is_localhost_http_url, is_localhost_url, websocket_url_from_rpc_url,
-    };
+    use super::{is_localhost_http_url, is_localhost_url, websocket_url_from_rpc_url};
 
     #[test]
     fn localhost_detection_handles_loopback_hosts() {

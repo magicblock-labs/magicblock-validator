@@ -1,9 +1,7 @@
 use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 
 use magicblock_core::traits::ActionsCallbackScheduler;
-use magicblock_program::outbox_intent_bundles::{
-    OutboxIntentBundle, OutboxIntentBundleStatus,
-};
+use magicblock_program::outbox_intent_bundles::{OutboxIntentBundle, OutboxIntentBundleStatus};
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
@@ -12,30 +10,21 @@ use tracing::warn;
 use crate::{
     ComputeBudgetConfig,
     intent_executor::{
-        IntentExecutor, IntentExecutorCtx, build_stage_intent_executor,
-        error::IntentExecutorError,
+        IntentExecutor, IntentExecutorCtx, build_stage_intent_executor, error::IntentExecutorError,
         intent_execution_client::IntentExecutionClient,
     },
-    outbox::{
-        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
-    },
+    outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
     transaction_preparator::TransactionPreparatorImpl,
 };
 
-pub type ReconcileIntentFuture<'a> =
+pub(crate) type ReconcileIntentFuture<'a> =
     Pin<Box<dyn Future<Output = OutboxIntentBundle> + Send + 'a>>;
 
-pub trait IntentExecutorBuilder<T> {
-    fn create_instance(
-        &self,
-        status: OutboxIntentBundleStatus,
-    ) -> Box<dyn IntentExecutor<T>>;
+pub(crate) trait IntentExecutorBuilder<T> {
+    fn create_instance(&self, status: OutboxIntentBundleStatus) -> Box<dyn IntentExecutor<T>>;
 
-    fn reconcile_intent<'a>(
-        &'a self,
-        intent: &'a OutboxIntentBundle,
-    ) -> ReconcileIntentFuture<'a>
+    fn reconcile_intent<'a>(&'a self, intent: &'a OutboxIntentBundle) -> ReconcileIntentFuture<'a>
     where
         Self: Sync,
     {
@@ -43,13 +32,13 @@ pub trait IntentExecutorBuilder<T> {
     }
 }
 
-pub struct ExecutorConfig {
+pub(crate) struct ExecutorConfig {
     pub compute_budget_config: ComputeBudgetConfig,
     pub actions_timeout: Duration,
 }
 
 /// Dummy struct to simplify signature of IntentExecutionEngine
-pub struct IntentExecutorBuilderImpl<A, O> {
+pub(crate) struct IntentExecutorBuilderImpl<A, O> {
     /// Base-layer signing identity — the engine's authority keypair.
     pub authority: Keypair,
     pub rpc_client: MagicblockRpcClient,
@@ -60,8 +49,7 @@ pub struct IntentExecutorBuilderImpl<A, O> {
     pub actions_callback_executor: A,
 }
 
-impl<A, O> IntentExecutorBuilder<TransactionPreparatorImpl>
-    for IntentExecutorBuilderImpl<A, O>
+impl<A, O> IntentExecutorBuilder<TransactionPreparatorImpl> for IntentExecutorBuilderImpl<A, O>
 where
     A: ActionsCallbackScheduler,
     O: OutboxClient,
@@ -84,24 +72,12 @@ where
             outbox_client: self.outbox_client.clone(),
             actions_callback_executor: self.actions_callback_executor.clone(),
         };
-        build_stage_intent_executor(
-            ctx,
-            status,
-            self.executor_config.actions_timeout,
-        )
+        build_stage_intent_executor(ctx, status, self.executor_config.actions_timeout)
     }
 
-    fn reconcile_intent<'a>(
-        &'a self,
-        intent: &'a OutboxIntentBundle,
-    ) -> ReconcileIntentFuture<'a> {
+    fn reconcile_intent<'a>(&'a self, intent: &'a OutboxIntentBundle) -> ReconcileIntentFuture<'a> {
         Box::pin(async move {
-            match self
-                .outbox_client
-                .outbox_reader()
-                .fetch_outbox_intent(intent.intent_id)
-                .await
-            {
+            match self.outbox_client.outbox_reader().fetch_outbox_intent(intent.intent_id).await {
                 Ok(Some(bundle)) => bundle,
                 Ok(None) => intent.clone(),
                 Err(_) => {

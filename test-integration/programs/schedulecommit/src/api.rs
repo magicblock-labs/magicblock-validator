@@ -6,9 +6,7 @@ use dlp_api::{
         undelegation_request_pda_from_delegated_account,
     },
 };
-use ephemeral_rollups_sdk::delegate_args::{
-    DelegateAccountMetas, DelegateAccounts,
-};
+use ephemeral_rollups_sdk::delegate_args::{DelegateAccountMetas, DelegateAccounts};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -17,8 +15,8 @@ use solana_system_interface::program as system_program;
 
 use crate::{
     BookUpdate, DelegateCpiArgs, DelegateOrderBookArgs, ScheduleCommitCpiArgs,
-    ScheduleCommitCpiWithVaultArgs, ScheduleCommitInstruction,
-    ScheduleCommitType, ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitInstruction, ScheduleCommitType,
+    ScheduleCommitWithOrderBookArgs,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -36,11 +34,7 @@ impl UserSeeds {
     }
 }
 
-pub fn init_account_instruction(
-    payer: Pubkey,
-    player: Pubkey,
-    committee: Pubkey,
-) -> Instruction {
+pub fn init_account_instruction(payer: Pubkey, player: Pubkey, committee: Pubkey) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
         AccountMeta::new(payer, true),
@@ -49,11 +43,7 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::Init,
-        account_metas,
-    )
+    Instruction::new_with_borsh(program_id, &ScheduleCommitInstruction::Init, account_metas)
 }
 
 pub fn init_order_book_instruction(
@@ -97,10 +87,7 @@ pub fn grow_order_book_instruction(
     )
 }
 
-pub fn init_payer_escrow(
-    payer: Pubkey,
-    escrow_authority: Pubkey,
-) -> [Instruction; 2] {
+pub fn init_payer_escrow(payer: Pubkey, escrow_authority: Pubkey) -> [Instruction; 2] {
     let top_up_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
         payer,
         escrow_authority,
@@ -161,13 +148,11 @@ pub fn delegate_account_cpi_instruction(
                 })
             }
             UserSeeds::OrderBook => {
-                ScheduleCommitInstruction::DelegateOrderBook(
-                    DelegateOrderBookArgs {
-                        commit_frequency_ms: 1_000_000_000,
-                        book_manager: player_or_book_manager,
-                        validator,
-                    },
-                )
+                ScheduleCommitInstruction::DelegateOrderBook(DelegateOrderBookArgs {
+                    commit_frequency_ms: 1_000_000_000,
+                    book_manager: player_or_book_manager,
+                    validator,
+                })
             }
         },
         account_metas,
@@ -180,12 +165,9 @@ pub fn request_undelegation_cpi_instruction(
     committee: Pubkey,
 ) -> Instruction {
     let program_id = crate::id();
-    let request_pda =
-        undelegation_request_pda_from_delegated_account(&committee);
-    let delegation_record =
-        delegation_record_pda_from_delegated_account(&committee);
-    let delegation_metadata =
-        delegation_metadata_pda_from_delegated_account(&committee);
+    let request_pda = undelegation_request_pda_from_delegated_account(&committee);
+    let delegation_record = delegation_record_pda_from_delegated_account(&committee);
+    let delegation_metadata = delegation_metadata_pda_from_delegated_account(&committee);
 
     let account_metas = vec![
         AccountMeta::new(payer, true),
@@ -261,9 +243,7 @@ pub fn schedule_commit_cpi_with_vault_instruction(
     ];
     if args.has_magic_vault {
         account_metas.push(AccountMeta {
-            pubkey: dlp_api::pda::magic_fee_vault_pda_from_validator(
-                &validator,
-            ),
+            pubkey: dlp_api::pda::magic_fee_vault_pda_from_validator(&validator),
             is_writable: true,
             is_signer: false,
         })
@@ -296,8 +276,7 @@ pub fn schedule_commit_with_vault_and_order_book_instruction(
     args: ScheduleCommitWithOrderBookArgs,
 ) -> Instruction {
     let program_id = crate::id();
-    let magic_fee_vault =
-        dlp_api::pda::magic_fee_vault_pda_from_validator(&validator);
+    let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(&validator);
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context_id, false),
@@ -309,8 +288,7 @@ pub fn schedule_commit_with_vault_and_order_book_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let ix =
-        ScheduleCommitInstruction::ScheduleCommitWithVaultAndOrderBookCpi(args);
+    let ix = ScheduleCommitInstruction::ScheduleCommitWithVaultAndOrderBookCpi(args);
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
@@ -320,10 +298,7 @@ pub fn update_order_book_instruction(
     update: BookUpdate,
 ) -> Instruction {
     let program_id = crate::id();
-    let account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new(order_book, false),
-    ];
+    let account_metas = vec![AccountMeta::new(payer, true), AccountMeta::new(order_book, false)];
 
     Instruction::new_with_borsh(
         program_id,
@@ -426,8 +401,7 @@ fn schedule_commit_cpi_instruction_impl(
         has_magic_vault: magic_fee_vault.is_some(),
         commit_payer,
     };
-    let ix =
-        ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args, commit_type);
+    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args, commit_type);
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
@@ -450,9 +424,7 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
 
     Instruction::new_with_borsh(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
-            players.to_vec(),
-        ),
+        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(players.to_vec()),
         account_metas,
     )
 }
@@ -476,9 +448,7 @@ pub fn schedule_commit_and_undelegate_cpi_twice(
 
     Instruction::new_with_borsh(
         program_id,
-        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(
-            players.to_vec(),
-        ),
+        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiTwice(players.to_vec()),
         account_metas,
     )
 }
@@ -512,10 +482,7 @@ pub fn pda_seeds(acc_id: &Pubkey) -> [&[u8]; 2] {
     [ACCOUNT.as_bytes(), acc_id.as_ref()]
 }
 
-pub fn pda_seeds_with_bump<'a>(
-    acc_id: &'a Pubkey,
-    bump: &'a [u8; 1],
-) -> [&'a [u8]; 3] {
+pub fn pda_seeds_with_bump<'a>(acc_id: &'a Pubkey, bump: &'a [u8; 1]) -> [&'a [u8]; 3] {
     [ACCOUNT.as_bytes(), acc_id.as_ref(), bump]
 }
 

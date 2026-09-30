@@ -4,18 +4,12 @@ use solana_pubkey::Pubkey;
 
 use super::ClaimedHandlerResult;
 use crate::{
-    requests::{
-        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
 impl HttpDispatcher {
-    pub(crate) async fn get_balance(
-        &self,
-        request: &JsonRequest,
-    ) -> ClaimedHandlerResult {
+    pub(crate) async fn get_balance(&self, request: &JsonRequest) -> ClaimedHandlerResult {
         let mut claims = 0;
         let result = async {
             let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();

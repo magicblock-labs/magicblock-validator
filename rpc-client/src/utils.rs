@@ -1,8 +1,7 @@
 use std::{future::Future, ops::ControlFlow, time::Duration};
 
 use solana_rpc_client_api::{
-    client_error::ErrorKind,
-    custom_error::JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY, request::RpcError,
+    client_error::ErrorKind, custom_error::JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY, request::RpcError,
 };
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
@@ -14,10 +13,7 @@ use crate::{MagicBlockRpcClientError, MagicBlockSendTransactionOutcome};
 pub trait SendErrorMapper<E> {
     type ExecutionError;
     fn map(&self, error: E) -> Self::ExecutionError;
-    fn decide_flow(
-        &self,
-        mapped_error: &Self::ExecutionError,
-    ) -> ControlFlow<(), Duration>;
+    fn decide_flow(&self, mapped_error: &Self::ExecutionError) -> ControlFlow<(), Duration>;
 }
 
 /// Sends a Solana transaction repeatedly until it succeeds, a stop condition is met,
@@ -61,8 +57,7 @@ where
             Err(err) => err,
         };
         let mapped_error = send_error_mapper.map(err);
-        let sleep_duration = match send_error_mapper.decide_flow(&mapped_error)
-        {
+        let sleep_duration = match send_error_mapper.decide_flow(&mapped_error) {
             ControlFlow::Continue(value) => value,
             ControlFlow::Break(()) => return Err(mapped_error),
         };
@@ -139,44 +134,34 @@ where
     ExecErr: From<MagicBlockRpcClientError>,
 {
     match error {
-        MagicBlockRpcClientError::SentTransactionError(
-            transaction_err,
-            signature,
-        ) => {
+        MagicBlockRpcClientError::SentTransactionError(transaction_err, signature) => {
             match transaction_error_mapper.try_map(transaction_err, Some(signature)) {
                 Ok(mapped_err) => mapped_err,
-                Err(original) => MagicBlockRpcClientError::SentTransactionError(
-                    original,
-                    signature,
-                ).into()
+                Err(original) => {
+                    MagicBlockRpcClientError::SentTransactionError(original, signature).into()
+                }
             }
         }
         MagicBlockRpcClientError::RpcClientError(err) => {
             match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
-                Err(original) => MagicBlockRpcClientError::RpcClientError(original).into()
+                Err(original) => MagicBlockRpcClientError::RpcClientError(original).into(),
             }
         }
         MagicBlockRpcClientError::SendTransaction(err) => {
             match try_map_client_error(transaction_error_mapper, *err) {
                 Ok(mapped_err) => mapped_err,
-                Err(original) => MagicBlockRpcClientError::SendTransaction(original).into()
+                Err(original) => MagicBlockRpcClientError::SendTransaction(original).into(),
             }
         }
-        err @
-         (MagicBlockRpcClientError::GetSlot(_)
-         | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
-             error!(error = ?err, "Unexpected error during send transaction");
-             err.into()
-         }
-        err
-        @ (MagicBlockRpcClientError::GetLatestBlockhash(_)
-        | MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(
-            ..,
-        )
-        | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
-            ..,
-        )) => err.into(),
+        err @ (MagicBlockRpcClientError::GetSlot(_)
+        | MagicBlockRpcClientError::LookupTableDeserialize(_)) => {
+            error!(error = ?err, "Unexpected error during send transaction");
+            err.into()
+        }
+        err @ (MagicBlockRpcClientError::GetLatestBlockhash(_)
+        | MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(..)
+        | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(..)) => err.into(),
     }
 }
 
@@ -188,41 +173,31 @@ where
     TxMap: TransactionErrorMapper<ExecutionError = ExecErr>,
 {
     match *err.kind {
-        ErrorKind::TransactionError(transaction_err) => {
-            transaction_error_mapper
-                .try_map(transaction_err, None)
-                .map_err(|transaction_err| {
-                    Box::new(solana_rpc_client_api::client_error::Error {
-                        request: err.request,
-                        kind: Box::new(ErrorKind::TransactionError(
-                            transaction_err,
-                        )),
-                    })
+        ErrorKind::TransactionError(transaction_err) => transaction_error_mapper
+            .try_map(transaction_err, None)
+            .map_err(|transaction_err| {
+                Box::new(solana_rpc_client_api::client_error::Error {
+                    request: err.request,
+                    kind: Box::new(ErrorKind::TransactionError(transaction_err)),
                 })
-        }
+            }),
         err_kind @ (ErrorKind::Reqwest(_)
         | ErrorKind::Middleware(_)
         | ErrorKind::RpcError(_)
         | ErrorKind::SerdeJson(_)
         | ErrorKind::SigningError(_)
         | ErrorKind::Custom(_)
-        | ErrorKind::Io(_)) => {
-            Err(Box::new(solana_rpc_client_api::client_error::Error {
-                request: err.request,
-                kind: Box::new(err_kind),
-            }))
-        }
+        | ErrorKind::Io(_)) => Err(Box::new(solana_rpc_client_api::client_error::Error {
+            request: err.request,
+            kind: Box::new(err_kind),
+        })),
     }
 }
 
-pub fn decide_rpc_error_flow(
-    error: &MagicBlockRpcClientError,
-) -> ControlFlow<(), Duration> {
+pub fn decide_rpc_error_flow(error: &MagicBlockRpcClientError) -> ControlFlow<(), Duration> {
     match error {
         MagicBlockRpcClientError::RpcClientError(err)
-        | MagicBlockRpcClientError::SendTransaction(err) => {
-            decide_rpc_native_flow(err)
-        }
+        | MagicBlockRpcClientError::SendTransaction(err) => decide_rpc_native_flow(err),
         MagicBlockRpcClientError::GetSlot(_)
         | MagicBlockRpcClientError::LookupTableDeserialize(_)
         | MagicBlockRpcClientError::SentTransactionError(_, _) => {
@@ -231,9 +206,7 @@ pub fn decide_rpc_error_flow(
             ControlFlow::Break(())
         }
         MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(..)
-        | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(
-            ..,
-        ) => {
+        | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(..) => {
             // The transaction was submitted. Retrying would re-sign and send
             // it again with a fresh blockhash.
             ControlFlow::Break(())
@@ -306,8 +279,7 @@ mod tests {
             kind: Box::new(ErrorKind::RpcError(RpcError::RpcResponseError {
                 code: JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY,
                 message: "Node is behind".to_string(),
-                data:
-                    solana_rpc_client_api::request::RpcResponseErrorData::Empty,
+                data: solana_rpc_client_api::request::RpcResponseErrorData::Empty,
             })),
         };
         assert!(decide_rpc_native_flow(&err).is_continue());
@@ -320,8 +292,7 @@ mod tests {
             kind: Box::new(ErrorKind::RpcError(RpcError::RpcResponseError {
                 code: -32602,
                 message: "invalid params".to_string(),
-                data:
-                    solana_rpc_client_api::request::RpcResponseErrorData::Empty,
+                data: solana_rpc_client_api::request::RpcResponseErrorData::Empty,
             })),
         };
         assert!(decide_rpc_native_flow(&err).is_break());

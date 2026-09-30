@@ -1,12 +1,10 @@
 use std::{fmt, ops::Deref};
 
 use anyhow::{ensure, Context, Result};
-use integration_test_tools::{
-    loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
-};
+use integration_test_tools::{loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext};
 use program_schedulecommit::api::{
-    delegate_account_cpi_instruction, init_account_instruction,
-    init_order_book_instruction, init_payer_escrow, UserSeeds,
+    delegate_account_cpi_instruction, init_account_instruction, init_order_book_instruction,
+    init_payer_escrow, UserSeeds,
 };
 use solana_commitment_config::CommitmentConfig;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -63,10 +61,7 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
-    pub fn try_new_random_keys(
-        ncommittees: usize,
-        user_seed: UserSeeds,
-    ) -> Result<Self> {
+    pub fn try_new_random_keys(ncommittees: usize, user_seed: UserSeeds) -> Result<Self> {
         Self::try_new_internal(ncommittees, true, user_seed)
     }
     pub fn try_new(ncommittees: usize, user_seed: UserSeeds) -> Result<Self> {
@@ -80,14 +75,10 @@ impl ScheduleCommitTestContext {
     ) -> Result<Self> {
         let ictx = IntegrationTestContext::try_new()?;
 
-        let payer_chain = if random_keys {
-            Keypair::new()
-        } else {
-            Keypair::new_from_array([0u8; 32])
-        };
+        let payer_chain =
+            if random_keys { Keypair::new() } else { Keypair::new_from_array([0u8; 32]) };
         let lamports = LAMPORTS_PER_SOL * 10;
-        let payer_chain_airdrop_sig =
-            ictx.airdrop_chain(&payer_chain.pubkey(), lamports)?;
+        let payer_chain_airdrop_sig = ictx.airdrop_chain(&payer_chain.pubkey(), lamports)?;
         debug!(
             "Airdropped {} lamports to chain payer {} ({})",
             lamports,
@@ -106,12 +97,7 @@ impl ScheduleCommitTestContext {
                 } else {
                     Keypair::new_from_array([_idx as u8 + 100; 32])
                 };
-                ictx.airdrop_chain_and_delegate(
-                    &payer_chain,
-                    &payer_ephem,
-                    lamports,
-                )
-                .unwrap();
+                ictx.airdrop_chain_and_delegate(&payer_chain, &payer_ephem, lamports).unwrap();
                 let (pda, _bump) = Pubkey::find_program_address(
                     &[user_seed.bytes(), payer_ephem.pubkey().as_ref()],
                     &program_schedulecommit::ID,
@@ -136,33 +122,25 @@ impl ScheduleCommitTestContext {
         assert!(payer_ephem_on_chain.lamports >= lamports / 2,);
         assert_eq!(payer_ephem_on_chain.owner, dlp_api::id());
 
-        let payer_chain_on_ephem =
-            ictx.fetch_ephem_account(payer_chain.pubkey())?;
+        let payer_chain_on_ephem = ictx.fetch_ephem_account(payer_chain.pubkey())?;
         trace!("Payer Chain Account on Ephem: {:#?}", payer_chain_on_ephem);
         assert_eq!(payer_chain_on_ephem, payer_chain_on_chain);
 
-        let payer_ephem_on_ephem =
-            ictx.fetch_ephem_account(payer_ephem.pubkey())?;
+        let payer_ephem_on_ephem = ictx.fetch_ephem_account(payer_ephem.pubkey())?;
         trace!("Payer Ephem Account on Ephem: {:#?}", payer_ephem_on_ephem);
-        assert_eq!(
-            payer_ephem_on_ephem.lamports,
-            payer_ephem_on_chain.lamports
-        );
+        assert_eq!(payer_ephem_on_ephem.lamports, payer_ephem_on_chain.lamports);
         assert_eq!(payer_ephem_on_ephem.owner, system_program::id());
 
-        let validator_identity = ictx
-            .ephem_validator_identity
-            .context("Ephemeral validator identity missing")?;
-        let validator_keypair =
-            Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-                .context("Failed to create validator authority keypair")?;
+        let validator_identity =
+            ictx.ephem_validator_identity.context("Ephemeral validator identity missing")?;
+        let validator_keypair = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
+            .context("Failed to create validator authority keypair")?;
         ensure!(
             validator_keypair.pubkey() == validator_identity,
             "Unexpected validator identity {}",
             validator_identity
         );
-        let magic_fee_vault =
-            ictx.ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)?;
+        let magic_fee_vault = ictx.ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)?;
         ictx.fetch_ephem_account(magic_fee_vault).with_context(|| {
             format!(
                 "Failed to fetch magic fee vault account {}",
@@ -179,10 +157,7 @@ impl ScheduleCommitTestContext {
         })
     }
 
-    pub fn init_committees_chunk(
-        &self,
-        committees: &[(Keypair, Pubkey)],
-    ) -> Result<Signature> {
+    pub fn init_committees_chunk(&self, committees: &[(Keypair, Pubkey)]) -> Result<Signature> {
         let mut ixs = vec![
             ComputeBudgetInstruction::set_compute_unit_limit(1_400_000),
             ComputeBudgetInstruction::set_compute_unit_price(10_000),
@@ -190,23 +165,17 @@ impl ScheduleCommitTestContext {
         match self.user_seed {
             UserSeeds::MagicScheduleCommit => {
                 ixs.extend(committees.iter().map(|(player, committee)| {
-                    init_account_instruction(
-                        self.payer_chain.pubkey(),
-                        player.pubkey(),
-                        *committee,
-                    )
+                    init_account_instruction(self.payer_chain.pubkey(), player.pubkey(), *committee)
                 }));
             }
             UserSeeds::OrderBook => {
-                ixs.extend(committees.iter().map(
-                    |(book_manager, committee)| {
-                        init_order_book_instruction(
-                            self.payer_chain.pubkey(),
-                            book_manager.pubkey(),
-                            *committee,
-                        )
-                    },
-                ));
+                ixs.extend(committees.iter().map(|(book_manager, committee)| {
+                    init_order_book_instruction(
+                        self.payer_chain.pubkey(),
+                        book_manager.pubkey(),
+                        *committee,
+                    )
+                }));
 
                 //// TODO (snawaz): currently the size of delegatable-account cannot be
                 //// more than 10K, else delegation will fail. So Let's revisit this when
@@ -225,10 +194,7 @@ impl ScheduleCommitTestContext {
             }
         };
 
-        let mut signers = committees
-            .iter()
-            .map(|(payer, _)| payer)
-            .collect::<Vec<_>>();
+        let mut signers = committees.iter().map(|(payer, _)| payer).collect::<Vec<_>>();
         signers.push(&self.payer_chain);
 
         let tx = Transaction::new_signed_with_payer(
@@ -237,7 +203,8 @@ impl ScheduleCommitTestContext {
             &signers,
             self.try_chain_blockhash()?,
         );
-        let sig = self.try_chain_client()?
+        let sig = self
+            .try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -268,10 +235,7 @@ impl ScheduleCommitTestContext {
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
-        let ixs = init_payer_escrow(
-            self.payer_chain.pubkey(),
-            self.payer_ephem.pubkey(),
-        );
+        let ixs = init_payer_escrow(self.payer_chain.pubkey(), self.payer_ephem.pubkey());
 
         // The ephemeral payer is already delegated on L1, so it cannot pay the
         // transaction fee. It still signs the escrow instructions, while the
@@ -294,10 +258,7 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to escrow fund for payer")
     }
 
-    fn delegate_committees_chunk(
-        &self,
-        committees: &[(Keypair, Pubkey)],
-    ) -> Result<Signature> {
+    fn delegate_committees_chunk(&self, committees: &[(Keypair, Pubkey)]) -> Result<Signature> {
         let mut ixs = vec![];
         for (player, _) in committees {
             let ix = delegate_account_cpi_instruction(
@@ -351,14 +312,14 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Integration Test Context Fields
     // -----------------
-    pub fn try_chain_client(&self) -> anyhow::Result<&RpcClient> {
+    pub fn try_chain_client(&self) -> Result<&RpcClient> {
         let Some(chain_client) = self.chain_client.as_ref() else {
             return Err(anyhow::anyhow!("Chain client not available"));
         };
         Ok(chain_client)
     }
 
-    pub fn try_chain_blockhash(&self) -> anyhow::Result<Hash> {
+    pub fn try_chain_blockhash(&self) -> Result<Hash> {
         let Some(chain_client) = self.chain_client.as_ref() else {
             return Err(anyhow::anyhow!("Chain client not available"));
         };
@@ -383,11 +344,7 @@ impl ScheduleCommitTestContext {
             commitment: &self.commitment,
             chain_client: self.common_ctx.chain_client.as_ref(),
             ephem_client: self.common_ctx.try_ephem_client().unwrap(),
-            validator_identity: self
-                .common_ctx
-                .ephem_validator_identity
-                .as_ref()
-                .unwrap(),
+            validator_identity: self.common_ctx.ephem_validator_identity.as_ref().unwrap(),
         }
     }
 

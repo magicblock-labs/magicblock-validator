@@ -1,8 +1,9 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated,
     testing::{
-        context::TestContext, deleg::add_delegation_record_for, init_logger,
-        utils::random_pubkeys,
+        context::TestContext, deleg::add_delegation_record_for, init_logger, utils::random_pubkeys,
     },
 };
 use solana_account::Account;
@@ -22,17 +23,9 @@ async fn delegated_account_survives_readonly_cache_pressure() {
             ..Default::default()
         },
     );
-    add_delegation_record_for(
-        &ctx.rpc_client,
-        delegated,
-        ctx.validator_pubkey,
-        owner,
-    );
+    add_delegation_record_for(&ctx.rpc_client, delegated, ctx.validator_pubkey, owner);
     ctx.chainlink
-        .ensure_accounts(
-            &[delegated],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[delegated], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
 
@@ -49,10 +42,7 @@ async fn delegated_account_survives_readonly_cache_pressure() {
     }
     for batch in readonly.chunks(20) {
         ctx.chainlink
-            .ensure_accounts(
-                batch,
-                AccountFetchEntrypoint::RpcGetMultipleAccounts,
-            )
+            .ensure_accounts(batch, AccountFetchEntrypoint::RpcGetMultipleAccounts)
             .await
             .unwrap();
     }

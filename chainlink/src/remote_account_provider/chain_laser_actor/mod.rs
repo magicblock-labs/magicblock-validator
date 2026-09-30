@@ -9,19 +9,16 @@ use parking_lot::RwLock;
 use solana_pubkey::Pubkey;
 use tokio::time::Duration;
 
-pub use self::{
+pub(crate) use self::{
     actor::{ChainLaserActor, Slots},
     stream_factory::{
-        LaserStreamWithHandle, StreamFactory, StreamFactoryImpl, StreamHandle,
-        StreamHandleImpl,
+        LaserStreamWithHandle, StreamFactory, StreamFactoryImpl, StreamHandle, StreamHandleImpl,
     },
     stream_manager::{StreamManager, StreamManagerConfig, StreamUpdateSource},
 };
-use crate::remote_account_provider::{
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-};
+use crate::remote_account_provider::{RemoteAccountProviderError, RemoteAccountProviderResult};
 
-pub type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
+pub(crate) type SharedSubscriptions = Arc<RwLock<HashSet<Pubkey>>>;
 
 mod actor;
 #[cfg(test)]
@@ -46,11 +43,7 @@ pub(crate) async fn write_with_retry<S: StreamHandle>(
     let initial_retries = retries;
 
     loop {
-        let err_msg = match tokio::time::timeout(
-            WRITE_TIMEOUT,
-            handle.write(request.clone()),
-        )
-        .await
+        let err_msg = match tokio::time::timeout(WRITE_TIMEOUT, handle.write(request.clone())).await
         {
             Ok(Ok(())) => return Ok(()),
             Ok(Err(err)) => format!("{err} ({err:?})"),
@@ -73,7 +66,7 @@ pub(crate) async fn write_with_retry<S: StreamHandle>(
 }
 
 /// Result of a laser stream operation
-pub type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
+pub(crate) type LaserResult = Result<SubscribeUpdate, LaserstreamError>;
 
 /// A laser stream of subscription updates
-pub type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;
+pub(crate) type LaserStream = Pin<Box<dyn Stream<Item = LaserResult> + Send>>;

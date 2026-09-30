@@ -10,14 +10,9 @@ impl WsDispatcher {
         request: &JsonRequest,
     ) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
-        let config = request
-            .optional::<RpcProgramAccountsConfig>(1)?
-            .unwrap_or_default();
+        let config = request.optional::<RpcProgramAccountsConfig>(1)?.unwrap_or_default();
 
-        let encoding = config
-            .account_config
-            .encoding
-            .unwrap_or(UiAccountEncoding::Base58);
+        let encoding = config.account_config.encoding.unwrap_or(UiAccountEncoding::Base58);
 
         let filters = config.filters.unwrap_or_default();
         for filter in &filters {
@@ -36,8 +31,7 @@ impl WsDispatcher {
         let handle = tokio::spawn(async move {
             while let Some((pubkey, account)) = rx.recv().await {
                 let slot = context_slot(&engine);
-                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
-                else {
+                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id) else {
                     continue;
                 };
                 if tx.send(bytes).await.is_err() {

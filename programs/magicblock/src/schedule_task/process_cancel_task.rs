@@ -11,7 +11,7 @@ use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
 pub(crate) fn process_cancel_task(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     task_id: i64,
 ) -> Result<(), InstructionError> {
     const TASK_AUTHORITY_IDX: u16 = 0;
@@ -19,10 +19,8 @@ pub(crate) fn process_cancel_task(
     let transaction_context = &*invoke_context.transaction_context;
 
     // Validate that the task authority is a signer
-    let task_authority_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        TASK_AUTHORITY_IDX,
-    )?;
+    let task_authority_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, TASK_AUTHORITY_IDX)?;
     if !signers.contains(task_authority_pubkey) {
         ic_msg!(
             invoke_context,
@@ -55,36 +53,26 @@ pub(crate) fn process_cancel_task(
 mod test {
     use magicblock_magic_program_api::instruction::MagicBlockInstruction;
     use solana_account::AccountSharedData;
-    use solana_instruction::{
-        AccountMeta, Instruction, error::InstructionError,
-    };
+    use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
     use solana_keypair::Keypair;
     use solana_sdk_ids::system_program;
     use solana_signer::Signer;
 
-    use crate::{
-        instruction_utils::InstructionUtils, test_utils::process_instruction,
-    };
+    use crate::{instruction_utils::InstructionUtils, test_utils::process_instruction};
 
     #[test]
     fn test_process_cancel_task() {
         let payer = Keypair::new();
         let task_id = 1;
 
-        let ix =
-            InstructionUtils::cancel_task_instruction(&payer.pubkey(), task_id);
+        let ix = InstructionUtils::cancel_task_instruction(&payer.pubkey(), task_id);
         let transaction_accounts = vec![(
             payer.pubkey(),
             AccountSharedData::new(u64::MAX, 0, &system_program::id()),
         )];
         let expected_result = Ok(());
 
-        process_instruction(
-            &ix.data,
-            transaction_accounts,
-            ix.accounts,
-            expected_result,
-        );
+        process_instruction(&ix.data, transaction_accounts, ix.accounts, expected_result);
     }
 
     #[test]
@@ -104,11 +92,6 @@ mod test {
         )];
         let expected_result = Err(InstructionError::MissingRequiredSignature);
 
-        process_instruction(
-            &ix.data,
-            transaction_accounts,
-            ix.accounts,
-            expected_result,
-        );
+        process_instruction(&ix.data, transaction_accounts, ix.accounts, expected_result);
     }
 }

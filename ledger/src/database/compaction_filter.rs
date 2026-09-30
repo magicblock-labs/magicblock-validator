@@ -10,9 +10,7 @@ use std::{
 use rocksdb::{
     CompactionDecision,
     compaction_filter::CompactionFilter,
-    compaction_filter_factory::{
-        CompactionFilterContext, CompactionFilterFactory,
-    },
+    compaction_filter_factory::{CompactionFilterContext, CompactionFilterFactory},
 };
 use solana_clock::Slot;
 
@@ -29,7 +27,7 @@ pub(crate) struct PurgedSlotFilterFactory<C: Column + ColumnName> {
 }
 
 impl<C: Column + ColumnName> PurgedSlotFilterFactory<C> {
-    pub fn new(oldest_slot: Arc<AtomicU64>) -> Self {
+    pub(super) fn new(oldest_slot: Arc<AtomicU64>) -> Self {
         let name = CString::new(format!(
             "purged_slot_filter({}, {:?})",
             C::NAME,
@@ -44,9 +42,7 @@ impl<C: Column + ColumnName> PurgedSlotFilterFactory<C> {
     }
 }
 
-impl<C: Column + ColumnName> CompactionFilterFactory
-    for PurgedSlotFilterFactory<C>
-{
+impl<C: Column + ColumnName> CompactionFilterFactory for PurgedSlotFilterFactory<C> {
     type Filter = PurgedSlotFilter<C>;
 
     fn create(&mut self, _context: CompactionFilterContext) -> Self::Filter {
@@ -79,12 +75,7 @@ pub(crate) struct PurgedSlotFilter<C: Column + ColumnName> {
 }
 
 impl<C: Column + ColumnName> CompactionFilter for PurgedSlotFilter<C> {
-    fn filter(
-        &mut self,
-        _level: u32,
-        key: &[u8],
-        _value: &[u8],
-    ) -> CompactionDecision {
+    fn filter(&mut self, _level: u32, key: &[u8], _value: &[u8]) -> CompactionDecision {
         use rocksdb::CompactionDecision::*;
         if C::keep_all_on_compaction() {
             return Keep;

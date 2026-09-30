@@ -16,8 +16,7 @@ pub fn init() {
 pub fn init_with_config(config: LoggingConfig) {
     use tracing_subscriber::prelude::*;
 
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     macro_rules! init_subscriber {
         ($fmt_layer:expr) => {{
@@ -34,9 +33,8 @@ pub fn init_with_config(config: LoggingConfig) {
 
     match config.style {
         LogStyle::Default => {
-            let layer = fmt::layer()
-                .with_timer(fmt::time::UtcTime::rfc_3339())
-                .with_filter(env_filter);
+            let layer =
+                fmt::layer().with_timer(fmt::time::UtcTime::rfc_3339()).with_filter(env_filter);
             init_subscriber!(layer);
         }
         LogStyle::Ephem => {
@@ -65,8 +63,7 @@ pub fn init_for_tests() {
 
     let _ = fmt::Subscriber::builder()
         .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| EnvFilter::new("info")),
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
         .with_test_writer()
         .try_init();
@@ -102,7 +99,7 @@ use tracing::{Event, Subscriber};
 use tracing_subscriber::{
     fmt::{
         FmtContext,
-        format::{self, FormatEvent, FormatFields, Writer},
+        format::{FormatEvent, FormatFields, Writer},
         time::FormatTime,
     },
     registry::LookupSpan,
@@ -112,9 +109,7 @@ use tracing_subscriber::{
 pub struct EphemFieldFormatter;
 
 impl<'writer> FormatFields<'writer> for EphemFieldFormatter {
-    fn format_fields<
-        R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields,
-    >(
+    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
         &self,
         mut writer: Writer<'writer>,
         fields: R,
@@ -129,9 +124,7 @@ impl<'writer> FormatFields<'writer> for EphemFieldFormatter {
 pub struct DevnetFieldFormatter;
 
 impl<'writer> FormatFields<'writer> for DevnetFieldFormatter {
-    fn format_fields<
-        R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields,
-    >(
+    fn format_fields<R: tracing_subscriber::prelude::__tracing_subscriber_field_RecordFields>(
         &self,
         mut writer: Writer<'writer>,
         fields: R,
@@ -150,19 +143,12 @@ struct SpaceSeparatedVisitor<'a, 'writer> {
 
 impl<'a, 'writer> SpaceSeparatedVisitor<'a, 'writer> {
     fn new(writer: &'a mut Writer<'writer>) -> Self {
-        Self {
-            writer,
-            first: true,
-        }
+        Self { writer, first: true }
     }
 }
 
 impl tracing::field::Visit for SpaceSeparatedVisitor<'_, '_> {
-    fn record_debug(
-        &mut self,
-        field: &tracing::field::Field,
-        value: &dyn std::fmt::Debug,
-    ) {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         if field.name() == "message" {
             let _ = write!(self.writer, "{:?}", value);
         } else {
@@ -198,7 +184,7 @@ where
     fn format_event(
         &self,
         ctx: &FmtContext<'_, S, N>,
-        mut writer: format::Writer<'_>,
+        mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> std::fmt::Result {
         let metadata = event.metadata();
@@ -228,7 +214,7 @@ where
     fn format_event(
         &self,
         ctx: &FmtContext<'_, S, N>,
-        mut writer: format::Writer<'_>,
+        mut writer: Writer<'_>,
         event: &Event<'_>,
     ) -> std::fmt::Result {
         let metadata = event.metadata();

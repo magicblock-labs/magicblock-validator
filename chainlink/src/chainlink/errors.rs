@@ -5,14 +5,12 @@ use thiserror::Error;
 
 use crate::remote_account_provider::RemoteAccountProviderError;
 
-pub type ChainlinkResult<T> = std::result::Result<T, ChainlinkError>;
+pub type ChainlinkResult<T> = Result<T, ChainlinkError>;
 
 #[derive(Debug, Error)]
 pub enum ChainlinkError {
     #[error("Remote account provider error: {0}")]
-    RemoteAccountProviderError(
-        #[from] crate::remote_account_provider::RemoteAccountProviderError,
-    ),
+    RemoteAccountProviderError(#[from] RemoteAccountProviderError),
     #[error("JoinError: {0}")]
     JoinError(#[from] tokio::task::JoinError),
 
@@ -34,9 +32,7 @@ pub enum ChainlinkError {
     #[error("Token account could not be decoded while cloning: {0} ({1})")]
     InvalidTokenAccount(Pubkey, String),
 
-    #[error(
-        "Failed to resolve one or more accounts {0} when getting delegation records"
-    )]
+    #[error("Failed to resolve one or more accounts {0} when getting delegation records")]
     DelegatedAccountResolutionsFailed(String),
 
     #[error("Failed to find account that was just resolved {0}")]
@@ -48,14 +44,10 @@ pub enum ChainlinkError {
     #[error("Failed to resolve program data account {0} for program {1}")]
     FailedToResolveProgramDataAccount(Pubkey, Pubkey),
 
-    #[error(
-        "Failed to resolve/deserialize one or more accounts {0} when getting programs"
-    )]
+    #[error("Failed to resolve/deserialize one or more accounts {0} when getting programs")]
     ProgramAccountResolutionsFailed(String),
 
-    #[error(
-        "Unexpected number of accounts returned when fetching account with companion: {0}"
-    )]
+    #[error("Unexpected number of accounts returned when fetching account with companion: {0}")]
     UnexpectedAccountCount(String),
 
     #[error("Missing accounts required by delegation actions: {0:?}")]

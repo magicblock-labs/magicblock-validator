@@ -5,10 +5,7 @@ use crate::{
 };
 
 impl HttpDispatcher {
-    pub(crate) async fn request_airdrop(
-        &self,
-        _request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) async fn request_airdrop(&self, _request: &JsonRequest) -> HandlerResult {
         Err(RpcError::invalid_request("free airdrop faucet is disabled"))
     }
 }

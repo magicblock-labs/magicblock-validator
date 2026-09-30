@@ -29,7 +29,7 @@ const PERF_SAMPLES_CF: &str = "perf_samples";
 ///
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
 /// * value type: [`generated::TransactionStatusMeta`]
-pub struct TransactionStatus;
+pub(crate) struct TransactionStatus;
 
 #[derive(Debug)]
 /// The address signatures column
@@ -37,7 +37,7 @@ pub struct TransactionStatus;
 /// * index type: `(`[`Pubkey`]`, `[`Slot`]`, u32, `[`Signature`]`)`
 ///   - account addr, slot, tx index, tx signature
 /// * value type: [`blockstore_meta::AddressSignatureMeta`]
-pub struct AddressSignatures;
+pub(crate) struct AddressSignatures;
 
 /// The slot + transaction index Signature column.
 /// It mainly serves to quickly iterate over all signatures in a slot
@@ -52,19 +52,19 @@ pub struct AddressSignatures;
 /// * index type: `(`[`Slot`]`, u32)`
 ///   - slot, tx index
 /// * value type: [`[`solana_signature::signature::Signature`]`]
-pub struct SlotSignatures;
+pub(crate) struct SlotSignatures;
 
 /// The block time column
 ///
 /// * index type: `u64` (see [`SlotColumn`])
 /// * value type: [`UnixTimestamp`]
-pub struct Blocktime;
+pub(crate) struct Blocktime;
 
 /// The block hash column
 ///
 /// * index type: `u64` (see [`SlotColumn`])
 /// * value type: [`solana_hash::hash::Hash`]
-pub struct Blockhash;
+pub(crate) struct Blockhash;
 
 /// The transaction with status column
 ///
@@ -74,20 +74,20 @@ pub struct Blockhash;
 ///
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
 /// * value type: `Vec<u8>` (bincode-serialized `VersionedTransaction`)
-pub struct Transaction;
+pub(crate) struct Transaction;
 
 /// The transaction memos column
 ///
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
 /// * value type: [`String`]
-pub struct TransactionMemos;
+pub(crate) struct TransactionMemos;
 
 #[derive(Debug)]
 /// The performance samples column
 ///
 /// * index type: `u64` (see [`SlotColumn`])
 /// * value type: [`crate::database::meta::PerfSample`]
-pub struct PerfSamples;
+pub(crate) struct PerfSamples;
 
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
@@ -96,7 +96,7 @@ pub struct PerfSamples;
 //   `compact_storage()` in ledger/src/blockstore/blockstore_purge.rs !!
 // - Account for column in `analyze_storage()` in ledger-tool/src/main.rs
 
-pub fn columns() -> Vec<&'static str> {
+pub(crate) fn columns() -> Vec<&'static str> {
     vec![
         TransactionStatus::NAME,
         AddressSignatures::NAME,
@@ -195,13 +195,9 @@ pub trait ColumnIndexDeprecation: Column {
     type DeprecatedIndex;
 
     fn deprecated_key(index: Self::DeprecatedIndex) -> Vec<u8>;
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError>;
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError>;
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError>;
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError>;
     fn convert_index(deprecated_index: Self::DeprecatedIndex) -> Self::Index;
 
     fn index(key: &[u8]) -> Self::Index {
@@ -224,9 +220,7 @@ pub trait ColumnIndexDeprecation: Column {
 impl Column for AddressSignatures {
     type Index = (Pubkey, Slot, u32, Signature);
 
-    fn key(
-        (pubkey, slot, transaction_index, signature): Self::Index,
-    ) -> Vec<u8> {
+    fn key((pubkey, slot, transaction_index, signature): Self::Index) -> Vec<u8> {
         let mut key = vec![0; Self::CURRENT_INDEX_LEN];
         key[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
         BigEndian::write_u64(&mut key[32..40], slot);
@@ -258,9 +252,7 @@ impl ColumnIndexDeprecation for AddressSignatures {
     const CURRENT_INDEX_LEN: usize = 108;
     type DeprecatedIndex = (u64, Pubkey, Slot, Signature);
 
-    fn deprecated_key(
-        (primary_index, pubkey, slot, signature): Self::DeprecatedIndex,
-    ) -> Vec<u8> {
+    fn deprecated_key((primary_index, pubkey, slot, signature): Self::DeprecatedIndex) -> Vec<u8> {
         let mut key = vec![0; Self::DEPRECATED_INDEX_LEN];
         BigEndian::write_u64(&mut key[0..8], primary_index);
         key[8..40].clone_from_slice(&pubkey.as_ref()[0..32]);
@@ -269,9 +261,7 @@ impl ColumnIndexDeprecation for AddressSignatures {
         key
     }
 
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError> {
         if key.len() != Self::DEPRECATED_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -282,9 +272,7 @@ impl ColumnIndexDeprecation for AddressSignatures {
         Ok((primary_index, pubkey, slot, signature))
     }
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError> {
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError> {
         if key.len() != Self::CURRENT_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -338,9 +326,7 @@ impl ColumnIndexDeprecation for SlotSignatures {
 
     type DeprecatedIndex = (u64, Slot, u32);
 
-    fn deprecated_key(
-        (primary_index, slot, tx_idx): Self::DeprecatedIndex,
-    ) -> Vec<u8> {
+    fn deprecated_key((primary_index, slot, tx_idx): Self::DeprecatedIndex) -> Vec<u8> {
         let mut key = vec![0; Self::DEPRECATED_INDEX_LEN];
         BigEndian::write_u64(&mut key[0..8], primary_index);
         BigEndian::write_u64(&mut key[8..16], slot);
@@ -348,9 +334,7 @@ impl ColumnIndexDeprecation for SlotSignatures {
         key
     }
 
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError> {
         if key.len() != Self::DEPRECATED_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -360,9 +344,7 @@ impl ColumnIndexDeprecation for SlotSignatures {
         Ok((primary_index, slot, tx_idx))
     }
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError> {
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError> {
         if key.len() != Self::CURRENT_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -417,9 +399,7 @@ impl ColumnIndexDeprecation for TransactionStatus {
     const CURRENT_INDEX_LEN: usize = 72;
     type DeprecatedIndex = (u64, Signature, Slot);
 
-    fn deprecated_key(
-        (index, signature, slot): Self::DeprecatedIndex,
-    ) -> Vec<u8> {
+    fn deprecated_key((index, signature, slot): Self::DeprecatedIndex) -> Vec<u8> {
         let mut key = vec![0; Self::DEPRECATED_INDEX_LEN];
         BigEndian::write_u64(&mut key[0..8], index);
         key[8..72].copy_from_slice(&signature.as_ref()[0..64]);
@@ -427,9 +407,7 @@ impl ColumnIndexDeprecation for TransactionStatus {
         key
     }
 
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError> {
         if key.len() != Self::DEPRECATED_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -439,9 +417,7 @@ impl ColumnIndexDeprecation for TransactionStatus {
         Ok((primary_index, signature, slot))
     }
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError> {
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError> {
         if key.len() != Self::CURRENT_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }
@@ -515,8 +491,7 @@ impl TypedColumn for Transaction {
 // Even though it is deprecated it is needed to implement iter_current_index_filtered
 impl ColumnIndexDeprecation for Transaction {
     // Same key as TransactionStatus
-    type DeprecatedIndex =
-        <TransactionStatus as ColumnIndexDeprecation>::DeprecatedIndex;
+    type DeprecatedIndex = <TransactionStatus as ColumnIndexDeprecation>::DeprecatedIndex;
 
     const DEPRECATED_INDEX_LEN: usize =
         <TransactionStatus as ColumnIndexDeprecation>::DEPRECATED_INDEX_LEN;
@@ -527,22 +502,16 @@ impl ColumnIndexDeprecation for Transaction {
         <TransactionStatus as ColumnIndexDeprecation>::deprecated_key(index)
     }
 
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError> {
         <TransactionStatus as ColumnIndexDeprecation>::try_deprecated_index(key)
     }
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError> {
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError> {
         <TransactionStatus as ColumnIndexDeprecation>::try_current_index(key)
     }
 
     fn convert_index(deprecated_index: Self::DeprecatedIndex) -> Self::Index {
-        <TransactionStatus as ColumnIndexDeprecation>::convert_index(
-            deprecated_index,
-        )
+        <TransactionStatus as ColumnIndexDeprecation>::convert_index(deprecated_index)
     }
 }
 
@@ -591,15 +560,11 @@ impl ColumnIndexDeprecation for TransactionMemos {
         key
     }
 
-    fn try_deprecated_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+    fn try_deprecated_index(key: &[u8]) -> Result<Self::DeprecatedIndex, IndexError> {
         Signature::try_from(&key[..64]).map_err(|_| IndexError::UnpackError)
     }
 
-    fn try_current_index(
-        key: &[u8],
-    ) -> std::result::Result<Self::Index, IndexError> {
+    fn try_current_index(key: &[u8]) -> Result<Self::Index, IndexError> {
         if key.len() != Self::CURRENT_INDEX_LEN {
             return Err(IndexError::UnpackError);
         }

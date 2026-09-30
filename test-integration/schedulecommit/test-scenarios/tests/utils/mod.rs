@@ -13,7 +13,7 @@ use solana_sdk::{
 // -----------------
 // Setup
 // -----------------
-pub fn get_context_with_delegated_committees(
+pub(crate) fn get_context_with_delegated_committees(
     ncommittees: usize,
     user_seed: UserSeeds,
 ) -> ScheduleCommitTestContext {
@@ -42,7 +42,7 @@ pub fn get_context_with_delegated_committees(
 // Asserts
 // -----------------
 #[allow(dead_code)]
-pub fn assert_committee_was_committed<T>(
+pub(crate) fn assert_committee_was_committed<T>(
     pda: Pubkey,
     res: &ScheduledCommitResult<T>,
     is_single_stage: bool,
@@ -74,7 +74,7 @@ pub fn assert_committee_was_committed<T>(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_was_committed<T>(
+pub(crate) fn assert_one_committee_was_committed<T>(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<T>,
     is_single_stage: bool,
@@ -85,7 +85,7 @@ pub fn assert_one_committee_was_committed<T>(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_two_committees_were_committed(
+pub(crate) fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
     is_single_stage: bool,
@@ -111,7 +111,7 @@ pub fn assert_two_committees_were_committed(
 }
 
 #[allow(dead_code)]
-pub fn assert_feepayer_was_committed(
+pub(crate) fn assert_feepayer_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
     is_single_stage: bool,
@@ -133,13 +133,12 @@ pub fn assert_feepayer_was_committed(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_synchronized_count(
+pub(crate) fn assert_one_committee_synchronized_count(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
-    let (ephem_account, chain_account, pda) =
-        get_main_accounts(ctx, res, &ctx.committees[0]);
+    let (ephem_account, chain_account, pda) = get_main_accounts(ctx, res, &ctx.committees[0]);
 
     assert_eq!(
         ephem_account.count, expected_count,
@@ -156,15 +155,13 @@ pub fn assert_one_committee_synchronized_count(
 #[allow(dead_code)]
 // used in 01_commits.rs
 // used in 02_commit_and_undelegate.rs
-pub fn assert_two_committees_synchronized_count(
+pub(crate) fn assert_two_committees_synchronized_count(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
-    let (ephem_account1, chain_account1, pda1) =
-        get_main_accounts(ctx, res, &ctx.committees[0]);
-    let (ephem_account2, chain_account2, pda2) =
-        get_main_accounts(ctx, res, &ctx.committees[1]);
+    let (ephem_account1, chain_account1, pda1) = get_main_accounts(ctx, res, &ctx.committees[0]);
+    let (ephem_account2, chain_account2, pda2) = get_main_accounts(ctx, res, &ctx.committees[1]);
 
     assert_eq!(
         ephem_account1.count, expected_count,
@@ -195,11 +192,7 @@ fn get_main_accounts(
 ) -> (MainAccount, MainAccount, Pubkey) {
     let (_, pda) = committee;
 
-    let ephem_account = res
-        .included
-        .get(pda)
-        .expect("should have committed pda")
-        .clone();
+    let ephem_account = res.included.get(pda).expect("should have committed pda").clone();
     let chain_account_data = ctx.fetch_chain_account_data(*pda).unwrap();
     let chain_account = MainAccount::try_decode(&chain_account_data).unwrap();
 
@@ -207,7 +200,7 @@ fn get_main_accounts(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_account_was_undelegated_on_chain(
+pub(crate) fn assert_one_committee_account_was_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
     let pda = ctx.committees[0].1;
@@ -216,7 +209,7 @@ pub fn assert_one_committee_account_was_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_account_was_not_undelegated_on_chain(
+pub(crate) fn assert_one_committee_account_was_not_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
     let pda = ctx.committees[0].1;
@@ -225,7 +218,7 @@ pub fn assert_one_committee_account_was_not_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_two_committee_accounts_were_undelegated_on_chain(
+pub(crate) fn assert_two_committee_accounts_were_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
     let pda1 = ctx.committees[0].1;
@@ -236,7 +229,7 @@ pub fn assert_two_committee_accounts_were_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_account_was_undelegated_on_chain(
+pub(crate) fn assert_account_was_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
     pda: Pubkey,
     new_owner: Pubkey,
@@ -251,7 +244,7 @@ pub fn assert_account_was_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_account_was_not_undelegated_on_chain(
+pub(crate) fn assert_account_was_not_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
     pda: Pubkey,
     program_id: Pubkey,
@@ -270,7 +263,7 @@ pub fn assert_account_was_not_undelegated_on_chain(
 }
 
 #[allow(dead_code)] // used in tests
-pub fn assert_is_instruction_error(
+pub(crate) fn assert_is_instruction_error(
     tx_err: TransactionError,
     tx_result_err: &client_error::Error,
     ix_error: InstructionError,
@@ -288,7 +281,7 @@ pub fn assert_is_instruction_error(
 }
 
 #[allow(dead_code)] // used in tests
-pub fn assert_is_one_of_instruction_errors(
+pub(crate) fn assert_is_one_of_instruction_errors(
     tx_err: TransactionError,
     tx_result_err: &client_error::Error,
     expected: &[InstructionError],
@@ -306,7 +299,7 @@ pub fn assert_is_one_of_instruction_errors(
 }
 
 #[allow(dead_code)] // used in tests
-pub fn extract_transaction_error(
+pub(crate) fn extract_transaction_error(
     tx_result: Result<Signature, client_error::Error>,
 ) -> (client_error::Error, Option<TransactionError>) {
     let tx_result_err = match tx_result {

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use setup::RpcTestEnv;
 
 mod setup;
@@ -6,11 +8,7 @@ mod setup;
 #[tokio::test]
 async fn test_get_version() {
     let env = RpcTestEnv::new().await;
-    let version_info = env
-        .rpc
-        .get_version()
-        .await
-        .expect("get_version request failed");
+    let version_info = env.rpc.get_version().await.expect("get_version request failed");
 
     assert!(
         !version_info.solana_core.is_empty(),
@@ -26,11 +24,7 @@ async fn test_get_version() {
 #[tokio::test]
 async fn test_get_identity() {
     let env = RpcTestEnv::new().await;
-    let identity = env
-        .rpc
-        .get_identity()
-        .await
-        .expect("get_identity request failed");
+    let identity = env.rpc.get_identity().await.expect("get_identity request failed");
 
     assert_eq!(
         identity,

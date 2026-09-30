@@ -1,17 +1,12 @@
 use magicblock_core::Slot;
 use solana_rpc_client_api::request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS;
 use solana_transaction_error::TransactionError;
-use solana_transaction_status::{
-    TransactionConfirmationStatus, TransactionStatus,
-};
+use solana_transaction_status::{TransactionConfirmationStatus, TransactionStatus};
 
 use super::HandlerResult;
 use crate::{
     error::RpcError,
-    requests::{
-        JsonHttpRequest as JsonRequest, params::SerdeSignature,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::SerdeSignature, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
@@ -19,10 +14,7 @@ const DEFAULT_CONFIRMATION_STATUS: Option<TransactionConfirmationStatus> =
     Some(TransactionConfirmationStatus::Finalized);
 
 impl HttpDispatcher {
-    pub(crate) async fn get_signature_statuses(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) async fn get_signature_statuses(&self, request: &JsonRequest) -> HandlerResult {
         let signatures = request.required::<Vec<SerdeSignature>>(0)?;
         if signatures.len() > MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS {
             return Err(RpcError::invalid_params(
@@ -53,14 +45,11 @@ impl HttpDispatcher {
         // One legacy admission for the batch; engine-only results never wait on it.
         if statuses.iter().any(Option::is_none) {
             self.with_ledger(|ledger| {
-                for (signature, status) in signatures.iter().zip(&mut statuses)
-                {
+                for (signature, status) in signatures.iter().zip(&mut statuses) {
                     if status.is_none() {
                         *status = ledger
                             .get_transaction_status(signature.0, Slot::MAX)?
-                            .map(|(slot, meta)| {
-                                build_transaction_status(slot, meta.status)
-                            });
+                            .map(|(slot, meta)| build_transaction_status(slot, meta.status));
                     }
                 }
                 Ok::<_, RpcError>(())
@@ -73,10 +62,7 @@ impl HttpDispatcher {
     }
 }
 
-fn build_transaction_status(
-    slot: Slot,
-    status: Result<(), TransactionError>,
-) -> TransactionStatus {
+fn build_transaction_status(slot: Slot, status: Result<(), TransactionError>) -> TransactionStatus {
     TransactionStatus {
         slot,
         status: status.clone(),

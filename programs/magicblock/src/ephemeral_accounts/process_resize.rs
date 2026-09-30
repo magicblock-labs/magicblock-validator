@@ -13,8 +13,8 @@ use super::{
 
 /// Resizes an existing ephemeral account, adjusting rent accordingly.
 pub(crate) fn process_resize_ephemeral_account(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &InvokeContext<'_, '_>,
+    transaction_context: &TransactionContext<'_>,
     new_data_len: u32,
 ) -> Result<(), InstructionError> {
     if new_data_len > MAX_DATA_LEN {
@@ -22,8 +22,7 @@ pub(crate) fn process_resize_ephemeral_account(
     }
 
     let caller_program_id = validate_common(invoke_context)?;
-    let ephemeral =
-        validate_existing_ephemeral(transaction_context, &caller_program_id)?;
+    let ephemeral = validate_existing_ephemeral(transaction_context, &caller_program_id)?;
 
     let old_len = get_ephemeral_data_len(&ephemeral)?;
     let new_rent = ephemeral::rent_for(new_data_len)?;

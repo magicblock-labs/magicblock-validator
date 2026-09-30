@@ -1,10 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
 use integration_test_tools::{init_logger, IntegrationTestContext};
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, rent::Rent, signature::Keypair,
-    signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, rent::Rent, signature::Keypair, signer::Signer};
 use tokio::task::JoinSet;
 use tracing::*;
 
@@ -27,8 +24,7 @@ async fn test_large_number_of_account_subscriptions() {
     let ctx = Arc::new(IntegrationTestContext::try_new().unwrap());
 
     debug!("Generating {NUM_PUBKEYS} keypairs...");
-    let keypairs: Vec<Keypair> =
-        (0..NUM_PUBKEYS).map(|_| Keypair::new()).collect();
+    let keypairs: Vec<Keypair> = (0..NUM_PUBKEYS).map(|_| Keypair::new()).collect();
     debug!("✅ Generated {NUM_PUBKEYS} keypairs");
 
     let rent_exempt_amount = Rent::default().minimum_balance(0);
@@ -40,8 +36,7 @@ async fn test_large_number_of_account_subscriptions() {
     ctx.airdrop_chain(&payer_chain.pubkey(), LAMPORTS_PER_SOL * 10)
         .expect("failed to airdrop to payer_chain");
 
-    let monitored_accounts_before =
-        ctx.get_monitored_accounts_count(PORT).unwrap();
+    let monitored_accounts_before = ctx.get_monitored_accounts_count(PORT).unwrap();
     let mut total_processed = 0;
     for (chunk_idx, chunk) in keypairs.chunks(AIRDROP_CHUNK_SIZE).enumerate() {
         let mut join_set = JoinSet::new();
@@ -51,14 +46,8 @@ async fn test_large_number_of_account_subscriptions() {
             let ctx = ctx.clone();
             join_set.spawn(async move {
                 if idx % 2 == 0 {
-                    ctx.airdrop_chain_and_delegate(
-                        &payer_chain,
-                        &keypair,
-                        rent_exempt_amount,
-                    )
-                    .expect(
-                        "failed to airdrop and delegate to on-chain account",
-                    );
+                    ctx.airdrop_chain_and_delegate(&payer_chain, &keypair, rent_exempt_amount)
+                        .expect("failed to airdrop and delegate to on-chain account");
                 } else {
                     ctx.airdrop_chain(&keypair.pubkey(), rent_exempt_amount)
                         .expect("failed to airdrop to on-chain account");
@@ -75,11 +64,7 @@ async fn test_large_number_of_account_subscriptions() {
         trace!(
             "Pubkeys in chunk {}: {}",
             chunk_idx + 1,
-            pubkeys
-                .iter()
-                .map(|k| k.to_string())
-                .collect::<Vec<_>>()
-                .join(", ")
+            pubkeys.iter().map(|k| k.to_string()).collect::<Vec<_>>().join(", ")
         );
 
         debug!(
@@ -90,9 +75,8 @@ async fn test_large_number_of_account_subscriptions() {
             total_processed
         );
 
-        let _accounts = ctx
-            .fetch_ephem_multiple_accounts(&pubkeys)
-            .expect("failed to fetch accounts");
+        let _accounts =
+            ctx.fetch_ephem_multiple_accounts(&pubkeys).expect("failed to fetch accounts");
 
         debug!(
             "✅ Fetched batch {}: {}/{} accounts ({} total)",
@@ -108,8 +92,7 @@ async fn test_large_number_of_account_subscriptions() {
     // Wait for metrics update
     tokio::time::sleep(Duration::from_secs(5)).await;
 
-    let monitored_accounts_after =
-        ctx.get_monitored_accounts_count(PORT).unwrap();
+    let monitored_accounts_after = ctx.get_monitored_accounts_count(PORT).unwrap();
     let diff = monitored_accounts_after - monitored_accounts_before;
     debug!("Monitored accounts count total: {monitored_accounts_after}, diff: {diff}");
 

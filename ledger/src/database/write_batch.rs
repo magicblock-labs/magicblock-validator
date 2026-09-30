@@ -12,13 +12,8 @@ pub struct WriteBatch<'a> {
 }
 
 impl<'a> WriteBatch<'a> {
-    pub fn put_bytes<C: Column + ColumnName>(
-        &mut self,
-        key: C::Index,
-        bytes: &[u8],
-    ) {
-        self.write_batch
-            .put_cf(self.get_cf::<C>(), C::key(key), bytes);
+    pub fn put_bytes<C: Column + ColumnName>(&mut self, key: C::Index, bytes: &[u8]) {
+        self.write_batch.put_cf(self.get_cf::<C>(), C::key(key), bytes);
     }
 
     pub fn delete<C: Column + ColumnName>(&mut self, key: C::Index) {
@@ -35,11 +30,7 @@ impl<'a> WriteBatch<'a> {
         value: &C::Type,
     ) -> Result<(), LedgerError> {
         let serialized_value = serialize(&value)?;
-        self.write_batch.put_cf(
-            self.get_cf::<C>(),
-            C::key(key),
-            serialized_value,
-        );
+        self.write_batch.put_cf(self.get_cf::<C>(), C::key(key), serialized_value);
         Ok(())
     }
 
@@ -60,7 +51,6 @@ impl<'a> WriteBatch<'a> {
         from: C::Index,
         to: C::Index, // exclusive
     ) {
-        self.write_batch
-            .delete_range_cf(cf, C::key(from), C::key(to));
+        self.write_batch.delete_range_cf(cf, C::key(from), C::key(to));
     }
 }

@@ -1,10 +1,4 @@
-use std::{
-    collections::HashMap,
-    mem,
-    num::NonZeroUsize,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use dlp_api::{
@@ -15,20 +9,19 @@ use dlp_api::{
 use lru::LruCache;
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
+use parking_lot::Mutex;
 use solana_account::Account;
 use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     client_error::ErrorKind, config::RpcAccountInfoConfig,
-    custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
-    request::RpcError,
+    custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED, request::RpcError,
 };
 use solana_signature::Signature;
 use tokio::sync::{Mutex as TMutex, MutexGuard};
 use tracing::{error, info, warn};
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
-const MUTEX_POISONED_MSG: &str = "CacheTaskInfoFetcher mutex poisoned!";
 
 /// A delegated account paired with the base-layer slot of the state
 /// snapshot being committed for it (`CommittedAccount::remote_slot`).
@@ -103,16 +96,12 @@ impl RpcTaskInfoFetcher {
             .flat_map(|(delegated_account, _)| {
                 [
                     Pubkey::find_program_address(
-                        delegation_record_seeds_from_delegated_account!(
-                            delegated_account
-                        ),
+                        delegation_record_seeds_from_delegated_account!(delegated_account),
                         &dlp_api::id(),
                     )
                     .0,
                     Pubkey::find_program_address(
-                        delegation_metadata_seeds_from_delegated_account!(
-                            delegated_account
-                        ),
+                        delegation_metadata_seeds_from_delegated_account!(delegated_account),
                         &dlp_api::id(),
                     )
                     .0,
@@ -133,32 +122,20 @@ impl RpcTaskInfoFetcher {
             .zip(pda_accounts.chunks_exact(2))
             .zip(accounts)
             .map(|((pair, pdas), (delegated_account, snapshot_slot))| {
-                let record =
-                    DelegationRecord::try_from_bytes_with_discriminator(
-                        &pair[0].data,
-                    )
-                    .map_err(|_| {
-                        TaskInfoFetcherError::InvalidAccountDataError(pdas[0])
-                    })?;
+                let record = DelegationRecord::try_from_bytes_with_discriminator(&pair[0].data)
+                    .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(pdas[0]))?;
                 // Snapshot slot 0 means the intent carries no snapshot
                 // provenance (synthetic/test intents); skip the session
                 // comparison since there is nothing to compare against.
-                if *snapshot_slot > 0 && record.delegation_slot > *snapshot_slot
-                {
-                    return Err(
-                        TaskInfoFetcherError::DelegationSessionChangedError {
-                            delegated_account: *delegated_account,
-                            delegation_slot: record.delegation_slot,
-                            snapshot_slot: *snapshot_slot,
-                        },
-                    );
+                if *snapshot_slot > 0 && record.delegation_slot > *snapshot_slot {
+                    return Err(TaskInfoFetcherError::DelegationSessionChangedError {
+                        delegated_account: *delegated_account,
+                        delegation_slot: record.delegation_slot,
+                        snapshot_slot: *snapshot_slot,
+                    });
                 }
-                DelegationMetadata::try_from_bytes_with_discriminator(
-                    &pair[1].data,
-                )
-                .map_err(|_| {
-                    TaskInfoFetcherError::InvalidAccountDataError(pdas[1])
-                })
+                DelegationMetadata::try_from_bytes_with_discriminator(&pair[1].data)
+                    .map_err(|_| TaskInfoFetcherError::InvalidAccountDataError(pdas[1]))
             })
             .collect()
     }
@@ -177,13 +154,7 @@ impl RpcTaskInfoFetcher {
         let mut i = 0;
         loop {
             i += 1;
-            let err = match Self::fetch_accounts(
-                rpc_client,
-                pubkeys,
-                min_context_slot,
-            )
-            .await
-            {
+            let err = match Self::fetch_accounts(rpc_client, pubkeys, min_context_slot).await {
                 Ok(value) => break Ok(value),
                 Err(err) => err,
             };
@@ -199,9 +170,7 @@ impl RpcTaskInfoFetcher {
                     );
                 }
                 err @ (TaskInfoFetcherError::InvalidAccountDataError(_)
-                | TaskInfoFetcherError::DelegationSessionChangedError {
-                    ..
-                }) => {
+                | TaskInfoFetcherError::DelegationSessionChangedError { .. }) => {
                     error!(error = ?err, "Unexpected error");
                     break Err(err);
                 }
@@ -250,9 +219,7 @@ impl RpcTaskInfoFetcher {
                 None,
             )
             .await
-            .map_err(|err| {
-                TaskInfoFetcherError::map_client_error(min_context_slot, err)
-            })?;
+            .map_err(|err| TaskInfoFetcherError::map_client_error(min_context_slot, err))?;
 
         let accounts = pubkeys
             .iter()
@@ -261,9 +228,7 @@ impl RpcTaskInfoFetcher {
                 let account = if let Some(account) = accounts.get_mut(i) {
                     account
                 } else {
-                    return Err(TaskInfoFetcherError::AccountNotFoundError(
-                        *pubkey,
-                    ));
+                    return Err(TaskInfoFetcherError::AccountNotFoundError(*pubkey));
                 };
                 if let Some(account) = account.take() {
                     Ok(account)
@@ -399,24 +364,20 @@ impl<'a> CacheInnerGuard<'a> {
 
 impl<'a> Drop for CacheInnerGuard<'a> {
     fn drop(&mut self) {
-        let mut inner = self.inner.lock().expect(MUTEX_POISONED_MSG);
+        let mut inner = self.inner.lock();
         let nonce_locks = mem::take(&mut self.nonce_locks);
         for (pubkey, lock) in nonce_locks {
             // Drop our clone first so strong_count reflects only other
             // live holders when we check below
             drop(lock);
-            let should_remove = inner
-                .retiring
-                .get(&pubkey)
-                .is_some_and(|l| Arc::strong_count(l) == 1);
+            let should_remove =
+                inner.retiring.get(&pubkey).is_some_and(|l| Arc::strong_count(l) == 1);
             if should_remove {
                 inner.retiring.remove(&pubkey);
             }
         }
 
-        metrics::set_task_info_fetcher_retiring_count(
-            inner.retiring.len() as i64
-        );
+        metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
     }
 }
 
@@ -447,12 +408,8 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
     /// Returns the cached nonce without promoting LRU order or incrementing.
     pub async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
         let lock = {
-            let inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
-            inner
-                .active
-                .peek(pubkey)
-                .or_else(|| inner.retiring.get(pubkey))
-                .cloned()
+            let inner = self.cache.lock();
+            inner.active.peek(pubkey).or_else(|| inner.retiring.get(pubkey)).cloned()
         }?;
 
         let locks_guard = CacheInnerGuard {
@@ -466,8 +423,8 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
     }
 
     /// Resets cache for some or all accounts
-    pub fn reset(&self, reset_type: ResetType) {
-        let mut cache = self.cache.lock().expect(MUTEX_POISONED_MSG);
+    pub fn reset(&self, reset_type: ResetType<'_>) {
+        let mut cache = self.cache.lock();
         match reset_type {
             ResetType::All => {
                 cache.active.clear();
@@ -493,20 +450,19 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
 
         let mut nonce_locks = vec![];
         {
-            let mut inner = self.cache.lock().expect(MUTEX_POISONED_MSG);
+            let mut inner = self.cache.lock();
             for pubkey in pubkeys {
-                let (lock, evicted) =
-                    if let Some(val) = inner.active.get(&pubkey) {
-                        (val.clone(), None)
-                    } else if let Some(val) = inner.retiring.remove(&pubkey) {
-                        // This promotes retiring to active
-                        let evicted = inner.active.push(pubkey, val.clone());
-                        (val, evicted)
-                    } else {
-                        let val = Arc::new(TMutex::new(u64::MAX));
-                        let evicted = inner.active.push(pubkey, val.clone());
-                        (val, evicted)
-                    };
+                let (lock, evicted) = if let Some(val) = inner.active.get(&pubkey) {
+                    (val.clone(), None)
+                } else if let Some(val) = inner.retiring.remove(&pubkey) {
+                    // This promotes retiring to active
+                    let evicted = inner.active.push(pubkey, val.clone());
+                    (val, evicted)
+                } else {
+                    let val = Arc::new(TMutex::new(u64::MAX));
+                    let evicted = inner.active.push(pubkey, val.clone());
+                    (val, evicted)
+                };
 
                 if let Some((evicted_pk, evicted_lock)) = evicted {
                     // If value isn't used by anyone then it can be dropped
@@ -519,17 +475,13 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
                         // 2. request for set A still ongoing
                         // 3, another request with set A comes in, creating new locks in `CacheInner::active`
                         // 4. 2 simultaneous requestors receive same value
-                        let old =
-                            inner.retiring.insert(evicted_pk, evicted_lock);
+                        let old = inner.retiring.insert(evicted_pk, evicted_lock);
                         if old.is_some() {
                             // Safety
                             // assume that is true:
                             // That means that value was active & retiring at the same time
                             // This is impossible as per logic above, contradiction. Q.E.D.
-                            debug_assert!(
-                                false,
-                                "Just evicted value can't be in retiring"
-                            );
+                            debug_assert!(false, "Just evicted value can't be in retiring");
                             error!(
                                 "Retiring map already contained lock with pubkey: {}",
                                 evicted_pk
@@ -540,15 +492,10 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
 
                 nonce_locks.push((pubkey, lock));
             }
-            metrics::set_task_info_fetcher_retiring_count(
-                inner.retiring.len() as i64
-            );
+            metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
         }
 
-        CacheInnerGuard {
-            inner: &self.cache,
-            nonce_locks,
-        }
+        CacheInnerGuard { inner: &self.cache, nonce_locks }
     }
 }
 
@@ -596,15 +543,10 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
 
         // Fetch missing nonces in cache
         let fetched_nonces = {
-            let missing_accounts: Vec<AccountSnapshot> = missing
-                .iter()
-                .map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey]))
-                .collect();
+            let missing_accounts: Vec<AccountSnapshot> =
+                missing.iter().map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey])).collect();
             self.inner
-                .fetch_current_commit_nonces(
-                    &missing_accounts,
-                    min_context_slot,
-                )
+                .fetch_current_commit_nonces(&missing_accounts, min_context_slot)
                 .await?
         };
 
@@ -659,15 +601,10 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
 
         // Fetch missing nonces in cache
         let fetched_nonces = {
-            let missing_accounts: Vec<AccountSnapshot> = missing
-                .iter()
-                .map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey]))
-                .collect();
+            let missing_accounts: Vec<AccountSnapshot> =
+                missing.iter().map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey])).collect();
             self.inner
-                .fetch_current_commit_nonces(
-                    &missing_accounts,
-                    min_context_slot,
-                )
+                .fetch_current_commit_nonces(&missing_accounts, min_context_slot)
                 .await?
         };
 
@@ -692,9 +629,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
-        self.inner
-            .fetch_delegation_metadata(accounts, min_context_slot)
-            .await
+        self.inner.fetch_delegation_metadata(accounts, min_context_slot).await
     }
 
     async fn get_base_accounts(
@@ -702,9 +637,7 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-        self.inner
-            .get_base_accounts(pubkeys, min_context_slot)
-            .await
+        self.inner.get_base_accounts(pubkeys, min_context_slot).await
     }
 }
 
@@ -714,11 +647,8 @@ pub enum ResetType<'a> {
 }
 
 /// Deduplicates snapshots by pubkey, keeping the newest snapshot slot.
-fn snapshot_slots_by_pubkey(
-    accounts: &[AccountSnapshot],
-) -> HashMap<Pubkey, u64> {
-    let mut slots: HashMap<Pubkey, u64> =
-        HashMap::with_capacity(accounts.len());
+fn snapshot_slots_by_pubkey(accounts: &[AccountSnapshot]) -> HashMap<Pubkey, u64> {
+    let mut slots: HashMap<Pubkey, u64> = HashMap::with_capacity(accounts.len());
     for (pubkey, slot) in accounts {
         let entry = slots.entry(*pubkey).or_insert(*slot);
         *entry = (*entry).max(*slot);
@@ -764,16 +694,11 @@ impl TaskInfoFetcherError {
         }
     }
 
-    pub fn map_client_error(
-        min_context_slot: u64,
-        e: MagicBlockRpcClientError,
-    ) -> Self {
-        const MIN_CONTEXT_SLOT_MSG1: &str =
-            "Minimum context slot has not been reached";
+    pub fn map_client_error(min_context_slot: u64, e: MagicBlockRpcClientError) -> Self {
+        const MIN_CONTEXT_SLOT_MSG1: &str = "Minimum context slot has not been reached";
         const MIN_CONTEXT_SLOT_MSG2: &str = "Min context slot not reached";
         fn is_min_context_slot_msg(msg: &str) -> bool {
-            msg.contains(MIN_CONTEXT_SLOT_MSG1)
-                || msg.contains(MIN_CONTEXT_SLOT_MSG2)
+            msg.contains(MIN_CONTEXT_SLOT_MSG1) || msg.contains(MIN_CONTEXT_SLOT_MSG2)
         }
 
         let orig = e;
@@ -789,25 +714,14 @@ impl TaskInfoFetcherError {
         match &*err.kind {
             ErrorKind::RpcError(rpc_err) => match rpc_err {
                 RpcError::ForUser(msg) if is_min_context_slot_msg(msg) => {
-                    Self::MinContextSlotNotReachedError(
-                        min_context_slot,
-                        Box::new(orig),
-                    )
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
                 }
                 RpcError::RpcResponseError {
                     code: JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
                     ..
-                } => Self::MinContextSlotNotReachedError(
-                    min_context_slot,
-                    Box::new(orig),
-                ),
-                RpcError::RpcResponseError { message, .. }
-                    if is_min_context_slot_msg(message) =>
-                {
-                    Self::MinContextSlotNotReachedError(
-                        min_context_slot,
-                        Box::new(orig),
-                    )
+                } => Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig)),
+                RpcError::RpcResponseError { message, .. } if is_min_context_slot_msg(message) => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
                 }
                 _ => Self::MagicBlockRpcClientError(Box::new(orig)),
             },
@@ -858,17 +772,11 @@ mod tests {
         let pk = Pubkey::new_unique();
         let fetcher = FetcherBuilder::new(vec![10]).build();
 
-        let r1 = fetcher
-            .fetch_next_commit_nonces(&[(pk, 0)], 0)
-            .await
-            .unwrap();
+        let r1 = fetcher.fetch_next_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r1[&pk], 11);
 
         // Cache hit: no RPC (only 1 response queued), increments
-        let r2 = fetcher
-            .fetch_next_commit_nonces(&[(pk, 0)], 0)
-            .await
-            .unwrap();
+        let r2 = fetcher.fetch_next_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r2[&pk], 12);
     }
 
@@ -879,14 +787,8 @@ mod tests {
         // prime pk1 (nonce 5), then mixed call fetches only cold pk2 (nonce 20)
         let fetcher = FetcherBuilder::new(vec![5, 20]).build();
 
-        fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-            .await
-            .unwrap(); // pk1 = 6
-        let r = fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0), (pk2, 0)], 0)
-            .await
-            .unwrap();
+        fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 = 6
+        let r = fetcher.fetch_next_commit_nonces(&[(pk1, 0), (pk2, 0)], 0).await.unwrap();
         assert_eq!(r[&pk1], 7); // cached, incremented
         assert_eq!(r[&pk2], 21); // fetched from chain
     }
@@ -898,26 +800,17 @@ mod tests {
         // pk1 initial, pk2 evicts pk1, pk1 re-fetch after eviction
         let fetcher = FetcherBuilder::new(vec![1, 2, 10]).capacity(1).build();
 
-        fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-            .await
-            .unwrap(); // pk1 cached = 2
-        fetcher
-            .fetch_next_commit_nonces(&[(pk2, 0)], 0)
-            .await
-            .unwrap(); // pk2 cached = 3, pk1 evicted
+        fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 cached = 2
+        fetcher.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap(); // pk2 cached = 3, pk1 evicted
 
         assert!(fetcher.peek_commit_nonce(&pk1).await.is_none()); // evicted
 
-        let r = fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-            .await
-            .unwrap();
+        let r = fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
         assert_eq!(r[&pk1], 11); // re-fetched (10 + 1)
 
         // Sequential eviction: pk1's guard was dropped before pk2 evicted it,
         // so Arc strong_count was 1 — never moved to retiring.
-        assert_eq!(fetcher.cache.lock().unwrap().retiring.len(), 0);
+        assert_eq!(fetcher.cache.lock().retiring.len(), 0);
     }
 
     // Phase 1: fetch phase1_keys one-by-one → barrier → outer verification →
@@ -932,19 +825,13 @@ mod tests {
         iters: usize,
     ) {
         for pk in &phase1_keys {
-            fetcher
-                .fetch_next_commit_nonces(&[(*pk, 0)], 0)
-                .await
-                .unwrap();
+            fetcher.fetch_next_commit_nonces(&[(*pk, 0)], 0).await.unwrap();
         }
         barrier.wait().await; // signal phase 1 done
         barrier.wait().await; // wait for outer verification
         for _ in 0..iters {
             for pk in &phase2_keys {
-                fetcher
-                    .fetch_next_commit_nonces(&[(*pk, 0)], 0)
-                    .await
-                    .unwrap();
+                fetcher.fetch_next_commit_nonces(&[(*pk, 0)], 0).await.unwrap();
             }
         }
         for chunk in shared_b.chunks(2) {
@@ -964,17 +851,12 @@ mod tests {
         const CAPACITY: usize = 30;
         const PHASE2_KEYS: usize = EXCLUSIVE + SHARED_A; // 60
 
-        let shared_a: Vec<Pubkey> =
-            (0..SHARED_A).map(|_| Pubkey::new_unique()).collect();
-        let shared_b: Vec<Pubkey> =
-            (0..SHARED_B).map(|_| Pubkey::new_unique()).collect();
-        let excl: [Vec<Pubkey>; NUM_WORKERS] = std::array::from_fn(|_| {
-            (0..EXCLUSIVE).map(|_| Pubkey::new_unique()).collect()
-        });
+        let shared_a: Vec<Pubkey> = (0..SHARED_A).map(|_| Pubkey::new_unique()).collect();
+        let shared_b: Vec<Pubkey> = (0..SHARED_B).map(|_| Pubkey::new_unique()).collect();
+        let excl: [Vec<Pubkey>; NUM_WORKERS] =
+            std::array::from_fn(|_| (0..EXCLUSIVE).map(|_| Pubkey::new_unique()).collect());
         let phase2_keys: [Vec<Pubkey>; NUM_WORKERS] =
-            std::array::from_fn(|i| {
-                excl[i].iter().chain(shared_a.iter()).cloned().collect()
-            });
+            std::array::from_fn(|i| excl[i].iter().chain(shared_a.iter()).cloned().collect());
 
         // Flat queue: each mock call pops exactly N entries (N cold keys).
         // Upper bounds:
@@ -982,9 +864,7 @@ mod tests {
         //   phase 2 excl+sa:    ITERS × PHASE2_KEYS × NUM_WORKERS × 1
         //   phase 2 shared_b:   (SHARED_B / chunk_size) × chunk_size × NUM_WORKERS
         //                     = SHARED_B × NUM_WORKERS
-        let total = SHARED_A
-            + ITERS * PHASE2_KEYS * NUM_WORKERS
-            + SHARED_B * NUM_WORKERS;
+        let total = SHARED_A + ITERS * PHASE2_KEYS * NUM_WORKERS + SHARED_B * NUM_WORKERS;
 
         let fetcher = Arc::new(
             FetcherBuilder::new(vec![0; total])
@@ -1048,17 +928,11 @@ mod tests {
         let pk = Pubkey::new_unique();
         let fetcher = FetcherBuilder::new(vec![10]).build();
 
-        let r1 = fetcher
-            .fetch_current_commit_nonces(&[(pk, 0)], 0)
-            .await
-            .unwrap();
+        let r1 = fetcher.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r1[&pk], 10); // stored as-is
 
         // Cache hit: still 10, fetch_current never increments
-        let r2 = fetcher
-            .fetch_current_commit_nonces(&[(pk, 0)], 0)
-            .await
-            .unwrap();
+        let r2 = fetcher.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r2[&pk], 10);
     }
 
@@ -1069,23 +943,14 @@ mod tests {
         // pk1 initial, pk2 initial, pk1 after reset
         let fetcher = FetcherBuilder::new(vec![1, 2, 50]).build();
 
-        fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-            .await
-            .unwrap(); // pk1 cached = 2
-        fetcher
-            .fetch_next_commit_nonces(&[(pk2, 0)], 0)
-            .await
-            .unwrap(); // pk2 cached = 3
+        fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 cached = 2
+        fetcher.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap(); // pk2 cached = 3
         fetcher.reset(ResetType::Specific(&[pk1]));
 
         assert!(fetcher.peek_commit_nonce(&pk1).await.is_none()); // cleared
         assert_eq!(fetcher.peek_commit_nonce(&pk2).await, Some(3)); // still cached
 
-        let r1 = fetcher
-            .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-            .await
-            .unwrap();
+        let r1 = fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
         assert_eq!(r1[&pk1], 51); // re-fetched (50 + 1)
     }
 
@@ -1105,10 +970,7 @@ mod tests {
         // Spawn Task A: slow fetch for pk1 acquires its nonce lock and sleeps.
         let fetcher2 = fetcher.clone();
         let task_a = tokio::spawn(async move {
-            fetcher2
-                .fetch_next_commit_nonces(&[(pk1, 0)], 0)
-                .await
-                .unwrap();
+            fetcher2.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
         });
 
         // Let Task A acquire pk1's nonce lock and start the slow fetch.
@@ -1118,17 +980,14 @@ mod tests {
         // because Task A's guard still holds a clone of pk1's Arc.
         let fetcher3 = fetcher.clone();
         let task_b = tokio::spawn(async move {
-            fetcher3
-                .fetch_next_commit_nonces(&[(pk2, 0)], 0)
-                .await
-                .unwrap();
+            fetcher3.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap();
         });
 
         // Let Task B run through acquire_nonce_locks (eviction happens here).
         tokio::task::yield_now().await;
 
         // pk1 is in retiring: Task A is in-flight and holds its Arc clone.
-        assert_eq!(fetcher.cache.lock().unwrap().retiring.len(), 1);
+        assert_eq!(fetcher.cache.lock().retiring.len(), 1);
 
         // peek finds pk1 in retiring, blocks on its in-flight lock, returns the value.
         let peeked = fetcher.peek_commit_nonce(&pk1).await;
@@ -1138,7 +997,7 @@ mod tests {
         task_b.await.unwrap();
 
         // All CacheInnerGuards dropped: retiring fully cleaned up.
-        assert_eq!(fetcher.cache.lock().unwrap().retiring.len(), 0);
+        assert_eq!(fetcher.cache.lock().retiring.len(), 0);
     }
 
     /// Fetcher mock
@@ -1168,8 +1027,7 @@ mod tests {
             accounts: &[AccountSnapshot],
             min_context_slot: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-            self.fetch_current_commit_nonces(accounts, min_context_slot)
-                .await
+            self.fetch_current_commit_nonces(accounts, min_context_slot).await
         }
 
         async fn fetch_current_commit_nonces(
@@ -1180,12 +1038,11 @@ mod tests {
             if let Some(delay) = self.delay {
                 tokio::time::sleep(delay).await;
             }
-            let mut q = self.nonces.lock().unwrap();
+            let mut q = self.nonces.lock();
             Ok(accounts
                 .iter()
                 .map(|(pk, _)| {
-                    let nonce =
-                        q.pop_front().expect("mock nonce queue exhausted");
+                    let nonce = q.pop_front().expect("mock nonce queue exhausted");
                     (*pk, nonce)
                 })
                 .collect())
@@ -1195,8 +1052,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
-        {
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| {
@@ -1204,8 +1060,7 @@ mod tests {
                         *pubkey,
                         DelegationMetadata {
                             last_commit_id: 0,
-                            undelegation_requester:
-                                dlp_api::state::UndelegationRequester::None,
+                            undelegation_requester: dlp_api::state::UndelegationRequester::None,
                             seeds: vec![],
                             rent_payer: *pubkey,
                         },
@@ -1219,7 +1074,7 @@ mod tests {
             _: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-            unimplemented!()
+            panic!("mock info fetcher should not load base accounts")
         }
     }
 
@@ -1248,9 +1103,7 @@ mod tests {
 
         fn build(self) -> CacheTaskInfoFetcher<MockInfoFetcher> {
             match self.capacity {
-                Some(cap) => {
-                    CacheTaskInfoFetcher::with_capacity(cap, self.inner)
-                }
+                Some(cap) => CacheTaskInfoFetcher::with_capacity(cap, self.inner),
                 None => CacheTaskInfoFetcher::new(self.inner),
             }
         }

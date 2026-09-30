@@ -1,71 +1,49 @@
 use json::{JsonContainerTrait, JsonValueMutTrait, JsonValueTrait};
 use ledger::request::{BlockDetails, BlockParams};
-use solana_rpc_client_api::config::{
-    RpcEncodingConfigWrapper, RpcTransactionConfig,
-};
-use solana_transaction_status::{
-    ConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
-};
+use solana_rpc_client_api::config::{RpcEncodingConfigWrapper, RpcTransactionConfig};
+use solana_transaction_status::{ConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
 
 use super::HandlerResult;
 use crate::{
     engine_types::confirmed_transaction,
     error::RpcError,
-    requests::{
-        JsonHttpRequest as JsonRequest, params::SerdeSignature,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::SerdeSignature, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
 impl HttpDispatcher {
-    pub(crate) async fn get_transaction(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) async fn get_transaction(&self, request: &JsonRequest) -> HandlerResult {
         let signature = request.required::<SerdeSignature>(0)?.into();
         let config = request
             .optional::<RpcEncodingConfigWrapper<RpcTransactionConfig>>(1)?
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
 
-        let encode =
-            |transaction: Option<ConfirmedTransactionWithStatusMeta>| {
-                let encoding =
-                    config.encoding.unwrap_or(UiTransactionEncoding::Json);
-                // This implementation supports all transaction versions, so we pass a max version number.
-                let max_version = Some(u8::MAX);
+        let encode = |transaction: Option<ConfirmedTransactionWithStatusMeta>| {
+            let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
+            // This implementation supports all transaction versions, so we pass a max version number.
+            let max_version = Some(u8::MAX);
 
-                // If the transaction was found, encode it for the RPC response.
-                let encoded_transaction = transaction
-                    .and_then(|tx| tx.encode(encoding, max_version).ok());
+            // If the transaction was found, encode it for the RPC response.
+            let encoded_transaction =
+                transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
 
-                let mut encoded_value = value_from_serializable(
-                    &encoded_transaction,
-                )
-                .ok_or_else(|| {
-                    RpcError::internal(
-                        "failed to serialize getTransaction response",
-                    )
-                })?;
-                normalize_failed_transaction_balance_arrays(&mut encoded_value);
+            let mut encoded_value = value_from_serializable(&encoded_transaction)
+                .ok_or_else(|| RpcError::internal("failed to serialize getTransaction response"))?;
+            normalize_failed_transaction_balance_arrays(&mut encoded_value);
 
-                if encoding == UiTransactionEncoding::JsonParsed {
-                    sanitize_nan_strings(&mut encoded_value);
-                }
+            if encoding == UiTransactionEncoding::JsonParsed {
+                sanitize_nan_strings(&mut encoded_value);
+            }
 
-                Ok(ResponsePayload::encode_no_context(
-                    &request.id,
-                    encoded_value,
-                ))
-            };
+            Ok(ResponsePayload::encode_no_context(
+                &request.id,
+                encoded_value,
+            ))
+        };
 
-        let engine_transaction = self
-            .engine
-            .transactions()
-            .get(signature)
-            .await
-            .map_err(RpcError::internal)?;
+        let engine_transaction =
+            self.engine.transactions().get(signature).await.map_err(RpcError::internal)?;
         let transaction = if let Some(transaction) = engine_transaction {
             let slot = transaction.execution.header.slot;
             let block_time = self
@@ -81,11 +59,7 @@ impl HttpDispatcher {
             Some(confirmed_transaction(transaction, block_time)?)
         } else {
             return self
-                .with_ledger(|ledger| {
-                    encode(
-                        ledger.get_complete_transaction(signature, u64::MAX)?,
-                    )
-                })
+                .with_ledger(|ledger| encode(ledger.get_complete_transaction(signature, u64::MAX)?))
                 .await;
         };
 
@@ -93,9 +67,7 @@ impl HttpDispatcher {
     }
 }
 
-fn value_from_serializable<T: json::Serialize>(
-    value: &T,
-) -> Option<json::Value> {
+fn value_from_serializable<T: json::Serialize>(value: &T) -> Option<json::Value> {
     json::to_value(value).ok()
 }
 
@@ -121,27 +93,20 @@ fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {
         *first_balance = balance.saturating_sub(fee).into();
     }
 
-    if let Some(encoded_balances) =
-        value_from_serializable(&repaired_post_balances)
-    {
+    if let Some(encoded_balances) = value_from_serializable(&repaired_post_balances) {
         value["meta"]["postBalances"] = encoded_balances;
     }
 }
 
 fn json_value_as_u64(value: &json::Value) -> Option<u64> {
-    value
-        .as_u64()
-        .or_else(|| value.as_str().and_then(|s| s.parse().ok()))
+    value.as_u64().or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
 fn sanitize_nan_strings(value: &mut json::Value) {
     sanitize_nan_strings_for_key(value, None);
 }
 
-fn sanitize_nan_strings_for_key(
-    value: &mut json::Value,
-    parent_key: Option<&str>,
-) {
+fn sanitize_nan_strings_for_key(value: &mut json::Value, parent_key: Option<&str>) {
     if let Some(values) = value.as_array_mut() {
         for value in values {
             sanitize_nan_strings_for_key(value, parent_key);
@@ -249,38 +214,31 @@ mod tests {
         assert_eq!(value["meta"]["logMessages"][2], "-nan");
         assert_eq!(value["meta"]["memo"], "nan");
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["amount"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["amount"],
             "0"
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["lamports"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["lamports"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["microLamports"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["microLamports"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["recentSlot"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["recentSlot"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["uiAmount"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["uiAmount"],
             0
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["uiAmountString"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["uiAmountString"],
             "0"
         );
         assert_eq!(
-            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]
-                ["note"],
+            value["transaction"]["message"]["instructions"][0]["parsed"]["info"]["note"],
             "nan"
         );
         assert_eq!(value["transaction"]["message"]["extra"]["rentEpoch"], 0);
@@ -346,8 +304,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance()
-     {
+    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance() {
         let mut value = json::json!({
             "meta": {
                 "err": "SomeError",

@@ -9,17 +9,15 @@ use solana_transaction_context::transaction::TransactionContext;
 
 use super::{
     MAX_DATA_LEN, transfer_rent,
-    validation::{
-        validate_common, validate_ephemeral_signer, validate_new_ephemeral,
-    },
+    validation::{validate_common, validate_ephemeral_signer, validate_new_ephemeral},
 };
 use crate::utils::account_actions::set_account_mode;
 
 /// Creates a new ephemeral account with rent paid by the sponsor.
 /// The account is owned by the calling program (inferred from CPI context).
 pub(crate) fn process_create_ephemeral_account(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &InvokeContext<'_, '_>,
+    transaction_context: &TransactionContext<'_>,
     data_len: u32,
 ) -> Result<(), InstructionError> {
     if data_len > MAX_DATA_LEN {

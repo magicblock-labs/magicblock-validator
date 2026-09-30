@@ -2,13 +2,15 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
 #[cfg(any(test, feature = "dev-context"))]
 use async_trait::async_trait;
+#[cfg(any(test, feature = "dev-context"))]
+use parking_lot::Mutex;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 use solana_clock::Clock;
@@ -78,10 +80,7 @@ impl ChainRpcClientMockBuilder {
     }
 
     pub fn clock_sysvar_for_slot(mut self, slot: u64) -> Self {
-        self.clock_sysvar.replace(Clock {
-            slot,
-            ..Default::default()
-        });
+        self.clock_sysvar.replace(Clock { slot, ..Default::default() });
         self
     }
 
@@ -108,8 +107,7 @@ impl ChainRpcClientMockBuilder {
 
     pub fn account(mut self, pubkey: Pubkey, account: Account) -> Self {
         let slot = self.current_slot;
-        self.accounts
-            .insert(pubkey, AccountAtSlot { account, slot });
+        self.accounts.insert(pubkey, AccountAtSlot { account, slot });
         self
     }
 
@@ -128,8 +126,7 @@ impl ChainRpcClientMockBuilder {
             program_account_fetches: Arc::<AtomicU64>::default(),
             block_fetches: Arc::new(AtomicBool::new(false)),
             fetch_block_notify: Arc::new(Notify::new()),
-            multi_account_response_truncate: self
-                .multi_account_response_truncate,
+            multi_account_response_truncate: self.multi_account_response_truncate,
         };
         if let Some(clock_sysvar) = self.clock_sysvar {
             mock.set_clock_sysvar(clock_sysvar);
@@ -186,7 +183,7 @@ impl ChainRpcClientMock {
     pub fn set_slot(&self, slot: u64) -> u64 {
         trace!(slot = slot, "Setting slot");
         self.current_slot.store(slot, Ordering::Relaxed);
-        for account in self.accounts.lock().unwrap().values_mut() {
+        for account in self.accounts.lock().values_mut() {
             account.slot = slot;
         }
         slot
@@ -211,12 +208,7 @@ impl ChainRpcClientMock {
         self.account_override_slot(&Clock::id(), clock.slot);
     }
 
-    pub fn set_clock_sysvar_with(
-        &self,
-        slot: u64,
-        epoch: u64,
-        leader_schedule_epoch: u64,
-    ) {
+    pub fn set_clock_sysvar_with(&self, slot: u64, epoch: u64, leader_schedule_epoch: u64) {
         trace!(
             slot = slot,
             epoch = epoch,
@@ -234,7 +226,7 @@ impl ChainRpcClientMock {
 
     pub fn account_override_slot(&self, pubkey: &Pubkey, slot: u64) {
         trace!(pubkey = %pubkey, slot = slot, "Overriding slot for account");
-        let mut lock = self.accounts.lock().unwrap();
+        let mut lock = self.accounts.lock();
         if let Some(account) = lock.get_mut(pubkey) {
             account.slot = slot;
         } else {
@@ -245,23 +237,17 @@ impl ChainRpcClientMock {
     pub fn add_account(&self, pubkey: Pubkey, account: Account) {
         let slot = self.current_slot.load(Ordering::Relaxed);
         trace!(pubkey = %pubkey, slot = slot, "Adding account");
-        self.accounts
-            .lock()
-            .unwrap()
-            .insert(pubkey, AccountAtSlot { account, slot });
+        self.accounts.lock().insert(pubkey, AccountAtSlot { account, slot });
     }
 
     pub fn remove_account(&self, pubkey: &Pubkey) {
         trace!(pubkey = %pubkey, "Removing account");
-        self.accounts.lock().unwrap().remove(pubkey);
+        self.accounts.lock().remove(pubkey);
     }
 
-    pub fn get_account_at_slot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> Option<AccountAtSlot> {
+    pub fn get_account_at_slot(&self, pubkey: &Pubkey) -> Option<AccountAtSlot> {
         trace!(pubkey = %pubkey, "Getting account");
-        let lock = self.accounts.lock().unwrap();
+        let lock = self.accounts.lock();
         let acc = lock.get(pubkey)?;
         if acc.slot >= self.current_slot.load(Ordering::Relaxed) {
             Some(acc.clone())
@@ -342,10 +328,7 @@ impl ChainRpcClientMock {
                     return false;
                 };
                 let end = offset.saturating_add(bytes.len());
-                account
-                    .data
-                    .get(offset..end)
-                    .is_some_and(|data| data == bytes.as_slice())
+                account.data.get(offset..end).is_some_and(|data| data == bytes.as_slice())
             }
             RpcFilterType::TokenAccountState => true,
         })
@@ -382,10 +365,7 @@ impl ChainRpcClient for ChainRpcClientMock {
             self.account_at_slot_checked(pubkey, &config)?
         {
             Response {
-                context: RpcResponseContext {
-                    slot,
-                    api_version: None,
-                },
+                context: RpcResponseContext { slot, api_version: None },
                 value: Some(account),
             }
         } else {
@@ -407,12 +387,8 @@ impl ChainRpcClient for ChainRpcClientMock {
     ) -> RpcResult<Vec<Option<Account>>> {
         self.multi_account_fetches.fetch_add(1, Ordering::Relaxed);
         self.wait_if_fetches_blocked().await;
-        if tracing::enabled!(tracing::Level::TRACE) {
-            let pubkeys = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
+        if tracing::enabled!(Level::TRACE) {
+            let pubkeys = pubkeys.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(", ");
             trace!(pubkeys = pubkeys, "get_multiple_accounts_with_config");
         }
         let mut accounts = vec![];
@@ -445,9 +421,7 @@ impl ChainRpcClient for ChainRpcClientMock {
         self.wait_if_fetches_blocked().await;
 
         let mut accounts = vec![];
-        for (account_pubkey, AccountAtSlot { account, slot }) in
-            self.accounts.lock().unwrap().iter()
-        {
+        for (account_pubkey, AccountAtSlot { account, slot }) in self.accounts.lock().iter() {
             if account.owner != *pubkey {
                 continue;
             }

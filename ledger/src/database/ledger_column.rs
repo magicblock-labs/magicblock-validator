@@ -13,9 +13,7 @@ use serde::de::DeserializeOwned;
 use tracing::warn;
 
 use super::{
-    columns::{
-        Column, ColumnIndexDeprecation, ColumnName, ProtobufColumn, TypedColumn,
-    },
+    columns::{Column, ColumnIndexDeprecation, ColumnName, ProtobufColumn, TypedColumn},
     iterator::IteratorMode,
     options::LedgerColumnOptions,
     rocks_db::Rocks,
@@ -24,10 +22,9 @@ use crate::{
     database::{columns::DIRTY_COUNT, write_batch::WriteBatch},
     errors::{LedgerError, LedgerResult},
     metrics::{
-        BLOCKSTORE_METRICS_ERROR, BlockstoreRocksDbColumnFamilyMetrics,
-        PERF_METRIC_OP_NAME_GET, PERF_METRIC_OP_NAME_MULTI_GET,
-        PERF_METRIC_OP_NAME_PUT, PerfSamplingStatus, maybe_enable_rocksdb_perf,
-        report_rocksdb_read_perf, report_rocksdb_write_perf,
+        BLOCKSTORE_METRICS_ERROR, BlockstoreRocksDbColumnFamilyMetrics, PERF_METRIC_OP_NAME_GET,
+        PERF_METRIC_OP_NAME_MULTI_GET, PERF_METRIC_OP_NAME_PUT, PerfSamplingStatus,
+        maybe_enable_rocksdb_perf, report_rocksdb_read_perf, report_rocksdb_write_perf,
     },
 };
 
@@ -112,10 +109,7 @@ impl<C> LedgerColumn<C>
 where
     C: Column + ColumnName,
 {
-    pub fn get_bytes(
-        &self,
-        key: C::Index,
-    ) -> Result<Option<Vec<u8>>, LedgerError> {
+    pub fn get_bytes(&self, key: C::Index) -> Result<Option<Vec<u8>>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -135,12 +129,10 @@ where
     pub fn multi_get_bytes(
         &self,
         keys: Vec<C::Index>,
-    ) -> Vec<std::result::Result<Option<Vec<u8>>, LedgerError>> {
-        let rocks_keys: Vec<_> =
-            keys.into_iter().map(|key| C::key(key)).collect();
+    ) -> Vec<Result<Option<Vec<u8>>, LedgerError>> {
+        let rocks_keys: Vec<_> = keys.into_iter().map(|key| C::key(key)).collect();
         {
-            let ref_rocks_keys: Vec<_> =
-                rocks_keys.iter().map(|k| &k[..]).collect();
+            let ref_rocks_keys: Vec<_> = rocks_keys.iter().map(|k| &k[..]).collect();
             let is_perf_enabled = maybe_enable_rocksdb_perf(
                 self.column_options.rocks_perf_sample_interval,
                 &self.read_perf_status,
@@ -151,14 +143,12 @@ where
                 .into_iter()
                 .map(|r| match r {
                     Ok(opt) => match opt {
-                        Some(pinnable_slice) => {
-                            Ok(Some(pinnable_slice.as_ref().to_vec()))
-                        }
+                        Some(pinnable_slice) => Ok(Some(pinnable_slice.as_ref().to_vec())),
                         None => Ok(None),
                     },
                     Err(e) => Err(e),
                 })
-                .collect::<Vec<std::result::Result<Option<_>, LedgerError>>>();
+                .collect::<Vec<Result<Option<_>, LedgerError>>>();
             if let Some(op_start_instant) = is_perf_enabled {
                 // use multi-get instead
                 report_rocksdb_read_perf(
@@ -176,10 +166,7 @@ where
     pub fn iter(
         &self,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> std::result::Result<
-        impl Iterator<Item = (C::Index, Box<[u8]>)> + '_,
-        LedgerError,
-    > {
+    ) -> Result<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_, LedgerError> {
         let cf = self.handle();
         let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
         Ok(iter.map(|pair| {
@@ -194,17 +181,13 @@ where
     }
 
     #[cfg(test)]
-    pub fn is_empty(&self) -> std::result::Result<bool, LedgerError> {
+    pub fn is_empty(&self) -> Result<bool, LedgerError> {
         let mut iter = self.backend.raw_iterator_cf(self.handle());
         iter.seek_to_first();
         Ok(!iter.valid())
     }
 
-    pub fn put_bytes(
-        &self,
-        key: C::Index,
-        value: &[u8],
-    ) -> std::result::Result<(), LedgerError> {
+    pub fn put_bytes(&self, key: C::Index, value: &[u8]) -> Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
@@ -226,10 +209,7 @@ where
     ///
     /// Full list of properties that return int values could be found
     /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
-    pub fn get_int_property(
-        &self,
-        name: impl CStrLike,
-    ) -> Result<i64, LedgerError> {
+    pub fn get_int_property(&self, name: impl CStrLike) -> Result<i64, LedgerError> {
         self.backend.get_int_property_cf(self.handle(), name)
     }
 
@@ -250,22 +230,17 @@ where
         result
     }
 
-    pub fn delete_in_batch(&self, write_batch: &mut WriteBatch, key: C::Index) {
+    pub fn delete_in_batch(&self, write_batch: &mut WriteBatch<'_>, key: C::Index) {
         write_batch.delete::<C>(key);
     }
 
-    pub fn delete_range(
-        &self,
-        from: C::Index,
-        to: C::Index,
-    ) -> LedgerResult<()> {
-        self.backend
-            .delete_range_cf(self.handle(), C::key(from), C::key(to))
+    pub fn delete_range(&self, from: C::Index, to: C::Index) -> LedgerResult<()> {
+        self.backend.delete_range_cf(self.handle(), C::key(from), C::key(to))
     }
 
     pub fn delete_range_in_batch(
         &self,
-        write_batch: &mut WriteBatch,
+        write_batch: &mut WriteBatch<'_>,
         from: C::Index,
         to: C::Index,
     ) {
@@ -345,15 +320,10 @@ impl<C> LedgerColumn<C>
 where
     C: TypedColumn + ColumnName,
 {
-    pub fn multi_get(
-        &self,
-        keys: Vec<C::Index>,
-    ) -> Vec<std::result::Result<Option<C::Type>, LedgerError>> {
-        let rocks_keys: Vec<_> =
-            keys.into_iter().map(|key| C::key(key)).collect();
+    pub fn multi_get(&self, keys: Vec<C::Index>) -> Vec<Result<Option<C::Type>, LedgerError>> {
+        let rocks_keys: Vec<_> = keys.into_iter().map(|key| C::key(key)).collect();
         {
-            let ref_rocks_keys: Vec<_> =
-                rocks_keys.iter().map(|k| &k[..]).collect();
+            let ref_rocks_keys: Vec<_> = rocks_keys.iter().map(|k| &k[..]).collect();
             let is_perf_enabled = maybe_enable_rocksdb_perf(
                 self.column_options.rocks_perf_sample_interval,
                 &self.read_perf_status,
@@ -364,14 +334,12 @@ where
                 .into_iter()
                 .map(|r| match r {
                     Ok(opt) => match opt {
-                        Some(pinnable_slice) => {
-                            Ok(Some(deserialize(pinnable_slice.as_ref())?))
-                        }
+                        Some(pinnable_slice) => Ok(Some(deserialize(pinnable_slice.as_ref())?)),
                         None => Ok(None),
                     },
                     Err(e) => Err(e),
                 })
-                .collect::<Vec<std::result::Result<Option<_>, LedgerError>>>();
+                .collect::<Vec<Result<Option<_>, LedgerError>>>();
             if let Some(op_start_instant) = is_perf_enabled {
                 // use multi-get instead
                 report_rocksdb_read_perf(
@@ -386,25 +354,17 @@ where
         }
     }
 
-    pub fn get(
-        &self,
-        key: C::Index,
-    ) -> std::result::Result<Option<C::Type>, LedgerError> {
+    pub fn get(&self, key: C::Index) -> Result<Option<C::Type>, LedgerError> {
         self.get_raw(&C::key(key))
     }
 
-    pub fn get_raw(
-        &self,
-        key: &[u8],
-    ) -> std::result::Result<Option<C::Type>, LedgerError> {
+    pub fn get_raw(&self, key: &[u8]) -> Result<Option<C::Type>, LedgerError> {
         let mut result = Ok(None);
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
         );
-        if let Some(pinnable_slice) =
-            self.backend.get_pinned_cf(self.handle(), key)?
-        {
+        if let Some(pinnable_slice) = self.backend.get_pinned_cf(self.handle(), key)? {
             let value = deserialize(pinnable_slice.as_ref())?;
             result = Ok(Some(value))
         }
@@ -420,20 +380,14 @@ where
         result
     }
 
-    pub fn put(
-        &self,
-        key: C::Index,
-        value: &C::Type,
-    ) -> std::result::Result<(), LedgerError> {
+    pub fn put(&self, key: C::Index, value: &C::Type) -> Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
         );
         let serialized_value = serialize(value)?;
 
-        let result =
-            self.backend
-                .put_cf(self.handle(), &C::key(key), &serialized_value);
+        let result = self.backend.put_cf(self.handle(), &C::key(key), &serialized_value);
 
         if let Some(op_start_instant) = is_perf_enabled {
             report_rocksdb_write_perf(
@@ -454,16 +408,14 @@ where
     pub fn get_protobuf_or_bincode<T: DeserializeOwned + Into<C::Type>>(
         &self,
         key: C::Index,
-    ) -> std::result::Result<Option<C::Type>, LedgerError> {
+    ) -> Result<Option<C::Type>, LedgerError> {
         self.get_raw_protobuf_or_bincode::<T>(&C::key(key))
     }
 
-    pub(crate) fn get_raw_protobuf_or_bincode<
-        T: DeserializeOwned + Into<C::Type>,
-    >(
+    pub(crate) fn get_raw_protobuf_or_bincode<T: DeserializeOwned + Into<C::Type>>(
         &self,
         key: &[u8],
-    ) -> std::result::Result<Option<C::Type>, LedgerError> {
+    ) -> Result<Option<C::Type>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -489,10 +441,7 @@ where
         }
     }
 
-    pub fn get_protobuf(
-        &self,
-        key: C::Index,
-    ) -> Result<Option<C::Type>, LedgerError> {
+    pub fn get_protobuf(&self, key: C::Index) -> Result<Option<C::Type>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -514,11 +463,7 @@ where
         }
     }
 
-    pub fn put_protobuf(
-        &self,
-        key: C::Index,
-        value: &C::Type,
-    ) -> std::result::Result<(), LedgerError> {
+    pub fn put_protobuf(&self, key: C::Index, value: &C::Type) -> Result<(), LedgerError> {
         let mut buf = Vec::with_capacity(value.encoded_len());
         value.encode(&mut buf)?;
 
@@ -604,7 +549,7 @@ fn get_column_count_complex_column<C: Column + ColumnName>(
 
 /// Increases entries counter if it's not [`DIRTY_COUNT`]
 /// Otherwise just skips it until it is set
-pub fn try_increase_entry_counter(entry_counter: &AtomicI64, by: u64) {
+pub(crate) fn try_increase_entry_counter(entry_counter: &AtomicI64, by: u64) {
     loop {
         let prev = entry_counter.load(Ordering::Acquire);
         if prev == DIRTY_COUNT {
@@ -613,12 +558,7 @@ pub fn try_increase_entry_counter(entry_counter: &AtomicI64, by: u64) {
 
         // In case value changed to [`DIRTY_COUNT`] in between
         if entry_counter
-            .compare_exchange(
-                prev,
-                prev + by as i64,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            )
+            .compare_exchange(prev, prev + by as i64, Ordering::AcqRel, Ordering::Relaxed)
             .is_ok()
         {
             return;
@@ -628,7 +568,7 @@ pub fn try_increase_entry_counter(entry_counter: &AtomicI64, by: u64) {
 
 /// Decreases entries counter if it's not [`DIRTY_COUNT`]
 /// Otherwise just skips it until it is set
-pub fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
+pub(crate) fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
     loop {
         let prev = entry_counter.load(Ordering::Acquire);
         if prev == DIRTY_COUNT {
@@ -639,12 +579,7 @@ pub fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
         if new >= 0 {
             // In case value changed to [`DIRTY_COUNT`] in between
             if entry_counter
-                .compare_exchange(
-                    prev,
-                    new,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
+                .compare_exchange(prev, new, Ordering::AcqRel, Ordering::Relaxed)
                 .is_ok()
             {
                 return;
@@ -653,12 +588,7 @@ pub fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
             warn!(counter = prev, "Negative entry counter");
             // In case value fixed to valid one in between
             if entry_counter
-                .compare_exchange(
-                    prev,
-                    DIRTY_COUNT,
-                    Ordering::AcqRel,
-                    Ordering::Relaxed,
-                )
+                .compare_exchange(prev, DIRTY_COUNT, Ordering::AcqRel, Ordering::Relaxed)
                 .is_ok()
             {
                 return;

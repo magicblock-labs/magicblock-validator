@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use json::{JsonContainerTrait, JsonValueTrait, Value};
 use keeper::testkit::store_v42;
 use setup::{RpcTestEnv, remote_account_claims_header};
@@ -37,12 +39,8 @@ async fn test_batch_requests() {
     assert_eq!(results.len(), 2, "Should return exactly 2 results");
 
     // Helper to find result by ID since batch responses can be out of order
-    let get_result = |id: u64| {
-        results
-            .iter()
-            .find(|v| v["id"] == id)
-            .expect("Result for id not found")
-    };
+    let get_result =
+        |id: u64| results.iter().find(|v| v["id"] == id).expect("Result for id not found");
 
     // Verify getVersion result (ID 1)
     let res1 = get_result(1);
@@ -64,8 +62,7 @@ async fn test_batch_requests() {
 }
 
 #[tokio::test]
-async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered()
- {
+async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered() {
     let env = RpcTestEnv::new().await;
     let client = reqwest::Client::new();
     let rpc_url = env.rpc.url();
@@ -83,13 +80,9 @@ async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetc
 
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
-    let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("batch response body should decode"),
-    )
-    .expect("batch response body should be valid JSON");
+    let body: Value =
+        json::from_str(&response.text().await.expect("batch response body should decode"))
+            .expect("batch response body should be valid JSON");
     assert!(body.is_array(), "batch response should be an array");
 }
 
@@ -122,13 +115,9 @@ async fn test_mixed_batch_requests_emit_remote_account_claims_header_zero() {
 
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
-    let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("mixed batch response body should decode"),
-    )
-    .expect("mixed batch response body should be valid JSON");
+    let body: Value =
+        json::from_str(&response.text().await.expect("mixed batch response body should decode"))
+            .expect("mixed batch response body should be valid JSON");
     assert!(body.is_array(), "mixed batch response should be an array");
     assert_eq!(body.as_array().unwrap().len(), 3);
 }

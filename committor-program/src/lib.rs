@@ -17,8 +17,8 @@ mod utils;
 pub use processor::process;
 pub use state::{
     changeset::{
-        ChangedAccount, ChangedAccountMeta, ChangedBundle, Changeset,
-        ChangesetBundles, ChangesetMeta, CommitableAccount,
+        ChangedAccount, ChangedAccountMeta, ChangedBundle, Changeset, ChangesetBundles,
+        ChangesetMeta, CommitableAccount,
     },
     changeset_chunks::{ChangesetChunk, ChangesetChunks},
     chunks::Chunks,

@@ -12,9 +12,7 @@ pub fn wait_for_ctrlc(
     output: Output,
 ) -> Result<Output, Box<dyn Error>> {
     let (tx, rx) = channel();
-    ctrlc::set_handler(move || {
-        tx.send(()).expect("Could not send signal on channel.")
-    })?;
+    ctrlc::set_handler(move || tx.send(()).expect("Could not send signal on channel."))?;
 
     println!("Hit Ctrl-C to stop validator(s)...");
     rx.recv().expect("Could not receive from channel.");

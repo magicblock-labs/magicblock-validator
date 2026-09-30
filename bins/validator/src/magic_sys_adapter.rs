@@ -19,7 +19,7 @@ use solana_pubkey::Pubkey;
 use tracing::error;
 
 #[derive(Clone)]
-pub struct MagicSysAdapter {
+pub(crate) struct MagicSysAdapter {
     handle: tokio::runtime::Handle,
     committor_processor: Arc<CommittorProcessor<AccountsDbIntentBacklog>>,
 }
@@ -34,22 +34,18 @@ impl MagicSysAdapter {
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub fn new(
+    pub(crate) fn new(
         handle: tokio::runtime::Handle,
         committor_processor: Arc<CommittorProcessor<AccountsDbIntentBacklog>>,
     ) -> Self {
-        Self {
-            handle,
-            committor_processor,
-        }
+        Self { handle, committor_processor }
     }
 
     fn fetch_current_commit_nonces_sync(
         &self,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
-    ) -> std::sync::mpsc::Receiver<TaskInfoFetcherResult<HashMap<Pubkey, u64>>>
-    {
+    ) -> std::sync::mpsc::Receiver<TaskInfoFetcherResult<HashMap<Pubkey, u64>>> {
         let (sender, receiver) = std::sync::mpsc::channel();
         let committor_processor = self.committor_processor.clone();
         let accounts = accounts.to_owned();
@@ -78,19 +74,12 @@ impl MagicSys for MagicSysAdapter {
             return Ok(HashMap::new());
         }
 
-        let min_context_slot = commits
-            .iter()
-            .map(|account| account.remote_slot)
-            .max()
-            .unwrap_or(0);
-        let accounts: Vec<_> = commits
-            .iter()
-            .map(|account| (account.pubkey, account.remote_slot))
-            .collect();
+        let min_context_slot = commits.iter().map(|account| account.remote_slot).max().unwrap_or(0);
+        let accounts: Vec<_> =
+            commits.iter().map(|account| (account.pubkey, account.remote_slot)).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver =
-            self.fetch_current_commit_nonces_sync(&accounts, min_context_slot);
+        let receiver = self.fetch_current_commit_nonces_sync(&accounts, min_context_slot);
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)
             .map_err(|err| match err {
@@ -103,16 +92,11 @@ impl MagicSys for MagicSysAdapter {
                     InstructionError::Custom(Self::RECV_ERR)
                 }
             })?
-            .inspect_err(|err| {
-                error!(error = ?err, "Failed to fetch current commit nonces")
-            })
+            .inspect_err(|err| error!(error = ?err, "Failed to fetch current commit nonces"))
             .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
     }
 
-    fn validate_intent_size(
-        &self,
-        intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError> {
+    fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError> {
         if IntentSizeValidator::fits(intent) {
             Ok(())
         } else {

@@ -6,15 +6,8 @@ use crate::{
 /// Creates chunks of realloc instructions such that each chunk fits into a single transaction.
 /// - reallocs: The realloc instructions to split up
 /// - init_ix: The init instruction that is combined with the first reallocs
-pub fn chunk_realloc_ixs<T: Clone>(
-    reallocs: Vec<T>,
-    init_ix: Option<T>,
-) -> Vec<Vec<T>> {
-    fn add_reallocs<T: Clone>(
-        chunk: &mut Vec<T>,
-        reallocs: &mut Vec<T>,
-        start_size: u16,
-    ) {
+pub fn chunk_realloc_ixs<T: Clone>(reallocs: Vec<T>, init_ix: Option<T>) -> Vec<Vec<T>> {
+    fn add_reallocs<T: Clone>(chunk: &mut Vec<T>, reallocs: &mut Vec<T>, start_size: u16) {
         let mut total_size = start_size;
         while total_size + IX_REALLOC_SIZE < MAX_INSTRUCTION_DATA_SIZE
             && chunk.len() < MAX_INSTRUCTION_LENGTH as usize

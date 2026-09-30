@@ -4,10 +4,7 @@ use solana_pubkey::Pubkey;
 
 use super::ClaimedHandlerResult;
 use crate::{
-    requests::{
-        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 

@@ -4,6 +4,8 @@ use engine::Engine;
 use magicblock_core::intent::outbox::outbox_intent_pda;
 use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
+#[cfg(any(test, feature = "dev-context-only-utils"))]
+use parking_lot::Mutex;
 use solana_account::ReadableAccount;
 
 /// Queues intents that overflow the in-memory execution channel, preserving
@@ -11,14 +13,8 @@ use solana_account::ReadableAccount;
 /// need to track ordering (e.g. by id) - the intent bundle itself already
 /// lives durably in the outbox account on-chain.
 pub trait BacklogDB: Send + 'static {
-    fn store_intent_bundle(
-        &self,
-        intent_bundle: OutboxIntentBundle,
-    ) -> DBResult<()>;
-    fn store_intent_bundles(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> DBResult<()>;
+    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()>;
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()>;
 
     /// Returns the oldest (first stored) intent bundle
     fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>>;
@@ -40,10 +36,7 @@ impl AccountsDbIntentBacklog {
 }
 
 impl BacklogDB for AccountsDbIntentBacklog {
-    fn store_intent_bundle(
-        &self,
-        intent_bundle: OutboxIntentBundle,
-    ) -> DBResult<()> {
+    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
         queue.push_back(intent_bundle.inner.intent_id);
 
@@ -51,10 +44,7 @@ impl BacklogDB for AccountsDbIntentBacklog {
         Ok(())
     }
 
-    fn store_intent_bundles(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> DBResult<()> {
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
         queue.extend(intent_bundles.into_iter().map(|el| el.inner.intent_id));
 
@@ -89,15 +79,13 @@ impl BacklogDB for AccountsDbIntentBacklog {
 
 #[cfg(any(test, feature = "dev-context-only-utils"))]
 pub struct DummyDB {
-    db: std::sync::Mutex<VecDeque<OutboxIntentBundle>>,
+    db: Mutex<VecDeque<OutboxIntentBundle>>,
 }
 
 #[cfg(any(test, feature = "dev-context-only-utils"))]
 impl Default for DummyDB {
     fn default() -> Self {
-        Self {
-            db: std::sync::Mutex::new(VecDeque::new()),
-        }
+        Self { db: Mutex::new(VecDeque::new()) }
     }
 }
 
@@ -110,28 +98,22 @@ impl DummyDB {
 
 #[cfg(any(test, feature = "dev-context-only-utils"))]
 impl BacklogDB for DummyDB {
-    fn store_intent_bundle(
-        &self,
-        intent_bundle: OutboxIntentBundle,
-    ) -> DBResult<()> {
-        self.db.lock().unwrap().push_back(intent_bundle);
+    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()> {
+        self.db.lock().push_back(intent_bundle);
         Ok(())
     }
 
-    fn store_intent_bundles(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> DBResult<()> {
-        self.db.lock().unwrap().extend(intent_bundles);
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
+        self.db.lock().extend(intent_bundles);
         Ok(())
     }
 
     fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>> {
-        Ok(self.db.lock().unwrap().pop_front())
+        Ok(self.db.lock().pop_front())
     }
 
     fn is_empty(&self) -> bool {
-        self.db.lock().unwrap().is_empty()
+        self.db.lock().is_empty()
     }
 }
 

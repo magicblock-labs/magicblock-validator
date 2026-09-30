@@ -3,8 +3,7 @@
 use std::borrow::Cow;
 
 use agave_transaction_view::{
-    transaction_version::TransactionVersion,
-    transaction_view::UnsanitizedTransactionView,
+    transaction_version::TransactionVersion, transaction_view::UnsanitizedTransactionView,
 };
 use ledger::{
     request::TransactionResponse,
@@ -12,8 +11,7 @@ use ledger::{
 };
 use nucleus::runtime::FullTransaction;
 use solana_message::{
-    compiled_instruction::CompiledInstruction, v0::LoadedAddresses,
-    v1::V1_PREFIX,
+    compiled_instruction::CompiledInstruction, v0::LoadedAddresses, v1::V1_PREFIX,
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
@@ -23,9 +21,8 @@ use solana_transaction::{
 };
 use solana_transaction_context::transaction::TransactionReturnData;
 use solana_transaction_status::{
-    ConfirmedTransactionWithStatusMeta, InnerInstruction, InnerInstructions,
-    TransactionStatusMeta, TransactionWithStatusMeta,
-    VersionedTransactionWithStatusMeta,
+    ConfirmedTransactionWithStatusMeta, InnerInstruction, InnerInstructions, TransactionStatusMeta,
+    TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
 };
 
 use crate::error::RpcError;
@@ -36,17 +33,15 @@ pub(crate) fn confirmed_transaction(
     response: TransactionResponse,
     block_time: Option<i64>,
 ) -> Result<ConfirmedTransactionWithStatusMeta, RpcError> {
-    let transaction = deserialize_transaction(
-        &response.transaction,
-        "invalid engine transaction",
-    )?;
+    let transaction = deserialize_transaction(&response.transaction, "invalid engine transaction")?;
     let slot = response.execution.header.slot;
     let meta = transaction_meta(response.execution);
     Ok(ConfirmedTransactionWithStatusMeta {
         slot,
-        tx_with_meta: TransactionWithStatusMeta::Complete(
-            VersionedTransactionWithStatusMeta { transaction, meta },
-        ),
+        tx_with_meta: TransactionWithStatusMeta::Complete(VersionedTransactionWithStatusMeta {
+            transaction,
+            meta,
+        }),
         block_time,
         // The engine does not currently persist a transaction's block index.
         index: 0,
@@ -56,10 +51,7 @@ pub(crate) fn confirmed_transaction(
 pub(crate) fn transaction_meta(execution: Execution) -> TransactionStatusMeta {
     let status = execution.header.result;
     let Some(details) = execution.details else {
-        return TransactionStatusMeta {
-            status,
-            ..Default::default()
-        };
+        return TransactionStatusMeta { status, ..Default::default() };
     };
     meta_from_details(status, details)
 }
@@ -79,18 +71,13 @@ pub(crate) fn processed_transaction(
         solana_message::SimpleAddressLoader::Disabled,
         &Default::default(),
     )
-    .map_err(|error| {
-        RpcError::internal(format!("invalid processed transaction: {error}"))
-    })?;
+    .map_err(|error| RpcError::internal(format!("invalid processed transaction: {error}")))?;
 
     let status = transaction.execution.result.flattened_result();
     let Some(execution) = transaction.execution.result.as_ref().ok() else {
         return Ok((
             sanitized,
-            TransactionStatusMeta {
-                status,
-                ..Default::default()
-            },
+            TransactionStatusMeta { status, ..Default::default() },
         ));
     };
     let details = &execution.execution_details;
@@ -101,35 +88,30 @@ pub(crate) fn processed_transaction(
         .map(|balances| balances.into_vecs())
         .unwrap_or_default();
     let fee = execution.loaded_transaction.fee_details.total_fee();
-    let post_balances =
-        post_balances_for_status(&status, fee, &pre_balances, post_balances);
-    let inner_instructions =
-        details.inner_instructions.as_ref().map(|groups| {
-            groups
-                .iter()
-                .enumerate()
-                .map(|(index, group)| InnerInstructions {
-                    index: u8::try_from(index).unwrap_or(u8::MAX),
-                    instructions: group
-                        .iter()
-                        .map(|instruction| InnerInstruction {
-                            instruction: instruction.instruction.clone(),
-                            stack_height: Some(instruction.stack_height.into()),
-                        })
-                        .collect(),
-                })
-                .collect()
-        });
+    let post_balances = post_balances_for_status(&status, fee, &pre_balances, post_balances);
+    let inner_instructions = details.inner_instructions.as_ref().map(|groups| {
+        groups
+            .iter()
+            .enumerate()
+            .map(|(index, group)| InnerInstructions {
+                index: u8::try_from(index).unwrap_or(u8::MAX),
+                instructions: group
+                    .iter()
+                    .map(|instruction| InnerInstruction {
+                        instruction: instruction.instruction.clone(),
+                        stack_height: Some(instruction.stack_height.into()),
+                    })
+                    .collect(),
+            })
+            .collect()
+    });
     let meta = TransactionStatusMeta {
         status,
         fee,
         pre_balances,
         post_balances,
         inner_instructions,
-        log_messages: details
-            .log_messages
-            .as_ref()
-            .map(|logs| logs.as_ref().clone()),
+        log_messages: details.log_messages.as_ref().map(|logs| logs.as_ref().clone()),
         pre_token_balances: None,
         post_token_balances: None,
         rewards: None,
@@ -145,9 +127,8 @@ fn deserialize_transaction(
     bytes: &[u8],
     error_context: &str,
 ) -> Result<VersionedTransaction, RpcError> {
-    let view = UnsanitizedTransactionView::try_new_unsanitized(bytes).map_err(
-        |error| RpcError::internal(format!("{error_context}: {error:?}")),
-    )?;
+    let view = UnsanitizedTransactionView::try_new_unsanitized(bytes)
+        .map_err(|error| RpcError::internal(format!("{error_context}: {error:?}")))?;
     let bytes = if matches!(view.version(), TransactionVersion::Magicblock) {
         let mut bytes = bytes.to_vec();
         bytes[0] = V1_PREFIX;
@@ -155,9 +136,8 @@ fn deserialize_transaction(
     } else {
         Cow::Borrowed(bytes)
     };
-    wincode::deserialize(&bytes).map_err(|error| {
-        RpcError::internal(format!("{error_context}: {error}"))
-    })
+    wincode::deserialize(&bytes)
+        .map_err(|error| RpcError::internal(format!("{error_context}: {error}")))
 }
 
 fn meta_from_details(
@@ -166,12 +146,8 @@ fn meta_from_details(
 ) -> TransactionStatusMeta {
     let fee = details.fee;
     let pre_balances = details.balances.pre;
-    let post_balances = post_balances_for_status(
-        &status,
-        fee,
-        &pre_balances,
-        details.balances.post,
-    );
+    let post_balances =
+        post_balances_for_status(&status, fee, &pre_balances, details.balances.post);
 
     TransactionStatusMeta {
         status,
@@ -240,8 +216,7 @@ mod tests {
 
     #[test]
     fn post_balances_for_status_keeps_successful_balances() {
-        let post_balances =
-            post_balances_for_status(&Ok(()), 5, &[10, 20], vec![4, 26]);
+        let post_balances = post_balances_for_status(&Ok(()), 5, &[10, 20], vec![4, 26]);
 
         assert_eq!(post_balances, vec![4, 26]);
     }
@@ -260,12 +235,8 @@ mod tests {
 
     #[test]
     fn post_balances_for_status_keeps_empty_failed_balances() {
-        let post_balances = post_balances_for_status(
-            &Err(TransactionError::AccountInUse),
-            5,
-            &[],
-            vec![1, 2, 3],
-        );
+        let post_balances =
+            post_balances_for_status(&Err(TransactionError::AccountInUse), 5, &[], vec![1, 2, 3]);
 
         assert_eq!(post_balances, vec![1, 2, 3]);
     }

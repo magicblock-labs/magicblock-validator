@@ -22,10 +22,7 @@ enum BlockConfigParam {
 }
 
 impl HttpDispatcher {
-    pub(crate) async fn get_block(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) async fn get_block(&self, request: &JsonRequest) -> HandlerResult {
         let slot = request.required::<Slot>(0)?;
         let config = match request.optional::<BlockConfigParam>(1)? {
             Some(BlockConfigParam::Config(config)) => config,
@@ -37,8 +34,7 @@ impl HttpDispatcher {
         };
 
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
-        let transaction_details =
-            config.transaction_details.unwrap_or_default();
+        let transaction_details = config.transaction_details.unwrap_or_default();
         // Match getTransaction: Aperture can encode every supported version
         // when clients omit the optional version capability.
         let options = BlockEncodingOptions {
@@ -50,9 +46,7 @@ impl HttpDispatcher {
         };
 
         let details = match transaction_details {
-            TransactionDetails::Full | TransactionDetails::Accounts => {
-                BlockDetails::Full
-            }
+            TransactionDetails::Full | TransactionDetails::Accounts => BlockDetails::Full,
             TransactionDetails::Signatures => BlockDetails::Signatures,
             TransactionDetails::None => BlockDetails::None,
         };
@@ -71,13 +65,9 @@ impl HttpDispatcher {
                     .get_block(slot)?
                     .map(ConfirmedBlock::from)
                     .map(|block| {
-                        block.encode_with_options(encoding, options).map_err(
-                            |error| {
-                                RpcError::internal(format!(
-                                    "failed to encode legacy block: {error}"
-                                ))
-                            },
-                        )
+                        block.encode_with_options(encoding, options).map_err(|error| {
+                            RpcError::internal(format!("failed to encode legacy block: {error}"))
+                        })
                     })
                     .transpose()
             })
@@ -122,24 +112,14 @@ fn encode_engine_block(
                 block_height: Some(block.slot),
             }
             .encode_with_options(encoding, options)
-            .map_err(|error| {
-                RpcError::internal(format!(
-                    "failed to encode engine block: {error}"
-                ))
-            })
+            .map_err(|error| RpcError::internal(format!("failed to encode engine block: {error}")))
         }
         BlockResponse::WithSignatures(block) => Ok(UiConfirmedBlock {
             previous_blockhash,
             blockhash,
             parent_slot,
             transactions: None,
-            signatures: Some(
-                block
-                    .signatures
-                    .into_iter()
-                    .map(|s| s.to_string())
-                    .collect(),
-            ),
+            signatures: Some(block.signatures.into_iter().map(|s| s.to_string()).collect()),
             rewards: options.show_rewards.then(Vec::new),
             num_reward_partitions: None,
             block_time: Some(block.block.time),

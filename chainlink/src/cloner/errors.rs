@@ -2,7 +2,7 @@ use engine::EngineError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
-pub type ClonerResult<T> = std::result::Result<T, ClonerError>;
+pub type ClonerResult<T> = Result<T, ClonerError>;
 
 #[derive(Debug, Error)]
 pub enum ClonerError {
@@ -15,9 +15,7 @@ pub enum ClonerError {
     #[error(transparent)]
     TransactionError(#[from] solana_transaction_error::TransactionError),
     #[error(transparent)]
-    RemoteAccountProviderError(
-        #[from] crate::remote_account_provider::RemoteAccountProviderError,
-    ),
+    RemoteAccountProviderError(#[from] crate::remote_account_provider::RemoteAccountProviderError),
     #[error("CommittorServiceError {0}")]
     CommittorServiceError(String),
 
@@ -27,11 +25,7 @@ pub enum ClonerError {
     #[error(
         "Clone transaction for account {pubkey} is too large: {size} bytes (max {max_size} bytes)"
     )]
-    CloneTransactionTooLarge {
-        pubkey: Pubkey,
-        size: usize,
-        max_size: usize,
-    },
+    CloneTransactionTooLarge { pubkey: Pubkey, size: usize, max_size: usize },
 
     #[error("Failed to clone regular account {0} : {1:?}")]
     FailedToCloneRegularAccount(Pubkey, Box<ClonerError>),
@@ -42,9 +36,7 @@ pub enum ClonerError {
     #[error("Failed to clone program {0} : {1:?}")]
     FailedToCloneProgram(Pubkey, Box<ClonerError>),
 
-    #[error(
-        "Failed to clone and schedule undelegation for account {0} : {1:?}"
-    )]
+    #[error("Failed to clone and schedule undelegation for account {0} : {1:?}")]
     FailedToCloneAndScheduleUndelegation(Pubkey, Box<ClonerError>),
 
     #[error("Failed to evict account {0} : {1:?}")]
@@ -59,9 +51,7 @@ impl ClonerError {
     /// Infrastructure and exceptional completion-task errors do not prove rollback.
     pub(crate) fn allows_rescue(&self) -> bool {
         match self {
-            Self::FailedToCloneRegularAccount(_, error) => {
-                error.allows_rescue()
-            }
+            Self::FailedToCloneRegularAccount(_, error) => error.allows_rescue(),
             Self::Engine(
                 EngineError::TransactionExecution(_)
                 | EngineError::TransactionCompile(_)
@@ -87,55 +77,34 @@ mod tests {
     fn rescue_eligibility_requires_definitive_failure() {
         for error in [
             EngineError::Sanitization(
-                keeper::TransactionView::try_new_sanitized(
-                    Vec::new().into(),
-                    true,
-                )
-                .unwrap_err(),
+                keeper::TransactionView::try_new_sanitized(Vec::new().into(), true).unwrap_err(),
             ),
             EngineError::Serde(wincode::WriteError::Custom("rejected").into()),
-            EngineError::TransactionExecution(
-                TransactionError::AccountNotFound,
-            ),
-            EngineError::TransactionCompile(
-                solana_message::CompileError::AccountIndexOverflow,
-            ),
-            EngineError::Signature(
-                solana_signer::SignerError::NotEnoughSigners,
-            ),
+            EngineError::TransactionExecution(TransactionError::AccountNotFound),
+            EngineError::TransactionCompile(solana_message::CompileError::AccountIndexOverflow),
+            EngineError::Signature(solana_signer::SignerError::NotEnoughSigners),
             EngineError::SignatureVerification,
         ] {
             let error = ClonerError::Engine(error);
             assert!(error.allows_rescue());
             assert!(
-                ClonerError::FailedToCloneRegularAccount(
-                    Pubkey::new_unique(),
-                    Box::new(error),
-                )
-                .allows_rescue()
+                ClonerError::FailedToCloneRegularAccount(Pubkey::new_unique(), Box::new(error),)
+                    .allows_rescue()
             );
         }
         for error in [
             EngineError::ShuttingDown,
-            EngineError::ServiceUnavailable(
-                nucleus::shutdown::Service::Sequencer,
-            ),
+            EngineError::ServiceUnavailable(nucleus::shutdown::Service::Sequencer),
             EngineError::Internal("transaction execution failed".into()),
         ] {
             let error = ClonerError::Engine(error);
             assert!(!error.allows_rescue());
             assert!(
-                !ClonerError::FailedToCloneRegularAccount(
-                    Pubkey::new_unique(),
-                    Box::new(error),
-                )
-                .allows_rescue()
+                !ClonerError::FailedToCloneRegularAccount(Pubkey::new_unique(), Box::new(error),)
+                    .allows_rescue()
             );
         }
-        assert!(
-            !ClonerError::TransactionError(TransactionError::AccountNotFound)
-                .allows_rescue()
-        );
+        assert!(!ClonerError::TransactionError(TransactionError::AccountNotFound).allows_rescue());
     }
 
     /// Proves an exceptional completion-task cancellation is not rollback evidence.

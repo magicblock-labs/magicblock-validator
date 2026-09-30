@@ -5,10 +5,7 @@ use std::{
 
 use integration_test_tools::validator::stop_validator;
 
-pub fn cleanup_validators(
-    ephem_validator: &mut Child,
-    devnet_validator: &mut Child,
-) {
+pub fn cleanup_validators(ephem_validator: &mut Child, devnet_validator: &mut Child) {
     cleanup_validator(ephem_validator, "ephemeral");
     cleanup_validator(devnet_validator, "devnet");
     kill_validators();

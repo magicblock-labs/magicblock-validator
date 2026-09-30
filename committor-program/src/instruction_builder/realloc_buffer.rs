@@ -2,8 +2,7 @@ use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use crate::{
-    consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
-    instruction::CommittorInstruction, pdas,
+    consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE, instruction::CommittorInstruction, pdas,
 };
 
 // -----------------
@@ -23,19 +22,15 @@ pub struct CreateReallocBufferIxArgs {
 /// Returns a tuple with the instructions and a bool indicating if we need to split
 /// them into multiple instructions in order to avoid
 /// [solana_program::program_error::MAX_INSTRUCTION_TRACE_LENGTH_EXCEEDED]J
-pub fn create_realloc_buffer_ixs(
-    args: CreateReallocBufferIxArgs,
-) -> Vec<Instruction> {
+pub fn create_realloc_buffer_ixs(args: CreateReallocBufferIxArgs) -> Vec<Instruction> {
     // We already allocated once during Init and only need to realloc
     // if the buffer is larger than [consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE]
-    if args.buffer_account_size <= MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64
-    {
+    if args.buffer_account_size <= MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64 {
         return vec![];
     }
 
     // Use remaining since [`MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE`] allocated at init
-    let remaining_size = args.buffer_account_size
-        - MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
+    let remaining_size = args.buffer_account_size - MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
     // B) We need to realloc multiple times
     // SAFETY; remaining size > consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
@@ -54,21 +49,15 @@ pub fn create_realloc_buffer_ixs_to_add_remaining(
         .collect()
 }
 
-fn create_realloc_buffer_ix(
-    args: CreateReallocBufferIxArgs,
-    invocation_count: u16,
-) -> Instruction {
+fn create_realloc_buffer_ix(args: CreateReallocBufferIxArgs, invocation_count: u16) -> Instruction {
     let CreateReallocBufferIxArgs {
         authority,
         pubkey,
         buffer_account_size,
         commit_id,
     } = args;
-    let (buffer_pda, buffer_bump) = pdas::buffer_pda(
-        &authority,
-        &pubkey,
-        commit_id.to_le_bytes().as_slice(),
-    );
+    let (buffer_pda, buffer_bump) =
+        pdas::buffer_pda(&authority, &pubkey, commit_id.to_le_bytes().as_slice());
 
     let program_id = crate::id();
     let ix = CommittorInstruction::ReallocBuffer {
@@ -78,9 +67,6 @@ fn create_realloc_buffer_ix(
         buffer_bump,
         invocation_count,
     };
-    let accounts = vec![
-        AccountMeta::new(authority, true),
-        AccountMeta::new(buffer_pda, false),
-    ];
+    let accounts = vec![AccountMeta::new(authority, true), AccountMeta::new(buffer_pda, false)];
     Instruction::new_with_borsh(program_id, &ix, accounts)
 }

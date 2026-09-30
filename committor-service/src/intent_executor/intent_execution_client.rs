@@ -2,13 +2,11 @@ use std::{ops::ControlFlow, time::Duration};
 
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockRpcClientResult,
-    MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
-    MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,
+    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
     utils::{
-        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
-        get_with_retries, map_magicblock_client_error,
-        send_transaction_with_retries,
+        SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow, get_with_retries,
+        map_magicblock_client_error, send_transaction_with_retries,
     },
 };
 use solana_commitment_config::CommitmentConfig;
@@ -51,27 +49,20 @@ impl IntentExecutionClient {
         authority: &Keypair,
         prepared_message: VersionedMessage,
         tasks: &[BaseTaskImpl],
-    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
-    {
+    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError> {
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
 
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
             transaction_error_mapper: IntentTransactionErrorMapper { tasks },
-            has_dedup_guard: tasks
-                .iter()
-                .any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
+            has_dedup_guard: tasks.iter().any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
         };
-        let attempt = || async {
-            self.send_prepared_message(authority, prepared_message.clone())
-                .await
-        };
-        send_transaction_with_retries(
-            attempt,
-            send_error_mapper,
-            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
-        )
+        let attempt =
+            || async { self.send_prepared_message(authority, prepared_message.clone()).await };
+        send_transaction_with_retries(attempt, send_error_mapper, |i, elapsed| {
+            !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS)
+        })
         .await
     }
 
@@ -101,11 +92,9 @@ impl IntentExecutionClient {
                 .await
         };
 
-        send_transaction_with_retries(
-            attempt,
-            send_error_mapper,
-            |i, elapsed| !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS),
-        )
+        send_transaction_with_retries(attempt, send_error_mapper, |i, elapsed| {
+            !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS)
+        })
         .await?;
         Ok(())
     }
@@ -122,8 +111,7 @@ impl IntentExecutionClient {
         &self,
         signatures: &[Signature],
         commitment_config: CommitmentConfig,
-    ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>>
-    {
+    ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>> {
         let _timer = metrics::start_rpc_client_signature_history_timer();
         let response = self
             .rpc_client
@@ -177,8 +165,7 @@ impl IntentExecutionClient {
         &self,
         authority: &Keypair,
         mut prepared_message: VersionedMessage,
-    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
-    {
+    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError> {
         let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
         match &mut prepared_message {
             VersionedMessage::V0(value) => {
@@ -195,8 +182,7 @@ impl IntentExecutionClient {
             }
         };
 
-        let transaction =
-            VersionedTransaction::try_new(prepared_message, &[&authority])?;
+        let transaction = VersionedTransaction::try_new(prepared_message, &[&authority])?;
         let result = self
             .rpc_client
             .send_transaction(
@@ -223,31 +209,20 @@ impl IntentExecutionClient {
         let cu_metrics = || async {
             match execution_outcome {
                 ExecutionOutput::SingleStage(signature) => {
-                    let tx = self
-                        .rpc_client
-                        .get_transaction(&signature, Some(config))
-                        .await?;
-                    Ok::<_, MagicBlockRpcClientError>(extract_cu(
-                        tx.transaction,
-                    ))
+                    let tx = self.rpc_client.get_transaction(&signature, Some(config)).await?;
+                    Ok::<_, MagicBlockRpcClientError>(extract_cu(tx.transaction))
                 }
                 ExecutionOutput::TwoStage {
                     commit_signature,
                     finalize_signature,
                 } => {
-                    let commit_tx = self
-                        .rpc_client
-                        .get_transaction(&commit_signature, Some(config))
-                        .await?;
-                    let finalize_tx = self
-                        .rpc_client
-                        .get_transaction(&finalize_signature, Some(config))
-                        .await?;
+                    let commit_tx =
+                        self.rpc_client.get_transaction(&commit_signature, Some(config)).await?;
+                    let finalize_tx =
+                        self.rpc_client.get_transaction(&finalize_signature, Some(config)).await?;
                     let commit_cu = extract_cu(commit_tx.transaction);
                     let finalize_cu = extract_cu(finalize_tx.transaction);
-                    let (Some(commit_cu), Some(finalize_cu)) =
-                        (commit_cu, finalize_cu)
-                    else {
+                    let (Some(commit_cu), Some(finalize_cu)) = (commit_cu, finalize_cu) else {
                         return Ok(None);
                     };
                     Ok(Some(commit_cu + finalize_cu))
@@ -256,9 +231,9 @@ impl IntentExecutionClient {
         };
 
         match cu_metrics().await {
-            Ok(Some(cu)) => metrics::set_commmittor_intent_cu_usage(
-                i64::try_from(cu).unwrap_or(i64::MAX),
-            ),
+            Ok(Some(cu)) => {
+                metrics::set_commmittor_intent_cu_usage(i64::try_from(cu).unwrap_or(i64::MAX))
+            }
             Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
             _ => {}
         }
@@ -274,9 +249,7 @@ struct IntentErrorMapper<TxMap> {
 
 impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
 where
-    TxMap: TransactionErrorMapper<
-        ExecutionError = TransactionStrategyExecutionError,
-    >,
+    TxMap: TransactionErrorMapper<ExecutionError = TransactionStrategyExecutionError>,
 {
     type ExecutionError = TransactionStrategyExecutionError;
     fn map(&self, error: InternalError) -> Self::ExecutionError {
@@ -285,20 +258,14 @@ where
         } else {
             match error {
                 InternalError::MagicBlockRpcClientError(err) => {
-                    map_magicblock_client_error(
-                        &self.transaction_error_mapper,
-                        *err,
-                    )
+                    map_magicblock_client_error(&self.transaction_error_mapper, *err)
                 }
                 err => TransactionStrategyExecutionError::InternalError(err),
             }
         }
     }
 
-    fn decide_flow(
-        &self,
-        err: &Self::ExecutionError,
-    ) -> ControlFlow<(), Duration> {
+    fn decide_flow(&self, err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
         let TransactionStrategyExecutionError::InternalError(
             InternalError::MagicBlockRpcClientError(err),
         ) = err
@@ -312,36 +279,26 @@ where
         // with a fresh blockhash could execute the actions twice.
         // Only failures from before signing & sending are retriable.
         match err.as_ref() {
-            MagicBlockRpcClientError::GetLatestBlockhash(_) => {
-                decide_rpc_error_flow(err)
-            }
+            MagicBlockRpcClientError::GetLatestBlockhash(_) => decide_rpc_error_flow(err),
             _ => ControlFlow::Break(()),
         }
     }
 }
 
-impl<TxMap> SendErrorMapper<MagicBlockRpcClientError>
-    for IntentErrorMapper<TxMap>
+impl<TxMap> SendErrorMapper<MagicBlockRpcClientError> for IntentErrorMapper<TxMap>
 where
-    TxMap: TransactionErrorMapper<
-        ExecutionError = TransactionStrategyExecutionError,
-    >,
+    TxMap: TransactionErrorMapper<ExecutionError = TransactionStrategyExecutionError>,
 {
     type ExecutionError = TransactionStrategyExecutionError;
     fn map(&self, error: MagicBlockRpcClientError) -> Self::ExecutionError {
         if error.is_transaction_too_large() {
-            TransactionStrategyExecutionError::TransactionTooLargeError(
-                error.into(),
-            )
+            TransactionStrategyExecutionError::TransactionTooLargeError(error.into())
         } else {
             map_magicblock_client_error(&self.transaction_error_mapper, error)
         }
     }
 
-    fn decide_flow(
-        &self,
-        err: &Self::ExecutionError,
-    ) -> ControlFlow<(), Duration> {
+    fn decide_flow(&self, err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
         match err {
             TransactionStrategyExecutionError::InternalError(
                 InternalError::MagicBlockRpcClientError(err),
@@ -359,10 +316,7 @@ impl SendErrorMapper<MagicBlockRpcClientError> for DefaultGetErrorMapper {
         error
     }
 
-    fn decide_flow(
-        &self,
-        mapped_error: &Self::ExecutionError,
-    ) -> ControlFlow<(), Duration> {
+    fn decide_flow(&self, mapped_error: &Self::ExecutionError) -> ControlFlow<(), Duration> {
         decide_rpc_error_flow(mapped_error)
     }
 }

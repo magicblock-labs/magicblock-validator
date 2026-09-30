@@ -5,8 +5,7 @@ use magicblock_committor_service::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
         utils::{create_commit_task, TransactionUtils},
-        BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
-        UndelegateTask,
+        BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -17,8 +16,7 @@ use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;
 
 use crate::common::{
-    create_buffer_commit_task, create_committed_account, generate_random_bytes,
-    TestFixture,
+    create_buffer_commit_task, create_committed_account, generate_random_bytes, TestFixture,
 };
 
 mod common;
@@ -46,9 +44,7 @@ async fn test_prepare_commit_tx_with_single_account() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
-        .await;
+    let result = preparator.prepare_for_strategy(&fixture.authority, &mut tx_strategy).await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
@@ -135,12 +131,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
             continue;
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
-        let chunks_account = fixture
-            .rpc_client
-            .get_account(&chunks_pda)
-            .await
-            .unwrap()
-            .unwrap();
+        let chunks_account = fixture.rpc_client.get_account(&chunks_pda).await.unwrap().unwrap();
         let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
         assert!(chunks.is_complete());
@@ -171,8 +162,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
         callback: None,
     };
 
-    let mut buffer_commit_task =
-        create_buffer_commit_task(&committed_account.account.data);
+    let mut buffer_commit_task = create_buffer_commit_task(&committed_account.account.data);
     buffer_commit_task.committed_account.pubkey = committed_account.pubkey;
     let tasks: Vec<BaseTaskImpl> = vec![
         // commit account
@@ -183,10 +173,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
         }
         .into(),
         // BaseAction
-        BaseActionTask::V1(BaseActionTaskV1 {
-            action: base_action,
-        })
-        .into(),
+        BaseActionTask::V1(BaseActionTaskV1 { action: base_action }).into(),
     ];
 
     // Test preparation
@@ -227,12 +214,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
 
-        let chunks_account = fixture
-            .rpc_client
-            .get_account(&chunks_pda)
-            .await
-            .unwrap()
-            .unwrap();
+        let chunks_account = fixture.rpc_client.get_account(&chunks_pda).await.unwrap().unwrap();
         let chunks = Chunks::try_from_slice(&chunks_account.data).unwrap();
 
         assert!(chunks.is_complete());
@@ -262,11 +244,8 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
         .into(),
     ];
 
-    let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
-        &fixture.authority.pubkey(),
-        &tasks,
-        None,
-    );
+    let lookup_tables_keys =
+        TaskStrategist::collect_lookup_table_keys(&fixture.authority.pubkey(), &tasks, None);
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
@@ -274,9 +253,7 @@ async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_strategy(&fixture.authority, &mut tx_strategy)
-        .await;
+    let result = preparator.prepare_for_strategy(&fixture.authority, &mut tx_strategy).await;
 
     assert!(result.is_ok());
 }

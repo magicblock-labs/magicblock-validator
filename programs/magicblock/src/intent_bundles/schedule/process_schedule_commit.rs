@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
 use magicblock_core::intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType,
-    calculate_commit_fee, types::CommittedAccount,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee,
+    types::CommittedAccount,
 };
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
@@ -13,17 +13,11 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     MagicContext,
-    magic_scheduled_base_intent::{
-        ScheduledIntentBundle, validate_commit_schedule_permissions,
-    },
+    magic_scheduled_base_intent::{ScheduledIntentBundle, validate_commit_schedule_permissions},
     magic_sys::{fetch_current_commit_nonces, validate_intent_size},
-    schedule_transactions::{
-        self, check_commit_limits, get_parent_program_id, try_get_fee_vault,
-    },
+    schedule_transactions::{self, check_commit_limits, get_parent_program_id, try_get_fee_vault},
     utils::{
-        account_actions::{
-            charge_delegated_payer, mark_account_as_undelegated,
-        },
+        account_actions::{charge_delegated_payer, mark_account_as_undelegated},
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
@@ -39,16 +33,13 @@ pub(crate) struct ProcessScheduleCommitOptions {
 
 pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
-    schedule_transactions::check_magic_context_id(
-        invoke_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
+    schedule_transactions::check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &*invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -64,8 +55,7 @@ pub(crate) fn process_schedule_commit(
     }
 
     // Assert Payer is signer
-    let payer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_pubkey = get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
     if !signers.contains(payer_pubkey) {
         ic_msg!(
             invoke_context,
@@ -75,8 +65,7 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let payer_account =
-        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_account = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
     let (magic_fee_vault, committees_start) = try_get_fee_vault(
         transaction_context,
         invoke_context,
@@ -104,10 +93,8 @@ pub(crate) fn process_schedule_commit(
     let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
     let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in committees_start..ix_accs_len {
-        let acc_pubkey =
-            get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
-        let acc =
-            get_instruction_account_with_idx(transaction_context, idx as u16)?;
+        let acc_pubkey = get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
+        let acc = get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
         // Local-only accounts, including Magic ATAs, cannot be committed.
         if acc.borrow()?.is(AccountMode::Magic) {
@@ -134,8 +121,7 @@ pub(crate) fn process_schedule_commit(
 
             if opts.request_undelegation {
                 // Must be writable and delegated to avoid double-undelegation
-                let is_writable =
-                    get_writable_with_idx(transaction_context, idx as u16)?;
+                let is_writable = get_writable_with_idx(transaction_context, idx as u16)?;
                 if !is_writable || !is_delegated {
                     ic_msg!(
                         invoke_context,
@@ -164,8 +150,7 @@ pub(crate) fn process_schedule_commit(
             )?;
 
             let account = acc.borrow()?;
-            let committed =
-                CommittedAccount::from_account_shared(*acc_pubkey, &account);
+            let committed = CommittedAccount::from_account_shared(*acc_pubkey, &account);
 
             if &committed.pubkey != acc_pubkey {
                 ic_msg!(
@@ -221,12 +206,8 @@ pub(crate) fn process_schedule_commit(
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    let mut context = MagicContext::deserialize(context_acc.borrow()?.data())
-        .map_err(|err| {
+    let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
+    let mut context = MagicContext::deserialize(context_acc.borrow()?.data()).map_err(|err| {
         ic_msg!(
             invoke_context,
             "Failed to deserialize MagicContext: {}",
@@ -240,17 +221,12 @@ pub(crate) fn process_schedule_commit(
 
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.
-    let clock =
-        invoke_context
-            .get_sysvar_cache()
-            .get_clock()
-            .map_err(|err| {
-                ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-                InstructionError::UnsupportedSysvar
-            })?;
+    let clock = invoke_context.get_sysvar_cache().get_clock().map_err(|err| {
+        ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+        InstructionError::UnsupportedSysvar
+    })?;
     let blockhash = invoke_context.environment_config.blockhash;
-    let sent_transaction =
-        InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
+    let sent_transaction = InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
     let sent_signature = sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
@@ -259,9 +235,7 @@ pub(crate) fn process_schedule_commit(
             undelegate_action: UndelegateType::Standalone,
         })
     } else {
-        MagicBaseIntent::CommitFinalize(CommitType::Standalone(
-            committed_accounts,
-        ))
+        MagicBaseIntent::CommitFinalize(CommitType::Standalone(committed_accounts))
     }
     .into();
     validate_intent_size(&base_intent).inspect_err(|_| {

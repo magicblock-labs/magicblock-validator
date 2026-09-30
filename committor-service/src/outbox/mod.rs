@@ -7,9 +7,7 @@ use solana_keypair::Address as Pubkey;
 use solana_transaction::Transaction;
 
 use crate::{
-    intent_executor::{
-        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
-    },
+    intent_executor::{ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult},
     outbox::outbox_intent_bundles_reader::OutboxIntentBundlesReader,
 };
 
@@ -27,10 +25,7 @@ pub trait OutboxClient: Send + Sync + 'static {
     /// Executes `Accept` tx and returns accepted intents
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<
-        Vec<ScheduledIntentBundle>,
-        (Vec<ScheduledIntentBundle>, Self::Error),
-    >;
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)>;
 
     /// Sets execution stage for outbox intent
     /// Note: intent has to be accepted prior
@@ -80,11 +75,7 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: if intent
-                .sent_transaction
-                .signatures
-                .is_empty()
-            {
+            intent_sent_transaction: if intent.sent_transaction.signatures.is_empty() {
                 IntentSentTransaction::Recovered
             } else {
                 IntentSentTransaction::Known(intent.sent_transaction.clone())

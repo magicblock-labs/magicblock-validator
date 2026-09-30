@@ -3,7 +3,7 @@ use thiserror::Error;
 
 use crate::state::chunks::ChunksError;
 
-pub type CommittorResult<T> = std::result::Result<T, CommittorError>;
+pub type CommittorResult<T> = Result<T, CommittorError>;
 
 #[derive(Error, Debug, Clone)]
 pub enum CommittorError {
@@ -16,9 +16,7 @@ pub enum CommittorError {
     #[error("Offset ({0}) must be multiple of chunk size ({1})")]
     OffsetMustBeMultipleOfChunkSize(usize, u16),
 
-    #[error(
-        "Chunk of size {0} cannot be stored at offset {1} in buffer of size ({2})"
-    )]
+    #[error("Chunk of size {0} cannot be stored at offset {1} in buffer of size ({2})")]
     OffsetChunkOutOfRange(usize, u32, usize),
 
     #[error("Out of bound access to chunks")]
@@ -30,9 +28,7 @@ impl From<ChunksError> for CommittorError {
         match value {
             ChunksError::OutOfBoundsError => CommittorError::OutOfBoundsError,
             ChunksError::InvalidOffsetError(offset, chunk_size) => {
-                CommittorError::OffsetMustBeMultipleOfChunkSize(
-                    offset, chunk_size,
-                )
+                CommittorError::OffsetMustBeMultipleOfChunkSize(offset, chunk_size)
             }
         }
     }

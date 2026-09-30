@@ -17,30 +17,22 @@ pub(crate) struct JsonRequest<M> {
     pub(crate) params: Option<Array>,
 }
 /// Represents either a single JSON-RPC request or a batch of multiple requests.
-pub enum RpcRequest {
+pub(crate) enum RpcRequest {
     Single(JsonHttpRequest),
     Multi(Vec<JsonHttpRequest>),
 }
 
 impl<M> JsonRequest<M> {
-    pub(crate) fn required<T: DeserializeOwned>(
-        &self,
-        index: usize,
-    ) -> RpcResult<T> {
+    pub(crate) fn required<T: DeserializeOwned>(&self, index: usize) -> RpcResult<T> {
         let value = self
             .params
             .as_ref()
             .and_then(|params| params.get(index))
-            .ok_or_else(|| {
-            RpcError::invalid_params(format!("missing parameter {index}"))
-        })?;
+            .ok_or_else(|| RpcError::invalid_params(format!("missing parameter {index}")))?;
         json::from_value(value).map_err(RpcError::invalid_params)
     }
 
-    pub(crate) fn optional<T: DeserializeOwned>(
-        &self,
-        index: usize,
-    ) -> RpcResult<Option<T>> {
+    pub(crate) fn optional<T: DeserializeOwned>(&self, index: usize) -> RpcResult<Option<T>> {
         self.params
             .as_ref()
             .and_then(|params| params.get(index))
@@ -48,9 +40,7 @@ impl<M> JsonRequest<M> {
                 if value.is_null() {
                     Ok(None)
                 } else {
-                    json::from_value(value)
-                        .map(Some)
-                        .map_err(RpcError::invalid_params)
+                    json::from_value(value).map(Some).map_err(RpcError::invalid_params)
                 }
             })
             .transpose()

@@ -32,3 +32,6 @@ tracing-subscriber = { workspace = true, features = ["time"] }
 
 [features]
 tokio-console = ["console-subscriber", "tokio/tracing"]
+
+[lints]
+workspace = true

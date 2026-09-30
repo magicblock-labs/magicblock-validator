@@ -1,7 +1,6 @@
 #[cfg(any(test, feature = "dev-context"))]
 use dlp_api::args::{
-    EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
-    PostDelegationActions,
+    EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
 };
 #[cfg(any(test, feature = "dev-context"))]
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
@@ -30,13 +29,7 @@ pub fn add_delegation_record_for(
     authority: Pubkey,
     owner: Pubkey,
 ) -> Pubkey {
-    add_delegation_record_with_slot_for(
-        rpc_client,
-        pubkey,
-        authority,
-        owner,
-        rpc_client.get_slot(),
-    )
+    add_delegation_record_with_slot_for(rpc_client, pubkey, authority, owner, rpc_client.get_slot())
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -47,8 +40,7 @@ pub fn add_delegation_record_with_slot_for(
     owner: Pubkey,
     delegation_slot: u64,
 ) -> Pubkey {
-    let deleg_record_pubkey =
-        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
         owner,
@@ -75,8 +67,7 @@ pub fn add_delegation_record_with_actions_for(
     owner: Pubkey,
     program_id: Pubkey,
 ) -> Pubkey {
-    let deleg_record_pubkey =
-        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
         owner,
@@ -116,8 +107,7 @@ pub fn add_invalid_delegation_record_for(
     rpc_client: &ChainRpcClientMock,
     pubkey: Pubkey,
 ) -> Pubkey {
-    let deleg_record_pubkey =
-        delegation_record_pda_from_delegated_account(&pubkey);
+    let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     // Create invalid delegation record data (corrupted/invalid bytes)
     let invalid_data = vec![255, 255, 255, 255]; // Invalid data
     rpc_client.add_account(

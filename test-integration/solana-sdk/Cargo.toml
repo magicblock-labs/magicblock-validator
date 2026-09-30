@@ -20,3 +20,6 @@ solana-seed-derivable = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 solana-transaction = { workspace = true }
+
+[lints]
+workspace = true

@@ -25,6 +25,7 @@ magicblock-delegation-program-api = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
+parking_lot = { workspace = true }
 magicblock-table-mania = { workspace = true }
 nucleus = { workspace = true }
 pin-project = { workspace = true }
@@ -66,3 +67,6 @@ tokio = { workspace = true, features = ["test-util"] }
 [features]
 default = []
 dev-context-only-utils = []
+
+[lints]
+workspace = true

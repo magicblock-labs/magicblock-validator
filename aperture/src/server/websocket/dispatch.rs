@@ -50,27 +50,20 @@ impl WsDispatcher {
         request: &JsonWsRequest,
     ) -> RpcResult<WsDispatchResult> {
         use JsonRpcWsMethod::*;
-        RPC_REQUESTS_COUNT
-            .with_label_values(&[request.method.as_str()])
-            .inc();
+        RPC_REQUESTS_COUNT.with_label_values(&[request.method.as_str()]).inc();
         let result = match request.method {
             AccountSubscribe => self.account_subscribe(request).await,
             ProgramSubscribe => self.program_subscribe(request).await,
             SignatureSubscribe => self.signature_subscribe(request).await,
             SlotSubscribe => self.slot_subscribe().await,
             LogsSubscribe => self.logs_subscribe(request).await,
-            AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe
-            | SlotUnsubscribe | SignatureUnsubscribe => {
-                self.unsubscribe(request)
-            }
+            AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe | SlotUnsubscribe
+            | SignatureUnsubscribe => self.unsubscribe(request),
             Ping => Ok(SubResult::Pong("pong")),
             MethodNotFound => Err(RpcError::method_not_found()),
         }?;
 
-        Ok(WsDispatchResult {
-            id: request.id.clone(),
-            result,
-        })
+        Ok(WsDispatchResult { id: request.id.clone(), result })
     }
 
     /// Handles a request to unsubscribe from a previously established subscription.
@@ -80,21 +73,13 @@ impl WsDispatcher {
     fn unsubscribe(&mut self, request: &JsonWsRequest) -> RpcResult<SubResult> {
         let id = request.required::<SubscriptionID>(0)?;
 
-        let success = self
-            .unsubs
-            .remove(&id)
-            .inspect(|handle| handle.abort())
-            .is_some();
+        let success = self.unsubs.remove(&id).inspect(|handle| handle.abort()).is_some();
         Ok(SubResult::Unsub(success))
     }
 
     /// Registers a spawned forwarding task under its subscription id. A duplicate
     /// id (should not happen with the global counter) aborts the previous task.
-    pub(crate) fn register(
-        &mut self,
-        id: SubscriptionID,
-        handle: JoinHandle<()>,
-    ) {
+    pub(crate) fn register(&mut self, id: SubscriptionID, handle: JoinHandle<()>) {
         if let Some(previous) = self.unsubs.insert(id, handle) {
             previous.abort();
         }

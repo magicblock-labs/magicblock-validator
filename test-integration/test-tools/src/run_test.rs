@@ -20,12 +20,7 @@ pub fn iteration_thread_pool() -> (Option<ThreadPool>, u32) {
         (None, concurrency)
     } else {
         (
-            Some(
-                ThreadPoolBuilder::new()
-                    .num_threads(concurrency as usize)
-                    .build()
-                    .unwrap(),
-            ),
+            Some(ThreadPoolBuilder::new().num_threads(concurrency as usize).build().unwrap()),
             concurrency,
         )
     }
@@ -80,10 +75,7 @@ macro_rules! run_test {
                     format!("{:04}", $i),
                     format!(
                         "{:04}",
-                        total_completed.fetch_add(
-                            1,
-                            ::std::sync::atomic::Ordering::Relaxed
-                        ) + 1
+                        total_completed.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed) + 1
                     ),
                     format!("{:04}", iterations)
                 );

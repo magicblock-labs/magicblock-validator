@@ -1,4 +1,5 @@
 use magicblock_rpc_client::MagicBlockRpcClientError;
+use solana_message::CompileError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use thiserror::Error;
@@ -12,6 +13,8 @@ use crate::{
 pub enum TransactionPreparatorError {
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("Failed to compile transaction: {0}")]
+    CompileError(#[from] CompileError),
     #[error("SignerError: {0}")]
     SignerError(#[from] SignerError),
     #[error("Failed to get latest blockhash: {0}")]
@@ -36,7 +39,7 @@ impl TransactionPreparatorError {
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::FailedToFitError | Self::SignerError(_) => false,
+            Self::FailedToFitError | Self::CompileError(_) | Self::SignerError(_) => false,
             Self::GetLatestBlockhashError(err) => err.is_transient(),
             Self::DeliveryPreparationError(err) => err.is_transient(),
         }
@@ -47,6 +50,7 @@ impl From<TaskStrategistError> for TransactionPreparatorError {
     fn from(value: TaskStrategistError) -> Self {
         match value {
             TaskStrategistError::FailedToFitError => Self::FailedToFitError,
+            TaskStrategistError::CompileError(err) => Self::CompileError(err),
             TaskStrategistError::SignerError(err) => Self::SignerError(err),
         }
     }

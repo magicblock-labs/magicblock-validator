@@ -12,6 +12,8 @@ use crate::consts;
 #[serde(transparent)]
 pub struct BindAddress(pub SocketAddr);
 
+// The default RPC address is a fixed, validated constant.
+#[allow(clippy::unwrap_used)]
 impl Default for BindAddress {
     fn default() -> Self {
         consts::DEFAULT_RPC_ADDR.parse().unwrap()
@@ -74,9 +76,8 @@ impl<'de> Deserialize<'de> for BindAddress {
         match StringOrInt::deserialize(deserializer)? {
             StringOrInt::String(s) => s.parse().map_err(de::Error::custom),
             StringOrInt::Int(port) => {
-                let port = u16::try_from(port).map_err(|_| {
-                    de::Error::custom("port number out of range for u16")
-                })?;
+                let port = u16::try_from(port)
+                    .map_err(|_| de::Error::custom("port number out of range for u16"))?;
                 Ok(BindAddress(SocketAddr::from(([127, 0, 0, 1], port))))
             }
         }
@@ -119,24 +120,17 @@ impl<'de> Deserialize<'de> for Remote {
 
         match Repr::deserialize(deserializer)? {
             Repr::Plain(url) => url.parse().map_err(de::Error::custom),
-            Repr::Detailed {
-                url,
-                ws_subs_per_connection,
-            } => {
+            Repr::Detailed { url, ws_subs_per_connection } => {
                 if ws_subs_per_connection == Some(0) {
                     return Err(de::Error::custom(
                         "ws-subs-per-connection must be greater than 0",
                     ));
                 }
                 match url.parse().map_err(de::Error::custom)? {
-                    Self::Websocket(url, _) => {
-                        Ok(Self::Websocket(url, ws_subs_per_connection))
-                    }
-                    _ if ws_subs_per_connection.is_some() => {
-                        Err(de::Error::custom(
-                            "ws-subs-per-connection only applies to ws/wss remotes",
-                        ))
-                    }
+                    Self::Websocket(url, _) => Ok(Self::Websocket(url, ws_subs_per_connection)),
+                    _ if ws_subs_per_connection.is_some() => Err(de::Error::custom(
+                        "ws-subs-per-connection only applies to ws/wss remotes",
+                    )),
                     other => Ok(other),
                 }
             }
@@ -199,9 +193,7 @@ impl Remote {
 /// A URL that whose alias like "mainnet" was resolved.
 ///
 /// Aliases are resolved during parsing and replaced with their full URLs.
-#[derive(
-    Clone, Debug, Deserialize, SerializeDisplay, Display, PartialEq, Deref,
-)]
+#[derive(Clone, Debug, Deserialize, SerializeDisplay, Display, PartialEq, Deref)]
 pub struct ResolvedUrl(pub Url);
 
 impl ResolvedUrl {

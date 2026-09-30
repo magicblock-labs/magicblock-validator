@@ -7,12 +7,10 @@ use std::{collections::HashMap, fs, path::PathBuf};
 use keeper::builder::KeeperBuilder;
 use magicblock_config::config::{EngineConfig, LoadableProgram};
 use magicblock_program::magicblock_processor::{
-    CallbackEntrypoint, Entrypoint, EphemeralSystemEntrypoint,
-    OutboxIntentEntrypoint,
+    CallbackEntrypoint, Entrypoint, EphemeralSystemEntrypoint, OutboxIntentEntrypoint,
 };
 use solana_program_runtime::{
-    invoke_context::BuiltinFunctionWithContext,
-    solana_sbpf::program::BuiltinFunctionDefinition,
+    invoke_context::BuiltinFunctionWithContext, solana_sbpf::program::BuiltinFunctionDefinition,
 };
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
@@ -35,19 +33,17 @@ pub fn keeper_builder<R>(
     })
 }
 
-fn load_programs(
-    programs: &[LoadableProgram],
-) -> Result<HashMap<Pubkey, Vec<u8>>, Error> {
+fn load_programs(programs: &[LoadableProgram]) -> Result<HashMap<Pubkey, Vec<u8>>, Error> {
     programs
         .iter()
         .map(|program| {
-            fs::read(&program.path)
-                .map(|elf| (program.id.0, elf))
-                .map_err(|source| Error::Program {
+            fs::read(&program.path).map(|elf| (program.id.0, elf)).map_err(|source| {
+                Error::Program {
                     id: program.id.0,
                     path: program.path.clone(),
                     source,
-                })
+                }
+            })
         })
         .collect()
 }

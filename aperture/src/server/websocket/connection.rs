@@ -1,8 +1,6 @@
 use std::time::Duration;
 
-use fastwebsockets::{
-    CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError,
-};
+use fastwebsockets::{CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use json::Value;
@@ -155,34 +153,25 @@ impl ConnectionHandler {
             }
         }
         // send a close frame (best effort) to the client
-        let frame =
-            Frame::close(CloseCode::Away.into(), b"server is shutting down");
+        let frame = Frame::close(CloseCode::Away.into(), b"server is shutting down");
         let _ = self.ws.write_frame(frame).await;
     }
 
     /// Formats and sends a standard JSON-RPC success response to the client.
     async fn report_success(&mut self, result: WsDispatchResult) -> bool {
-        let payload =
-            ResponsePayload::encode_no_context_raw(&result.id, result.result);
+        let payload = ResponsePayload::encode_no_context_raw(&result.id, result.result);
         self.send(payload.0).await.is_ok()
     }
 
     /// Formats and sends a standard JSON-RPC error response to the client.
-    async fn report_failure(
-        &mut self,
-        id: Option<&Value>,
-        error: RpcError,
-    ) -> bool {
+    async fn report_failure(&mut self, id: Option<&Value>, error: RpcError) -> bool {
         let payload = ResponseErrorPayload::encode(id, error);
         self.send(payload.into_body().0).await.is_ok()
     }
 
     /// A low-level helper to write a payload as a WebSocket text frame.
     #[inline]
-    async fn send(
-        &mut self,
-        payload: impl Into<Payload<'_>>,
-    ) -> Result<(), WebSocketError> {
+    async fn send(&mut self, payload: impl Into<Payload<'_>>) -> Result<(), WebSocketError> {
         let frame = Frame::text(payload.into());
         self.ws.write_frame(frame).await
     }

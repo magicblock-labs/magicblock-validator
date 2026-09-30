@@ -4,9 +4,7 @@ use std::{
 };
 
 use magicblock_config::config::LedgerConfig;
-use magicblock_ledger_deprecated::{
-    BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, Ledger, LedgerOptions,
-};
+use magicblock_ledger_deprecated::{BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, Ledger, LedgerOptions};
 use solana_program::clock::Slot;
 use tracing::*;
 
@@ -15,10 +13,7 @@ use crate::errors::{ApiError, ApiResult};
 // -----------------
 // Init
 // -----------------
-pub(crate) fn init(
-    path: &Path,
-    config: &LedgerConfig,
-) -> ApiResult<(Ledger, Slot)> {
+pub(crate) fn init(path: &Path, config: &LedgerConfig) -> ApiResult<(Ledger, Slot)> {
     if config.reset {
         remove_ledger_directory_if_exists(path).map_err(|err| {
             error!(error = ?err, path = %path.display(), "Unable to remove ledger");
@@ -53,9 +48,7 @@ pub(crate) fn validator_keypair_path(ledger_path: &Path) -> ApiResult<PathBuf> {
 // -----------------
 pub(crate) fn ledger_parent_dir(ledger_path: &Path) -> ApiResult<PathBuf> {
     let parent = ledger_path.parent().ok_or_else(|| {
-        ApiError::LedgerPathIsMissingParent(
-            ledger_path.to_path_buf().display().to_string(),
-        )
+        ApiError::LedgerPathIsMissingParent(ledger_path.to_path_buf().display().to_string())
     })?;
     Ok(parent.to_path_buf())
 }

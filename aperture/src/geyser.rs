@@ -8,9 +8,9 @@ use std::{
 };
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
-    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3,
-    ReplicaAccountInfoVersions, ReplicaBlockInfoV4, ReplicaBlockInfoVersions,
-    ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions, SlotStatus,
+    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3, ReplicaAccountInfoVersions,
+    ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV2,
+    ReplicaTransactionInfoVersions, SlotStatus,
 };
 use engine::Engine;
 use json::{JsonValueTrait, Value};
@@ -82,19 +82,15 @@ impl GeyserPluginManager {
         config_path: &Path,
     ) -> Result<(Box<dyn GeyserPlugin>, Library), GeyserPluginError> {
         let config = fs::read_to_string(config_path)?;
-        let config: Value = json::from_str(&config).map_err(|error| {
-            GeyserPluginError::ConfigFileReadError {
+        let config: Value =
+            json::from_str(&config).map_err(|error| GeyserPluginError::ConfigFileReadError {
                 msg: format!("failed to parse plugin configuration: {error}"),
+            })?;
+        let path = config.get("libpath").and_then(JsonValueTrait::as_str).ok_or_else(|| {
+            GeyserPluginError::ConfigFileReadError {
+                msg: "plugin configuration must contain a string `libpath` field".into(),
             }
         })?;
-        let path = config
-            .get("libpath")
-            .and_then(JsonValueTrait::as_str)
-            .ok_or_else(|| GeyserPluginError::ConfigFileReadError {
-                msg:
-                    "plugin configuration must contain a string `libpath` field"
-                        .into(),
-            })?;
 
         // SAFETY: loading arbitrary code is an explicit operator action through
         // `libpath`; the library handle is retained until after plugin drop.
@@ -104,12 +100,12 @@ impl GeyserPluginManager {
             }
         })?;
         // SAFETY: the plugin ABI requires this exact symbol and function type.
-        let create: Symbol<PluginCreate> = unsafe {
-            library.get(ENTRYPOINT_SYMBOL)
-        }
-        .map_err(|error| GeyserPluginError::ConfigFileReadError {
-            msg: format!("failed to load plugin entrypoint: {error}"),
-        })?;
+        let create: Symbol<'_, PluginCreate> =
+            unsafe { library.get(ENTRYPOINT_SYMBOL) }.map_err(|error| {
+                GeyserPluginError::ConfigFileReadError {
+                    msg: format!("failed to load plugin entrypoint: {error}"),
+                }
+            })?;
         // SAFETY: the ABI contract transfers ownership of one heap allocation.
         let raw = unsafe { create() };
         if raw.is_null() {
@@ -127,9 +123,7 @@ impl GeyserPluginManager {
 
     fn notify_transaction(&self, transaction: &FullTransaction) {
         let Ok((sanitized, meta)) = processed_transaction(transaction)
-            .inspect_err(|error| {
-                warn!(?error, "failed to convert engine transaction for Geyser")
-            })
+            .inspect_err(|error| warn!(?error, "failed to convert engine transaction for Geyser"))
         else {
             return;
         };
@@ -169,18 +163,13 @@ impl GeyserPluginManager {
         else {
             return;
         };
-        for (pubkey, account) in
-            std::mem::take(&mut execution.loaded_transaction.accounts)
-        {
-            let Some(account) = AccountSeqLock::new(account).read(|account| {
-                account
-                    .dirty()
-                    .then(|| AccountSharedData::from(account.owned()))
-            }) else {
+        for (pubkey, account) in std::mem::take(&mut execution.loaded_transaction.accounts) {
+            let Some(account) = AccountSeqLock::new(account)
+                .read(|account| account.dirty().then(|| AccountSharedData::from(account.owned())))
+            else {
                 continue;
             };
-            let write_version =
-                self.write_version.fetch_add(1, Ordering::Relaxed);
+            let write_version = self.write_version.fetch_add(1, Ordering::Relaxed);
             let info = ReplicaAccountInfoV3 {
                 pubkey: pubkey.as_array(),
                 lamports: account.lamports(),
@@ -213,11 +202,7 @@ impl GeyserPluginManager {
     fn notify_block(&self, block: Block) {
         let parent = block.slot.checked_sub(1);
         for plugin in &self.plugins {
-            if let Err(error) = plugin.update_slot_status(
-                block.slot,
-                parent,
-                &SlotStatus::Rooted,
-            ) {
+            if let Err(error) = plugin.update_slot_status(block.slot, parent, &SlotStatus::Rooted) {
                 warn!(
                     plugin = plugin.name(),
                     ?error,
@@ -245,8 +230,8 @@ impl GeyserPluginManager {
             entry_count: 0,
         };
         for plugin in &self.plugins {
-            if let Err(error) = plugin
-                .notify_block_metadata(ReplicaBlockInfoVersions::V0_0_4(&info))
+            if let Err(error) =
+                plugin.notify_block_metadata(ReplicaBlockInfoVersions::V0_0_4(&info))
             {
                 warn!(
                     plugin = plugin.name(),
@@ -338,9 +323,7 @@ fn start_manager(
                         manager.notify_transaction(&transaction);
                         manager.notify_accounts(transaction);
                     }
-                    Some(GeyserEvent::Block(block)) => {
-                        manager.notify_block(block)
-                    }
+                    Some(GeyserEvent::Block(block)) => manager.notify_block(block),
                     None => break,
                 }
             }
@@ -351,7 +334,9 @@ fn start_manager(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Arc, Mutex as StdMutex};
+    use std::sync::Arc;
+
+    use parking_lot::Mutex as StdMutex;
 
     use agave_geyser_plugin_interface::geyser_plugin_interface::{
         GeyserPlugin, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
@@ -397,25 +382,18 @@ mod tests {
 
         fn notify_transaction(
             &self,
-            transaction: ReplicaTransactionInfoVersions,
+            transaction: ReplicaTransactionInfoVersions<'_>,
             slot: u64,
         ) -> PluginResult<()> {
-            let ReplicaTransactionInfoVersions::V0_0_2(info) = transaction
-            else {
+            let ReplicaTransactionInfoVersions::V0_0_2(info) = transaction else {
                 panic!("expected transaction info v2")
             };
             let meta = info.transaction_status_meta;
-            self.0.lock().unwrap().transactions.push(TransactionEvent {
+            self.0.lock().transactions.push(TransactionEvent {
                 slot,
                 success: meta.status.is_ok(),
-                logs: meta
-                    .log_messages
-                    .as_ref()
-                    .is_some_and(|logs| !logs.is_empty()),
-                cpi: meta
-                    .inner_instructions
-                    .as_ref()
-                    .is_some_and(|groups| !groups.is_empty()),
+                logs: meta.log_messages.as_ref().is_some_and(|logs| !logs.is_empty()),
+                cpi: meta.inner_instructions.as_ref().is_some_and(|groups| !groups.is_empty()),
                 return_data: meta.return_data.is_some(),
                 compute_units: meta.compute_units_consumed.unwrap_or_default(),
             });
@@ -424,18 +402,14 @@ mod tests {
 
         fn update_account(
             &self,
-            account: ReplicaAccountInfoVersions,
+            account: ReplicaAccountInfoVersions<'_>,
             slot: u64,
             _is_startup: bool,
         ) -> PluginResult<()> {
             let ReplicaAccountInfoVersions::V0_0_3(info) = account else {
                 panic!("expected account info v3")
             };
-            self.0.lock().unwrap().accounts.push((
-                slot,
-                info.write_version,
-                info.txn.is_none(),
-            ));
+            self.0.lock().accounts.push((slot, info.write_version, info.txn.is_none()));
             Ok(())
         }
 
@@ -446,18 +420,15 @@ mod tests {
             status: &SlotStatus,
         ) -> PluginResult<()> {
             assert_eq!(status, &SlotStatus::Rooted);
-            self.0.lock().unwrap().slots.push(slot);
+            self.0.lock().slots.push(slot);
             Ok(())
         }
 
-        fn notify_block_metadata(
-            &self,
-            block: ReplicaBlockInfoVersions,
-        ) -> PluginResult<()> {
+        fn notify_block_metadata(&self, block: ReplicaBlockInfoVersions<'_>) -> PluginResult<()> {
             let ReplicaBlockInfoVersions::V0_0_4(info) = block else {
                 panic!("expected block info v4")
             };
-            self.0.lock().unwrap().blocks.push((
+            self.0.lock().blocks.push((
                 info.slot,
                 info.executed_transaction_count,
                 info.entry_count,
@@ -472,13 +443,11 @@ mod tests {
         let mut te = TestEngine::new().await;
         let output = store_v42(&te, 0, AccountMode::Magic);
         let events = Arc::new(StdMutex::new(Events::default()));
-        let manager =
-            Arc::new(GeyserPluginManager::from_plugins(vec![Box::new(
-                FakePlugin(events.clone()),
-            )]));
+        let manager = Arc::new(GeyserPluginManager::from_plugins(vec![Box::new(
+            FakePlugin(events.clone()),
+        )]));
         let cancel = CancellationToken::new();
-        let tasks =
-            start_manager(manager, 0, (*te).clone(), cancel.clone()).unwrap();
+        let tasks = start_manager(manager, 0, (*te).clone(), cancel.clone()).unwrap();
 
         te.execute(&[E::lit(7).cpi().compose(output, &[])])
             .await
@@ -487,11 +456,10 @@ mod tests {
             .await
             .expect("second transaction succeeds");
         te.advance(1).await;
-        let deadline =
-            tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
             let ready = {
-                let events = events.lock().unwrap();
+                let events = events.lock();
                 events.transactions.len() >= 2
                     && events.accounts.len() >= 2
                     && !events.slots.is_empty()
@@ -501,7 +469,7 @@ mod tests {
                 break;
             }
             if tokio::time::Instant::now() >= deadline {
-                let events = events.lock().unwrap();
+                let events = events.lock();
                 panic!(
                     "Geyser delivery timed out: transactions={}, accounts={}, slots={}, blocks={}",
                     events.transactions.len(),
@@ -514,22 +482,15 @@ mod tests {
         }
 
         {
-            let events = events.lock().unwrap();
-            let transaction =
-                events.transactions.first().expect("transaction delivered");
+            let events = events.lock();
+            let transaction = events.transactions.first().expect("transaction delivered");
             assert!(transaction.slot > 0);
             assert!(transaction.success, "successful result is retained");
             assert!(transaction.logs, "logs are retained");
             assert!(transaction.cpi, "CPI metadata is retained");
             assert!(transaction.return_data, "return data is retained");
-            assert!(
-                transaction.compute_units > 0,
-                "compute units are retained"
-            );
-            assert!(
-                !events.accounts.is_empty(),
-                "account updates are delivered"
-            );
+            assert!(transaction.compute_units > 0, "compute units are retained");
+            assert!(!events.accounts.is_empty(), "account updates are delivered");
             for versions in events.accounts.windows(2) {
                 assert_eq!(versions[1].1, versions[0].1 + 1);
             }

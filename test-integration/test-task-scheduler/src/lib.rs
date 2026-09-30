@@ -12,8 +12,7 @@ use integration_test_tools::{
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     validator::{
-        cleanup, start_magicblock_validator_with_config_struct_and_temp_dir,
-        TMP_DIR_CONFIG,
+        cleanup, start_magicblock_validator_with_config_struct_and_temp_dir, TMP_DIR_CONFIG,
     },
     IntegrationTestContext,
 };
@@ -22,13 +21,10 @@ use magicblock_config::{
     types::{network::Remote, SerdePubkey},
     LeaderParams,
 };
-use magicblock_program::{
-    args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey,
-};
+use magicblock_program::{args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey};
 use program_schedulecommit::MainAccount;
 use solana_sdk::{
-    instruction::Instruction, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -44,8 +40,7 @@ fn hydra_program_path() -> PathBuf {
 pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Pubkey) {
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
 
-    let loaded_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
+    let loaded_accounts = LoadedAccounts::with_delegation_program_test_authority();
     let sponsor = loaded_accounts.validator_authority();
 
     let config = LeaderParams {
@@ -156,10 +151,7 @@ pub fn cancel_task(
     send_ephem_tx(
         ctx,
         validator,
-        &[InstructionUtils::cancel_task_instruction(
-            &payer.pubkey(),
-            task_id,
-        )],
+        &[InstructionUtils::cancel_task_instruction(&payer.pubkey(), task_id)],
         payer,
     );
 }
@@ -179,8 +171,7 @@ pub fn wait_for_hydra_crank(
             .and_then(|client| client.get_account(crank_pda).ok());
         if let Some(account) = maybe_account {
             assert!(
-                account.owner.to_bytes()
-                    == HYDRA_EPHEMERAL_PROGRAM_ID.to_bytes(),
+                account.owner.to_bytes() == HYDRA_EPHEMERAL_PROGRAM_ID.to_bytes(),
                 cleanup(validator),
                 "crank account {} not owned by hydra program (owner: {})",
                 crank_pda,
@@ -236,9 +227,7 @@ pub fn wait_for_committed_count(
         let account = expect!(
             ctx.try_chain_client().and_then(|client| client
                 .get_account(committee)
-                .map_err(|err| anyhow::anyhow!(
-                    "failed to get chain account: {err}"
-                ))),
+                .map_err(|err| anyhow::anyhow!("failed to get chain account: {err}"))),
             validator
         );
         if let Ok(state) = MainAccount::try_decode(&account.data) {

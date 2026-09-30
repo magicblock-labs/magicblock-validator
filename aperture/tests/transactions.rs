@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use json::JsonValueTrait;
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, remote_account_claims_header, transfer};
@@ -6,8 +8,7 @@ use solana_hash::Hash as BlockHash;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::GetConfirmedSignaturesForAddress2Config;
 use solana_rpc_client_api::config::{
-    RpcSendTransactionConfig, RpcSimulateTransactionAccountsConfig,
-    RpcSimulateTransactionConfig,
+    RpcSendTransactionConfig, RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
 };
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
@@ -21,8 +22,7 @@ mod setup;
 #[tokio::test]
 async fn test_send_transaction_success() {
     let env = RpcTestEnv::new().await;
-    let (transfer_tx, sender, recipient) =
-        env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+    let (transfer_tx, sender, recipient) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
     let sender_before = load_v42_lamports(&env.engine, sender).unwrap();
     let recipient_before = load_v42_lamports(&env.engine, recipient).unwrap();
     let config = RpcSendTransactionConfig {
@@ -60,10 +60,9 @@ async fn test_send_transaction_success() {
 async fn test_send_transaction_emits_remote_account_claims_header_zero() {
     let env = RpcTestEnv::new().await;
     let (transaction, _, _) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
-    let encoded = bs58::encode(
-        wincode::serialize(&transaction).expect("transaction should serialize"),
-    )
-    .into_string();
+    let encoded =
+        bs58::encode(wincode::serialize(&transaction).expect("transaction should serialize"))
+            .into_string();
     let request = json::json!({
         "jsonrpc": "2.0",
         "method": "sendTransaction",
@@ -81,10 +80,7 @@ async fn test_send_transaction_emits_remote_account_claims_header_zero() {
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("sendTransaction response body should decode"),
+        &response.text().await.expect("sendTransaction response body should decode"),
     )
     .expect("sendTransaction response body should be valid JSON");
     assert!(body["result"].is_str(), "response should contain signature");
@@ -137,9 +133,7 @@ async fn test_send_transaction_with_invalid_blockhash() {
         .expect_err("transaction with an invalid blockhash should fail");
 
     assert!(
-        error
-            .to_string()
-            .contains(&TransactionError::BlockhashNotFound.to_string()),
+        error.to_string().contains(&TransactionError::BlockhashNotFound.to_string()),
         "expected a blockhash rejection, got {error}"
     );
     assert!(
@@ -160,10 +154,7 @@ async fn test_send_transaction_with_invalid_signature() {
         ..Default::default()
     };
 
-    let result = env
-        .rpc
-        .send_transaction_with_config(&transfer_tx, config)
-        .await;
+    let result = env.rpc.send_transaction_with_config(&transfer_tx, config).await;
 
     assert!(
         result.is_err(),
@@ -184,8 +175,7 @@ async fn test_send_transaction_with_invalid_signature() {
 #[tokio::test]
 async fn test_simulate_transaction_success() {
     let env = RpcTestEnv::new().await;
-    let (transfer_tx, sender, recipient) =
-        env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+    let (transfer_tx, sender, recipient) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
     let signature = transfer_tx.signatures[0];
     let sender_before = load_v42_lamports(&env.engine, sender);
     let recipient_before = load_v42_lamports(&env.engine, recipient);
@@ -230,10 +220,9 @@ async fn test_simulate_transaction_success() {
 async fn test_simulate_transaction_emits_remote_account_claims_header_zero() {
     let env = RpcTestEnv::new().await;
     let (transaction, _, _) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
-    let encoded = bs58::encode(
-        wincode::serialize(&transaction).expect("transaction should serialize"),
-    )
-    .into_string();
+    let encoded =
+        bs58::encode(wincode::serialize(&transaction).expect("transaction should serialize"))
+            .into_string();
     let request = json::json!({
         "jsonrpc": "2.0",
         "method": "simulateTransaction",
@@ -251,10 +240,7 @@ async fn test_simulate_transaction_emits_remote_account_claims_header_zero() {
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("simulateTransaction response body should decode"),
+        &response.text().await.expect("simulateTransaction response body should decode"),
     )
     .expect("simulateTransaction response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
@@ -262,14 +248,12 @@ async fn test_simulate_transaction_emits_remote_account_claims_header_zero() {
 
 #[tokio::test]
 async fn test_simulate_transaction_with_requested_accounts_emits_remote_account_claims_header_zero()
- {
+{
     let env = RpcTestEnv::new().await;
-    let (transaction, sender, recipient) =
-        env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
-    let encoded = bs58::encode(
-        wincode::serialize(&transaction).expect("transaction should serialize"),
-    )
-    .into_string();
+    let (transaction, sender, recipient) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+    let encoded =
+        bs58::encode(wincode::serialize(&transaction).expect("transaction should serialize"))
+            .into_string();
     let request = json::json!({
         "jsonrpc": "2.0",
         "method": "simulateTransaction",
@@ -299,10 +283,7 @@ async fn test_simulate_transaction_with_requested_accounts_emits_remote_account_
     assert!(response.status().is_success());
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value = json::from_str(
-        &response
-            .text()
-            .await
-            .expect("simulateTransaction response body should decode"),
+        &response.text().await.expect("simulateTransaction response body should decode"),
     )
     .expect("simulateTransaction response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
@@ -311,18 +292,13 @@ async fn test_simulate_transaction_with_requested_accounts_emits_remote_account_
 #[tokio::test]
 async fn test_simulate_transaction_returns_requested_accounts() {
     let env = RpcTestEnv::new().await;
-    let (transfer_tx, sender, recipient) =
-        env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+    let (transfer_tx, sender, recipient) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
     let sender_before = load_v42_lamports(&env.engine, sender).unwrap();
     let recipient_before = load_v42_lamports(&env.engine, recipient).unwrap();
     let config = RpcSimulateTransactionConfig {
         accounts: Some(RpcSimulateTransactionAccountsConfig {
             encoding: Some(UiAccountEncoding::Base64),
-            addresses: vec![
-                sender.to_string(),
-                recipient.to_string(),
-                PROGRAM_ID.to_string(),
-            ],
+            addresses: vec![sender.to_string(), recipient.to_string(), PROGRAM_ID.to_string()],
         }),
         ..Default::default()
     };
@@ -366,8 +342,7 @@ async fn test_simulate_transaction_with_config_options() {
     // run with signature verification disabled.
     // Test `replace_recent_blockhash: true`
     {
-        let (mut transfer_tx, _, _) =
-            env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+        let (mut transfer_tx, _, _) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
         let bogus_blockhash = BlockHash::new_unique();
         transfer_tx.message.recent_blockhash = bogus_blockhash;
 
@@ -398,8 +373,7 @@ async fn test_simulate_transaction_with_config_options() {
 
     // Test `sig_verify: false`
     {
-        let (mut transfer_tx, _, _) =
-            env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
+        let (mut transfer_tx, _, _) = env.rpc_transfer(RpcTestEnv::TRANSFER_AMOUNT);
         transfer_tx.signatures[0] = Signature::new_unique(); // Invalid signature
 
         let config = RpcSimulateTransactionConfig {
@@ -427,11 +401,9 @@ async fn test_simulate_transaction_failure() {
 
     // Test with an instruction that is guaranteed to fail (e.g., insufficient funds).
     let sender = store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
-    let recipient =
-        store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
+    let recipient = store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
     let amount = load_v42_lamports(&env.engine, sender).unwrap() + 1;
-    let failing_tx =
-        env.rpc_transaction(&[transfer(sender, recipient, amount)]);
+    let failing_tx = env.rpc_transaction(&[transfer(sender, recipient, amount)]);
     let result = env
         .rpc
         .simulate_transaction(&failing_tx)
@@ -525,8 +497,7 @@ async fn test_get_signatures_for_address() {
         .expect("get_signatures_for_address failed");
 
     assert!(signatures.len() >= 2, "should find at least two signatures");
-    let sig_strings: Vec<_> =
-        signatures.iter().map(|s| s.signature.clone()).collect();
+    let sig_strings: Vec<_> = signatures.iter().map(|s| s.signature.clone()).collect();
     assert!(sig_strings.contains(&signature1.to_string()));
     assert!(sig_strings.contains(&signature2.to_string()));
 }

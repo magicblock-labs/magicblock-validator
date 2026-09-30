@@ -15,17 +15,13 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn init_logger() {
     use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
-    init_with_config(LoggingConfig {
-        style: LogStyle::from_env(),
-    });
+    init_with_config(LoggingConfig { style: LogStyle::from_env() });
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> ExitCode {
     init_logger();
-    let reason = run()
-        .await
-        .unwrap_or_else(|error| ShutdownReason::Error(error.into()));
+    let reason = run().await.unwrap_or_else(|error| ShutdownReason::Error(error.into()));
     exit(reason)
 }
 
@@ -35,10 +31,9 @@ async fn run() -> Result<ShutdownReason> {
     };
     info!(config = ?config, "starting verifier");
 
-    let metrics =
-        magicblock_metrics::MetricsService::bind(config.metrics.address.0)
-            .await
-            .context("failed to bind metrics service")?;
+    let metrics = magicblock_metrics::MetricsService::bind(config.metrics.address.0)
+        .await
+        .context("failed to bind metrics service")?;
     let mut metrics_shutdown = ShutdownManager::default();
     let shutdown = metrics_shutdown.handle(Service::Metrics);
     tokio::spawn(metrics.run(shutdown));
@@ -68,9 +63,8 @@ async fn run_engine(
     metrics_shutdown: &mut ShutdownManager,
 ) -> Result<ShutdownReason> {
     let mut shutdown = ShutdownManager::default();
-    let builder =
-        magicblock_runtime::keeper_builder(&config.engine, &config.programs)
-            .context("failed to build verifier runtime image")?;
+    let builder = magicblock_runtime::keeper_builder(&config.engine, &config.programs)
+        .context("failed to build verifier runtime image")?;
     let (pacer, blocks) = mpsc::channel(16);
     let engine = Engine::new(builder, Some(blocks), &mut shutdown)
         .await

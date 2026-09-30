@@ -1,7 +1,5 @@
 use integration_test_tools::{init_logger, IntegrationTestContext};
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use solana_system_interface::instruction as system_instruction;
 use solana_transaction_status_client_types::UiTransactionEncoding;
 use tracing::*;
@@ -12,17 +10,12 @@ fn test_get_block_timestamp_stability() {
 
     let ctx = IntegrationTestContext::try_new().unwrap();
     let chain_payer = Keypair::new();
-    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL)
-        .unwrap();
+    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL).unwrap();
 
     let from_keypair = Keypair::new();
     let to_keypair = Keypair::new();
-    ctx.airdrop_chain_and_delegate(
-        &chain_payer,
-        &from_keypair,
-        LAMPORTS_PER_SOL,
-    )
-    .unwrap();
+    ctx.airdrop_chain_and_delegate(&chain_payer, &from_keypair, LAMPORTS_PER_SOL)
+        .unwrap();
     ctx.airdrop_chain_and_delegate(&chain_payer, &to_keypair, LAMPORTS_PER_SOL)
         .unwrap();
     debug!(
@@ -55,16 +48,8 @@ fn test_get_block_timestamp_stability() {
         .unwrap();
 
     let current_slot = tx.slot;
-    let block_time = ctx
-        .try_ephem_client()
-        .unwrap()
-        .get_block_time(current_slot)
-        .unwrap();
-    let ledger_block = ctx
-        .try_ephem_client()
-        .unwrap()
-        .get_block(current_slot)
-        .unwrap();
+    let block_time = ctx.try_ephem_client().unwrap().get_block_time(current_slot).unwrap();
+    let ledger_block = ctx.try_ephem_client().unwrap().get_block(current_slot).unwrap();
 
     assert_eq!(ledger_block.block_time, Some(block_time));
     assert_eq!(tx.block_time, Some(block_time));

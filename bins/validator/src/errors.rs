@@ -13,10 +13,10 @@ use solana_rpc_client_api::client_error::Error as RpcClientError;
 use solana_transaction_error::TransactionError;
 use thiserror::Error;
 
-pub type ApiResult<T> = std::result::Result<T, ApiError>;
+pub(crate) type ApiResult<T> = Result<T, ApiError>;
 
 #[derive(Debug, Error)]
-pub enum ApiError {
+pub(crate) enum ApiError {
     #[error("IO error: {0}")]
     IoError(#[from] io::Error),
 
@@ -39,17 +39,12 @@ pub enum ApiError {
     ChainlinkError(Box<ChainlinkError>),
 
     #[error("Failed to obtain balance for validator '{0}' from chain: {1}")]
-    FailedToObtainValidatorOnChainBalance(
-        Pubkey,
-        #[source] Box<RpcClientError>,
-    ),
+    FailedToObtainValidatorOnChainBalance(Pubkey, #[source] Box<RpcClientError>),
 
     #[error("Failed to sync rent sysvar from base chain: {0}")]
     FailedToSyncBaseChainRent(String),
 
-    #[error(
-        "Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)"
-    )]
+    #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
     ValidatorInsufficientlyFunded(Pubkey, u64),
 
     #[error("Failed to initialize magic fee vault for validator '{0}': {1}")]

@@ -3,9 +3,8 @@ use std::{thread::sleep, time::Duration};
 use cleanass::assert;
 use ephemeral_rollups_sdk::spl::{
     builders::{
-        DelegateEphemeralAtaBuilder, InitializeEphemeralAtaBuilder,
-        InitializeGlobalVaultBuilder, InitializeRentPdaBuilder,
-        SetupAndDelegateShuttleEphemeralAtaWithMergeBuilder,
+        DelegateEphemeralAtaBuilder, InitializeEphemeralAtaBuilder, InitializeGlobalVaultBuilder,
+        InitializeRentPdaBuilder, SetupAndDelegateShuttleEphemeralAtaWithMergeBuilder,
     },
     find_rent_pda, find_shuttle_ata, find_shuttle_ephemeral_ata,
 };
@@ -16,8 +15,7 @@ use integration_test_tools::{
 };
 use magicblock_core::token_programs::derive_ata;
 use solana_sdk::{
-    program_pack::Pack, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    program_pack::Pack, signature::Keypair, signer::Signer, transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
@@ -67,14 +65,11 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     let mint = Keypair::new();
     let source_ata = derive_ata(&owner.pubkey(), &mint.pubkey());
     let destination_ata = derive_ata(&recipient.pubkey(), &mint.pubkey());
-    let validator_pk = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let validator_pk = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
     let (shuttle_ephemeral_ata, _) =
         find_shuttle_ephemeral_ata(&owner.pubkey(), &mint.pubkey(), SHUTTLE_ID);
-    let (shuttle_ata, _) =
-        find_shuttle_ata(&shuttle_ephemeral_ata, &mint.pubkey());
+    let (shuttle_ata, _) = find_shuttle_ata(&shuttle_ephemeral_ata, &mint.pubkey());
 
     let mut server = MockRangeServer::start().unwrap();
     server.set_risk(&owner.pubkey().to_string(), owner_risk);
@@ -145,13 +140,9 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
             validator
         ),
     ];
-    let mut setup_tx =
-        Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
+    let mut setup_tx = Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = expect!(
-        ctx.send_and_confirm_transaction_chain(
-            &mut setup_tx,
-            &[&fee_payer, &mint, &owner],
-        ),
+        ctx.send_and_confirm_transaction_chain(&mut setup_tx, &[&fee_payer, &mint, &owner],),
         validator
     );
     assert!(
@@ -201,17 +192,11 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     let (rent_pda, _) = find_rent_pda();
     if ctx.fetch_chain_account(rent_pda).is_err() {
         let mut prereq_tx = Transaction::new_with_payer(
-            &[InitializeRentPdaBuilder {
-                payer: fee_payer.pubkey(),
-            }
-            .instruction()],
+            &[InitializeRentPdaBuilder { payer: fee_payer.pubkey() }.instruction()],
             Some(&fee_payer.pubkey()),
         );
         let (_sig, confirmed) = expect!(
-            ctx.send_and_confirm_transaction_chain(
-                &mut prereq_tx,
-                &[&fee_payer]
-            ),
+            ctx.send_and_confirm_transaction_chain(&mut prereq_tx, &[&fee_payer]),
             validator
         );
         assert!(
@@ -257,10 +242,7 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
         Some(&fee_payer.pubkey()),
     );
     let (_sig, confirmed) = expect!(
-        ctx.send_and_confirm_transaction_chain(
-            &mut shuttle_tx,
-            &[&fee_payer, &owner],
-        ),
+        ctx.send_and_confirm_transaction_chain(&mut shuttle_tx, &[&fee_payer, &owner],),
         validator
     );
     assert!(
@@ -316,11 +298,7 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     if expect_allowed {
         // Low-risk owner: the merge ran, so the shuttle's tokens landed in the
         // recipient's ATA.
-        let merged = wait_for_token_balance_ephem(
-            &ctx,
-            &destination_ata,
-            SHUTTLE_AMOUNT,
-        );
+        let merged = wait_for_token_balance_ephem(&ctx, &destination_ata, SHUTTLE_AMOUNT);
         assert!(
             merged,
             cleanup_both(&mut validator, &mut server),

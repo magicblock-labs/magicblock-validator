@@ -2,18 +2,19 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
+        Arc,
     },
 };
+
+use parking_lot::Mutex;
 
 use async_trait::async_trait;
 use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_committor_service::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
-        error::IntentExecutorResult,
-        intent_execution_client::IntentExecutionClient, ExecutionOutput,
-        IntentExecutionReport, IntentExecutorCtx,
+        accepted_intent_executor::AcceptedIntentExecutor, error::IntentExecutorResult,
+        intent_execution_client::IntentExecutionClient, ExecutionOutput, IntentExecutionReport,
+        IntentExecutorCtx,
     },
     outbox::{
         outbox_client::InternalOutboxClientError,
@@ -23,13 +24,11 @@ use magicblock_committor_service::{
     tasks::{
         commit_task::{CommitDelivery, CommitTask},
         task_info_fetcher::{
-            AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherError, TaskInfoFetcherResult,
+            AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
+            TaskInfoFetcherResult,
         },
     },
-    transaction_preparator::{
-        delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
-    },
+    transaction_preparator::{delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl},
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
@@ -53,14 +52,9 @@ use solana_sdk::{
 
 // Poll until the account holds at least `min_lamports`. On a freshly
 // started validator the first airdrop can take a few slots to land.
-async fn wait_for_funding(
-    rpc_client: &MagicblockRpcClient,
-    pubkey: &Pubkey,
-    min_lamports: u64,
-) {
+async fn wait_for_funding(rpc_client: &MagicblockRpcClient, pubkey: &Pubkey, min_lamports: u64) {
     const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-    const POLL_INTERVAL: std::time::Duration =
-        std::time::Duration::from_millis(50);
+    const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(50);
 
     let start = std::time::Instant::now();
     loop {
@@ -75,16 +69,15 @@ async fn wait_for_funding(
 }
 
 // Helper function to create a test RPC client
-pub async fn create_test_client() -> MagicblockRpcClient {
+pub(crate) async fn create_test_client() -> MagicblockRpcClient {
     let url = "http://localhost:7799".to_string();
-    let rpc_client =
-        RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
+    let rpc_client = RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
 
     MagicblockRpcClient::new(Arc::new(rpc_client))
 }
 
 // Test fixture structure
-pub struct TestFixture {
+pub(crate) struct TestFixture {
     pub rpc_client: MagicblockRpcClient,
     pub table_mania: TableMania,
     #[allow(dead_code)]
@@ -94,30 +87,25 @@ pub struct TestFixture {
 
 impl TestFixture {
     #[allow(dead_code)]
-    pub async fn new() -> Self {
+    pub(crate) async fn new() -> Self {
         let authority = Keypair::new();
         TestFixture::new_with_keypair(authority).await
     }
 
-    pub async fn new_with_keypair(authority: Keypair) -> Self {
+    pub(crate) async fn new_with_keypair(authority: Keypair) -> Self {
         let rpc_client = create_test_client().await;
 
         // TableMania
         let gc_config = GarbageCollectorConfig::default();
-        let table_mania =
-            TableMania::new(rpc_client.clone(), &authority, Some(gc_config));
+        let table_mania = TableMania::new(rpc_client.clone(), &authority, Some(gc_config));
 
         // Airdrop some SOL to the authority for testing
         const AIRDROP_LAMPORTS: u64 = 100_000_000_000; // 100 SOL
-        rpc_client
-            .request_airdrop(&authority.pubkey(), AIRDROP_LAMPORTS)
-            .await
-            .unwrap();
+        rpc_client.request_airdrop(&authority.pubkey(), AIRDROP_LAMPORTS).await.unwrap();
         // request_airdrop only submits the transfer; wait until the funds are
         // visible or the first transaction a test sends may fail to debit the
         // authority ("no record of a prior credit").
-        wait_for_funding(&rpc_client, &authority.pubkey(), AIRDROP_LAMPORTS)
-            .await;
+        wait_for_funding(&rpc_client, &authority.pubkey(), AIRDROP_LAMPORTS).await;
 
         let compute_budget_config = ComputeBudgetConfig::new(1_000_000);
         Self {
@@ -129,7 +117,7 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_delivery_preparator(&self) -> DeliveryPreparator {
+    pub(crate) fn create_delivery_preparator(&self) -> DeliveryPreparator {
         DeliveryPreparator::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
@@ -138,7 +126,7 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_transaction_preparator(&self) -> TransactionPreparatorImpl {
+    pub(crate) fn create_transaction_preparator(&self) -> TransactionPreparatorImpl {
         TransactionPreparatorImpl::new(
             self.rpc_client.clone(),
             self.table_mania.clone(),
@@ -147,7 +135,7 @@ impl TestFixture {
     }
 
     #[allow(dead_code)]
-    pub fn create_intent_executor(
+    pub(crate) fn create_intent_executor(
         &self,
     ) -> AcceptedIntentExecutor<
         TransactionPreparatorImpl,
@@ -158,21 +146,18 @@ impl TestFixture {
         AcceptedIntentExecutor::new(
             IntentExecutorCtx {
                 authority: self.authority.insecure_clone(),
-                intent_client: IntentExecutionClient::new(
-                    self.rpc_client.clone(),
-                ),
+                intent_client: IntentExecutionClient::new(self.rpc_client.clone()),
                 transaction_preparator: self.create_transaction_preparator(),
                 task_info_fetcher: self.create_task_info_fetcher(),
                 outbox_client: Arc::new(MockOutboxClient),
-                actions_callback_executor: MockActionsCallbackExecutor::default(
-                ),
+                actions_callback_executor: MockActionsCallbackExecutor::default(),
             },
             DEFAULT_ACTIONS_TIMEOUT,
         )
     }
 
     #[allow(dead_code)]
-    pub fn create_task_info_fetcher(
+    pub(crate) fn create_task_info_fetcher(
         &self,
     ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
         Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
@@ -181,16 +166,13 @@ impl TestFixture {
     }
 }
 
-pub struct MockOutboxReader;
+pub(crate) struct MockOutboxReader;
 
 #[async_trait]
 impl OutboxIntentBundlesReader for MockOutboxReader {
     type Error = std::convert::Infallible;
 
-    async fn read(
-        &mut self,
-        _n: usize,
-    ) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
+    async fn read(&mut self, _n: usize) -> Result<Vec<OutboxIntentBundle>, Self::Error> {
         Ok(vec![])
     }
 
@@ -203,7 +185,7 @@ impl OutboxIntentBundlesReader for MockOutboxReader {
 }
 
 #[derive(Clone)]
-pub struct MockOutboxClient;
+pub(crate) struct MockOutboxClient;
 
 #[async_trait]
 impl OutboxClient for MockOutboxClient {
@@ -212,10 +194,7 @@ impl OutboxClient for MockOutboxClient {
 
     async fn accept_scheduled_intents(
         &self,
-    ) -> Result<
-        Vec<ScheduledIntentBundle>,
-        (Vec<ScheduledIntentBundle>, Self::Error),
-    > {
+    ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, Self::Error)> {
         Ok(vec![])
     }
 
@@ -249,14 +228,14 @@ impl OutboxClient for MockOutboxClient {
 type CallbackCalls = Vec<(Vec<BaseActionCallback>, ActionResult)>;
 
 #[derive(Clone, Default)]
-pub struct MockActionsCallbackExecutor {
+pub(crate) struct MockActionsCallbackExecutor {
     pub calls: Arc<Mutex<CallbackCalls>>,
 }
 
 impl MockActionsCallbackExecutor {
     #[allow(dead_code)]
-    pub fn calls(&self) -> CallbackCalls {
-        self.calls.lock().unwrap().clone()
+    pub(crate) fn calls(&self) -> CallbackCalls {
+        self.calls.lock().clone()
     }
 }
 
@@ -267,16 +246,13 @@ impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
         _signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
-        let signatures = callbacks
-            .iter()
-            .map(|_| Ok(Signature::new_unique()))
-            .collect();
-        self.calls.lock().unwrap().push((callbacks, result));
+        let signatures = callbacks.iter().map(|_| Ok(Signature::new_unique())).collect();
+        self.calls.lock().push((callbacks, result));
         signatures
     }
 }
 
-pub struct MockTaskInfoFetcher(MagicblockRpcClient);
+pub(crate) struct MockTaskInfoFetcher(MagicblockRpcClient);
 
 #[async_trait]
 impl TaskInfoFetcher for MockTaskInfoFetcher {
@@ -325,9 +301,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
         self.0
             .get_multiple_accounts(pubkeys, None)
             .await
-            .map_err(|err| {
-                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
-            })
+            .map_err(|err| TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err)))
             .map(|accounts| {
                 pubkeys
                     .iter()
@@ -339,7 +313,7 @@ impl TaskInfoFetcher for MockTaskInfoFetcher {
 }
 
 #[allow(dead_code)]
-pub fn generate_random_bytes(length: usize) -> Vec<u8> {
+pub(crate) fn generate_random_bytes(length: usize) -> Vec<u8> {
     use rand::Rng;
 
     let mut rng = rand::thread_rng();
@@ -347,7 +321,7 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub fn create_commit_task(data: &[u8]) -> CommitTask {
+pub(crate) fn create_commit_task(data: &[u8]) -> CommitTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
     CommitTask {
         commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
@@ -368,7 +342,7 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
-pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
+pub(crate) fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
     let task = create_commit_task(data);
     CommitTask {
         delivery_details: CommitDelivery::StateInBuffer { prepared: false },
@@ -377,7 +351,7 @@ pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
 }
 
 #[allow(dead_code)]
-pub fn create_committed_account(data: &[u8]) -> CommittedAccount {
+pub(crate) fn create_committed_account(data: &[u8]) -> CommittedAccount {
     CommittedAccount {
         pubkey: Pubkey::new_unique(),
         account: Account {

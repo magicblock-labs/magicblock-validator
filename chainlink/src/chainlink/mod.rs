@@ -9,12 +9,8 @@ use fetch_cloner::FetchCloner;
 use keeper::error::KeeperError;
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::token_programs::{
-    is_ata, try_derive_eata_address_and_bump,
-};
-use magicblock_metrics::metrics::{
-    AccountFetchContext, AccountFetchEntrypoint,
-};
+use magicblock_core::token_programs::{is_ata, try_derive_eata_address_and_bump};
+use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -30,8 +26,7 @@ use crate::{
     remote_account_provider::{
         ChainPubsubClient, ChainRpcClient, ChainRpcClientImpl, Endpoints,
         ProdRemoteAccountProvider, RemoteAccountProvider, SubscriptionReason,
-        chain_updates_client::ChainUpdatesClient,
-        config::RemoteAccountProviderConfig,
+        chain_updates_client::ChainUpdatesClient, config::RemoteAccountProviderConfig,
     },
     submux::SubMuxClient,
 };
@@ -44,8 +39,7 @@ pub(crate) const SUBSCRIPTION_UPDATE_LIMIT: usize = 5_000;
 const ENSURE_ACCOUNTS_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Production Chainlink stack.
-pub type ProdChainlink =
-    InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>;
+pub type ProdChainlink = InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>>;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ObservedUndelegationRequest {
@@ -110,12 +104,8 @@ impl AccountDelegationStatus {
         } else {
             Some(match self.account_on_er {
                 AccountStatusOnEr::Missing => "delegated_on_base_missing_on_er",
-                AccountStatusOnEr::Delegated => {
-                    "delegated_on_base_and_er_mismatch"
-                }
-                AccountStatusOnEr::NotDelegated => {
-                    "delegated_on_base_not_delegated_on_er"
-                }
+                AccountStatusOnEr::Delegated => "delegated_on_base_and_er_mismatch",
+                AccountStatusOnEr::NotDelegated => "delegated_on_base_not_delegated_on_er",
             })
         }
     }
@@ -152,29 +142,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     pub fn try_new_with_undelegation_request_sender(
         engine: Engine,
         fetch_cloner: Option<Arc<FetchCloner<T, U>>>,
-        undelegation_request_sender: broadcast::Sender<
-            ObservedUndelegationRequest,
-        >,
+        undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
     ) -> ChainlinkResult<Self> {
-        let (stale_accounts_sub, evicted_accounts_sub) =
-            if let Some(fetch_cloner) = &fetch_cloner {
-                let stale_accounts_rx =
-                    fetch_cloner.try_get_stale_account_rx()?;
-                (
-                    Some(Self::subscribe_stale_accounts(
-                        engine.clone(),
-                        fetch_cloner.remote_account_provider(),
-                        stale_accounts_rx,
-                    )),
-                    Some(Self::subscribe_account_evictions(
-                        engine.clone(),
-                        fetch_cloner.remote_account_provider(),
-                        engine.accounts().subscribe_evictions()?,
-                    )),
-                )
-            } else {
-                (None, None)
-            };
+        let (stale_accounts_sub, evicted_accounts_sub) = if let Some(fetch_cloner) = &fetch_cloner {
+            let stale_accounts_rx = fetch_cloner.try_get_stale_account_rx()?;
+            (
+                Some(Self::subscribe_stale_accounts(
+                    engine.clone(),
+                    fetch_cloner.remote_account_provider(),
+                    stale_accounts_rx,
+                )),
+                Some(Self::subscribe_account_evictions(
+                    engine.clone(),
+                    fetch_cloner.remote_account_provider(),
+                    engine.accounts().subscribe_evictions()?,
+                )),
+            )
+        } else {
+            (None, None)
+        };
         Ok(Self {
             engine,
             fetch_cloner,
@@ -198,7 +184,7 @@ impl InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>> {
         chain_slot: Arc<AtomicU64>,
     ) -> ChainlinkResult<Self> {
         // Connect the provider and fetch cloner through one update channel.
-        let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
+        let (tx, rx) = mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
         let provider = Arc::new(
             ProdRemoteAccountProvider::try_new_from_endpoints(
                 endpoints,
@@ -210,8 +196,7 @@ impl InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>> {
             .await?,
         );
         let (undelegation_request_sender, _) = broadcast::channel(1024);
-        let risk_service =
-            RiskService::try_from_config(&chainlink_config.risk)?.map(Arc::new);
+        let risk_service = RiskService::try_from_config(&chainlink_config.risk)?.map(Arc::new);
         match risk_service.as_ref() {
             // Which policy is live decides whether an action can activate
             // unchecked, so make it visible at startup.
@@ -250,9 +235,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
 
         task::spawn(async move {
             while let Some(pubkey) = stale_accounts_rx.recv().await {
-                let subscription = remote_account_provider
-                    .lock_account_eviction(&pubkey)
-                    .await;
+                let subscription = remote_account_provider.lock_account_eviction(&pubkey).await;
                 if subscription.is_watching() {
                     trace!(
                         pubkey = %pubkey,
@@ -260,20 +243,18 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     );
                     continue;
                 }
-                let accessor =
-                    match cloner::claim_account_eviction(&engine, pubkey).await
-                    {
-                        Ok(Some(accessor)) => accessor,
-                        Ok(None) => continue,
-                        Err(err) => {
-                            warn!(
-                                pubkey = %pubkey,
-                                error = ?err,
-                                "Failed to claim unwatched account eviction"
-                            );
-                            continue;
-                        }
-                    };
+                let accessor = match cloner::claim_account_eviction(&engine, pubkey).await {
+                    Ok(Some(accessor)) => accessor,
+                    Ok(None) => continue,
+                    Err(err) => {
+                        warn!(
+                            pubkey = %pubkey,
+                            error = ?err,
+                            "Failed to claim unwatched account eviction"
+                        );
+                        continue;
+                    }
+                };
                 trace!(
                     pubkey = %pubkey,
                     "Submitting eviction transaction for unwatched account"
@@ -286,9 +267,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     );
                     continue;
                 }
-                if let Err(err) =
-                    cloner::delete_claimed_account(accessor, pubkey).await
-                {
+                if let Err(err) = cloner::delete_claimed_account(accessor, pubkey).await {
                     warn!(
                         pubkey = %pubkey,
                         error = ?err,
@@ -424,9 +403,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 let loader = accounts.loader();
                 let mut transients = Vec::new();
                 for &pubkey in pubkeys {
-                    if loader
-                        .read(&pubkey, |account| account.mode())
-                        .map_err(KeeperError::from)?
+                    if loader.read(&pubkey, |account| account.mode()).map_err(KeeperError::from)?
                         == Some(AccountMode::Transient)
                     {
                         transients.push(pubkey);
@@ -442,16 +419,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             let claimed = if pending.is_empty() {
                 0
             } else {
-                fetch_cloner
-                    .fetch_and_clone_requested_accounts(pending, fetch_origin)
-                    .await?
+                fetch_cloner.fetch_and_clone_requested_accounts(pending, fetch_origin).await?
             };
             Ok(claimed
                 + fetch_cloner
-                    .refresh_transient_requested_accounts(
-                        &transients,
-                        fetch_origin,
-                    )
+                    .refresh_transient_requested_accounts(&transients, fetch_origin)
                     .await?)
         })
         .await
@@ -477,13 +449,11 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         pubkeys: &[Pubkey],
         fetch_origin: AccountFetchEntrypoint,
     ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
-        if tracing::enabled!(tracing::Level::TRACE) {
+        if tracing::enabled!(Level::TRACE) {
             let count = pubkeys.len();
             trace!(count, "Fetching accounts");
         }
-        let snapshot = |account: &AccountSharedData| {
-            AccountSharedData::from(account.owned())
-        };
+        let snapshot = |account: &AccountSharedData| AccountSharedData::from(account.owned());
         self.ensure_accounts(pubkeys, fetch_origin).await?;
 
         let accessor = self.engine.accounts();
@@ -536,8 +506,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .into_iter()
             .map(|status| {
                 #[allow(deprecated)]
-                let delegated_on_base_and_er =
-                    status.delegated_on_base_and_er();
+                let delegated_on_base_and_er = status.delegated_on_base_and_er();
                 delegated_on_base_and_er
             })
             .collect())
@@ -553,9 +522,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(vec![AccountDelegationStatus::default(); pubkeys.len()]);
         };
-        let remote_accounts = fetch_cloner
-            .fetch_remote_accounts(pubkeys, fetch_context)
-            .await?;
+        let remote_accounts = fetch_cloner.fetch_remote_accounts(pubkeys, fetch_context).await?;
         if remote_accounts.len() != pubkeys.len() {
             return Err(ChainlinkError::UnexpectedAccountCount(format!(
                 "expected {} remote accounts, got {}",
@@ -570,12 +537,10 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .iter()
             .zip(remote_accounts)
             .map(|(pubkey, remote_account)| {
-                let delegated_on_base =
-                    remote_account.is_owned_by_delegation_program();
+                let delegated_on_base = remote_account.is_owned_by_delegation_program();
                 let account_on_er = match loader
                     .read(pubkey, |account| {
-                        account.is(AccountMode::Delegated)
-                            || account.owner().eq(&dlp_api::id())
+                        account.is(AccountMode::Delegated) || account.owner().eq(&dlp_api::id())
                     })
                     .ok()
                     .flatten()
@@ -584,10 +549,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                     Some(true) => AccountStatusOnEr::Delegated,
                     Some(false) => AccountStatusOnEr::NotDelegated,
                 };
-                AccountDelegationStatus {
-                    delegated_on_base,
-                    account_on_er,
-                }
+                AccountDelegationStatus { delegated_on_base, account_on_er }
             })
             .collect())
     }
@@ -597,10 +559,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     /// 1. Subscribe to updates for the account
     /// 2. When a subscription update is received we clone the new state as usual
     #[instrument(skip(self))]
-    pub async fn undelegation_requested(
-        &self,
-        pubkey: Pubkey,
-    ) -> ChainlinkResult<()> {
+    pub async fn undelegation_requested(&self, pubkey: Pubkey) -> ChainlinkResult<()> {
         debug!(pubkey = %pubkey, "Undelegation requested");
 
         magicblock_metrics::metrics::inc_undelegation_requested();
@@ -611,9 +570,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
 
         // Subscribe to updates for this account so we can track changes
         // once it's undelegated
-        fetch_cloner
-            .subscribe_to_account_to_track_undelegation(&pubkey)
-            .await?;
+        fetch_cloner.subscribe_to_account_to_track_undelegation(&pubkey).await?;
 
         debug!(pubkey = %pubkey, "Successfully subscribed for undelegation tracking");
         Ok(())
@@ -662,8 +619,7 @@ mod tests {
 
     use crate::{
         remote_account_provider::{
-            SubscriptionReason,
-            chain_pubsub_client::mock::ChainPubsubClientMock,
+            SubscriptionReason, chain_pubsub_client::mock::ChainPubsubClientMock,
         },
         testing::{init_logger, rpc_client_mock::ChainRpcClientMock},
     };
@@ -677,22 +633,15 @@ mod tests {
         use std::sync::atomic::AtomicU64;
 
         use crate::{
-            remote_account_provider::{
-                RemoteAccountProvider, chain_slot::ChainSlot,
-            },
+            remote_account_provider::{RemoteAccountProvider, chain_slot::ChainSlot},
             testing::{
-                rpc_client_mock::ChainRpcClientMockBuilder,
-                utils::create_test_subscribed_accounts,
+                rpc_client_mock::ChainRpcClientMockBuilder, utils::create_test_subscribed_accounts,
             },
         };
 
-        let rpc_client = ChainRpcClientMockBuilder::new()
-            .slot(1)
-            .clock_sysvar_for_slot(1)
-            .build();
+        let rpc_client = ChainRpcClientMockBuilder::new().slot(1).clock_sysvar_for_slot(1).build();
         let (updates_sender, updates_receiver) = mpsc::channel(1_000);
-        let pubsub_client =
-            ChainPubsubClientMock::new(updates_sender, updates_receiver);
+        let pubsub_client = ChainPubsubClientMock::new(updates_sender, updates_receiver);
         let (forward_tx, _forward_rx) = mpsc::channel(1_000);
         let (subscribed_accounts, config) = create_test_subscribed_accounts();
         let chain_slot = Arc::<AtomicU64>::default();
@@ -714,8 +663,7 @@ mod tests {
     /// Proves the subscription boundary remains held until same-pubkey account
     /// eviction work finishes.
     #[tokio::test]
-    async fn test_account_eviction_blocks_same_pubkey_subscription_until_eviction_finishes()
-     {
+    async fn test_account_eviction_blocks_same_pubkey_subscription_until_eviction_finishes() {
         init_logger();
 
         let remote_account_provider = test_remote_account_provider().await;
@@ -730,9 +678,7 @@ mod tests {
         let eviction_started_for_task = eviction_started.clone();
         let release_eviction_for_task = release_eviction.clone();
         let eviction_task = tokio::spawn(async move {
-            let _eviction = eviction_provider
-                .lock_account_eviction(&eviction_pubkey)
-                .await;
+            let _eviction = eviction_provider.lock_account_eviction(&eviction_pubkey).await;
             eviction_started_for_task.notify_one();
             release_eviction_for_task.notified().await;
         });
@@ -744,30 +690,22 @@ mod tests {
         let subscribe_pubkey = pubkey;
         let subscribe_task = tokio::spawn(async move {
             let result = subscribe_provider
-                .acquire_subscription(
-                    &subscribe_pubkey,
-                    SubscriptionReason::DirectAccount,
-                )
+                .acquire_subscription(&subscribe_pubkey, SubscriptionReason::DirectAccount)
                 .await;
             let _ = result_tx.send(result);
         });
 
         assert!(
-            tokio::time::timeout(Duration::from_millis(50), &mut result_rx,)
-                .await
-                .is_err(),
+            tokio::time::timeout(Duration::from_millis(50), &mut result_rx,).await.is_err(),
             "same-pubkey subscribe must wait while account eviction holds the subscription lock"
         );
 
         release_eviction.notify_one();
         eviction_task.await.unwrap();
-        let subscribe_result = tokio::time::timeout(
-            Duration::from_secs(1),
-            &mut result_rx,
-        )
-        .await
-        .expect("subscription should complete after eviction releases the lock")
-        .expect("subscription task should send its result");
+        let subscribe_result = tokio::time::timeout(Duration::from_secs(1), &mut result_rx)
+            .await
+            .expect("subscription should complete after eviction releases the lock")
+            .expect("subscription task should send its result");
         subscribe_task.await.unwrap();
 
         assert!(subscribe_result.is_ok());

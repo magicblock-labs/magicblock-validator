@@ -9,8 +9,7 @@ use magicblock_committor_service::tasks::{
 use solana_sdk::signer::Signer;
 
 use crate::common::{
-    create_buffer_commit_task, create_commit_task, generate_random_bytes,
-    TestFixture,
+    create_buffer_commit_task, create_commit_task, generate_random_bytes, TestFixture,
 };
 
 mod common;
@@ -28,15 +27,12 @@ async fn test_prepare_10kb_buffer() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let result = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let BaseTaskImpl::Commit(ref commit_task) = strategy.optimized_tasks[0]
-    else {
+    let BaseTaskImpl::Commit(ref commit_task) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
     let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
@@ -63,8 +59,8 @@ async fn test_prepare_10kb_buffer() {
         .unwrap()
         .expect("Chunks account should exist");
 
-    let chunks = Chunks::try_from_slice(&chunks_account.data)
-        .expect("Failed to deserialize chunks");
+    let chunks =
+        Chunks::try_from_slice(&chunks_account.data).expect("Failed to deserialize chunks");
 
     assert!(
         chunks.is_complete(),
@@ -82,10 +78,8 @@ async fn test_prepare_multiple_buffers() {
         generate_random_bytes(10),
         generate_random_bytes(500 * 1024),
     ];
-    let buffer_tasks: Vec<BaseTaskImpl> = datas
-        .iter()
-        .map(|data| create_buffer_commit_task(data).into())
-        .collect();
+    let buffer_tasks: Vec<BaseTaskImpl> =
+        datas.iter().map(|data| create_buffer_commit_task(data).into()).collect();
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
@@ -93,9 +87,7 @@ async fn test_prepare_multiple_buffers() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let result = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
@@ -104,9 +96,7 @@ async fn test_prepare_multiple_buffers() {
         .optimized_tasks
         .iter()
         .filter_map(|el| match el {
-            BaseTaskImpl::Commit(commit_task) => {
-                CleanupTask::from_commit(commit_task)
-            }
+            BaseTaskImpl::Commit(commit_task) => CleanupTask::from_commit(commit_task),
             _ => None,
         })
         .collect();
@@ -135,8 +125,8 @@ async fn test_prepare_multiple_buffers() {
             .unwrap()
             .expect("Chunks account should exist");
 
-        let chunks = Chunks::try_from_slice(&chunks_account.data)
-            .expect("Failed to deserialize chunks");
+        let chunks =
+            Chunks::try_from_slice(&chunks_account.data).expect("Failed to deserialize chunks");
 
         assert!(
             chunks.is_complete(),
@@ -150,30 +140,19 @@ async fn test_lookup_tables() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_delivery_preparator();
 
-    let datas = [
-        generate_random_bytes(10),
-        generate_random_bytes(20),
-        generate_random_bytes(30),
-    ];
-    let tasks: Vec<BaseTaskImpl> = datas
-        .iter()
-        .map(|data| create_commit_task(data).into())
-        .collect();
+    let datas = [generate_random_bytes(10), generate_random_bytes(20), generate_random_bytes(30)];
+    let tasks: Vec<BaseTaskImpl> =
+        datas.iter().map(|data| create_commit_task(data).into()).collect();
 
-    let lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
-        &fixture.authority.pubkey(),
-        &tasks,
-        None,
-    );
+    let lookup_tables_keys =
+        TaskStrategist::collect_lookup_table_keys(&fixture.authority.pubkey(), &tasks, None);
     let mut strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys,
         uniqueness_nonce: None,
     };
 
-    let result = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let result = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
     assert!(result.is_ok(), "Failed to prepare lookup tables");
 
     let alts = result.unwrap();
@@ -204,9 +183,7 @@ async fn test_already_initialized_error_handled() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let result = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
@@ -228,12 +205,9 @@ async fn test_already_initialized_error_handled() {
 
     // Imitate commit to the non deleted buffer using different length
     // Keep same task with commit id, swap data
-    let data = generate_random_bytes(
-        commit_task.committed_account.account.data.len() - 2,
-    );
+    let data = generate_random_bytes(commit_task.committed_account.account.data.len() - 2);
     commit_task.committed_account.account.data = data.clone();
-    commit_task.delivery_details =
-        CommitDelivery::StateInBuffer { prepared: false };
+    commit_task.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.into()],
         lookup_tables_keys: vec![],
@@ -241,9 +215,7 @@ async fn test_already_initialized_error_handled() {
     };
 
     // Test preparation
-    let result = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let result = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
@@ -280,24 +252,15 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
             transaction::VersionedTransaction,
         };
 
-        let message = Message::try_compile(
-            &fixture.authority.pubkey(),
-            instructions,
-            &[],
-            blockhash,
-        )
-        .expect("compile transaction");
-        let transaction = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[&fixture.authority],
-        )
-        .expect("sign transaction");
+        let message =
+            Message::try_compile(&fixture.authority.pubkey(), instructions, &[], blockhash)
+                .expect("compile transaction");
+        let transaction =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[&fixture.authority])
+                .expect("sign transaction");
         fixture
             .rpc_client
-            .send_transaction(
-                &transaction,
-                &MagicBlockSendTransactionConfig::Send,
-            )
+            .send_transaction(&transaction, &MagicBlockSendTransactionConfig::Send)
             .await
             .expect("send transaction")
             .into_signature()
@@ -330,8 +293,7 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
     let data = generate_random_bytes(112);
     let mut commit_task = create_buffer_commit_task(&data);
     commit_task.reset_commit_id(1);
-    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task)
-    else {
+    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task) else {
         panic!("expected preparation stage");
     };
 
@@ -339,18 +301,10 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
     // next preparation uses the same authority, account, commit id, and cached
     // blockhash, so ignoring its intent nonce would reproduce the old init
     // signature after the buffer has already been closed.
-    let cached_blockhash = fixture
-        .rpc_client
-        .get_latest_blockhash()
-        .await
-        .expect("blockhash");
-    let mut init_instructions =
-        fixture.compute_budget_config.buffer_init.instructions(1);
-    init_instructions
-        .push(preparation_task.init_instruction(&fixture.authority.pubkey()));
-    let init_signature =
-        send_with_blockhash(&fixture, &init_instructions, cached_blockhash)
-            .await;
+    let cached_blockhash = fixture.rpc_client.get_latest_blockhash().await.expect("blockhash");
+    let mut init_instructions = fixture.compute_budget_config.buffer_init.instructions(1);
+    init_instructions.push(preparation_task.init_instruction(&fixture.authority.pubkey()));
+    let init_signature = send_with_blockhash(&fixture, &init_instructions, cached_blockhash).await;
     // The write below touches the buffer the init creates; without this wait
     // the two transactions can execute in either order within a slot.
     wait_for_processed(&fixture, &init_signature, &cached_blockhash).await;
@@ -366,27 +320,19 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         .instructions(write_instruction.data.len());
     write_instructions.push(write_instruction);
     let write_signature =
-        send_with_blockhash(&fixture, &write_instructions, cached_blockhash)
-            .await;
+        send_with_blockhash(&fixture, &write_instructions, cached_blockhash).await;
     wait_for_processed(&fixture, &write_signature, &cached_blockhash).await;
 
     let historical_cleanup = preparation_task.cleanup_task();
     // Three realloc budget units produce the same 30k limit used by cleanup.
-    let mut close_instructions =
-        fixture.compute_budget_config.buffer_init.instructions(3);
-    close_instructions
-        .push(historical_cleanup.instruction(&fixture.authority.pubkey()));
+    let mut close_instructions = fixture.compute_budget_config.buffer_init.instructions(3);
+    close_instructions.push(historical_cleanup.instruction(&fixture.authority.pubkey()));
     let close_signature =
-        send_with_blockhash(&fixture, &close_instructions, cached_blockhash)
-            .await;
+        send_with_blockhash(&fixture, &close_instructions, cached_blockhash).await;
     wait_for_processed(&fixture, &close_signature, &cached_blockhash).await;
 
     assert_eq!(
-        fixture
-            .rpc_client
-            .get_latest_blockhash()
-            .await
-            .expect("cached blockhash"),
+        fixture.rpc_client.get_latest_blockhash().await.expect("cached blockhash"),
         cached_blockhash,
         "test setup exceeded the blockhash cache lifetime"
     );
@@ -422,8 +368,7 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         .await
         .expect("chunks lookup")
         .expect("chunks account");
-    let chunks =
-        Chunks::try_from_slice(&chunks.data).expect("deserialize chunks");
+    let chunks = Chunks::try_from_slice(&chunks.data).expect("deserialize chunks");
     assert!(chunks.is_complete());
 
     preparator
@@ -480,9 +425,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     };
 
     // --- Step 1: initial prepare ---
-    let res = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy)
-        .await;
+    let res = preparator.prepare_for_delivery(&fixture.authority, &mut strategy).await;
     assert!(res.is_ok(), "Initial prepare failed: {:?}", res.err());
 
     // Collect cleanup states for the two buffer tasks, verify they wrote expected data+chunks
@@ -528,8 +471,8 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             .await
             .unwrap()
             .expect("Chunks account should exist after initial prepare");
-        let chunks = Chunks::try_from_slice(&chunks_acc.data)
-            .expect("Failed to deserialize chunks");
+        let chunks =
+            Chunks::try_from_slice(&chunks_acc.data).expect("Failed to deserialize chunks");
         assert!(
             chunks.is_complete(),
             "Chunks should be complete after initial prepare (index {})",
@@ -549,18 +492,12 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     }
     // Buffer B: shrink by 5 bytes
     {
-        commit_b
-            .committed_account
-            .account
-            .data
-            .truncate(buf_b_data.len() - 5);
+        commit_b.committed_account.account.data.truncate(buf_b_data.len() - 5);
     }
 
     // Rebuild buffer stages with mutated data
-    commit_a.delivery_details =
-        CommitDelivery::StateInBuffer { prepared: false };
-    commit_b.delivery_details =
-        CommitDelivery::StateInBuffer { prepared: false };
+    commit_a.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
+    commit_b.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
 
     // --- Step 4: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
     let mut strategy2 = TransactionStrategy {
@@ -573,9 +510,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         uniqueness_nonce: None,
     };
 
-    let res2 = preparator
-        .prepare_for_delivery(&fixture.authority, &mut strategy2)
-        .await;
+    let res2 = preparator.prepare_for_delivery(&fixture.authority, &mut strategy2).await;
     assert!(
         res2.is_ok(),
         "Re-prepare failed after cleanup: {:?}",
@@ -628,8 +563,8 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
             .await
             .unwrap()
             .expect("Chunks account should exist after re-prepare");
-        let chunks = Chunks::try_from_slice(&chunks_acc.data)
-            .expect("Failed to deserialize chunks");
+        let chunks =
+            Chunks::try_from_slice(&chunks_acc.data).expect("Failed to deserialize chunks");
         assert!(
             chunks.is_complete(),
             "Chunks should be complete after re-prepare (index {})",

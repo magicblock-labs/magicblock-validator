@@ -9,8 +9,8 @@ use solana_pubkey::Pubkey;
 use tracing::*;
 
 use super::{
-    CompanionFetchLogContext, FetchCloner, ProgramVerifyState,
-    log_companion_fetch_failure, subscription::release_program_data_subs,
+    CompanionFetchLogContext, FetchCloner, ProgramVerifyState, log_companion_fetch_failure,
+    subscription::release_program_data_subs,
 };
 use crate::remote_account_provider::{
     ChainPubsubClient, ChainRpcClient, SubscriptionReason,
@@ -63,19 +63,16 @@ fn schedule_deferred_verify<T, U>(
     let this = this.clone();
     let account = account.clone();
     let ctx = companion_fetch_log_context.clone();
-    let delay = PROGRAM_VERIFY_THROTTLE.saturating_sub(elapsed)
-        + Duration::from_millis(10);
+    let delay = PROGRAM_VERIFY_THROTTLE.saturating_sub(elapsed) + Duration::from_millis(10);
     tokio::task::spawn(async move {
         tokio::time::sleep(delay).await;
         if let Some(state) = this.program_verify_cache.lock().get_mut(&pubkey) {
             state.deferred_verify = false;
         }
         // Box-erased to break the async type cycle with the handler.
-        let fut: std::pin::Pin<
-            Box<dyn std::future::Future<Output = ()> + Send>,
-        > = Box::pin(handle_executable_sub_update_with_context(
-            &this, pubkey, account, &ctx,
-        ));
+        let fut: std::pin::Pin<Box<dyn Future<Output = ()> + Send>> = Box::pin(
+            handle_executable_sub_update_with_context(&this, pubkey, account, &ctx),
+        );
         fut.await;
     });
 }
@@ -98,8 +95,7 @@ where
     T: ChainRpcClient,
     U: ChainPubsubClient,
 {
-    let Some(state) = this.program_verify_cache.lock().get(&pubkey).cloned()
-    else {
+    let Some(state) = this.program_verify_cache.lock().get(&pubkey).cloned() else {
         // Not loaded by this process yet: full load.
         return false;
     };
@@ -123,10 +119,7 @@ where
         };
         if released_watch {
             this.remote_account_provider
-                .forget_subscription_reason(
-                    &program_data_pubkey,
-                    SubscriptionReason::ProgramData,
-                )
+                .forget_subscription_reason(&program_data_pubkey, SubscriptionReason::ProgramData)
                 .await;
         }
         return false;
@@ -144,13 +137,7 @@ where
     if elapsed < PROGRAM_VERIFY_THROTTLE {
         // Suppressed, but never lost: a single verification covering the
         // window's notifications runs at window expiry.
-        schedule_deferred_verify(
-            this,
-            pubkey,
-            account,
-            companion_fetch_log_context,
-            elapsed,
-        );
+        schedule_deferred_verify(this, pubkey, account, companion_fetch_log_context, elapsed);
         return true;
     }
     let Some(loaded_header) = state.programdata_header else {
@@ -171,13 +158,10 @@ where
         // (upgrades) and authority changes alike. Responses are truncated
         // to the prefix in case a provider ignores `dataSlice`.
         Ok(Some(header))
-            if header.get(..programdata_header_len()).unwrap_or(&header)
-                == loaded_header =>
+            if header.get(..programdata_header_len()).unwrap_or(&header) == loaded_header =>
         {
             trace!(pubkey = %pubkey, "Programdata header unchanged; skipping program reload");
-            if let Some(state) =
-                this.program_verify_cache.lock().get_mut(&pubkey)
-            {
+            if let Some(state) = this.program_verify_cache.lock().get_mut(&pubkey) {
                 state.verified_at = Instant::now();
             }
             true
@@ -236,90 +220,74 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
     }
 
     let acquired_program_data_reason = if account.read().owner() == LOADER_V3 {
-        this.acquire_subscription_reason(
-            &program_data_pubkey,
-            SubscriptionReason::ProgramData,
-        )
-        .await
-        .map(|_| true)
-        .unwrap_or_else(|err| {
-            warn!(
-                pubkey = %program_data_pubkey,
-                error = ?err,
-                "Failed to acquire program data subscription reason"
-            );
-            false
-        })
+        this.acquire_subscription_reason(&program_data_pubkey, SubscriptionReason::ProgramData)
+            .await
+            .map(|_| true)
+            .unwrap_or_else(|err| {
+                warn!(
+                    pubkey = %program_data_pubkey,
+                    error = ?err,
+                    "Failed to acquire program data subscription reason"
+                );
+                false
+            })
     } else {
         false
     };
-    let program_load_context = AccountFetchContext::subscription_update(
-        AccountFetchReason::ProgramLoad,
-    );
-    let program_data_context = program_load_context
-        .clone()
-        .with_reason(AccountFetchReason::ProgramData);
+    let program_load_context =
+        AccountFetchContext::subscription_update(AccountFetchReason::ProgramLoad);
+    let program_data_context =
+        program_load_context.clone().with_reason(AccountFetchReason::ProgramData);
 
-    let (program_account, program_data_account) =
-        if account.read().owner() == LOADER_V3 {
-            match FetchCloner::task_to_fetch_with_program_data(
-                this,
-                pubkey,
-                account.read().slot(),
-                program_data_context,
-            )
-            .await
-            {
-                Ok(Ok(account_with_companion)) => (
-                    account_with_companion.account,
-                    account_with_companion.companion_account,
-                ),
-                Ok(Err(err)) => {
-                    log_companion_fetch_failure(
-                        companion_fetch_log_context,
-                        program_data_pubkey,
-                        ChainlinkCompanionFetchKind::ProgramData,
-                        &err,
-                    );
-                    if acquired_program_data_reason {
-                        // Both refs exist for LoaderV3 program-data cleanup.
-                        release_program_data_subs(
-                            &this.remote_account_provider,
-                            program_data_pubkey,
-                        )
+    let (program_account, program_data_account) = if account.read().owner() == LOADER_V3 {
+        match FetchCloner::task_to_fetch_with_program_data(
+            this,
+            pubkey,
+            account.read().slot(),
+            program_data_context,
+        )
+        .await
+        {
+            Ok(Ok(account_with_companion)) => (
+                account_with_companion.account,
+                account_with_companion.companion_account,
+            ),
+            Ok(Err(err)) => {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    program_data_pubkey,
+                    ChainlinkCompanionFetchKind::ProgramData,
+                    &err,
+                );
+                if acquired_program_data_reason {
+                    // Both refs exist for LoaderV3 program-data cleanup.
+                    release_program_data_subs(&this.remote_account_provider, program_data_pubkey)
                         .await;
-                    }
-                    return;
                 }
-                Err(err) => {
-                    log_companion_fetch_failure(
-                        companion_fetch_log_context,
-                        program_data_pubkey,
-                        ChainlinkCompanionFetchKind::ProgramData,
-                        &err,
-                    );
-                    if acquired_program_data_reason {
-                        // Both refs exist for LoaderV3 program-data cleanup.
-                        release_program_data_subs(
-                            &this.remote_account_provider,
-                            program_data_pubkey,
-                        )
-                        .await;
-                    }
-                    return;
-                }
+                return;
             }
-        } else {
-            (account, None::<AccountBuilder>)
-        };
+            Err(err) => {
+                log_companion_fetch_failure(
+                    companion_fetch_log_context,
+                    program_data_pubkey,
+                    ChainlinkCompanionFetchKind::ProgramData,
+                    &err,
+                );
+                if acquired_program_data_reason {
+                    // Both refs exist for LoaderV3 program-data cleanup.
+                    release_program_data_subs(&this.remote_account_provider, program_data_pubkey)
+                        .await;
+                }
+                return;
+            }
+        }
+    } else {
+        (account, None::<AccountBuilder>)
+    };
 
-    let fetched_programdata_header =
-        program_data_account.as_ref().and_then(|pd| {
-            pd.read()
-                .data()
-                .get(..programdata_header_len())
-                .map(<[u8]>::to_vec)
-        });
+    let fetched_programdata_header = program_data_account
+        .as_ref()
+        .and_then(|pd| pd.read().data().get(..programdata_header_len()).map(<[u8]>::to_vec));
 
     let loaded_program = match ProgramAccountResolver::try_new(
         pubkey,
@@ -332,19 +300,12 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
             warn!(pubkey = %pubkey, error = %err, "Failed to resolve program account into bank");
             if acquired_program_data_reason {
                 // Both refs exist for LoaderV3 program-data cleanup.
-                release_program_data_subs(
-                    &this.remote_account_provider,
-                    program_data_pubkey,
-                )
-                .await;
+                release_program_data_subs(&this.remote_account_provider, program_data_pubkey).await;
             }
             return;
         }
     };
-    match this
-        .clone_program(loaded_program, program_load_context)
-        .await
-    {
+    match this.clone_program(loaded_program, program_load_context).await {
         // Only successful loads are remembered: a failure leaves the next
         // notification free to retry immediately, as before.
         Ok(_) => {
@@ -366,10 +327,6 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
 
     if acquired_program_data_reason {
         // Both refs exist for LoaderV3 program-data cleanup.
-        release_program_data_subs(
-            &this.remote_account_provider,
-            program_data_pubkey,
-        )
-        .await;
+        release_program_data_subs(&this.remote_account_provider, program_data_pubkey).await;
     }
 }

@@ -16,8 +16,8 @@ use crate::{
         strategy_executor::{
             error::TransactionStrategyExecutionError,
             utils::{
-                handle_actions_result, handle_commit_id_error,
-                handle_undelegation_error, prepare_and_execute_strategy,
+                handle_actions_result, handle_commit_id_error, handle_undelegation_error,
+                prepare_and_execute_strategy,
             },
         },
     },
@@ -62,8 +62,7 @@ where
         failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
+        let finalize_task: BaseTaskImpl = FinalizeTask { delegated_account }.into();
         prepare_and_execute_strategy(
             self.intent_client,
             self.authority,
@@ -143,21 +142,14 @@ where
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
+            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, signature) => {
                 let optimized_tasks = strategy.optimized_tasks.as_slice();
                 if let Some(delegated_account) = err
                     .task_index()
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
+                        BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
+                        BaseTaskImpl::CommitFinalize(task) => Some(task.committed_account.pubkey),
                         _ => None,
                     })
                 {
@@ -175,15 +167,11 @@ where
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup =
-                    handle_undelegation_error(&self.authority.pubkey(), strategy);
+                let to_cleanup = handle_undelegation_error(&self.authority.pubkey(), strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
-                _,
-                _,
-            )
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _)
             | TransactionStrategyExecutionError::TransactionTooLargeError(_) => {
                 // Can't be handled in scope of single stage execution
                 // We signal flow break
@@ -220,8 +208,7 @@ where
         failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
+        let finalize_task: BaseTaskImpl = FinalizeTask { delegated_account }.into();
         prepare_and_execute_strategy(
             self.intent_client,
             self.authority,
@@ -279,21 +266,14 @@ where
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
+            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, signature) => {
                 let optimized_tasks = strategy.optimized_tasks.as_slice();
                 let task_index = err.task_index();
                 if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
+                        BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
+                        BaseTaskImpl::CommitFinalize(task) => Some(task.committed_account.pubkey),
                         _ => None,
                     })
                 {
@@ -327,10 +307,7 @@ where
                 Ok(ControlFlow::Break(()))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
-                _,
-                _,
-            ) => {
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
                 // Can't be handled
                 error!(error = ?err, "Commit tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))
@@ -394,15 +371,11 @@ where
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
-                let to_cleanup =
-                    handle_undelegation_error(&self.authority.pubkey(), strategy);
+                let to_cleanup = handle_undelegation_error(&self.authority.pubkey(), strategy);
                 Ok(ControlFlow::Continue(to_cleanup))
             }
             TransactionStrategyExecutionError::CpiLimitError(_, _)
-            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(
-                _,
-                _,
-            ) => {
+            | TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(_, _) => {
                 // Can't be handled
                 warn!(error = ?err, "Finalization tasks exceeded execution limit");
                 Ok(ControlFlow::Break(()))

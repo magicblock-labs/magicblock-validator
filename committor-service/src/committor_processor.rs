@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, hash_map::Entry},
-    sync::{Arc, Mutex, atomic::AtomicU64},
+    sync::{Arc, atomic::AtomicU64},
 };
 
 use futures_util::future::join_all;
@@ -8,6 +8,7 @@ use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use parking_lot::Mutex;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -21,9 +22,7 @@ use tracing::{error, info, instrument};
 
 use crate::{
     config::ChainConfig,
-    error::{
-        CommittorServiceError, CommittorServiceResult, IntentScheduleError,
-    },
+    error::{CommittorServiceError, CommittorServiceResult, IntentScheduleError},
     intent_engine::{
         BroadcastedIntentExecutionResult, IntentExecutionEngine, db::BacklogDB,
         intent_stream::IntentStream,
@@ -34,14 +33,10 @@ use crate::{
     },
     outbox::OutboxClient,
     tasks::task_info_fetcher::{
-        AccountSnapshot, CacheTaskInfoFetcher, RpcTaskInfoFetcher,
-        TaskInfoFetcher, TaskInfoFetcherResult,
+        AccountSnapshot, CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
+        TaskInfoFetcherResult,
     },
 };
-
-const POISONED_MUTEX_MSG: &str =
-    "CommittorProcessor pending messages mutex poisoned!";
-const POISONED_BACKLOG_MSG: &str = "intent backlog mutex poisoned";
 
 type BundleResultListener = oneshot::Sender<BroadcastedIntentExecutionResult>;
 
@@ -83,34 +78,26 @@ impl<D: BacklogDB> CommittorProcessor<D> {
                 )
             }
             (None, Some(websocket_uri)) => {
-                MagicblockRpcClient::new_with_websocket(
-                    rpc_client,
-                    Some(websocket_uri),
-                )
+                MagicblockRpcClient::new_with_websocket(rpc_client, Some(websocket_uri))
             }
             (None, None) => MagicblockRpcClient::new(rpc_client),
         };
 
         // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
-        let table_mania = TableMania::new(
-            magic_block_rpc_client.clone(),
-            &authority,
-            Some(gc_config),
-        );
+        let table_mania =
+            TableMania::new(magic_block_rpc_client.clone(), &authority, Some(gc_config));
 
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(
-            RpcTaskInfoFetcher::new(magic_block_rpc_client.clone()),
-        ));
+        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+            magic_block_rpc_client.clone(),
+        )));
         let backlog = Arc::new(Mutex::new(db));
         let executor_builder = IntentExecutorBuilderImpl {
             authority: authority.insecure_clone(),
             rpc_client: magic_block_rpc_client.clone(),
             table_mania: table_mania.clone(),
             executor_config: ExecutorConfig {
-                compute_budget_config: chain_config
-                    .compute_budget_config
-                    .clone(),
+                compute_budget_config: chain_config.compute_budget_config.clone(),
                 actions_timeout: chain_config.actions_timeout,
             },
             outbox_client,
@@ -122,8 +109,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
             let (sender, receiver) = mpsc::channel(1000);
             (sender, IntentStream::new(backlog.clone(), receiver))
         };
-        let intent_engine =
-            IntentExecutionEngine::new(intent_stream, executor_builder);
+        let intent_engine = IntentExecutionEngine::new(intent_stream, executor_builder);
         let result_sender = intent_engine.spawn();
         let result_subscription = result_sender.subscribe();
         let pending_result_listeners = Arc::new(Mutex::new(HashMap::new()));
@@ -147,30 +133,22 @@ impl<D: BacklogDB> CommittorProcessor<D> {
         &self,
         intent_bundles: Vec<OutboxIntentBundle>,
     ) -> CommittorServiceResult<()> {
-        let backlog = self.backlog.lock().expect(POISONED_BACKLOG_MSG);
+        let backlog = self.backlog.lock();
         let schedule_result = if backlog.is_empty() {
             let mut iter = intent_bundles.into_iter();
             // Treated as regular value not propagated lower
             #[allow(clippy::result_large_err)]
-            let send_result =
-                iter.try_for_each(|bundle| self.intent_sender.try_send(bundle));
+            let send_result = iter.try_for_each(|bundle| self.intent_sender.try_send(bundle));
             match send_result {
                 Ok(_) => Ok(()),
-                Err(TrySendError::Closed(_)) => {
-                    Err(IntentScheduleError::ChannelClosed)
-                }
+                Err(TrySendError::Closed(_)) => Err(IntentScheduleError::ChannelClosed),
                 Err(TrySendError::Full(bundle)) => {
-                    let leftovers =
-                        std::iter::once(bundle).chain(iter).collect();
-                    backlog
-                        .store_intent_bundles(leftovers)
-                        .map_err(IntentScheduleError::from)
+                    let leftovers = std::iter::once(bundle).chain(iter).collect();
+                    backlog.store_intent_bundles(leftovers).map_err(IntentScheduleError::from)
                 }
             }
         } else {
-            backlog
-                .store_intent_bundles(intent_bundles)
-                .map_err(IntentScheduleError::from)
+            backlog.store_intent_bundles(intent_bundles).map_err(IntentScheduleError::from)
         };
 
         schedule_result.inspect_err(|err| {
@@ -186,10 +164,7 @@ impl<D: BacklogDB> CommittorProcessor<D> {
     ) -> CommittorServiceResult<Vec<BroadcastedIntentExecutionResult>> {
         // Critical section
         let (receivers, inserted_ids) = {
-            let mut result_listeners = self
-                .pending_result_listeners
-                .lock()
-                .expect(POISONED_MUTEX_MSG);
+            let mut result_listeners = self.pending_result_listeners.lock();
 
             let mut receivers = Vec::with_capacity(intent_bundles.len());
             let mut inserted_ids = Vec::with_capacity(intent_bundles.len());
@@ -206,11 +181,9 @@ impl<D: BacklogDB> CommittorProcessor<D> {
                         for id in &inserted_ids {
                             result_listeners.remove(id);
                         }
-                        return Err(
-                            CommittorServiceError::RepeatingMessageError(
-                                intent.intent_id,
-                            ),
-                        );
+                        return Err(CommittorServiceError::RepeatingMessageError(
+                            intent.intent_id,
+                        ));
                     }
                 }
             }
@@ -218,28 +191,21 @@ impl<D: BacklogDB> CommittorProcessor<D> {
         };
 
         if let Err(err) = self.schedule_intent_bundles(intent_bundles).await {
-            let mut result_listeners = self
-                .pending_result_listeners
-                .lock()
-                .expect(POISONED_MUTEX_MSG);
+            let mut result_listeners = self.pending_result_listeners.lock();
             for id in &inserted_ids {
                 result_listeners.remove(id);
             }
             return Err(err);
         }
 
-        let results = join_all(receivers)
-            .await
-            .into_iter()
-            .collect::<Result<Vec<_>, RecvError>>()?;
+        let results =
+            join_all(receivers).await.into_iter().collect::<Result<Vec<_>, RecvError>>()?;
 
         Ok(results)
     }
 
     /// Creates a subscription for results of BaseIntent execution
-    pub fn subscribe_for_results(
-        &self,
-    ) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
+    pub fn subscribe_for_results(&self) -> broadcast::Receiver<BroadcastedIntentExecutionResult> {
         self.result_sender.subscribe()
     }
 
@@ -257,12 +223,8 @@ impl<D: BacklogDB> CommittorProcessor<D> {
     /// Dispatch worker
     #[instrument(skip(pending_result_listeners, results_subscription))]
     async fn dispatcher(
-        mut results_subscription: broadcast::Receiver<
-            BroadcastedIntentExecutionResult,
-        >,
-        pending_result_listeners: Arc<
-            Mutex<HashMap<u64, BundleResultListener>>,
-        >,
+        mut results_subscription: broadcast::Receiver<BroadcastedIntentExecutionResult>,
+        pending_result_listeners: Arc<Mutex<HashMap<u64, BundleResultListener>>>,
     ) {
         loop {
             let execution_result = match results_subscription.recv().await {
@@ -279,10 +241,8 @@ impl<D: BacklogDB> CommittorProcessor<D> {
                 }
             };
 
-            let sender = if let Some(sender) = pending_result_listeners
-                .lock()
-                .expect(POISONED_MUTEX_MSG)
-                .remove(&execution_result.id)
+            let sender = if let Some(sender) =
+                pending_result_listeners.lock().remove(&execution_result.id)
             {
                 sender
             } else {

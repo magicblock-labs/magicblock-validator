@@ -1,22 +1,14 @@
-use std::{
-    cell::RefCell,
-    mem,
-    sync::{Arc, RwLock},
-};
+use std::{cell::RefCell, mem, sync::Arc};
 
 use lazy_static::lazy_static;
-use solana_account::{
-    AccountSharedData, ReadableAccount, state_traits::StateMut,
-};
+use parking_lot::RwLock;
+use solana_account::{AccountSharedData, ReadableAccount, state_traits::StateMut};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
-use crate::{
-    magic_context::MagicContext,
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-};
+use crate::{magic_context::MagicContext, magic_scheduled_base_intent::ScheduledIntentBundle};
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
@@ -40,73 +32,47 @@ impl Default for TransactionScheduler {
 
 impl TransactionScheduler {
     pub fn schedule_base_intent(
-        invoke_context: &InvokeContext,
+        invoke_context: &InvokeContext<'_, '_>,
         context_account: &RefCell<AccountSharedData>,
         action: ScheduledIntentBundle,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
-        let mut context = MagicContext::deserialize(context_data.data())
-            .map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "Failed to deserialize MagicContext: {}",
-                    err
-                );
-                InstructionError::GenericError
-            })?;
+        let mut context = MagicContext::deserialize(context_data.data()).map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to deserialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
         context.add_scheduled_action(action);
         context_data.set_state(&context)?;
         Ok(())
     }
 
-    pub fn accept_scheduled_base_intent(
-        &self,
-        base_intents: Vec<ScheduledIntentBundle>,
-    ) {
-        self.scheduled_intent_bundles
-            .write()
-            .expect("scheduled_action lock poisoned")
-            .extend(base_intents);
+    pub fn accept_scheduled_base_intent(&self, base_intents: Vec<ScheduledIntentBundle>) {
+        self.scheduled_intent_bundles.write().extend(base_intents);
     }
 
-    pub fn get_scheduled_actions_by_payer(
-        &self,
-        payer: &Pubkey,
-    ) -> Vec<ScheduledIntentBundle> {
-        let commits = self
-            .scheduled_intent_bundles
-            .read()
-            .expect("scheduled_action lock poisoned");
+    pub fn get_scheduled_actions_by_payer(&self, payer: &Pubkey) -> Vec<ScheduledIntentBundle> {
+        let commits = self.scheduled_intent_bundles.read();
 
-        commits
-            .iter()
-            .filter(|x| x.payer.eq(payer))
-            .cloned()
-            .collect::<Vec<_>>()
+        commits.iter().filter(|x| x.payer.eq(payer)).cloned().collect::<Vec<_>>()
     }
 
     pub fn take_scheduled_intent_bundles(&self) -> Vec<ScheduledIntentBundle> {
-        let mut lock = self
-            .scheduled_intent_bundles
-            .write()
-            .expect("scheduled_action lock poisoned");
+        let mut lock = self.scheduled_intent_bundles.write();
         mem::take(&mut *lock)
     }
 
     pub fn scheduled_actions_len(&self) -> usize {
-        let lock = self
-            .scheduled_intent_bundles
-            .read()
-            .expect("scheduled_action lock poisoned");
+        let lock = self.scheduled_intent_bundles.read();
 
         lock.len()
     }
 
     pub fn clear_scheduled_actions(&self) {
-        let mut lock = self
-            .scheduled_intent_bundles
-            .write()
-            .expect("scheduled_action lock poisoned");
+        let mut lock = self.scheduled_intent_bundles.write();
         lock.clear();
     }
 }

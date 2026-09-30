@@ -3,10 +3,7 @@ use std::{collections::HashSet, fmt};
 use solana_account::AccountBuilder;
 use solana_pubkey::Pubkey;
 
-use crate::{
-    cloner::AccountCloneRequest,
-    remote_account_provider::program_account::LoadedProgram,
-};
+use crate::{cloner::AccountCloneRequest, remote_account_provider::program_account::LoadedProgram};
 
 pub(crate) struct AccountWithCompanion {
     pub(crate) pubkey: Pubkey,
@@ -68,15 +65,11 @@ impl FetchAndCloneResult {
     }
 
     pub fn pubkeys_missing_delegation_record(&self) -> Vec<Pubkey> {
-        self.missing_delegation_record
-            .iter()
-            .map(|(p, _)| *p)
-            .collect()
+        self.missing_delegation_record.iter().map(|(p, _)| *p).collect()
     }
 
     pub fn is_ok(&self) -> bool {
-        self.not_found_on_chain.is_empty()
-            && self.missing_delegation_record.is_empty()
+        self.not_found_on_chain.is_empty() && self.missing_delegation_record.is_empty()
     }
 }
 
@@ -89,10 +82,7 @@ impl fmt::Display for FetchAndCloneResult {
                 writeln!(
                     f,
                     "Accounts not found on chain: {:?}",
-                    self.not_found_on_chain
-                        .iter()
-                        .map(|(p, _)| p.to_string())
-                        .collect::<Vec<_>>()
+                    self.not_found_on_chain.iter().map(|(p, _)| p.to_string()).collect::<Vec<_>>()
                 )?;
             }
             if !self.missing_delegation_record.is_empty() {

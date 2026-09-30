@@ -5,8 +5,7 @@ use std::{
 };
 
 use helius_laserstream::grpc::{
-    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-    SubscribeRequestFilterSlots,
+    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
 };
 use magicblock_config::config::GrpcConfig;
 use magicblock_metrics::metrics;
@@ -15,18 +14,17 @@ use tokio_stream::StreamMap;
 use tracing::{trace, warn};
 
 use super::{
-    LaserResult, LaserStream, LaserStreamWithHandle, SharedSubscriptions,
-    StreamFactory, write_with_retry,
+    LaserResult, LaserStream, LaserStreamWithHandle, SharedSubscriptions, StreamFactory,
+    write_with_retry,
 };
 use crate::remote_account_provider::{
-    RemoteAccountProviderResult, chain_laser_actor::StreamHandle,
-    chain_slot::ChainSlot,
+    RemoteAccountProviderResult, chain_laser_actor::StreamHandle, chain_slot::ChainSlot,
 };
 
 /// Identifies whether a stream update came from an account or
 /// program subscription stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StreamUpdateSource {
+pub(crate) enum StreamUpdateSource {
     Account,
     Program,
 }
@@ -64,7 +62,7 @@ const STREAM_STARTUP_GRACE: Duration = Duration::from_millis(200);
 
 /// Configuration for the generational stream manager.
 #[derive(Debug, Clone, Copy)]
-pub struct StreamManagerConfig {
+pub(crate) struct StreamManagerConfig {
     /// Max subscriptions per optimized old stream chunk.
     pub max_subs_in_old_optimized: NonZeroUsize,
     /// Max unoptimized old streams before optimization is triggered.
@@ -106,7 +104,7 @@ impl From<&GrpcConfig> for StreamManagerConfig {
 /// corresponding handles are stored separately for use in
 /// [Self::update_subscriptions].
 #[allow(unused)]
-pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
+pub(crate) struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
     /// Configures limits for stream management
     config: StreamManagerConfig,
     /// The factory used to create streams
@@ -170,7 +168,7 @@ pub struct StreamManager<S: StreamHandle, SF: StreamFactory<S>> {
 
 #[allow(unused)]
 impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
-    pub fn new(
+    pub(crate) fn new(
         config: StreamManagerConfig,
         stream_factory: SF,
         chain_slot: ChainSlot,
@@ -214,7 +212,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// more accounts than optimization would allow. Each chunk
     /// goes through the normal subscribe → promote → optimize
     /// cycle independently.
-    pub async fn account_subscribe(
+    pub(crate) async fn account_subscribe(
         &mut self,
         pubkeys: &[Pubkey],
         commitment: &CommitmentLevel,
@@ -223,11 +221,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // Filter out pubkeys already in subscriptions.
         let new_pks: Vec<Pubkey> = {
             let subs = self.subscriptions.read();
-            pubkeys
-                .iter()
-                .filter(|pk| !subs.contains(pk))
-                .copied()
-                .collect()
+            pubkeys.iter().filter(|pk| !subs.contains(pk)).copied().collect()
         };
 
         if new_pks.is_empty() {
@@ -241,8 +235,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // count never exceeds the limit. Subsequent chunks use the
         // full limit (since promotion clears current_new_subs).
         let max = self.config.max_subs_in_old_optimized.get();
-        let remaining_capacity =
-            max.saturating_sub(self.current_new_subs.len());
+        let remaining_capacity = max.saturating_sub(self.current_new_subs.len());
 
         if new_pks.len() > remaining_capacity {
             let (first, rest) = if remaining_capacity > 0 {
@@ -254,18 +247,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
                 ([].as_slice(), new_pks.as_slice())
             };
             if !first.is_empty() {
-                self.account_subscribe_batch(first, commitment, from_slot)
-                    .await?;
+                self.account_subscribe_batch(first, commitment, from_slot).await?;
             }
             for chunk in rest.chunks(max) {
-                self.account_subscribe_batch(chunk, commitment, from_slot)
-                    .await?;
+                self.account_subscribe_batch(chunk, commitment, from_slot).await?;
             }
             return Ok(());
         }
 
-        self.account_subscribe_batch(&new_pks, commitment, from_slot)
-            .await
+        self.account_subscribe_batch(&new_pks, commitment, from_slot).await
     }
 
     /// Subscribe a single batch of new pubkeys (already filtered
@@ -295,11 +285,9 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
             );
             write_with_retry(handle, "account_subscribe", request).await
         } else {
-            let pks: Vec<Pubkey> =
-                self.current_new_subs.iter().copied().collect();
+            let pks: Vec<Pubkey> = self.current_new_subs.iter().copied().collect();
             let pk_refs: Vec<&Pubkey> = pks.iter().collect();
-            self.insert_current_new_stream(&pk_refs, commitment, from_slot)
-                .await
+            self.insert_current_new_stream(&pk_refs, commitment, from_slot).await
         };
 
         // Revert tentative current_new_subs additions if the stream update failed
@@ -324,18 +312,15 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // be created on the next subscribe call.
         if self.current_new_subs.len() > self.config.max_subs_in_new {
             // Move current-new to unoptimized old.
-            if let Some(stream) = self.stream_map.remove(&StreamKey::CurrentNew)
-            {
+            if let Some(stream) = self.stream_map.remove(&StreamKey::CurrentNew) {
                 let idx = self.unoptimized_old_handles.len();
                 // The same live stream relocates: its silence history
                 // must move with it rather than reset, so a stream
                 // already going quiet cannot hide behind the promotion.
-                let last_seen =
-                    self.last_activity.remove(&StreamKey::CurrentNew);
+                let last_seen = self.last_activity.remove(&StreamKey::CurrentNew);
                 self.insert_stream(StreamKey::UnoptimizedOld(idx), stream);
                 if let Some(last_seen) = last_seen {
-                    self.last_activity
-                        .insert(StreamKey::UnoptimizedOld(idx), last_seen);
+                    self.last_activity.insert(StreamKey::UnoptimizedOld(idx), last_seen);
                 }
             }
             if let Some(handle) = self.current_new_handle.take() {
@@ -345,9 +330,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
             // If unoptimized old handles exceed the limit,
             // optimize.
-            if self.unoptimized_old_handles.len()
-                > self.config.max_old_unoptimized
-            {
+            if self.unoptimized_old_handles.len() > self.config.max_old_unoptimized {
                 self.optimize(commitment).await.inspect_err(|err| {
                     warn!(client_id = self.client_id,
                         current_subs_count = self.subscriptions.read().len(),
@@ -367,7 +350,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Removes them from the `subscriptions` HashSet only — streams
     /// are never modified. Updates for these pubkeys will be ignored
     /// by the actor.
-    pub fn account_unsubscribe(&mut self, pubkeys: &[Pubkey]) {
+    pub(crate) fn account_unsubscribe(&mut self, pubkeys: &[Pubkey]) {
         let mut subs = self.subscriptions.write();
         for pk in pubkeys {
             subs.remove(pk);
@@ -376,7 +359,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Clears all account subscriptions and drops all account
     /// streams.
-    pub fn clear_account_subscriptions(&mut self) {
+    pub(crate) fn clear_account_subscriptions(&mut self) {
         self.subscriptions.write().clear();
         self.current_new_subs.clear();
         self.current_new_handle = None;
@@ -394,7 +377,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Returns `true` if any account stream exists.
-    pub fn has_account_subscriptions(&self) -> bool {
+    pub(crate) fn has_account_subscriptions(&self) -> bool {
         self.current_new_handle.is_some()
             || !self.unoptimized_old_handles.is_empty()
             || !self.optimized_old_handles.is_empty()
@@ -403,9 +386,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Polls all streams in the [StreamMap], returning the next
     /// available update tagged with its source.
     /// Returns `None` when the map is empty.
-    pub async fn next_update(
-        &mut self,
-    ) -> Option<(StreamUpdateSource, LaserResult)> {
+    pub(crate) async fn next_update(&mut self) -> Option<(StreamUpdateSource, LaserResult)> {
         use tokio_stream::StreamExt;
         let (key, result) = self.stream_map.next().await?;
         // Only successful updates count as liveness: a stream stuck in an
@@ -418,7 +399,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Returns `true` if any stream (account or program) exists.
-    pub fn has_any_subscriptions(&self) -> bool {
+    pub(crate) fn has_any_subscriptions(&self) -> bool {
         !self.stream_map.is_empty()
     }
 
@@ -429,25 +410,17 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// map ended silently (the StreamMap drops finished children during
     /// polling without notification while siblings remain) and is
     /// reported as infinite silence.
-    pub fn max_stream_silence(&mut self) -> Option<Duration> {
+    pub(crate) fn max_stream_silence(&mut self) -> Option<Duration> {
         let now = Instant::now();
-        let live: HashSet<StreamKey> =
-            self.stream_map.keys().cloned().collect();
-        if self
-            .expected_stream_keys()
-            .iter()
-            .any(|key| !live.contains(key))
-        {
+        let live: HashSet<StreamKey> = self.stream_map.keys().cloned().collect();
+        if self.expected_stream_keys().iter().any(|key| !live.contains(key)) {
             return Some(Duration::MAX);
         }
         self.last_activity.retain(|key, _| live.contains(key));
         live.into_iter()
             .map(|key| {
                 now.saturating_duration_since(
-                    *self
-                        .last_activity
-                        .entry(key)
-                        .or_insert(now + STREAM_STARTUP_GRACE),
+                    *self.last_activity.entry(key).or_insert(now + STREAM_STARTUP_GRACE),
                 )
             })
             .max()
@@ -473,13 +446,13 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Returns `true` if there are unoptimized old streams.
-    pub fn has_unoptimized_streams(&self) -> bool {
+    pub(crate) fn has_unoptimized_streams(&self) -> bool {
         !self.unoptimized_old_handles.is_empty()
     }
 
     /// Returns `true` if optimization has occurred since the
     /// last call to this method, then resets the flag.
-    pub fn take_optimized_flag(&mut self) -> bool {
+    pub(crate) fn take_optimized_flag(&mut self) -> bool {
         let v = self.optimized_since_last_check;
         self.optimized_since_last_check = false;
         v
@@ -527,7 +500,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// and thus the method invoking it ([Self::account_subscribe]) returns an error (the actor does so).
     /// Otherwise streams may end up in an inconsistent state if a subscription attempt
     /// fails.
-    pub async fn optimize(
+    pub(crate) async fn optimize(
         &mut self,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
@@ -551,8 +524,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
         // Collect all active subscriptions and chunk them.
-        let all_pks: Vec<Pubkey> =
-            self.subscriptions.read().iter().copied().collect();
+        let all_pks: Vec<Pubkey> = self.subscriptions.read().iter().copied().collect();
         let from_slot = self.compute_from_slot();
 
         // Create replacement streams before mutating existing account
@@ -560,16 +532,11 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         // remains unchanged.
         let mut new_optimized_streams = Vec::new();
         let mut new_optimized_handles = Vec::new();
-        for (i, chunk) in all_pks
-            .chunks(self.config.max_subs_in_old_optimized.get())
-            .enumerate()
-        {
+        for (i, chunk) in all_pks.chunks(self.config.max_subs_in_old_optimized.get()).enumerate() {
             let refs: Vec<&Pubkey> = chunk.iter().collect();
             let LaserStreamWithHandle { stream, handle } = self
                 .stream_factory
-                .subscribe(Self::build_account_request(
-                    &refs, commitment, from_slot,
-                ))
+                .subscribe(Self::build_account_request(&refs, commitment, from_slot))
                 .await?;
             new_optimized_streams.push((StreamKey::OptimizedOld(i), stream));
             new_optimized_handles.push(handle);
@@ -577,17 +544,14 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
         let prev_current_new = self.stream_map.remove(&StreamKey::CurrentNew);
         let prev_unoptimized: Vec<_> = (0..self.unoptimized_old_handles.len())
-            .filter_map(|i| {
-                self.stream_map.remove(&StreamKey::UnoptimizedOld(i))
-            })
+            .filter_map(|i| self.stream_map.remove(&StreamKey::UnoptimizedOld(i)))
             .collect();
         let prev_optimized: Vec<_> = (0..self.optimized_old_handles.len())
             .filter_map(|i| self.stream_map.remove(&StreamKey::OptimizedOld(i)))
             .collect();
 
-        let prev_stream_count = usize::from(prev_current_new.is_some())
-            + prev_unoptimized.len()
-            + prev_optimized.len();
+        let prev_stream_count =
+            usize::from(prev_current_new.is_some()) + prev_unoptimized.len() + prev_optimized.len();
 
         for (key, stream) in new_optimized_streams {
             self.insert_stream(key, stream);
@@ -617,7 +581,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
 
     /// Returns `true` if the pubkey is in the active
     /// `subscriptions` set.
-    pub fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
+    pub(crate) fn is_subscribed(&self, pubkey: &Pubkey) -> bool {
         self.subscriptions.read().contains(pubkey)
     }
 
@@ -626,7 +590,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     // ---------------------------------------------------------
 
     /// Returns a reference to the shared subscriptions.
-    pub fn subscriptions(&self) -> &SharedSubscriptions {
+    pub(crate) fn subscriptions(&self) -> &SharedSubscriptions {
         &self.subscriptions
     }
 
@@ -656,9 +620,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// generations.
     fn account_stream_count(&self) -> usize {
         let current = usize::from(self.current_new_handle.is_some());
-        self.optimized_old_handles.len()
-            + self.unoptimized_old_handles.len()
-            + current
+        self.optimized_old_handles.len() + self.unoptimized_old_handles.len() + current
     }
 
     // ---------------------------------------------------------
@@ -670,8 +632,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// activation and backfill legitimately delay the first update well
     /// past the steady-state liveness window.
     fn insert_stream(&mut self, key: StreamKey, stream: LaserStream) {
-        self.last_activity
-            .insert(key.clone(), Instant::now() + STREAM_STARTUP_GRACE);
+        self.last_activity.insert(key.clone(), Instant::now() + STREAM_STARTUP_GRACE);
         self.stream_map.insert(key, stream);
     }
 
@@ -722,8 +683,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         commitment: &CommitmentLevel,
         from_slot: u64,
     ) -> RemoteAccountProviderResult<()> {
-        let request =
-            Self::build_account_request(pubkeys, commitment, from_slot);
+        let request = Self::build_account_request(pubkeys, commitment, from_slot);
         let LaserStreamWithHandle { stream, handle } =
             self.stream_factory.subscribe(request).await?;
         self.insert_stream(StreamKey::CurrentNew, stream);
@@ -734,30 +694,20 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     /// Adds a program subscription. If the program is already
     /// subscribed, this is a no-op. Otherwise, updates the
     /// program stream to include all subscribed programs.
-    pub async fn add_program_subscription(
+    pub(crate) async fn add_program_subscription(
         &mut self,
         program_id: Pubkey,
         commitment: &CommitmentLevel,
     ) -> RemoteAccountProviderResult<()> {
-        if self
-            .program_sub
-            .as_ref()
-            .is_some_and(|(subs, _)| subs.contains(&program_id))
-        {
+        if self.program_sub.as_ref().is_some_and(|(subs, _)| subs.contains(&program_id)) {
             return Ok(());
         }
 
         let from_slot = self.compute_from_slot();
-        if let Some((mut subscribed_programs, handle)) = self.program_sub.take()
-        {
+        if let Some((mut subscribed_programs, handle)) = self.program_sub.take() {
             subscribed_programs.insert(program_id);
-            let request = Self::build_program_request(
-                &subscribed_programs,
-                commitment,
-                from_slot,
-            );
-            match write_with_retry(&handle, "program_subscribe", request).await
-            {
+            let request = Self::build_program_request(&subscribed_programs, commitment, from_slot);
+            match write_with_retry(&handle, "program_subscribe", request).await {
                 Ok(()) => {
                     self.program_sub = Some((subscribed_programs, handle));
                 }
@@ -770,13 +720,8 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         } else {
             let mut subscribed_programs = HashSet::new();
             subscribed_programs.insert(program_id);
-            let LaserStreamWithHandle { stream, handle } = self
-                .create_program_stream(
-                    &subscribed_programs,
-                    commitment,
-                    from_slot,
-                )
-                .await?;
+            let LaserStreamWithHandle { stream, handle } =
+                self.create_program_stream(&subscribed_programs, commitment, from_slot).await?;
             self.insert_stream(StreamKey::Program, stream);
             self.program_sub = Some((subscribed_programs, handle));
             self.update_stream_metrics_with_extra(0);
@@ -786,12 +731,12 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
     }
 
     /// Returns whether there are active program subscriptions.
-    pub fn has_program_subscriptions(&self) -> bool {
+    pub(crate) fn has_program_subscriptions(&self) -> bool {
         self.program_sub.is_some()
     }
 
     /// Clears all program subscriptions.
-    pub fn clear_program_subscriptions(&mut self) {
+    pub(crate) fn clear_program_subscriptions(&mut self) {
         self.stream_map.remove(&StreamKey::Program);
         self.program_sub = None;
         self.update_stream_metrics_with_extra(0);
@@ -828,8 +773,7 @@ impl<S: StreamHandle, SF: StreamFactory<S>> StreamManager<S, SF> {
         commitment: &CommitmentLevel,
         from_slot: u64,
     ) -> RemoteAccountProviderResult<LaserStreamWithHandle<S>> {
-        let request =
-            Self::build_program_request(program_ids, commitment, from_slot);
+        let request = Self::build_program_request(program_ids, commitment, from_slot);
         self.stream_factory.subscribe(request).await
     }
 }
@@ -878,10 +822,7 @@ mod tests {
     /// Collect all account pubkey strings from a captured
     /// `SubscribeRequest`'s account filters.
     fn account_pubkeys_from_request(req: &SubscribeRequest) -> HashSet<String> {
-        req.accounts
-            .values()
-            .flat_map(|f| f.account.iter().cloned())
-            .collect()
+        req.accounts.values().flat_map(|f| f.account.iter().cloned()).collect()
     }
 
     /// Assert that `subscriptions()` contains exactly `expected`
@@ -905,10 +846,7 @@ mod tests {
 
     /// Assert that a `SubscribeRequest` filter contains exactly the
     /// given pubkeys (order-independent, exact count).
-    fn assert_request_has_exact_pubkeys(
-        req: &SubscribeRequest,
-        expected: &[Pubkey],
-    ) {
+    fn assert_request_has_exact_pubkeys(req: &SubscribeRequest, expected: &[Pubkey]) {
         let filter = account_pubkeys_from_request(req);
         assert_eq!(
             filter.len(),
@@ -963,10 +901,7 @@ mod tests {
 
     /// Returns the union of all account pubkey strings across all
     /// captured requests from `start_idx` onward.
-    fn all_filter_pubkeys_from(
-        factory: &MockStreamFactory,
-        start_idx: usize,
-    ) -> HashSet<String> {
+    fn all_filter_pubkeys_from(factory: &MockStreamFactory, start_idx: usize) -> HashSet<String> {
         factory
             .captured_requests()
             .iter()
@@ -1028,15 +963,9 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = make_pubkeys(3);
 
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 0)
-            .await
-            .unwrap();
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 0)
-            .await
-            .unwrap();
-        mgr.account_subscribe(&[pks[2]], &COMMITMENT, 0)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 0).await.unwrap();
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 0).await.unwrap();
+        mgr.account_subscribe(&[pks[2]], &COMMITMENT, 0).await.unwrap();
 
         assert_subscriptions_eq(&mgr, &pks);
 
@@ -1079,16 +1008,12 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         // Subscribe MAX_NEW (5) pubkeys first.
         let first_five = make_pubkeys(5);
-        mgr.account_subscribe(&first_five, &COMMITMENT, 0)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&first_five, &COMMITMENT, 0).await.unwrap();
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
 
         // Subscribe the 6th pubkey → triggers promotion.
         let sixth = Pubkey::new_unique();
-        mgr.account_subscribe(&[sixth], &COMMITMENT, 0)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[sixth], &COMMITMENT, 0).await.unwrap();
 
         assert_eq!(mgr.unoptimized_old_stream_count(), 1);
         // After promotion current-new starts empty (all pubkeys
@@ -1099,11 +1024,8 @@ mod tests {
         // with all 6 pubkeys.
         let handle_reqs = factory.handle_requests();
         let promoted_req = handle_reqs.last().unwrap();
-        let all_pks: Vec<Pubkey> = first_five
-            .iter()
-            .copied()
-            .chain(std::iter::once(sixth))
-            .collect();
+        let all_pks: Vec<Pubkey> =
+            first_five.iter().copied().chain(std::iter::once(sixth)).collect();
         assert_request_has_exact_pubkeys(promoted_req, &all_pks);
     }
 
@@ -1257,8 +1179,7 @@ mod tests {
 
         // Optimized streams should only contain the 10 remaining
         // pubkeys.
-        let remaining: HashSet<String> =
-            pks[5..].iter().map(|pk| pk.to_string()).collect();
+        let remaining: HashSet<String> = pks[5..].iter().map(|pk| pk.to_string()).collect();
         let filter_pks = all_filter_pubkeys_from(&factory, reqs_before);
         assert_eq!(filter_pks.len(), 10);
         for pk in &to_unsub {
@@ -1312,9 +1233,7 @@ mod tests {
 
         // Subscribe a new pubkey after optimization.
         let new_pk = Pubkey::new_unique();
-        mgr.account_subscribe(&[new_pk], &COMMITMENT, 0)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[new_pk], &COMMITMENT, 0).await.unwrap();
 
         assert!(mgr.subscriptions().read().contains(&new_pk));
         assert!(mgr.current_new_subs().contains(&new_pk));
@@ -1474,8 +1393,7 @@ mod tests {
         assert!(count > 0);
         assert_eq!(
             count,
-            mgr.optimized_old_stream_count()
-                + mgr.unoptimized_old_stream_count(),
+            mgr.optimized_old_stream_count() + mgr.unoptimized_old_stream_count(),
         );
     }
 
@@ -1499,10 +1417,7 @@ mod tests {
         assert_eq!(mgr.unoptimized_old_stream_count(), 0);
         // Only optimized old streams remain (current-new is empty
         // after optimize).
-        assert_eq!(
-            mgr.account_stream_count(),
-            mgr.optimized_old_stream_count(),
-        );
+        assert_eq!(mgr.account_stream_count(), mgr.optimized_old_stream_count(),);
     }
 
     // -------------------------------------------------------------
@@ -1568,8 +1483,7 @@ mod tests {
         let (mut mgr, factory) = create_manager();
         let pks = subscribe_n(&mut mgr, 20).await;
         // Unsubscribe 8 scattered.
-        let unsub1: Vec<Pubkey> =
-            pks.iter().step_by(2).take(8).copied().collect();
+        let unsub1: Vec<Pubkey> = pks.iter().step_by(2).take(8).copied().collect();
         mgr.account_unsubscribe(&unsub1);
 
         // Subscribe 5 new ones.
@@ -1646,11 +1560,8 @@ mod tests {
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT).await.unwrap();
 
-        let optimize_reqs: Vec<_> = factory
-            .captured_requests()
-            .into_iter()
-            .skip(reqs_before)
-            .collect();
+        let optimize_reqs: Vec<_> =
+            factory.captured_requests().into_iter().skip(reqs_before).collect();
         assert_eq!(optimize_reqs.len(), 2);
 
         let first_pks = account_pubkeys_from_request(&optimize_reqs[0]);
@@ -1668,8 +1579,7 @@ mod tests {
         subscribe_n(&mut mgr, 5).await;
         let calls_before = factory.captured_requests().len();
 
-        let pks: Vec<Pubkey> =
-            mgr.subscriptions().read().iter().take(3).copied().collect();
+        let pks: Vec<Pubkey> = mgr.subscriptions().read().iter().take(3).copied().collect();
         mgr.account_unsubscribe(&pks);
 
         assert_eq!(factory.captured_requests().len(), calls_before);
@@ -1699,13 +1609,9 @@ mod tests {
 
         // First call creates the stream via subscribe (writes via
         // handle internally).
-        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 100)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pks[0]], &COMMITMENT, 100).await.unwrap();
         // Second call updates via handle.write().
-        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 200)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&[pks[1]], &COMMITMENT, 200).await.unwrap();
 
         let handle_reqs = factory.handle_requests();
         // First write with pks[0] and from_slot=100, second write with
@@ -1730,12 +1636,9 @@ mod tests {
         );
         let program_id = Pubkey::new_unique();
 
-        mgr.add_program_subscription(program_id, &COMMITMENT)
-            .await
-            .unwrap();
+        mgr.add_program_subscription(program_id, &COMMITMENT).await.unwrap();
 
-        let expected_from_slot =
-            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        let expected_from_slot = current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
         let reqs = factory.captured_requests();
         assert_eq!(reqs.len(), 1);
         assert_eq!(reqs[0].from_slot, Some(expected_from_slot));
@@ -1746,15 +1649,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_program_subscription_retry_after_update_failure_writes_again()
-    {
+    async fn test_program_subscription_retry_after_update_failure_writes_again() {
         let (mut mgr, factory) = create_manager();
         let first_program = Pubkey::new_unique();
         let second_program = Pubkey::new_unique();
 
-        mgr.add_program_subscription(first_program, &COMMITMENT)
-            .await
-            .unwrap();
+        mgr.add_program_subscription(first_program, &COMMITMENT).await.unwrap();
 
         let writes_after_first = factory.handle_requests().len();
         factory.fail_next_handle_writes(6);
@@ -1800,21 +1700,15 @@ mod tests {
             "test".to_string(),
         );
 
-        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42).await.unwrap();
 
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT).await.unwrap();
 
-        let optimize_reqs: Vec<_> = factory
-            .captured_requests()
-            .into_iter()
-            .skip(reqs_before)
-            .collect();
+        let optimize_reqs: Vec<_> =
+            factory.captured_requests().into_iter().skip(reqs_before).collect();
         assert!(!optimize_reqs.is_empty());
-        let expected_from_slot =
-            current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
+        let expected_from_slot = current_slot - ChainSlot::MAX_SLOTS_SUB_ACTIVATION;
         for req in &optimize_reqs {
             assert_eq!(
                 req.from_slot,
@@ -1840,18 +1734,13 @@ mod tests {
             "test".to_string(),
         );
 
-        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42)
-            .await
-            .unwrap();
+        mgr.account_subscribe(&make_pubkeys(5), &COMMITMENT, 42).await.unwrap();
 
         let reqs_before = factory.captured_requests().len();
         mgr.optimize(&COMMITMENT).await.unwrap();
 
-        let optimize_reqs: Vec<_> = factory
-            .captured_requests()
-            .into_iter()
-            .skip(reqs_before)
-            .collect();
+        let optimize_reqs: Vec<_> =
+            factory.captured_requests().into_iter().skip(reqs_before).collect();
         assert!(!optimize_reqs.is_empty());
         for req in &optimize_reqs {
             assert_eq!(
@@ -1877,10 +1766,9 @@ mod tests {
 
         factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Account);
@@ -1895,16 +1783,13 @@ mod tests {
 
         let (mut mgr, factory) = create_manager();
         let program_id = Pubkey::new_unique();
-        mgr.add_program_subscription(program_id, &COMMITMENT)
-            .await
-            .unwrap();
+        mgr.add_program_subscription(program_id, &COMMITMENT).await.unwrap();
 
         factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Program);
@@ -1923,21 +1808,16 @@ mod tests {
         subscribe_n(&mut mgr, 2).await;
         // Program stream → index 1
         let program_id = Pubkey::new_unique();
-        mgr.add_program_subscription(program_id, &COMMITMENT)
-            .await
-            .unwrap();
+        mgr.add_program_subscription(program_id, &COMMITMENT).await.unwrap();
 
         factory.push_update_to_stream(0, Ok(SubscribeUpdate::default()));
         factory.push_update_to_stream(1, Ok(SubscribeUpdate::default()));
 
         let mut sources = Vec::new();
         for _ in 0..2 {
-            let result = tokio::time::timeout(
-                Duration::from_millis(100),
-                mgr.next_update(),
-            )
-            .await
-            .expect("next_update timed out");
+            let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+                .await
+                .expect("next_update timed out");
 
             let (source, update) = result.expect("stream ended");
             assert!(update.is_ok());
@@ -1969,10 +1849,9 @@ mod tests {
 
         factory.push_error_to_stream(0, error);
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Account);
@@ -1988,9 +1867,7 @@ mod tests {
 
         let (mut mgr, factory) = create_manager();
         let program_id = Pubkey::new_unique();
-        mgr.add_program_subscription(program_id, &COMMITMENT)
-            .await
-            .unwrap();
+        mgr.add_program_subscription(program_id, &COMMITMENT).await.unwrap();
 
         let status = tonic::Status::new(Code::Internal, "program stream error");
         let error = LaserstreamError::Status(status);
@@ -1998,10 +1875,9 @@ mod tests {
         // Program stream is at index 0 when only program stream exists
         factory.push_error_to_stream(0, error);
 
-        let result =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
 
         let (source, update) = result.expect("stream ended");
         assert_eq!(source, StreamUpdateSource::Program);
@@ -2108,8 +1984,7 @@ mod tests {
         }
 
         // All 85 pubkeys are subscribed.
-        let all: Vec<Pubkey> =
-            seed.iter().chain(batch.iter()).copied().collect();
+        let all: Vec<Pubkey> = seed.iter().chain(batch.iter()).copied().collect();
         assert_subscriptions_eq(&mgr, &all);
     }
 
@@ -2129,10 +2004,9 @@ mod tests {
 
         // next_update should return None (stream ended) since the
         // underlying channel was closed
-        let result =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let result = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
 
         // When a stream is closed, next_update returns None
         assert!(result.is_none());
@@ -2152,12 +2026,9 @@ mod tests {
         idx: usize,
     ) {
         factory.push_update_to_stream(idx, Ok(SubscribeUpdate::default()));
-        let update = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mgr.next_update(),
-        )
-        .await
-        .expect("next_update timed out");
+        let update = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
         assert!(update.is_some());
     }
 
@@ -2244,9 +2115,7 @@ mod tests {
         // child (the only ready one is the closed child, which the
         // StreamMap reaps) and then parks, so the timeout is expected.
         factory.close_stream(0);
-        let poll =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await;
+        let poll = tokio::time::timeout(Duration::from_millis(100), mgr.next_update()).await;
         assert!(poll.is_err(), "no update expected while reaping");
 
         assert_eq!(
@@ -2273,15 +2142,11 @@ mod tests {
 
         factory.push_error_to_stream(
             0,
-            LaserstreamError::Status(tonic::Status::new(
-                Code::Internal,
-                "test error",
-            )),
+            LaserstreamError::Status(tonic::Status::new(Code::Internal, "test error")),
         );
-        let update =
-            tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
-                .await
-                .expect("next_update timed out");
+        let update = tokio::time::timeout(Duration::from_millis(100), mgr.next_update())
+            .await
+            .expect("next_update timed out");
         assert!(matches!(update, Some((_, Err(_)))));
 
         let silence = mgr.max_stream_silence().expect("stream exists");

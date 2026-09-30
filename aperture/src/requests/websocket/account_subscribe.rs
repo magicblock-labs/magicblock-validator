@@ -11,9 +11,7 @@ impl WsDispatcher {
         request: &JsonRequest,
     ) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
-        let config = request
-            .optional::<RpcAccountInfoConfig>(1)?
-            .unwrap_or_default();
+        let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let encoder = AccountEncoder {
             encoding,
@@ -28,8 +26,7 @@ impl WsDispatcher {
             while let Some(account) = rx.recv().await {
                 let account: AccountSharedData = account;
                 let slot = context_slot(&engine);
-                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id)
-                else {
+                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id) else {
                     continue;
                 };
                 if tx.send(bytes).await.is_err() {

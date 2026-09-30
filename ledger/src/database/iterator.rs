@@ -1,4 +1,4 @@
-pub use rocksdb::Direction as IteratorDirection;
+pub(crate) use rocksdb::Direction as IteratorDirection;
 
 pub enum IteratorMode<Index> {
     Start,

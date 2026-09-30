@@ -13,9 +13,7 @@ use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
+        accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     },
     validator::authority,
 };
@@ -27,9 +25,9 @@ const PDA_IDX: u16 = 1;
 /// magic program's `AcceptScheduleCommits`. Claims ownership of the fresh,
 /// system-owned, zero-lamport PDA directly - no ephemeral system program CPI
 /// is needed since no lamports are transferred.
-pub fn process_create_outbox_intent(
+pub(crate) fn process_create_outbox_intent(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     data: Vec<u8>,
 ) -> Result<(), InstructionError> {
     validate(&signers, invoke_context, &data)?;
@@ -38,7 +36,7 @@ pub fn process_create_outbox_intent(
 
 fn validate(
     signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     data: &[u8],
 ) -> Result<(), InstructionError> {
     OutboxIntentBundle::try_from_bytes(data).map_err(|_| {
@@ -51,8 +49,7 @@ fn validate(
 
     let transaction_context = &*invoke_context.transaction_context;
 
-    let sponsor =
-        *get_instruction_pubkey_with_idx(transaction_context, SPONSOR_IDX)?;
+    let sponsor = *get_instruction_pubkey_with_idx(transaction_context, SPONSOR_IDX)?;
     let validator_auth = authority();
     if sponsor != validator_auth {
         ic_msg!(
@@ -78,7 +75,7 @@ fn validate(
 /// Validates that the account at `idx` is an empty system-owned account
 /// (0 lamports, system program owner), ready to be claimed as the outbox PDA.
 fn validate_new_pda(
-    transaction_context: &TransactionContext,
+    transaction_context: &TransactionContext<'_>,
     idx: u16,
 ) -> Result<(), InstructionError> {
     let pda_acc = get_instruction_account_with_idx(transaction_context, idx)?;
@@ -90,13 +87,12 @@ fn validate_new_pda(
 }
 
 fn create_ephemeral_outbox_account(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     pda_idx: u16,
     data: Vec<u8>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
-    let pda_acc =
-        get_instruction_account_with_idx(transaction_context, pda_idx)?;
+    let pda_acc = get_instruction_account_with_idx(transaction_context, pda_idx)?;
 
     let mut acc = pda_acc.borrow_mut()?;
     acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);

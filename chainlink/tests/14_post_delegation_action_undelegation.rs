@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use dlp_api::{
@@ -33,16 +35,15 @@ fn add_delegation_record_with_failing_action(
         commit_frequency_ms: 2_000,
     };
     let mut data = vec![0; DelegationRecord::size_with_discriminator()];
-    record.to_bytes_with_discriminator(&mut data).unwrap();
+    record
+        .to_bytes_with_discriminator(&mut data)
+        .expect("delegation record fixture serializes");
 
     let actions = PostDelegationActions {
         inserted_signers: 0,
         inserted_non_signers: 0,
         // index 0 -> the delegated target, index 1 -> v42 program
-        signers: vec![
-            *delegated_pubkey.as_array(),
-            *v42_calculator_interface::ID.as_array(),
-        ],
+        signers: vec![*delegated_pubkey.as_array(), *v42_calculator_interface::ID.as_array()],
         non_signers: vec![],
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 1,
@@ -56,7 +57,9 @@ fn add_delegation_record_with_failing_action(
             },
         }],
     };
-    data.extend_from_slice(&borsh::to_vec(&actions).unwrap());
+    data.extend_from_slice(
+        &borsh::to_vec(&actions).expect("post-delegation actions fixture serializes"),
+    );
 
     ctx.rpc_client.add_account(
         delegation_record_pda_from_delegated_account(&delegated_pubkey),
@@ -104,15 +107,11 @@ async fn failing_post_delegation_action_is_rejected() {
 
     // Both attempts must reach execution: an error alone cannot distinguish
     // activation rejection from the existing fixture's rejected rescue.
-    for program in [
-        v42_calculator_interface::ID,
-        magicblock_magic_program_api::id(),
-    ] {
-        let completed =
-            tokio::time::timeout(Duration::from_secs(4), processed.recv())
-                .await
-                .expect("activation and rescue are processed")
-                .expect("processed stream remains open");
+    for program in [v42_calculator_interface::ID, magicblock_magic_program_api::id()] {
+        let completed = tokio::time::timeout(Duration::from_secs(4), processed.recv())
+            .await
+            .expect("activation and rescue are processed")
+            .expect("processed stream remains open");
         let keys = completed.transaction.static_account_keys();
         assert!(keys.contains(&delegated_pubkey));
         assert!(

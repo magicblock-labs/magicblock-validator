@@ -1,3 +1,7 @@
+// This module is a test fixture even when enabled through dev-context; fail
+// immediately when fixture setup or assertions cannot be satisfied.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 #[cfg(any(test, feature = "dev-context"))]
 pub mod accounts;
 #[cfg(any(test, feature = "dev-context"))]
@@ -18,8 +22,7 @@ pub use utils::init_logger;
 
 #[cfg(test)]
 pub fn pending_metric_test_lock() -> &'static tokio::sync::Mutex<()> {
-    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
-        std::sync::OnceLock::new();
+    static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
@@ -140,11 +143,7 @@ macro_rules! assert_cloned_as_undelegated {
                 .read(pubkey, reader)
                 .unwrap()
                 .expect(&format!("Expected account {} to be cloned", pubkey));
-            assert!(
-                !account.0,
-                "Expected account {} to be undelegated",
-                pubkey
-            );
+            assert!(!account.0, "Expected account {} to be undelegated", pubkey);
             assert_eq!(
                 account.1, $slot,
                 "Expected account {} to have remote slot {}",
@@ -168,11 +167,7 @@ macro_rules! assert_cloned_as_undelegated {
                 .read(pubkey, reader)
                 .unwrap()
                 .expect(&format!("Expected account {} to be cloned", pubkey));
-            assert!(
-                !account.0,
-                "Expected account {} to be undelegated",
-                pubkey
-            );
+            assert!(!account.0, "Expected account {} to be undelegated", pubkey);
             assert_eq!(
                 account.1, $slot,
                 "Expected account {} to have remote slot {}",
@@ -398,13 +393,8 @@ macro_rules! assert_loaded_program {
 #[macro_export]
 macro_rules! assert_loaded_program_with_size {
     ($cloner:expr, $program_id:expr, $auth:expr, $loader:expr, $loader_status:expr, $size:expr) => {{
-        let loaded_program = $crate::assert_loaded_program!(
-            $cloner,
-            $program_id,
-            $auth,
-            $loader,
-            $loader_status
-        );
+        let loaded_program =
+            $crate::assert_loaded_program!($cloner, $program_id, $auth, $loader, $loader_status);
         let actual_size = loaded_program.program_data.len();
         let (min, max) = $crate::min_max_with_deviation_percent!($size, 5.0);
         assert!(
@@ -445,13 +435,8 @@ macro_rules! min_max_with_deviation_percent {
 #[macro_export]
 macro_rules! assert_loaded_program_with_min_size {
     ($cloner:expr, $program_id:expr, $auth:expr, $loader:expr, $loader_status:expr, $size:expr) => {{
-        let loaded_program = $crate::assert_loaded_program!(
-            $cloner,
-            $program_id,
-            $auth,
-            $loader,
-            $loader_status
-        );
+        let loaded_program =
+            $crate::assert_loaded_program!($cloner, $program_id, $auth, $loader, $loader_status);
         assert!(loaded_program.program_data.len() >= $size);
     }};
 }

@@ -16,7 +16,8 @@ pub const DEFAULT_ENGINE_LEDGER_DIRECTORY: &str = "magicblock-test-storage/";
 
 /// WARNING: This keypair is for development/testing only.
 /// Production deployments MUST provide their own keypair via config file, env var, or CLI argument.
-pub const DEFAULT_VALIDATOR_KEYPAIR: &str = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
+pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
+    "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
 
 /// Default compute unit price in microlamports
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;

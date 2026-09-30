@@ -1,6 +1,4 @@
-use solana_rpc_client_api::{
-    client_error, response::RpcSimulateTransactionResult,
-};
+use solana_rpc_client_api::{client_error, response::RpcSimulateTransactionResult};
 use solana_sdk::signature::Signature;
 
 pub fn get_rpc_transwise_error_msg(err: &anyhow::Error) -> Option<String> {
@@ -18,19 +16,19 @@ pub fn get_rpc_transwise_error_msg(err: &anyhow::Error) -> Option<String> {
         })
 }
 
-pub fn stringify_simulation_result(
-    res: RpcSimulateTransactionResult,
-    sig: &Signature,
-) -> String {
+pub fn stringify_simulation_result(res: RpcSimulateTransactionResult, sig: &Signature) -> String {
     let mut msg = String::new();
     let error = res.err.map(|e| format!("Error: {:?}", e));
-    let logs = res.logs.map(|logs| {
-        if logs.is_empty() {
-            "".to_string()
-        } else {
-            logs.join("\n  ").to_string()
-        }
-    });
+    let logs =
+        res.logs.map(
+            |logs| {
+                if logs.is_empty() {
+                    "".to_string()
+                } else {
+                    logs.join("\n  ").to_string()
+                }
+            },
+        );
     let accounts = res.accounts.map_or("".to_string(), |accounts| {
         format!(
             "{:?}",
@@ -40,9 +38,8 @@ pub fn stringify_simulation_result(
                 .collect::<Vec<_>>()
         )
     });
-    let replacement_blockhash = res
-        .replacement_blockhash
-        .map(|b| format!("Replacement Blockhash: {:?}", b));
+    let replacement_blockhash =
+        res.replacement_blockhash.map(|b| format!("Replacement Blockhash: {:?}", b));
 
     msg.push_str(format!("Simulation Result: {}\n", sig).as_str());
     if !accounts.is_empty() {

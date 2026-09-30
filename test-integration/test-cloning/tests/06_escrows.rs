@@ -1,9 +1,7 @@
-use integration_test_tools::{
-    dlp_interface, init_logger, IntegrationTestContext,
-};
+use integration_test_tools::{dlp_interface, init_logger, IntegrationTestContext};
 use solana_sdk::{
-    account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
-    signature::Keypair, signer::Signer,
+    account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
 use solana_system_interface::instruction as system_instruction;
 use tracing::*;
@@ -45,9 +43,8 @@ fn test_cloning_escrowed_payer() {
         &delegated_kp.pubkey(),
         LAMPORTS_PER_SOL / 2,
     );
-    let (_sig, _found) = ctx
-        .send_and_confirm_instructions_with_payer_ephem(&[ix], &escrowed_kp)
-        .unwrap();
+    let (_sig, _found) =
+        ctx.send_and_confirm_instructions_with_payer_ephem(&[ix], &escrowed_kp).unwrap();
 
     // When it completes we should see an unchanged escrow inside the validator
     let (escrow_pda, after_tx_acc) = get_escrow_pda_ephem(&ctx, &escrowed_kp);

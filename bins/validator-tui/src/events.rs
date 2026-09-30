@@ -10,25 +10,17 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EventAction {
+pub(crate) enum EventAction {
     None,
     FetchTransaction { rpc_url: String, signature: String },
     OpenUrl(String),
 }
 
-pub fn poll_event(timeout: Duration) -> Option<Event> {
-    if event::poll(timeout).ok()? {
-        event::read().ok()
-    } else {
-        None
-    }
+pub(crate) fn poll_event(timeout: Duration) -> Option<Event> {
+    if event::poll(timeout).ok()? { event::read().ok() } else { None }
 }
 
-pub fn handle_event(
-    state: &mut TuiState,
-    event: Event,
-    terminal_area: Rect,
-) -> EventAction {
+pub(crate) fn handle_event(state: &mut TuiState, event: Event, terminal_area: Rect) -> EventAction {
     if let Event::Key(key) = event {
         handle_key(state, key, terminal_area)
     } else {
@@ -36,27 +28,19 @@ pub fn handle_event(
     }
 }
 
-fn handle_key(
-    state: &mut TuiState,
-    key: KeyEvent,
-    terminal_area: Rect,
-) -> EventAction {
+fn handle_key(state: &mut TuiState, key: KeyEvent, terminal_area: Rect) -> EventAction {
     let visible_height = terminal_area.height.saturating_sub(9) as usize;
 
     if state.view_mode == ViewMode::Detail {
         match key.code {
             KeyCode::Esc | KeyCode::Char('q') => state.close_tx_detail(),
-            KeyCode::Char('c')
-                if key.modifiers.contains(KeyModifiers::CONTROL) =>
-            {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 state.close_tx_detail();
             }
             KeyCode::Enter => {
                 if let Some(detail) = &state.tx_detail {
                     let url = match detail.selected_account_address() {
-                        Some(account) => {
-                            build_account_explorer_url(&detail.rpc_url, account)
-                        }
+                        Some(account) => build_account_explorer_url(&detail.rpc_url, account),
                         None => detail.explorer_url.clone(),
                     };
                     state.close_tx_detail();
@@ -76,8 +60,7 @@ fn handle_key(
             }
             KeyCode::PageUp => {
                 if let Some(detail) = &mut state.tx_detail {
-                    let page_size =
-                        detail_popup_page_size(detail, terminal_area);
+                    let page_size = detail_popup_page_size(detail, terminal_area);
                     detail.scroll_content_page_up(page_size);
                 }
             }
@@ -95,8 +78,7 @@ fn handle_key(
             }
             KeyCode::End => {
                 if let Some(detail) = &mut state.tx_detail {
-                    let (_, max_scroll) =
-                        detail_popup_scroll_metrics(detail, terminal_area);
+                    let (_, max_scroll) = detail_popup_scroll_metrics(detail, terminal_area);
                     detail.scroll_content_end(max_scroll);
                 }
             }
@@ -105,13 +87,7 @@ fn handle_key(
         return EventAction::None;
     }
 
-    if matches!(
-        key,
-        KeyEvent {
-            code: KeyCode::Esc,
-            ..
-        }
-    ) {
+    if matches!(key, KeyEvent { code: KeyCode::Esc, .. }) {
         state.should_quit = true;
         return EventAction::None;
     }
@@ -203,13 +179,10 @@ fn handle_key(
         KeyCode::Char('4') => state.select_tab_by_shortcut(4),
         KeyCode::Up | KeyCode::Char('k') => state.scroll_up(),
         KeyCode::Down | KeyCode::Char('j') => match state.active_tab {
-            Tab::Logs => state.scroll_logs_down_for_terminal(
-                terminal_area.width,
-                terminal_area.height,
-            ),
-            Tab::Transactions | Tab::RemoteTransactions => {
-                state.scroll_down(visible_height)
+            Tab::Logs => {
+                state.scroll_logs_down_for_terminal(terminal_area.width, terminal_area.height)
             }
+            Tab::Transactions | Tab::RemoteTransactions => state.scroll_down(visible_height),
             Tab::Config => {}
         },
         KeyCode::PageUp => {
@@ -220,10 +193,8 @@ fn handle_key(
         KeyCode::PageDown => {
             for _ in 0..10 {
                 match state.active_tab {
-                    Tab::Logs => state.scroll_logs_down_for_terminal(
-                        terminal_area.width,
-                        terminal_area.height,
-                    ),
+                    Tab::Logs => state
+                        .scroll_logs_down_for_terminal(terminal_area.width, terminal_area.height),
                     Tab::Transactions | Tab::RemoteTransactions => {
                         state.scroll_down(visible_height)
                     }
@@ -239,10 +210,9 @@ fn handle_key(
             Tab::Config => {}
         },
         KeyCode::End => match state.active_tab {
-            Tab::Logs => state.scroll_logs_end_for_terminal(
-                terminal_area.width,
-                terminal_area.height,
-            ),
+            Tab::Logs => {
+                state.scroll_logs_end_for_terminal(terminal_area.width, terminal_area.height)
+            }
             Tab::Transactions | Tab::RemoteTransactions => {
                 state.scroll_transactions_end(visible_height);
             }
@@ -272,10 +242,7 @@ fn build_account_explorer_url(rpc_url: &str, account: &str) -> String {
     )
 }
 
-fn detail_popup_page_size(
-    detail: &crate::state::TransactionDetail,
-    area: Rect,
-) -> usize {
+fn detail_popup_page_size(detail: &crate::state::TransactionDetail, area: Rect) -> usize {
     detail_popup_viewport_for_terminal(detail, area.width, area.height)
         .map(|viewport| viewport.inner_height.max(1))
         .unwrap_or(1)
@@ -296,10 +263,7 @@ mod tests {
     use ratatui::layout::Rect;
 
     use super::{EventAction, handle_event};
-    use crate::state::{
-        Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState,
-        ViewMode,
-    };
+    use crate::state::{Tab, TransactionAccount, TransactionDetail, TuiConfig, TuiState, ViewMode};
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -389,14 +353,8 @@ mod tests {
 
         match action {
             EventAction::OpenUrl(url) => {
-                assert!(
-                    url.contains("/address/11111111111111111111111111111111")
-                );
-                assert!(
-                    url.contains(
-                        "customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"
-                    )
-                );
+                assert!(url.contains("/address/11111111111111111111111111111111"));
+                assert!(url.contains("customUrl=http%3A%2F%2F127%2E0%2E0%2E1%3A8898"));
             }
             other => panic!("expected OpenUrl action, got {:?}", other),
         }
@@ -492,10 +450,7 @@ mod tests {
 
         let _ = handle_event(
             &mut state,
-            Event::Key(KeyEvent::new(
-                KeyCode::Char('u'),
-                KeyModifiers::CONTROL,
-            )),
+            Event::Key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL)),
             terminal_area(),
         );
         assert_eq!(state.tx_filter_query(), "");
@@ -561,14 +516,7 @@ mod tests {
             terminal_area(),
         );
 
-        assert!(
-            state
-                .tx_detail
-                .as_ref()
-                .map(|d| d.detail_scroll)
-                .unwrap_or(0)
-                > 0
-        );
+        assert!(state.tx_detail.as_ref().map(|d| d.detail_scroll).unwrap_or(0) > 0);
 
         let _ = handle_event(
             &mut state,
@@ -577,11 +525,7 @@ mod tests {
         );
 
         assert_eq!(
-            state
-                .tx_detail
-                .as_ref()
-                .map(|d| d.detail_scroll)
-                .unwrap_or(1),
+            state.tx_detail.as_ref().map(|d| d.detail_scroll).unwrap_or(1),
             0
         );
     }

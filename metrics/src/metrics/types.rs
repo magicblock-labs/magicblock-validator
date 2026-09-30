@@ -72,9 +72,7 @@ impl AccountFetchEntrypoint {
 
     fn signature(&self) -> Option<&Signature> {
         match self {
-            Self::SendTransaction(sig) | Self::SimulateTransaction(sig) => {
-                Some(sig)
-            }
+            Self::SendTransaction(sig) | Self::SimulateTransaction(sig) => Some(sig),
             _ => None,
         }
     }
@@ -114,14 +112,10 @@ impl AccountFetchReason {
             Self::DelegationRecord => "delegation_record",
             Self::ProgramData => "program_data",
             Self::ActionDependencyMissing => "action_dependency_missing",
-            Self::ActionDependencyForcedRefresh => {
-                "action_dependency_forced_refresh"
-            }
+            Self::ActionDependencyForcedRefresh => "action_dependency_forced_refresh",
             Self::UndelegatingRefresh => "undelegating_refresh",
             Self::SubscriptionUpdateClone => "subscription_update_clone",
-            Self::SubscriptionUpdateGreedyDiscovery => {
-                "subscription_update_greedy_discovery"
-            }
+            Self::SubscriptionUpdateGreedyDiscovery => "subscription_update_greedy_discovery",
             Self::AtaProjection => "ata_projection",
             Self::ProgramLoad => "program_load",
             Self::Clock => "clock",
@@ -149,10 +143,7 @@ pub struct AccountFetchContext {
 }
 
 impl AccountFetchContext {
-    fn new(
-        entrypoint: AccountFetchEntrypoint,
-        reason: AccountFetchReason,
-    ) -> Self {
+    fn new(entrypoint: AccountFetchEntrypoint, reason: AccountFetchReason) -> Self {
         Self {
             entrypoint,
             reason,
@@ -219,8 +210,7 @@ impl AccountFetchContext {
     }
 
     pub fn add_remote_account_claims(&self, count: usize) {
-        self.remote_account_claims
-            .fetch_add(count as u64, Ordering::Relaxed);
+        self.remote_account_claims.fetch_add(count as u64, Ordering::Relaxed);
     }
 
     pub fn remote_account_claims_value(&self) -> u64 {
@@ -281,12 +271,8 @@ impl ChainlinkPendingFetchOutcome {
             Self::JoinedExisting => "joined_existing",
             Self::OwnerSucceeded => "owner_succeeded",
             Self::OwnerFailed => "owner_failed",
-            Self::ResolvedBySubscriptionUpdate => {
-                "resolved_by_subscription_update"
-            }
-            Self::RpcFetchCompletedAfterUpdate => {
-                "rpc_fetch_completed_after_update"
-            }
+            Self::ResolvedBySubscriptionUpdate => "resolved_by_subscription_update",
+            Self::RpcFetchCompletedAfterUpdate => "rpc_fetch_completed_after_update",
         }
     }
 }
@@ -777,8 +763,7 @@ mod tests {
     fn account_fetch_context_signature_is_for_transaction_entrypoints() {
         let signature = Signature::from([1u8; 64]);
         let send_context = AccountFetchContext::send_transaction(signature);
-        let simulate_context =
-            AccountFetchContext::simulate_transaction(signature);
+        let simulate_context = AccountFetchContext::simulate_transaction(signature);
         for context in [&send_context, &simulate_context] {
             assert_eq!(context.signature(), Some(&signature));
             assert_eq!(context.entrypoint().signature(), Some(&signature));
@@ -787,9 +772,7 @@ mod tests {
         let contexts = [
             AccountFetchContext::rpc_get_account(),
             AccountFetchContext::rpc_get_multiple_accounts(),
-            AccountFetchContext::subscription_update(
-                AccountFetchReason::SubscriptionUpdateClone,
-            ),
+            AccountFetchContext::subscription_update(AccountFetchReason::SubscriptionUpdateClone),
             AccountFetchContext::project_ata(),
             AccountFetchContext::internal(AccountFetchReason::Clock),
         ];
@@ -802,9 +785,7 @@ mod tests {
 
     #[test]
     fn simulation_requested_accounts_count_remote_account_claims() {
-        let context = AccountFetchContext::simulate_transaction(
-            Signature::from([1u8; 64]),
-        );
+        let context = AccountFetchContext::simulate_transaction(Signature::from([1u8; 64]));
         assert!(context.should_count_remote_account_claims());
         assert!(
             !context

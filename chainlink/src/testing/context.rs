@@ -24,8 +24,7 @@ use crate::{
     errors::ChainlinkResult,
     fetch_cloner::FetchCloner,
     remote_account_provider::{
-        RemoteAccountProvider,
-        chain_pubsub_client::mock::ChainPubsubClientMock,
+        RemoteAccountProvider, chain_pubsub_client::mock::ChainPubsubClientMock,
         config::RemoteAccountProviderConfig,
     },
     testing::{
@@ -35,8 +34,7 @@ use crate::{
         utils::create_test_subscribed_accounts_with_config,
     },
 };
-pub type TestChainlink =
-    InnerChainlink<ChainRpcClientMock, ChainPubsubClientMock>;
+pub type TestChainlink = InnerChainlink<ChainRpcClientMock, ChainPubsubClientMock>;
 
 #[derive(Clone)]
 pub struct TestContext {
@@ -50,13 +48,8 @@ pub struct TestContext {
 
 impl TestContext {
     pub async fn init(slot: Slot) -> Self {
-        Self::init_with_config_and_risk(
-            slot,
-            RemoteAccountProviderConfig::default(),
-            None,
-            None,
-        )
-        .await
+        Self::init_with_config_and_risk(slot, RemoteAccountProviderConfig::default(), None, None)
+            .await
     }
 
     pub async fn init_with_risk_service(
@@ -72,10 +65,7 @@ impl TestContext {
         .await
     }
 
-    pub async fn init_with_config(
-        slot: Slot,
-        config: RemoteAccountProviderConfig,
-    ) -> Self {
+    pub async fn init_with_config(slot: Slot, config: RemoteAccountProviderConfig) -> Self {
         Self::init_with_config_and_risk(slot, config, None, None).await
     }
 
@@ -97,11 +87,9 @@ impl TestContext {
     ) -> Self {
         super::init_logger();
         let (rpc_client, pubsub_client) = {
-            let rpc_client =
-                ChainRpcClientMockBuilder::new().slot(slot).build();
+            let rpc_client = ChainRpcClientMockBuilder::new().slot(slot).build();
             let (updates_sndr, updates_rcvr) = mpsc::channel(100);
-            let pubsub_client =
-                ChainPubsubClientMock::new(updates_sndr, updates_rcvr);
+            let pubsub_client = ChainPubsubClientMock::new(updates_sndr, updates_rcvr);
             (rpc_client, pubsub_client)
         };
 
@@ -109,9 +97,7 @@ impl TestContext {
             let dirs = Dirs::default();
             let mut builder = keeper_builder(&dirs);
             builder.accountsdb.lru_capacity = capacity;
-            Rc::new(
-                TestEngine::from_builder(dirs, builder, Pacing::External).await,
-            )
+            Rc::new(TestEngine::from_builder(dirs, builder, Pacing::External).await)
         } else {
             Rc::new(TestEngine::new().await)
         };
@@ -119,9 +105,8 @@ impl TestContext {
         let validator_keypair = Keypair::new();
         let validator_pubkey = validator_keypair.pubkey();
         let fetch_cloner = {
-            let (tx, rx) = tokio::sync::mpsc::channel(100);
-            let subscribed_accounts =
-                create_test_subscribed_accounts_with_config(&config);
+            let (tx, rx) = mpsc::channel(100);
+            let subscribed_accounts = create_test_subscribed_accounts_with_config(&config);
 
             let provider = Arc::new(
                 RemoteAccountProvider::try_new_from_clients(
@@ -144,8 +129,7 @@ impl TestContext {
                 risk_service,
             )
         };
-        let chainlink =
-            InnerChainlink::try_new(bank.clone(), Some(fetch_cloner)).unwrap();
+        let chainlink = InnerChainlink::try_new(bank.clone(), Some(fetch_cloner)).unwrap();
         Self {
             rpc_client,
             pubsub_client,
@@ -156,41 +140,25 @@ impl TestContext {
         }
     }
 
-    pub async fn send_account_update<T: Into<Account>>(
-        &self,
-        pubkey: Pubkey,
-        account: T,
-    ) {
+    pub async fn send_account_update<T: Into<Account>>(&self, pubkey: Pubkey, account: T) {
         let account = account.into();
         // When a subscription update is sent this means that the Solana account updated and
         // thus it makes sense to keep our RpcClient in sync.
         self.rpc_client.add_account(pubkey, account.clone());
         let slot = self.rpc_client.get_slot();
 
-        self.pubsub_client
-            .send_account_update(pubkey, slot, &account)
-            .await;
+        self.pubsub_client.send_account_update(pubkey, slot, &account).await;
     }
 
-    pub async fn wait_for_account_updates(
-        &self,
-        count: u64,
-        timeout_millis: Option<u64>,
-    ) -> bool {
+    pub async fn wait_for_account_updates(&self, count: u64, timeout_millis: Option<u64>) -> bool {
         let timeout = timeout_millis
             .map(Duration::from_millis)
             .unwrap_or_else(|| Duration::from_secs(1));
-        let fetch_cloner = self
-            .chainlink
-            .fetch_cloner()
-            .expect("test Chainlink has a fetch cloner");
+        let fetch_cloner =
+            self.chainlink.fetch_cloner().expect("test Chainlink has a fetch cloner");
         let target_count = fetch_cloner.processed_updates_count() + count;
-        self.wait_for_processed_account_updates(
-            fetch_cloner,
-            target_count,
-            timeout,
-        )
-        .await
+        self.wait_for_processed_account_updates(fetch_cloner, target_count, timeout)
+            .await
     }
 
     async fn wait_for_processed_account_updates(
@@ -221,21 +189,15 @@ impl TestContext {
         account: T,
         timeout_millis: Option<u64>,
     ) -> bool {
-        let fetch_cloner = self
-            .chainlink
-            .fetch_cloner()
-            .expect("test Chainlink has a fetch cloner");
+        let fetch_cloner =
+            self.chainlink.fetch_cloner().expect("test Chainlink has a fetch cloner");
         let target_count = fetch_cloner.processed_updates_count() + 1;
         self.send_account_update(pubkey, account).await;
         let timeout = timeout_millis
             .map(Duration::from_millis)
             .unwrap_or_else(|| Duration::from_secs(1));
-        self.wait_for_processed_account_updates(
-            fetch_cloner,
-            target_count,
-            timeout,
-        )
-        .await
+        self.wait_for_processed_account_updates(fetch_cloner, target_count, timeout)
+            .await
     }
 
     pub async fn wait_for_local_account(
@@ -250,10 +212,7 @@ impl TestContext {
                 // A borrowed account can expose its new image before AccountsDB
                 // finishes moving it between storage backends. The account
                 // notification is emitted only after that commit completes.
-                updates
-                    .recv()
-                    .await
-                    .expect("local account update channel closed");
+                updates.recv().await.expect("local account update channel closed");
                 let matches = bank
                     .accounts()
                     .loader()
@@ -278,10 +237,7 @@ impl TestContext {
 
     pub async fn ensure_account(&self, pubkey: &Pubkey) -> ChainlinkResult<()> {
         self.chainlink
-            .ensure_accounts(
-                &[*pubkey],
-                AccountFetchEntrypoint::RpcGetMultipleAccounts,
-            )
+            .ensure_accounts(&[*pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
             .await
             .map(|_| ())
     }
@@ -326,14 +282,11 @@ impl TestContext {
 
         // Committor service then requests undelegation on chain
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();
-        let undelegated_acc: AccountSharedData =
-            AccountBuilder::from(account_shared_with_owner_and_slot(
-                &acc.account,
-                *owner,
-                self.rpc_client.get_slot(),
-            ))
-            .mode(AccountMode::ReadOnly)
-            .build();
+        let undelegated_acc: AccountSharedData = AccountBuilder::from(
+            account_shared_with_owner_and_slot(&acc.account, *owner, self.rpc_client.get_slot()),
+        )
+        .mode(AccountMode::ReadOnly)
+        .build();
         let delegation_record_pubkey =
             dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
@@ -356,35 +309,25 @@ impl TestContext {
         owner: &Pubkey,
     ) -> ChainlinkResult<DelegateResult> {
         // Add new delegation record on chain
-        let delegation_record_pubkey = add_delegation_record_for(
-            &self.rpc_client,
-            *pubkey,
-            *authority,
-            *owner,
-        );
+        let delegation_record_pubkey =
+            add_delegation_record_for(&self.rpc_client, *pubkey, *authority, *owner);
 
         // Update account to be delegated on chain and send a sub update
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();
-        let delegated_acc =
-            account_shared_with_owner(&acc.account, dlp_api::id());
+        let delegated_acc = account_shared_with_owner(&acc.account, dlp_api::id());
         let mode = if authority == &self.validator_pubkey {
             AccountMode::Delegated
         } else {
             AccountMode::ReadOnly
         };
-        let expected = AccountBuilder::from(AccountSharedData::from(
-            delegated_acc.owned(),
-        ))
-        .owner(*owner)
-        .slot(self.rpc_client.get_slot())
-        .mode(mode)
-        .build();
-        self.materialize_subscription_update(*pubkey, delegated_acc, &expected)
-            .await;
+        let expected = AccountBuilder::from(AccountSharedData::from(delegated_acc.owned()))
+            .owner(*owner)
+            .slot(self.rpc_client.get_slot())
+            .mode(mode)
+            .build();
+        self.materialize_subscription_update(*pubkey, delegated_acc, &expected).await;
 
-        Ok(DelegateResult {
-            delegation_record_pubkey,
-        })
+        Ok(DelegateResult { delegation_record_pubkey })
     }
 
     /// Waits for both the committed image and subsequent subscription cleanup.
@@ -396,17 +339,10 @@ impl TestContext {
     ) {
         let mut local_updates = self.bank.accounts().subscribe(pubkey);
         assert!(
-            self.send_and_receive_account_update(pubkey, remote, Some(8_000))
-                .await,
+            self.send_and_receive_account_update(pubkey, remote, Some(8_000)).await,
             "subscription update and cleanup complete"
         );
-        Self::wait_for_local_account(
-            &self.bank,
-            &pubkey,
-            &mut local_updates,
-            expected,
-        )
-        .await;
+        Self::wait_for_local_account(&self.bank, &pubkey, &mut local_updates, expected).await;
     }
 }
 

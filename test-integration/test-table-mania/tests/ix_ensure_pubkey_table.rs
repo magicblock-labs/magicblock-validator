@@ -18,10 +18,7 @@ async fn test_ensure_pubkeys_table_existing_pubkey() {
     pubkeys_set.insert(pubkey);
 
     // Reserve the pubkey first
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_set).await.unwrap();
 
     // Get refcount before ensure_pubkeys_table
     let refcount_before = table_mania.get_pubkey_refcount(&pubkey).await;
@@ -31,10 +28,7 @@ async fn test_ensure_pubkeys_table_existing_pubkey() {
     let tables_count_before = table_mania.active_tables_count().await;
     debug!("Active tables before ensure: {}", tables_count_before);
 
-    table_mania
-        .ensure_pubkeys_table(&authority, &pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.ensure_pubkeys_table(&authority, &pubkeys_set).await.unwrap();
 
     // Get refcount after ensure_pubkeys_table
     let refcount_after = table_mania.get_pubkey_refcount(&pubkey).await;
@@ -71,10 +65,7 @@ async fn test_ensure_pubkeys_table_new_pubkey() {
     debug!("Active tables before ensure: {}", tables_count_before);
 
     // Ensure the pubkey exists - should create a new table
-    table_mania
-        .ensure_pubkeys_table(&authority, &pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.ensure_pubkeys_table(&authority, &pubkeys_set).await.unwrap();
 
     // Get refcount after ensure_pubkeys_table
     let refcount_after = table_mania.get_pubkey_refcount(&pubkey).await;
@@ -99,8 +90,7 @@ async fn test_ensure_pubkeys_table_new_pubkey() {
 }
 
 #[tokio::test]
-async fn test_ensure_pubkeys_table_of_reserved_pubkey_doesnt_affect_ref_count()
-{
+async fn test_ensure_pubkeys_table_of_reserved_pubkey_doesnt_affect_ref_count() {
     init_logger!();
     let authority = Keypair::new();
     let table_mania = utils::setup_table_mania(&authority).await;
@@ -110,10 +100,7 @@ async fn test_ensure_pubkeys_table_of_reserved_pubkey_doesnt_affect_ref_count()
     pubkeys_set.insert(pubkey);
 
     // 1. Reserve the pubkey first
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_set).await.unwrap();
 
     // assert that table refcount is 1
     let refcount_after_reserve = table_mania.get_pubkey_refcount(&pubkey).await;
@@ -125,10 +112,7 @@ async fn test_ensure_pubkeys_table_of_reserved_pubkey_doesnt_affect_ref_count()
     );
 
     // 2. Ensure pubkey
-    table_mania
-        .ensure_pubkeys_table(&authority, &pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.ensure_pubkeys_table(&authority, &pubkeys_set).await.unwrap();
 
     // assert that table refcount is still 1
     let refcount_after_ensure = table_mania.get_pubkey_refcount(&pubkey).await;
@@ -145,8 +129,7 @@ async fn test_ensure_pubkeys_table_of_reserved_pubkey_doesnt_affect_ref_count()
 }
 
 #[tokio::test]
-async fn test_ensure_pubkeys_multiple_some_reserved_some_not_all_have_final_refcount_one(
-) {
+async fn test_ensure_pubkeys_multiple_some_reserved_some_not_all_have_final_refcount_one() {
     init_logger!();
     let authority = Keypair::new();
     let table_mania = utils::setup_table_mania(&authority).await;
@@ -162,16 +145,11 @@ async fn test_ensure_pubkeys_multiple_some_reserved_some_not_all_have_final_refc
     reserved_pubkeys_set.insert(reserved_pubkey1);
     reserved_pubkeys_set.insert(reserved_pubkey2);
 
-    table_mania
-        .reserve_pubkeys(&authority, &reserved_pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.reserve_pubkeys(&authority, &reserved_pubkeys_set).await.unwrap();
 
     // Verify reserved pubkeys have refcount 1
-    let reserved_refcount1 =
-        table_mania.get_pubkey_refcount(&reserved_pubkey1).await;
-    let reserved_refcount2 =
-        table_mania.get_pubkey_refcount(&reserved_pubkey2).await;
+    let reserved_refcount1 = table_mania.get_pubkey_refcount(&reserved_pubkey1).await;
+    let reserved_refcount2 = table_mania.get_pubkey_refcount(&reserved_pubkey2).await;
     assert_eq!(reserved_refcount1, Some(1));
     assert_eq!(reserved_refcount2, Some(1));
 
@@ -188,16 +166,11 @@ async fn test_ensure_pubkeys_multiple_some_reserved_some_not_all_have_final_refc
     all_pubkeys_set.insert(new_pubkey1);
     all_pubkeys_set.insert(new_pubkey2);
 
-    table_mania
-        .ensure_pubkeys_table(&authority, &all_pubkeys_set)
-        .await
-        .unwrap();
+    table_mania.ensure_pubkeys_table(&authority, &all_pubkeys_set).await.unwrap();
 
     // Verify all pubkeys have refcount 1 after ensure
-    let final_refcount1 =
-        table_mania.get_pubkey_refcount(&reserved_pubkey1).await;
-    let final_refcount2 =
-        table_mania.get_pubkey_refcount(&reserved_pubkey2).await;
+    let final_refcount1 = table_mania.get_pubkey_refcount(&reserved_pubkey1).await;
+    let final_refcount2 = table_mania.get_pubkey_refcount(&reserved_pubkey2).await;
     let final_refcount3 = table_mania.get_pubkey_refcount(&new_pubkey1).await;
     let final_refcount4 = table_mania.get_pubkey_refcount(&new_pubkey2).await;
 

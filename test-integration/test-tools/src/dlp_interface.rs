@@ -19,26 +19,21 @@ pub fn create_topup_ixs(
     lamports: u64,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let topup_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
-        payer,
-        recvr,
-        Some(lamports),
-        None,
-    );
+    let topup_ix =
+        dlp_api::instruction_builder::top_up_ephemeral_balance(payer, recvr, Some(lamports), None);
     let mut ixs = vec![topup_ix];
     if let Some(validator) = validator {
-        let delegate_ix =
-            dlp_api::instruction_builder::delegate_ephemeral_balance(
-                payer,
-                recvr,
-                DelegateEphemeralBalanceArgs {
-                    delegate_args: DelegateArgs {
-                        validator: Some(validator),
-                        ..Default::default()
-                    },
+        let delegate_ix = dlp_api::instruction_builder::delegate_ephemeral_balance(
+            payer,
+            recvr,
+            DelegateEphemeralBalanceArgs {
+                delegate_args: DelegateArgs {
+                    validator: Some(validator),
                     ..Default::default()
                 },
-            );
+                ..Default::default()
+            },
+        );
         ixs.push(delegate_ix);
     }
     ixs
@@ -49,8 +44,7 @@ pub fn create_delegate_ixs(
     delegatee: Pubkey,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let change_owner_ix =
-        system_instruction::assign(&delegatee, &dlp_api::id());
+    let change_owner_ix = system_instruction::assign(&delegatee, &dlp_api::id());
     let delegate_ix = dlp_api::instruction_builder::delegate(
         payer,
         delegatee,
@@ -69,8 +63,7 @@ pub fn create_delegate_to_any_ixs(
     delegatee: Pubkey,
     validator: Option<Pubkey>,
 ) -> Vec<Instruction> {
-    let change_owner_ix =
-        system_instruction::assign(&delegatee, &dlp_api::id());
+    let change_owner_ix = system_instruction::assign(&delegatee, &dlp_api::id());
     let delegate_ix = dlp_api::instruction_builder::delegate_with_any_validator(
         payer,
         delegatee,
@@ -91,14 +84,8 @@ pub async fn top_up_ephemeral_fee_balance(
     sol: u64,
     validator: Option<Pubkey>,
 ) -> anyhow::Result<(Signature, Pubkey, Pubkey)> {
-    let ixs = create_topup_ixs(
-        payer.pubkey(),
-        recvr,
-        sol * LAMPORTS_PER_SOL,
-        validator,
-    );
-    let sig = send_instructions(rpc_client, &ixs, &[payer], "topup ephemeral")
-        .await?;
+    let ixs = create_topup_ixs(payer.pubkey(), recvr, sol * LAMPORTS_PER_SOL, validator);
+    let sig = send_instructions(rpc_client, &ixs, &[payer], "topup ephemeral").await?;
     let (ephemeral_balance_pda, deleg_record) = escrow_pdas(&recvr);
     debug!(
         "Top-up ephemeral balance {} {ephemeral_balance_pda} sig: {sig}, validator_id: {}",
@@ -149,12 +136,9 @@ async fn send_instructions(
     signers: &[&Keypair],
     label: &str,
 ) -> anyhow::Result<Signature> {
-    let recent_blockhash = rpc_client
-        .get_latest_blockhash()
-        .await
-        .expect("Failed to get recent blockhash");
-    let mut transaction =
-        Transaction::new_with_payer(ixs, Some(&signers[0].pubkey()));
+    let recent_blockhash =
+        rpc_client.get_latest_blockhash().await.expect("Failed to get recent blockhash");
+    let mut transaction = Transaction::new_with_payer(ixs, Some(&signers[0].pubkey()));
     transaction.sign(signers, recent_blockhash);
     send_transaction(rpc_client, &transaction, label).await
 }

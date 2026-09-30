@@ -42,10 +42,7 @@ async fn reserve_pubkeys_in_one_table_in_chunks(chunk_size: usize) {
     for chunk in pubkeys.chunks(chunk_size) {
         debug!("Storing chunk of size: {}", chunk.len());
         let chunk_hashset = HashSet::from_iter(chunk.iter().cloned());
-        table_mania
-            .reserve_pubkeys(&authority, &chunk_hashset)
-            .await
-            .unwrap();
+        table_mania.reserve_pubkeys(&authority, &chunk_hashset).await.unwrap();
     }
 
     utils::log_active_table_addresses(&table_mania).await;
@@ -86,16 +83,11 @@ reserve_pubkeys_in_multiple_tables!(512, 100);
 reserve_pubkeys_in_multiple_tables!(1_000, 20);
 reserve_pubkeys_in_multiple_tables!(2_100, 10);
 
-async fn reserve_pubkeys_in_multiple_tables_in_chunks(
-    amount: usize,
-    chunk_size: usize,
-) {
+async fn reserve_pubkeys_in_multiple_tables_in_chunks(amount: usize, chunk_size: usize) {
     init_logger!();
     let authority = Keypair::new();
 
-    let pubkeys = (0..amount)
-        .map(|_| Pubkey::new_unique())
-        .collect::<Vec<_>>();
+    let pubkeys = (0..amount).map(|_| Pubkey::new_unique()).collect::<Vec<_>>();
 
     let table_mania = utils::setup_table_mania(&authority).await;
 
@@ -105,22 +97,13 @@ async fn reserve_pubkeys_in_multiple_tables_in_chunks(
         let chunk_hashset = HashSet::from_iter(chunk.iter().cloned());
         let table_mania = table_mania.clone();
         let authority = authority.insecure_clone();
-        join_set.spawn(async move {
-            table_mania
-                .reserve_pubkeys(&authority, &chunk_hashset)
-                .await
-        });
+        join_set
+            .spawn(async move { table_mania.reserve_pubkeys(&authority, &chunk_hashset).await });
     }
-    join_set
-        .join_all()
-        .await
-        .into_iter()
-        .collect::<Result<Vec<_>, _>>()
-        .unwrap();
+    join_set.join_all().await.into_iter().collect::<Result<Vec<_>, _>>().unwrap();
 
     utils::log_active_table_addresses(&table_mania).await;
-    let expected_tables_count =
-        (amount as f32 / LOOKUP_TABLE_MAX_ADDRESSES as f32).ceil() as usize;
+    let expected_tables_count = (amount as f32 / LOOKUP_TABLE_MAX_ADDRESSES as f32).ceil() as usize;
     assert_eq!(
         table_mania.active_tables_count().await,
         expected_tables_count

@@ -6,10 +6,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     Pubkey,
-    args::{
-        AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs,
-        ScheduleTaskArgs,
-    },
+    args::{AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs},
     compat::Instruction,
     outbox::ExecutionStage,
 };
@@ -429,9 +426,7 @@ pub struct AccountModificationForInstruction {
 }
 
 /// Common fields for cloning an account.
-#[derive(
-    Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq,
-)]
+#[derive(Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct AccountCloneFields {
     pub lamports: u64,

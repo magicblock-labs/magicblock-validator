@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use setup::RpcTestEnv;
 use solana_hash::Hash;
 use solana_rpc_client_api::config::RpcBlockConfig;
@@ -11,12 +13,7 @@ async fn block_rpc_methods() {
     let initial = env.rpc.get_slot().await.expect("get slot");
 
     env.engine.advance(2).await;
-    drop(
-        env.engine
-            .barrier()
-            .await
-            .expect("advanced blocks are applied"),
-    );
+    drop(env.engine.barrier().await.expect("advanced blocks are applied"));
     let current = env.rpc.get_slot().await.expect("get advanced slot");
     assert!(current > initial);
     assert_eq!(
@@ -32,12 +29,7 @@ async fn block_rpc_methods() {
     assert_ne!(blockhash, Hash::default());
     assert_eq!(env.rpc.get_latest_blockhash().await.unwrap(), blockhash);
     assert!(last_valid_slot > current);
-    assert!(
-        env.rpc
-            .is_blockhash_valid(&blockhash, Default::default())
-            .await
-            .unwrap()
-    );
+    assert!(env.rpc.is_blockhash_valid(&blockhash, Default::default()).await.unwrap());
     assert!(
         !env.rpc
             .is_blockhash_valid(&Hash::new_unique(), Default::default())
@@ -70,11 +62,7 @@ async fn block_rpc_methods() {
         .await
         .expect("get transaction block");
     assert_eq!(block.block_height, Some(transaction_slot));
-    assert!(
-        block
-            .transactions
-            .is_some_and(|transactions| !transactions.is_empty())
-    );
+    assert!(block.transactions.is_some_and(|transactions| !transactions.is_empty()));
     assert_eq!(
         env.rpc.get_block_time(transaction_slot).await.unwrap(),
         transaction_slot as i64
@@ -82,12 +70,7 @@ async fn block_rpc_methods() {
     assert!(env.rpc.get_block(transaction_slot + 100).await.is_err());
 
     env.engine.advance(10).await;
-    drop(
-        env.engine
-            .barrier()
-            .await
-            .expect("advanced blocks are applied"),
-    );
+    drop(env.engine.barrier().await.expect("advanced blocks are applied"));
     let latest = env.rpc.get_slot().await.unwrap();
     let start = latest - 3;
     assert_eq!(
