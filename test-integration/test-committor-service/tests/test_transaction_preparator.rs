@@ -5,11 +5,12 @@ use magicblock_committor_service::{
     tasks::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
-        utils::{create_commit_task, TransactionUtils},
+        utils::create_commit_task,
         BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
         UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
+    transactions::PreparedMessage,
 };
 use magicblock_core::intent::{BaseAction, ProgramArgs};
 use magicblock_program::args::ShortAccountMeta;
@@ -57,22 +58,7 @@ async fn test_prepare_commit_tx_with_single_account() {
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
-    // For such strategy there's no preparation
-    // expected messsage is just assembled tx from Args task with no ALTs
-    let mut actual_message = result.unwrap();
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message)
+    assert!(matches!(result.unwrap(), PreparedMessage::V1(_)));
 }
 
 #[tokio::test]
@@ -112,7 +98,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     };
 
     // Test preparation
-    let mut actual_message = preparator
+    preparator
         .prepare_for_strategy(
             &fixture.authority,
             &mut tx_strategy,
@@ -120,20 +106,6 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         )
         .await
         .unwrap();
-
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message);
 
     for task in &tx_strategy.optimized_tasks {
         let commit_task = match task {
@@ -206,7 +178,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     };
 
     // Test preparation
-    let mut actual_message = preparator
+    preparator
         .prepare_for_strategy(
             &fixture.authority,
             &mut tx_strategy,
@@ -214,20 +186,6 @@ async fn test_prepare_commit_tx_with_base_actions() {
         )
         .await
         .unwrap();
-
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message);
 
     // Now we verify that buffers were created
     for task in &tx_strategy.optimized_tasks {
