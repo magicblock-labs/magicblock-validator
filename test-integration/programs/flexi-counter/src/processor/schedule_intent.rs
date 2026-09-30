@@ -1,9 +1,8 @@
 use borsh::to_vec;
 use ephemeral_rollups_sdk::{
     ephem::{
-        CallHandler, CommitAndUndelegate, CommitType, FoldableIntentBuilder,
-        MagicAction, MagicInstructionBuilder, MagicIntentBundleBuilder,
-        UndelegateType,
+        CallHandler, CommitAndUndelegate, CommitType, FoldableIntentBuilder, MagicAction,
+        MagicInstructionBuilder, MagicIntentBundleBuilder, UndelegateType,
     },
     ActionArgs, ShortAccountMeta,
 };
@@ -22,11 +21,11 @@ use solana_program::{
 
 use crate::instruction::FlexiCounterInstruction;
 
-pub const ACTOR_ESCROW_INDEX: u8 = 1;
+pub(super) const ACTOR_ESCROW_INDEX: u8 = 1;
 const PRIZE: u64 = 1_000_000;
 
-pub fn process_create_intent(
-    accounts: &[AccountInfo],
+pub(super) fn process_create_intent(
+    accounts: &[AccountInfo<'_>],
     num_committees: u8,
     counter_diffs: Vec<i64>,
     is_undelegate: bool,
@@ -55,13 +54,11 @@ pub fn process_create_intent(
     let transfer_destination = next_account_info(account_info_iter)?;
     let system_program = next_account_info(account_info_iter)?;
 
-    let escrow_authorities =
-        next_account_infos(account_info_iter, num_committees)?;
+    let escrow_authorities = next_account_infos(account_info_iter, num_committees)?;
     let committees = next_account_infos(account_info_iter, num_committees)?;
 
     // Create commit actions
-    let commit_action =
-        FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
+    let commit_action = FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
     let call_handlers = committees
         .iter()
         .zip(escrow_authorities.iter().cloned())
@@ -100,11 +97,10 @@ pub fn process_create_intent(
             .zip(escrow_authorities.iter().cloned())
             .zip(counter_diffs.iter().copied())
             .map(|((committee, escrow_authority), counter_diff)| {
-                let undelegate_action =
-                    FlexiCounterInstruction::UndelegateActionHandler {
-                        counter_diff,
-                        amount: PRIZE,
-                    };
+                let undelegate_action = FlexiCounterInstruction::UndelegateActionHandler {
+                    counter_diff,
+                    amount: PRIZE,
+                };
 
                 let other_accounts = vec![
                     // counter account
@@ -128,10 +124,7 @@ pub fn process_create_intent(
                 })
             })
             .collect::<Result<Vec<_>, ProgramError>>()?;
-        let undelegate_action = UndelegateType::WithHandler {
-            call_handlers,
-            callbacks: vec![],
-        };
+        let undelegate_action = UndelegateType::WithHandler { call_handlers, callbacks: vec![] };
         let undelegate_type_action = CommitAndUndelegate {
             commit_type: commit_action,
             undelegate_type: undelegate_action,
@@ -155,8 +148,8 @@ pub fn process_create_intent(
 /// both Commit and CommitAndUndelegate intents simultaneously using MagicIntentBundleBuilder.
 ///
 /// This tests the new SDK feature where a single bundle can contain multiple intent types.
-pub fn process_create_intent_bundle(
-    accounts: &[AccountInfo],
+pub(super) fn process_create_intent_bundle(
+    accounts: &[AccountInfo<'_>],
     num_commit_only: u8,
     num_undelegate: u8,
     counter_diffs: Vec<i64>,
@@ -194,16 +187,12 @@ pub fn process_create_intent_bundle(
     let system_program = next_account_info(account_info_iter)?;
 
     // Commit-only accounts
-    let commit_only_escrows =
-        next_account_infos(account_info_iter, num_commit_only)?;
-    let commit_only_counters =
-        next_account_infos(account_info_iter, num_commit_only)?;
+    let commit_only_escrows = next_account_infos(account_info_iter, num_commit_only)?;
+    let commit_only_counters = next_account_infos(account_info_iter, num_commit_only)?;
 
     // CommitAndUndelegate accounts
-    let undelegate_escrows =
-        next_account_infos(account_info_iter, num_undelegate)?;
-    let undelegate_counters =
-        next_account_infos(account_info_iter, num_undelegate)?;
+    let undelegate_escrows = next_account_infos(account_info_iter, num_undelegate)?;
+    let undelegate_counters = next_account_infos(account_info_iter, num_undelegate)?;
 
     // Get the first available payer for the builder
     let payer = if !commit_only_escrows.is_empty() {
@@ -216,16 +205,12 @@ pub fn process_create_intent_bundle(
     };
 
     // Start building the intent bundle
-    let mut builder = MagicIntentBundleBuilder::new(
-        payer,
-        magic_context.clone(),
-        magic_program.clone(),
-    );
+    let mut builder =
+        MagicIntentBundleBuilder::new(payer, magic_context.clone(), magic_program.clone());
 
     // Build Commit intent (commit-only accounts)
     if !commit_only_counters.is_empty() {
-        let commit_action =
-            FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
+        let commit_action = FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
         let call_handlers = commit_only_counters
             .iter()
             .zip(commit_only_escrows.iter().cloned())
@@ -261,8 +246,7 @@ pub fn process_create_intent_bundle(
     // Build CommitAndUndelegate intent
     if !undelegate_counters.is_empty() {
         // Post-commit actions for CommitAndUndelegate
-        let commit_action =
-            FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
+        let commit_action = FlexiCounterInstruction::CommitActionHandler { amount: PRIZE };
         let commit_handlers = undelegate_counters
             .iter()
             .zip(undelegate_escrows.iter().cloned())
@@ -295,11 +279,10 @@ pub fn process_create_intent_bundle(
             .zip(undelegate_escrows.iter().cloned())
             .zip(counter_diffs.iter().copied())
             .map(|((counter, escrow_authority), counter_diff)| {
-                let undelegate_action =
-                    FlexiCounterInstruction::UndelegateActionHandler {
-                        counter_diff,
-                        amount: PRIZE,
-                    };
+                let undelegate_action = FlexiCounterInstruction::UndelegateActionHandler {
+                    counter_diff,
+                    amount: PRIZE,
+                };
 
                 let other_accounts = vec![
                     counter.into(),
@@ -334,8 +317,8 @@ pub fn process_create_intent_bundle(
     builder.build_and_invoke()
 }
 
-pub fn process_create_intent_bundle_commit_and_finalize(
-    accounts: &[AccountInfo],
+pub(super) fn process_create_intent_bundle_commit_and_finalize(
+    accounts: &[AccountInfo<'_>],
     num_commit: u8,
     num_commit_finalize: u8,
 ) -> ProgramResult {
@@ -357,8 +340,7 @@ pub fn process_create_intent_bundle_commit_and_finalize(
     let magic_program = next_account_info(account_info_iter)?;
     let payer = next_account_info(account_info_iter)?;
     let commit_accounts = next_account_infos(account_info_iter, num_commit)?;
-    let commit_finalize_accounts =
-        next_account_infos(account_info_iter, num_commit_finalize)?;
+    let commit_finalize_accounts = next_account_infos(account_info_iter, num_commit_finalize)?;
 
     let mut all_accounts = Vec::new();
     all_accounts.extend(commit_accounts.iter().cloned());
@@ -383,10 +365,7 @@ pub fn process_create_intent_bundle_commit_and_finalize(
 
     let args = MagicIntentBundleArgs {
         commit: Some(CommitTypeArgs::Standalone(
-            commit_accounts
-                .iter()
-                .map(|account| account_index(account.key))
-                .collect(),
+            commit_accounts.iter().map(|account| account_index(account.key)).collect(),
         )),
         commit_and_undelegate: None,
         commit_finalize: Some(CommitTypeArgs::Standalone(
@@ -399,24 +378,16 @@ pub fn process_create_intent_bundle_commit_and_finalize(
         standalone_actions: vec![],
     };
 
-    let mut metas = vec![
-        AccountMeta::new(*payer.key, true),
-        AccountMeta::new(*magic_context.key, false),
-    ];
-    metas.extend(
-        dedup_keys
-            .iter()
-            .map(|pubkey| AccountMeta::new(*pubkey, false)),
-    );
+    let mut metas =
+        vec![AccountMeta::new(*payer.key, true), AccountMeta::new(*magic_context.key, false)];
+    metas.extend(dedup_keys.iter().map(|pubkey| AccountMeta::new(*pubkey, false)));
 
-    let mut cpi_accounts =
-        vec![magic_program.clone(), payer.clone(), magic_context.clone()];
-    cpi_accounts.extend(dedup_keys.iter().filter_map(|pubkey| {
-        all_accounts
-            .iter()
-            .find(|account| account.key == pubkey)
-            .cloned()
-    }));
+    let mut cpi_accounts = vec![magic_program.clone(), payer.clone(), magic_context.clone()];
+    cpi_accounts.extend(
+        dedup_keys.iter().filter_map(|pubkey| {
+            all_accounts.iter().find(|account| account.key == pubkey).cloned()
+        }),
+    );
 
     let ix = Instruction::new_with_bincode(
         *magic_program.key,

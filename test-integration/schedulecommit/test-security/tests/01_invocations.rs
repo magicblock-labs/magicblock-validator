@@ -2,9 +2,7 @@ use program_schedulecommit::{
     api::{schedule_commit_cpi_instruction, UserSeeds},
     ScheduleCommitType,
 };
-use schedulecommit_client::{
-    ScheduleCommitTestContext, ScheduleCommitTestContextFields,
-};
+use schedulecommit_client::{ScheduleCommitTestContext, ScheduleCommitTestContextFields};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -15,28 +13,22 @@ use solana_sdk::{
 use solana_system_interface::instruction as system_instruction;
 
 use crate::utils::{
-    create_nested_schedule_cpis_instruction,
-    create_sibling_non_cpi_instruction,
+    create_nested_schedule_cpis_instruction, create_sibling_non_cpi_instruction,
     create_sibling_schedule_cpis_instruction,
 };
 mod utils;
 
 const _PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
 
-const PROGRAM_ID_NOT_FOUND: &str =
-    "ScheduleCommit ERR: failed to find parent program id";
+const PROGRAM_ID_NOT_FOUND: &str = "ScheduleCommit ERR: failed to find parent program id";
 const INVALID_ACCOUNT_OWNER: &str = "Invalid account owner";
-const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str =
-    "needs to be owned by the invoking program";
+const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str = "needs to be owned by the invoking program";
 
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(2, UserSeeds::MagicScheduleCommit)
     } else {
-        ScheduleCommitTestContext::try_new_random_keys(
-            2,
-            UserSeeds::MagicScheduleCommit,
-        )
+        ScheduleCommitTestContext::try_new_random_keys(2, UserSeeds::MagicScheduleCommit)
     }
     .unwrap();
     ctx.init_committees().unwrap();
@@ -53,10 +45,8 @@ fn create_schedule_commit_ix(
     pubkeys: &[Pubkey],
 ) -> Instruction {
     let instruction_data = vec![1, 0, 0, 0];
-    let mut account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new(magic_context_key, false),
-    ];
+    let mut account_metas =
+        vec![AccountMeta::new(payer, true), AccountMeta::new(magic_context_key, false)];
     if let Some(magic_fee_vault) = magic_fee_vault {
         account_metas.push(AccountMeta::new(magic_fee_vault, false));
     }
@@ -69,17 +59,11 @@ fn create_schedule_commit_ix(
             is_writable: true,
         });
     }
-    Instruction::new_with_bytes(
-        magic_program_key,
-        &instruction_data,
-        account_metas,
-    )
+    Instruction::new_with_bytes(magic_program_key, &instruction_data, account_metas)
 }
 
 fn magic_fee_vault(ctx: &ScheduleCommitTestContext) -> Pubkey {
-    dlp_api::pda::magic_fee_vault_pda_from_validator(
-        &ctx.ephem_validator_identity().unwrap(),
-    )
+    dlp_api::pda::magic_fee_vault_pda_from_validator(&ctx.ephem_validator_identity().unwrap())
 }
 
 #[test]
@@ -111,15 +95,14 @@ fn test_schedule_commit_directly_with_single_ix() {
     );
 
     let sig = tx.signatures[0];
-    let res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     ctx.assert_ephemeral_transaction_error(sig, &res, PROGRAM_ID_NOT_FOUND);
 }
 
@@ -152,15 +135,14 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
     );
 
     let sig = tx.signatures[0];
-    let _res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let _res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
 
     // 2. Retrieve the scheduled commit
     let commit_result = ctx
@@ -193,11 +175,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     let (_, rcvr_pda) = committees[0];
 
     // 1. Transfer to rcvr
-    let transfer_ix_1 = system_instruction::transfer(
-        &transfer_payer.pubkey(),
-        &rcvr_pda,
-        1_000_000,
-    );
+    let transfer_ix_1 =
+        system_instruction::transfer(&transfer_payer.pubkey(), &rcvr_pda, 1_000_000);
 
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
@@ -209,11 +188,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     );
 
     // 3. Transfer to rcvr again
-    let transfer_ix_2 = system_instruction::transfer(
-        &transfer_payer.pubkey(),
-        &rcvr_pda,
-        2_000_000,
-    );
+    let transfer_ix_2 =
+        system_instruction::transfer(&transfer_payer.pubkey(), &rcvr_pda, 2_000_000);
 
     let tx = Transaction::new_signed_with_payer(
         &[transfer_ix_1, ix, transfer_ix_2],
@@ -223,15 +199,14 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     );
 
     let sig = tx.signatures[0];
-    let res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     ctx.assert_ephemeral_transaction_error(sig, &res, PROGRAM_ID_NOT_FOUND);
 }
 
@@ -250,14 +225,10 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
         ..
     } = ctx.fields();
 
-    let players = &committees
-        .iter()
-        .map(|(player, _)| player.pubkey())
-        .collect::<Vec<_>>();
+    let players = &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>();
     let pdas = &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>();
 
-    let ix =
-        create_sibling_schedule_cpis_instruction(payer.pubkey(), pdas, players);
+    let ix = create_sibling_schedule_cpis_instruction(payer.pubkey(), pdas, players);
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -267,22 +238,17 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
     );
 
     let sig = tx.signatures[0];
-    let res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
 
     ctx.assert_ephemeral_transaction_error(sig, &res, INVALID_ACCOUNT_OWNER);
-    ctx.assert_ephemeral_transaction_error(
-        sig,
-        &res,
-        NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM,
-    );
+    ctx.assert_ephemeral_transaction_error(sig, &res, NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM);
 }
 
 #[test]
@@ -303,10 +269,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         ..
     } = ctx.fields();
 
-    let players = &committees
-        .iter()
-        .map(|(player, _)| player.pubkey())
-        .collect::<Vec<_>>();
+    let players = &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>();
     let pdas = &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>();
 
     let non_cpi_ix = create_sibling_non_cpi_instruction(payer.pubkey());
@@ -321,8 +284,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         ScheduleCommitType::CommitFinalize,
     );
 
-    let nested_cpi_ix =
-        create_nested_schedule_cpis_instruction(payer.pubkey(), pdas, players);
+    let nested_cpi_ix = create_nested_schedule_cpis_instruction(payer.pubkey(), pdas, players);
 
     let tx = Transaction::new_signed_with_payer(
         &[non_cpi_ix, cpi_ix, nested_cpi_ix],
@@ -332,20 +294,15 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
     );
 
     let sig = tx.signatures[0];
-    let res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
 
     ctx.assert_ephemeral_transaction_error(sig, &res, INVALID_ACCOUNT_OWNER);
-    ctx.assert_ephemeral_transaction_error(
-        sig,
-        &res,
-        NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM,
-    );
+    ctx.assert_ephemeral_transaction_error(sig, &res, NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM);
 }

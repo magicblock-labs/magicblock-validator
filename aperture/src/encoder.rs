@@ -2,9 +2,7 @@ use hyper::body::Bytes;
 use json::Serialize;
 use magicblock_core::Slot;
 use solana_account::{AccountSharedData, ReadableAccount};
-use solana_account_decoder::{
-    UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
-};
+use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
 use solana_pubkey::Pubkey;
 use solana_transaction_error::{TransactionError, TransactionResult};
 
@@ -34,13 +32,7 @@ impl AccountEncoder {
         account: &AccountSharedData,
         id: SubscriptionID,
     ) -> Option<Bytes> {
-        let encoded = encode_ui_account(
-            pubkey,
-            account,
-            self.encoding,
-            None,
-            self.data_slice,
-        );
+        let encoded = encode_ui_account(pubkey, account, self.encoding, None, self.data_slice);
         let method = "accountNotification";
         NotificationPayload::encode(encoded, slot, method, id)
     }
@@ -89,11 +81,7 @@ impl TransactionResultEncoder {
 pub(crate) struct SlotEncoder;
 
 impl SlotEncoder {
-    pub(crate) fn encode(
-        &self,
-        slot: Slot,
-        id: SubscriptionID,
-    ) -> Option<Bytes> {
+    pub(crate) fn encode(&self, slot: Slot, id: SubscriptionID) -> Option<Bytes> {
         #[derive(Serialize)]
         struct SlotUpdate {
             slot: u64,

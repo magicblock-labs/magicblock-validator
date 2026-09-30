@@ -2,8 +2,7 @@ use std::{sync::Arc, thread};
 
 use integration_test_tools::{init_logger, IntegrationTestContext};
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 use tracing::*;
 
@@ -52,9 +51,7 @@ fn test_get_multiple_existing_accounts_in_parallel() {
         let ctx = ctx.clone();
         move || {
             debug!("Start thread 1,2,3 {{");
-            let fetched = ctx
-                .fetch_ephem_multiple_accounts(&[acc1, acc2, acc3])
-                .unwrap();
+            let fetched = ctx.fetch_ephem_multiple_accounts(&[acc1, acc2, acc3]).unwrap();
             debug!("}} End thread 1,2,3");
             assert_eq!(fetched.len(), 3);
             assert!(fetched.iter().all(|acc| acc.is_some()));
@@ -75,8 +72,7 @@ fn test_get_multiple_existing_accounts_in_parallel() {
         let ctx = ctx.clone();
         move || {
             debug!("Start thread 5,6 {{");
-            let fetched =
-                ctx.fetch_ephem_multiple_accounts(&[acc5, acc6]).unwrap();
+            let fetched = ctx.fetch_ephem_multiple_accounts(&[acc5, acc6]).unwrap();
             debug!("}} End thread 5,6");
             assert_eq!(fetched.len(), 2);
             assert!(fetched.iter().all(|acc| acc.is_some()));
@@ -87,9 +83,7 @@ fn test_get_multiple_existing_accounts_in_parallel() {
         let ctx = ctx.clone();
         move || {
             debug!("Start thread 7,8,9 {{");
-            let fetched = ctx
-                .fetch_ephem_multiple_accounts(&[acc7, acc8, acc9])
-                .unwrap();
+            let fetched = ctx.fetch_ephem_multiple_accounts(&[acc7, acc8, acc9]).unwrap();
             debug!("}} End thread 7,8,9");
             assert_eq!(fetched.len(), 3);
             assert!(fetched.iter().all(|acc| acc.is_some()));

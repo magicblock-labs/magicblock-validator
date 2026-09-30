@@ -7,21 +7,15 @@ use magicblock_metrics::metrics;
 use scc::{Guard, Queue};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::{
-    nonblocking::pubsub_client::PubsubClientResult,
-    pubsub_client::PubsubClientError,
+    nonblocking::pubsub_client::PubsubClientResult, pubsub_client::PubsubClientError,
 };
-use solana_rpc_client_api::config::{
-    RpcAccountInfoConfig, RpcProgramAccountsConfig,
-};
+use solana_rpc_client_api::config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::*;
 
 use super::{
     errors::RemoteAccountProviderResult,
-    pubsub_connection::{
-        ProgramSubscribeResult, PubsubConnection, SubscribeResult,
-        UnsubscribeFn,
-    },
+    pubsub_connection::{ProgramSubscribeResult, PubsubConnection, SubscribeResult, UnsubscribeFn},
 };
 
 /// A slot in the connection pool, wrapping a PubSubConnection and
@@ -131,21 +125,19 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     ) -> PubsubClientResult<(S, UnsubscribeFn)>
     where
         F: FnOnce(Arc<T>) -> Fut,
-        Fut: std::future::Future<Output = PubsubClientResult<(S, UnsubscribeFn)>>,
+        Fut: Future<Output = PubsubClientResult<(S, UnsubscribeFn)>>,
         S: 'static,
     {
         // Find or create a connection
-        let (sub_count, connection) =
-            match self.find_or_create_connection().await {
-                Ok(result) => result,
-                Err(err) => {
-                    return Err(PubsubClientError::SubscribeFailed {
-                        reason: "Unable to find or create connection"
-                            .to_string(),
-                        message: format!("{err:?}"),
-                    });
-                }
-            };
+        let (sub_count, connection) = match self.find_or_create_connection().await {
+            Ok(result) => result,
+            Err(err) => {
+                return Err(PubsubClientError::SubscribeFailed {
+                    reason: "Unable to find or create connection".to_string(),
+                    message: format!("{err:?}"),
+                });
+            }
+        };
 
         // Subscribe using the selected connection
         match subscribe_fn(connection).await {
@@ -183,9 +175,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                 }
             }
             Err(err) => {
-                return Err(PubsubClientError::ConnectionClosed(format!(
-                    "{err:?}"
-                )));
+                return Err(PubsubClientError::ConnectionClosed(format!("{err:?}")));
             }
         };
         // Since we already created it we keep it as well
@@ -229,10 +219,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         };
         self.connections.push(conn);
         let connection_count = self.connections.len();
-        metrics::set_pubsub_client_connections_count(
-            &self.client_id,
-            connection_count,
-        );
+        metrics::set_pubsub_client_connections_count(&self.client_id, connection_count);
         trace!(
             url = self.url,
             connection_count, "Created new pooled connection"
@@ -243,10 +230,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// Tries to atomically reserve a subscription slot on an existing
     /// connection via CAS, ensuring we never exceed
     /// `per_connection_sub_limit`.
-    fn try_insert_sub(
-        &self,
-        guard: &Guard,
-    ) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
+    fn try_insert_sub(&self, guard: &Guard) -> Option<(Arc<AtomicUsize>, Arc<T>)> {
         for conn in self.connections.iter(guard) {
             let sub_count = &conn.sub_count;
             loop {
@@ -255,18 +239,10 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
                     break;
                 }
                 if sub_count
-                    .compare_exchange(
-                        current,
-                        current + 1,
-                        Ordering::SeqCst,
-                        Ordering::SeqCst,
-                    )
+                    .compare_exchange(current, current + 1, Ordering::SeqCst, Ordering::SeqCst)
                     .is_ok()
                 {
-                    return Some((
-                        Arc::clone(&conn.sub_count),
-                        Arc::clone(&conn.connection),
-                    ));
+                    return Some((Arc::clone(&conn.sub_count), Arc::clone(&conn.connection)));
                 }
             }
         }
@@ -277,11 +253,7 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
     /// connection on which it was made.
     /// The decrement is guaranteed even if the future is dropped (e.g. by a
     /// timeout) because it runs in a `Drop` guard.
-    fn wrap_unsub(
-        &self,
-        raw_unsub: UnsubscribeFn,
-        sub_count: Arc<AtomicUsize>,
-    ) -> UnsubscribeFn {
+    fn wrap_unsub(&self, raw_unsub: UnsubscribeFn, sub_count: Arc<AtomicUsize>) -> UnsubscribeFn {
         Box::new(move || {
             Box::pin(async move {
                 let _guard = SubCountGuard(Some(sub_count));
@@ -300,16 +272,14 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
 
         // 1. Snapshot all connections under EBR guard (clone each)
         let ebr_guard = Guard::new();
-        let all: Vec<PooledConnection<T>> =
-            self.connections.iter(&ebr_guard).cloned().collect();
+        let all: Vec<PooledConnection<T>> = self.connections.iter(&ebr_guard).cloned().collect();
         drop(ebr_guard);
 
         // 2. Re-check sub_count under the lock to avoid removing a
         //    connection that was reserved between a prior snapshot and
         //    acquiring the mutex.
-        let (active, idle): (Vec<_>, Vec<_>) = all
-            .into_iter()
-            .partition(|c| c.sub_count.load(Ordering::SeqCst) > 0);
+        let (active, idle): (Vec<_>, Vec<_>) =
+            all.into_iter().partition(|c| c.sub_count.load(Ordering::SeqCst) > 0);
 
         // 3. Nothing to prune
         if idle.is_empty() {
@@ -332,22 +302,12 @@ impl<T: PubsubConnection> PubSubConnectionPool<T> {
         }
 
         // 6. Compute pruned count and update metrics
-        let pruned = if active.is_empty() {
-            idle.len().saturating_sub(1)
-        } else {
-            idle.len()
-        };
+        let pruned = if active.is_empty() { idle.len().saturating_sub(1) } else { idle.len() };
 
         if pruned > 0 {
             let remaining = self.connections.len();
-            metrics::set_pubsub_client_connections_count(
-                &self.client_id,
-                remaining,
-            );
-            metrics::inc_pubsub_idle_connections_pruned_count(
-                &self.client_id,
-                pruned as u64,
-            );
+            metrics::set_pubsub_client_connections_count(&self.client_id, remaining);
+            metrics::inc_pubsub_idle_connections_pruned_count(&self.client_id, pruned as u64);
             trace!(pruned, remaining, "Pruned idle pooled connections");
         }
         pruned
@@ -376,19 +336,14 @@ mod tests {
     ) {
         for (idx, expected_subs) in conn_subs.iter().enumerate() {
             let conn = get_connection_at_index(pool, idx).unwrap();
-            assert_eq!(
-                conn.sub_count.load(Ordering::SeqCst),
-                expected_subs.len()
-            );
+            assert_eq!(conn.sub_count.load(Ordering::SeqCst), expected_subs.len());
             for pubkey in expected_subs {
                 assert!(conn.connection.account_subs().contains(pubkey));
             }
         }
     }
 
-    async fn create_pool(
-        limit: usize,
-    ) -> PubSubConnectionPool<MockPubsubConnection> {
+    async fn create_pool(limit: usize) -> PubSubConnectionPool<MockPubsubConnection> {
         PubSubConnectionPool::<MockPubsubConnection>::new(
             "mock://".to_string(),
             limit,
@@ -402,10 +357,8 @@ mod tests {
         pool: &PubSubConnectionPool<MockPubsubConnection>,
         pubkey: &Pubkey,
     ) -> UnsubscribeFn {
-        let (_stream, unsub) = pool
-            .account_subscribe(pubkey, RpcAccountInfoConfig::default())
-            .await
-            .unwrap();
+        let (_stream, unsub) =
+            pool.account_subscribe(pubkey, RpcAccountInfoConfig::default()).await.unwrap();
         unsub
     }
 
@@ -415,10 +368,7 @@ mod tests {
     ) {
         for (idx, expected_subs) in conn_subs.iter().enumerate() {
             let conn = get_connection_at_index(pool, idx).unwrap();
-            assert_eq!(
-                conn.sub_count.load(Ordering::SeqCst),
-                expected_subs.len()
-            );
+            assert_eq!(conn.sub_count.load(Ordering::SeqCst), expected_subs.len());
             for pubkey in expected_subs {
                 assert!(conn.connection.program_subs().contains(pubkey));
             }
@@ -437,11 +387,7 @@ mod tests {
     }
 
     fn create_pubkeys<const N: usize>() -> [Pubkey; N] {
-        (0..N)
-            .map(|_| Pubkey::new_unique())
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap()
+        (0..N).map(|_| Pubkey::new_unique()).collect::<Vec<_>>().try_into().unwrap()
     }
 
     #[tokio::test]
@@ -522,10 +468,7 @@ mod tests {
 
         // Sub pk3 -> Conn1 full
         let unsub3 = account_subscribe(&pool, &pks[3]).await;
-        assert_account_subs(
-            &pool,
-            &[vec![pks[0], pks[1]], vec![pks[2], pks[3]]],
-        );
+        assert_account_subs(&pool, &[vec![pks[0], pks[1]], vec![pks[2], pks[3]]]);
 
         // Sub pk4 -> Conn2 created
         let _unsub4 = account_subscribe(&pool, &pks[4]).await;
@@ -623,12 +566,9 @@ mod tests {
         pool: &PubSubConnectionPool<MockPubsubConnection>,
         conn_subs: &[(Vec<Pubkey>, Vec<Pubkey>)],
     ) {
-        for (idx, (expected_account, expected_program)) in
-            conn_subs.iter().enumerate()
-        {
+        for (idx, (expected_account, expected_program)) in conn_subs.iter().enumerate() {
             let conn = get_connection_at_index(pool, idx).unwrap();
-            let expected_total =
-                expected_account.len() + expected_program.len();
+            let expected_total = expected_account.len() + expected_program.len();
             assert_eq!(conn.sub_count.load(Ordering::SeqCst), expected_total);
             for pubkey in expected_account {
                 assert!(conn.connection.account_subs().contains(pubkey));
@@ -657,10 +597,7 @@ mod tests {
         // Sub account(ak2) -> Conn1 created (1/2) [Conn0 is full]
         let _unsub_a2 = account_subscribe(&pool, &ak2).await;
         // Final: Conn0 (ak1 + pk1), Conn1 (ak2)
-        assert_mixed_subs(
-            &pool,
-            &[(vec![ak1], vec![pk1]), (vec![ak2], vec![])],
-        );
+        assert_mixed_subs(&pool, &[(vec![ak1], vec![pk1]), (vec![ak2], vec![])]);
     }
 
     #[tokio::test]
@@ -750,20 +687,13 @@ mod tests {
 
         // Sub pid3 -> Conn1 full
         let unsub3 = program_subscribe(&pool, &pids[3]).await;
-        assert_program_subs(
-            &pool,
-            &[vec![pids[0], pids[1]], vec![pids[2], pids[3]]],
-        );
+        assert_program_subs(&pool, &[vec![pids[0], pids[1]], vec![pids[2], pids[3]]]);
 
         // Sub pid4 -> Conn2 created
         let _unsub4 = program_subscribe(&pool, &pids[4]).await;
         assert_program_subs(
             &pool,
-            &[
-                vec![pids[0], pids[1]],
-                vec![pids[2], pids[3]],
-                vec![pids[4]],
-            ],
+            &[vec![pids[0], pids[1]], vec![pids[2], pids[3]], vec![pids[4]]],
         );
 
         // Unsub pid0 -> Conn0 has capacity
@@ -773,11 +703,7 @@ mod tests {
         let _unsub5 = program_subscribe(&pool, &pids[5]).await;
         assert_program_subs(
             &pool,
-            &[
-                vec![pids[1], pids[5]],
-                vec![pids[2], pids[3]],
-                vec![pids[4]],
-            ],
+            &[vec![pids[1], pids[5]], vec![pids[2], pids[3]], vec![pids[4]]],
         );
 
         // Unsub pid1, pid3 -> Conn0 and Conn1 each drop to 1
@@ -790,11 +716,7 @@ mod tests {
         // Final: Conn0 (pid5, pid6), Conn1 (pid2, pid7), Conn2 (pid4)
         assert_program_subs(
             &pool,
-            &[
-                vec![pids[5], pids[6]],
-                vec![pids[2], pids[7]],
-                vec![pids[4]],
-            ],
+            &[vec![pids[5], pids[6]], vec![pids[2], pids[7]], vec![pids[4]]],
         );
     }
 }

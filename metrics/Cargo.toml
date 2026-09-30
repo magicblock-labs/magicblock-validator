@@ -21,3 +21,6 @@ prometheus = { workspace = true }
 solana-signature = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tracing = { workspace = true }
+
+[lints]
+workspace = true

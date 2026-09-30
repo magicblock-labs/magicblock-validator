@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use dlp_api::{
@@ -27,11 +29,7 @@ fn remote_account() -> Account {
     }
 }
 
-fn add_increment_action(
-    ctx: &TestContext,
-    pubkey: Pubkey,
-    output: Pubkey,
-) -> Pubkey {
+fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pubkey {
     let record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     let record = DelegationRecord {
         authority: ctx.validator_pubkey,
@@ -45,21 +43,13 @@ fn add_increment_action(
     let actions = PostDelegationActions {
         inserted_signers: 0,
         inserted_non_signers: 0,
-        signers: vec![
-            *pubkey.as_array(),
-            *output.as_array(),
-            *V42_ID.as_array(),
-        ],
+        signers: vec![*pubkey.as_array(), *output.as_array(), *V42_ID.as_array()],
         non_signers: vec![],
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 2,
             accounts: vec![
-                MaybeEncryptedAccountMeta::ClearText(
-                    dlp_api::compact::AccountMeta::new(0, false),
-                ),
-                MaybeEncryptedAccountMeta::ClearText(
-                    dlp_api::compact::AccountMeta::new(1, false),
-                ),
+                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(0, false)),
+                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(1, false)),
             ],
             data: MaybeEncryptedIxData {
                 prefix: action.data,
@@ -120,16 +110,13 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     seed_output(&ctx, output, 0);
     let remote_account = remote_account();
     rpc_client.add_account(account_pubkey, remote_account.clone());
-    let deleg_record_pubkey =
-        add_increment_action(&ctx, account_pubkey, output);
+    let deleg_record_pubkey = add_increment_action(&ctx, account_pubkey, output);
     let mut updates = bank.accounts().subscribe(account_pubkey);
     let blocker = bank.account(account_pubkey).await.unwrap();
 
     let requested = [account_pubkey];
-    let ensure = chainlink.ensure_accounts(
-        &requested,
-        AccountFetchEntrypoint::RpcGetMultipleAccounts,
-    );
+    let ensure =
+        chainlink.ensure_accounts(&requested, AccountFetchEntrypoint::RpcGetMultipleAccounts);
     let subscription = ctx.send_account_update(account_pubkey, remote_account);
     let release = async move {
         tokio::task::yield_now().await;
@@ -148,9 +135,7 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     );
     updates.recv().await.expect("one materialization update");
     assert!(
-        tokio::time::timeout(Duration::from_millis(100), updates.recv())
-            .await
-            .is_err(),
+        tokio::time::timeout(Duration::from_millis(100), updates.recv()).await.is_err(),
         "race must not commit a second account mutation"
     );
     assert_not_subscribed!(chainlink, &[&account_pubkey, &deleg_record_pubkey]);
@@ -185,8 +170,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
     let record = add_increment_action(&ctx, pubkey, output);
 
     assert!(
-        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000))
-            .await,
+        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await,
         "subscription update completes"
     );
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, V42_ID);
@@ -229,8 +213,7 @@ async fn older_completion_update_replaces_transient_account() {
         ..Default::default()
     };
     assert!(
-        ctx.send_and_receive_account_update(pubkey, completed, Some(8_000))
-            .await,
+        ctx.send_and_receive_account_update(pubkey, completed, Some(8_000)).await,
         "subscription update completes"
     );
 
@@ -276,11 +259,7 @@ async fn timed_out_activation_satisfies_waiter_without_refetch() {
 
     // Passing by value drops the caller's wait, not Engine's submitted work or
     // its mutation ownership. Cancellation alone cannot authorize another write.
-    assert!(
-        tokio::time::timeout(PENDING, ctx.ensure_account(&pubkey))
-            .await
-            .is_err()
-    );
+    assert!(tokio::time::timeout(PENDING, ctx.ensure_account(&pubkey)).await.is_err());
     ctx.rpc_client.set_slot(newer_slot);
     // Do not replace the delegation record: only the observation slot advances.
     let fetches = ctx.rpc_client.multi_account_fetches();
@@ -333,9 +312,7 @@ async fn timed_out_activation_satisfies_waiter_without_refetch() {
         (9, 1)
     );
     assert!(
-        tokio::time::timeout(PENDING, processed.recv())
-            .await
-            .is_err(),
+        tokio::time::timeout(PENDING, processed.recv()).await.is_err(),
         "no rescue, replacement, or replay may follow activation"
     );
 }

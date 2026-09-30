@@ -8,9 +8,8 @@ use std::{
 
 use clap::{Error as CliError, Parser};
 use config::{
-    EngineConfig, FollowerReplication, LeaderReplication,
-    aperture::ApertureConfig, cli::CliParams, grpc::GrpcConfig,
-    metrics::MetricsConfig,
+    EngineConfig, FollowerReplication, LeaderReplication, aperture::ApertureConfig, cli::CliParams,
+    grpc::GrpcConfig, metrics::MetricsConfig,
 };
 use figment::{
     Error as FigmentError, Figment, Profile,
@@ -86,9 +85,7 @@ impl LeaderParams {
     /// After merging, automatic guarantees are enforced:
     /// - At least one HTTP endpoint is configured (for JSON-RPC calls)
     /// - At least one WebSocket endpoint is configured (for subscriptions)
-    pub fn try_new(
-        args: impl Iterator<Item = OsString>,
-    ) -> Result<Self, ConfigError> {
+    pub fn try_new(args: impl Iterator<Item = OsString>) -> Result<Self, ConfigError> {
         // 1. Parse CLI arguments into the "Overlay" struct
         let cli = CliParams::try_parse_from(args)?;
 
@@ -118,9 +115,7 @@ impl LeaderParams {
     /// Loads a leader config file with the same defaults and environment
     /// overlay used by the leader binary, but without a CLI overlay.
     /// The exact file must exist; parent directories are not searched.
-    pub fn load(
-        path: impl AsRef<Path>,
-    ) -> Result<Self, Box<figment::error::Error>> {
+    pub fn load(path: impl AsRef<Path>) -> Result<Self, Box<figment::error::Error>> {
         let figment = Figment::new()
             .merge(Toml::file_exact(path.as_ref()).profile(Profile::Default))
             .merge(
@@ -161,25 +156,23 @@ impl LeaderParams {
 
     /// Ensures at least one HTTP endpoint is configured.
     /// If no HTTP remote is present, adds the default HTTP remote (devnet).
+    // The built-in devnet URL is a fixed, validated constant.
+    #[allow(clippy::unwrap_used)]
     fn ensure_http(&mut self) {
         let mut remotes = self.remotes.iter();
         if remotes.any(|r| matches!(r, Remote::Http(_))) {
             return;
         }
-        self.remotes
-            .push(Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap()));
+        self.remotes.push(Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap()));
     }
 
     /// Ensures at least one WebSocket endpoint is configured.
     /// If no WebSocket remote is present, derives one from the first HTTP remote.
     /// This satisfies the requirement for a subscription-capable endpoint.
+    #[allow(clippy::unwrap_used)]
     fn ensure_websocket(&mut self) {
         // Check if a websocket remote already exists
-        if self
-            .remotes
-            .iter()
-            .any(|r| matches!(r, Remote::Websocket(..)))
-        {
+        if self.remotes.iter().any(|r| matches!(r, Remote::Websocket(..))) {
             return;
         }
 
@@ -194,8 +187,7 @@ impl LeaderParams {
         } else {
             // Fallback: if no HTTP remote exists (unexpected, since ensure_http() was called first),
             // create a default WebSocket remote from the default HTTP remote.
-            let default_http =
-                Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap());
+            let default_http = Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap());
             if let Some(default_websocket) = default_http.to_websocket() {
                 self.remotes.push(default_websocket);
             }
@@ -264,8 +256,7 @@ impl fmt::Display for LeaderParams {
                 "Blocks",
                 format!(
                     "{:?}; superblock {}",
-                    self.engine.blockstore.blocktime,
-                    self.engine.blockstore.superblock,
+                    self.engine.blockstore.blocktime, self.engine.blockstore.superblock,
                 ),
             ),
             (
@@ -300,11 +291,7 @@ impl fmt::Display for LeaderParams {
                 "Chainlink",
                 format!(
                     "risk {}; resubscribe {:?}",
-                    if self.chainlink.risk.enabled {
-                        "enabled"
-                    } else {
-                        "disabled"
-                    },
+                    if self.chainlink.risk.enabled { "enabled" } else { "disabled" },
                     self.chainlink.resubscription_delay,
                 ),
             ),
@@ -365,13 +352,10 @@ struct VerifierCli {
 
 impl VerifierParams {
     /// Loads a verifier config from TOML followed by `MBV_VERIFIER_` overrides.
-    pub fn try_new(
-        args: impl Iterator<Item = OsString>,
-    ) -> Result<Self, ConfigError> {
+    pub fn try_new(args: impl Iterator<Item = OsString>) -> Result<Self, ConfigError> {
         let cli = VerifierCli::try_parse_from(args)?;
-        let figment = Figment::new()
-            .merge(Toml::file(&cli.config).profile(Profile::Default))
-            .merge(
+        let figment =
+            Figment::new().merge(Toml::file(&cli.config).profile(Profile::Default)).merge(
                 Env::prefixed(VERIFIER_ENV_VAR_PREFIX)
                     .split("__")
                     .map(|k| Uncased::new(k.as_str().replace('_', "-")))
@@ -390,15 +374,13 @@ impl VerifierParams {
             ))
             .into());
         }
-        if params.engine.replication.upstream_authority.0 == Default::default()
-        {
+        if params.engine.replication.upstream_authority.0 == Default::default() {
             return Err(Box::new(FigmentError::from(
                 "engine.replication.upstream-authority is required",
             ))
             .into());
         }
-        params.engine.authority.remote =
-            Some(params.engine.replication.upstream_authority.0);
+        params.engine.authority.remote = Some(params.engine.replication.upstream_authority.0);
         Ok(params)
     }
 }

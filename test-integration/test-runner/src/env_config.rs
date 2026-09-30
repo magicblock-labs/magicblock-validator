@@ -34,9 +34,7 @@ pub struct TestConfigViaEnvVars {
 
 impl TestConfigViaEnvVars {
     pub fn skip_entirely(&self, test_name: &str) -> bool {
-        !self.run_test(test_name)
-            && !self.setup_devnet(test_name)
-            && !self.setup_ephem(test_name)
+        !self.run_test(test_name) && !self.setup_devnet(test_name) && !self.setup_ephem(test_name)
     }
 
     pub fn run_test(&self, test_name: &str) -> bool {
@@ -54,22 +52,17 @@ impl TestConfigViaEnvVars {
     /// suppressing every committor_* shard.
     fn is_skipped(&self, test_name: &str) -> bool {
         self.skipped_tests.iter().any(|skipped| {
-            skipped == test_name
-                || umbrella_aliases_for(skipped).contains(&test_name)
+            skipped == test_name || umbrella_aliases_for(skipped).contains(&test_name)
         })
     }
 
     pub fn setup_devnet(&self, test_name: &str) -> bool {
-        self.validators_only
-            .as_ref()
-            .is_none_or(|setup| setup.devnet())
+        self.validators_only.as_ref().is_none_or(|setup| setup.devnet())
             && self.include_test(test_name)
     }
 
     pub fn setup_ephem(&self, test_name: &str) -> bool {
-        self.validators_only
-            .as_ref()
-            .is_none_or(|setup| setup.ephem())
+        self.validators_only.as_ref().is_none_or(|setup| setup.ephem())
             && self.include_test(test_name)
     }
 }
@@ -105,19 +98,14 @@ fn umbrella_aliases_for(name: &str) -> &'static [&'static str] {
 
 impl Default for TestConfigViaEnvVars {
     fn default() -> Self {
-        let validators_only =
-            std::env::var("SETUP_ONLY").ok().map(|s| s.as_str().into());
+        let validators_only = std::env::var("SETUP_ONLY").ok().map(|s| s.as_str().into());
 
         let selected_tests = std::env::var("RUN_TESTS")
-            .map(|tests| {
-                tests.split(',').map(|s| s.trim().to_string()).collect()
-            })
+            .map(|tests| tests.split(',').map(|s| s.trim().to_string()).collect())
             .unwrap_or_default();
 
         let skipped_tests = std::env::var("SKIP_TESTS")
-            .map(|tests| {
-                tests.split(',').map(|s| s.trim().to_string()).collect()
-            })
+            .map(|tests| tests.split(',').map(|s| s.trim().to_string()).collect())
             .unwrap_or_default();
 
         TestConfigViaEnvVars {

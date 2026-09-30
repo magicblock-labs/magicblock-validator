@@ -1,7 +1,6 @@
 use integration_test_tools::{init_logger, IntegrationTestContext};
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 
 fn random_pubkey() -> Pubkey {
@@ -31,18 +30,11 @@ fn test_get_multiple_accounts_both_existing_and_not() {
     // 1. Create initial account with 2 SOL
     ctx.airdrop_chain(&normal, 2 * LAMPORTS_PER_SOL)
         .expect("failed to airdrop to normal on-chain account");
-    let (
-        _airdrop_sig,
-        _escrow_sig,
-        ephemeral_balance_pda,
-        _deleg_record,
-        escrow_lamports,
-    ) = ctx
+    let (_airdrop_sig, _escrow_sig, ephemeral_balance_pda, _deleg_record, escrow_lamports) = ctx
         .airdrop_chain_escrowed(&escrowed_kp, 2 * LAMPORTS_PER_SOL)
         .expect("failed to airdrop to escrowed on-chain account");
 
-    let pubkeys =
-        [normal, missing, escrowed_kp.pubkey(), ephemeral_balance_pda];
+    let pubkeys = [normal, missing, escrowed_kp.pubkey(), ephemeral_balance_pda];
     let accs = ctx.fetch_ephem_multiple_accounts(&pubkeys);
     assert!(accs.is_ok());
     let accs = accs.unwrap();

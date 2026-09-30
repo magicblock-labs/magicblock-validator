@@ -5,9 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 
-use crate::intent::{
-    BaseActionCallback, MagicIntentBundle, types::CommittedAccount,
-};
+use crate::intent::{BaseActionCallback, MagicIntentBundle, types::CommittedAccount};
 
 /// Trait that provides access to system calls implemented outside of SVM,
 /// accessible in magic-program.
@@ -23,10 +21,7 @@ pub trait MagicSys: Sync + Send + 'static {
     /// matter how it gets optimized at execution time, returns `Err` so the
     /// intent can be refused up front instead of failing later during
     /// commit/finalize.
-    fn validate_intent_size(
-        &self,
-        intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError>;
+    fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError>;
 }
 
 /// Interface for service handling callback execution/scheduling
@@ -81,10 +76,7 @@ impl fmt::Display for ActionError {
         match self {
             Self::TimeoutError => write!(f, "Actions expired"),
             Self::ActionsError(err, sig) => {
-                write!(
-                    f,
-                    "User supplied actions are ill-formed: {err}. {sig:?}"
-                )
+                write!(f, "User supplied actions are ill-formed: {err}. {sig:?}")
             }
             Self::IntentFailedError(msg) => {
                 write!(f, "Intent execution failed: {msg}")

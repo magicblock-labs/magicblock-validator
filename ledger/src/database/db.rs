@@ -16,10 +16,7 @@ use super::{
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
-use crate::{
-    database::columns::DIRTY_COUNT, errors::LedgerError,
-    metrics::PerfSamplingStatus,
-};
+use crate::{database::columns::DIRTY_COUNT, errors::LedgerError, metrics::PerfSamplingStatus};
 
 #[derive(Debug)]
 pub struct Database {
@@ -29,10 +26,7 @@ pub struct Database {
 }
 
 impl Database {
-    pub fn open(
-        path: &Path,
-        options: LedgerOptions,
-    ) -> Result<Self, LedgerError> {
+    pub fn open(path: &Path, options: LedgerOptions) -> Result<Self, LedgerError> {
         let column_options = Arc::new(options.column_options.clone());
         let backend = Arc::new(Rocks::open(path, options)?);
 
@@ -53,9 +47,8 @@ impl Database {
     where
         C: TypedColumn + ColumnName,
     {
-        if let Some(pinnable_slice) = self
-            .backend
-            .get_pinned_cf(self.cf_handle::<C>(), &C::key(key))?
+        if let Some(pinnable_slice) =
+            self.backend.get_pinned_cf(self.cf_handle::<C>(), &C::key(key))?
         {
             let value = deserialize(pinnable_slice.as_ref())?;
             Ok(Some(value))
@@ -108,15 +101,12 @@ impl Database {
 
     pub fn batch(&self) -> WriteBatch<'_> {
         let write_batch = self.backend.batch();
-        let map = columns()
-            .into_iter()
-            .map(|desc| (desc, self.backend.cf_handle(desc)))
-            .collect();
+        let map = columns().into_iter().map(|desc| (desc, self.backend.cf_handle(desc))).collect();
 
         WriteBatch { write_batch, map }
     }
 
-    pub fn write(&self, batch: WriteBatch) -> Result<(), LedgerError> {
+    pub fn write(&self, batch: WriteBatch<'_>) -> Result<(), LedgerError> {
         self.backend.write(batch.write_batch)
     }
 
@@ -127,12 +117,8 @@ impl Database {
     /// Adds a \[`from`, `to`\] range that deletes all entries between the `from` slot
     /// and `to` slot inclusively.  If `from` slot and `to` slot are the same, then all
     /// entries in that slot will be removed.
-    pub fn delete_range_cf<C>(
-        &self,
-        batch: &mut WriteBatch,
-        from: Slot,
-        to: Slot,
-    ) where
+    pub fn delete_range_cf<C>(&self, batch: &mut WriteBatch<'_>, from: Slot, to: Slot)
+    where
         C: Column + ColumnName,
     {
         let cf = self.cf_handle::<C>();
@@ -147,11 +133,7 @@ impl Database {
     }
 
     /// Delete files whose slot range is within \[`from`, `to`\].
-    pub fn delete_file_in_range_cf<C>(
-        &self,
-        from: Slot,
-        to: Slot,
-    ) -> std::result::Result<(), LedgerError>
+    pub fn delete_file_in_range_cf<C>(&self, from: Slot, to: Slot) -> Result<(), LedgerError>
     where
         C: Column + ColumnName,
     {
@@ -163,11 +145,8 @@ impl Database {
     }
 
     /// See [crate::database::rocks_db::Rocks::compact_range_cf] for documentation.
-    pub fn compact_range_cf<C>(
-        &self,
-        from: Option<C::Index>,
-        to: Option<C::Index>,
-    ) where
+    pub fn compact_range_cf<C>(&self, from: Option<C::Index>, to: Option<C::Index>)
+    where
         C: Column + ColumnName,
     {
         self.backend.compact_range_cf(
@@ -181,9 +160,7 @@ impl Database {
         self.backend.is_primary_access()
     }
 
-    pub fn live_files_metadata(
-        &self,
-    ) -> std::result::Result<Vec<LiveFile>, LedgerError> {
+    pub fn live_files_metadata(&self) -> Result<Vec<LiveFile>, LedgerError> {
         self.backend.live_files_metadata()
     }
 

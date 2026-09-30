@@ -70,3 +70,6 @@ v42-calculator-interface = { workspace = true }
 [features]
 default = []
 dev-context = ["engine/testkit", "keeper/testkit", "magicblock-metrics/dev-context"]
+
+[lints]
+workspace = true

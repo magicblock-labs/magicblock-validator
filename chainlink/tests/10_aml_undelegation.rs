@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -34,20 +36,14 @@ impl MockRiskServer {
     /// Mocks the risk server's `GET /risk?pubkey=` endpoint. `isRisky` is
     /// computed from the seeded score against `RISK_THRESHOLD`, mirroring the
     /// real server which owns the threshold.
-    async fn start(
-        address_scores: Vec<(String, u64)>,
-        expected_calls: usize,
-    ) -> Self {
-        let listener =
-            TcpListener::bind("127.0.0.1:0").expect("bind mock risk server");
+    async fn start(address_scores: Vec<(String, u64)>, expected_calls: usize) -> Self {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock risk server");
         let addr = listener.local_addr().expect("mock risk server address");
-        let score_by_address: HashMap<String, u64> =
-            address_scores.into_iter().collect();
+        let score_by_address: HashMap<String, u64> = address_scores.into_iter().collect();
 
         let worker = tokio::task::spawn_blocking(move || {
             for _ in 0..expected_calls {
-                let (mut stream, _) =
-                    listener.accept().expect("accept mock risk request");
+                let (mut stream, _) = listener.accept().expect("accept mock risk request");
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .expect("set mock risk read timeout");
@@ -55,13 +51,10 @@ impl MockRiskServer {
                 let mut buffer = [0u8; 4096];
                 let read = stream.read(&mut buffer).expect("read request");
                 let request = String::from_utf8_lossy(&buffer[..read]);
-                let pubkey = extract_query_value(&request, "pubkey")
-                    .expect("missing pubkey query");
+                let pubkey = extract_query_value(&request, "pubkey").expect("missing pubkey query");
                 assert!(request.starts_with("GET /risk?"));
 
-                let score = score_by_address
-                    .get(&pubkey)
-                    .expect("unexpected risk address");
+                let score = score_by_address.get(&pubkey).expect("unexpected risk address");
                 let is_risky = *score > RISK_THRESHOLD;
                 let body = format!(
                     r#"{{"pubkey":"{pubkey}","riskScore":{score},"riskThreshold":{RISK_THRESHOLD},"isRisky":{is_risky}}}"#
@@ -71,9 +64,7 @@ impl MockRiskServer {
                     body.len(),
                     body
                 );
-                stream
-                    .write_all(response.as_bytes())
-                    .expect("write mock risk response");
+                stream.write_all(response.as_bytes()).expect("write mock risk response");
             }
         });
 
@@ -89,13 +80,7 @@ impl MockRiskServer {
 }
 
 fn extract_query_value(request: &str, key: &str) -> Option<String> {
-    let query = request
-        .lines()
-        .next()?
-        .split_whitespace()
-        .nth(1)?
-        .split('?')
-        .nth(1)?;
+    let query = request.lines().next()?.split_whitespace().nth(1)?.split('?').nth(1)?;
     query.split('&').find_map(|part| {
         let (k, v) = part.split_once('=')?;
         (k == key).then(|| v.to_string())
@@ -117,8 +102,7 @@ fn add_delegation_record_with_signer_action(
     owner: Pubkey,
     signer: Pubkey,
 ) {
-    let action = v42_calculator_interface::builder::Expr::lit(0)
-        .compose(delegated_pubkey, &[]);
+    let action = v42_calculator_interface::builder::Expr::lit(0).compose(delegated_pubkey, &[]);
     let record = DelegationRecord {
         authority: ctx.validator_pubkey,
         owner,
@@ -132,20 +116,15 @@ fn add_delegation_record_with_signer_action(
     let actions = PostDelegationActions {
         inserted_signers: 0,
         inserted_non_signers: 0,
-        signers: vec![
-            *signer.as_array(),
-            *v42_calculator_interface::ID.as_array(),
-        ],
+        signers: vec![*signer.as_array(), *v42_calculator_interface::ID.as_array()],
         non_signers: vec![],
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 1,
             accounts: vec![
-                MaybeEncryptedAccountMeta::ClearText(
-                    dlp_api::compact::AccountMeta::new(0, true),
-                ),
-                MaybeEncryptedAccountMeta::ClearText(
-                    dlp_api::compact::AccountMeta::new_readonly(1, false),
-                ),
+                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(0, true)),
+                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new_readonly(
+                    1, false,
+                )),
             ],
             data: MaybeEncryptedIxData {
                 prefix: action.data,
@@ -170,17 +149,14 @@ async fn setup(risk_score: u64) -> (TestContext, MockRiskServer, Pubkey) {
 
     let delegated_pubkey = Pubkey::new_unique();
     let signer = delegated_pubkey;
-    let server =
-        MockRiskServer::start(vec![(signer.to_string(), risk_score)], 1).await;
-    let risk_service =
-        RiskService::try_from_config(&risk_config(server.base_url.clone()))
-            .expect("risk config should be valid")
-            .expect("risk service should be enabled");
+    let server = MockRiskServer::start(vec![(signer.to_string(), risk_score)], 1).await;
+    let risk_service = RiskService::try_from_config(&risk_config(server.base_url.clone()))
+        .expect("risk config should be valid")
+        .expect("risk service should be enabled");
     let risk_service = Arc::new(risk_service);
 
     let slot = 100;
-    let ctx =
-        TestContext::init_with_risk_service(slot, Some(risk_service)).await;
+    let ctx = TestContext::init_with_risk_service(slot, Some(risk_service)).await;
 
     let owner = v42_calculator_interface::ID;
     ctx.rpc_client.add_account(
@@ -193,12 +169,7 @@ async fn setup(risk_score: u64) -> (TestContext, MockRiskServer, Pubkey) {
             rent_epoch: 0,
         },
     );
-    add_delegation_record_with_signer_action(
-        &ctx,
-        delegated_pubkey,
-        owner,
-        signer,
-    );
+    add_delegation_record_with_signer_action(&ctx, delegated_pubkey, owner, signer);
 
     (ctx, server, delegated_pubkey)
 }

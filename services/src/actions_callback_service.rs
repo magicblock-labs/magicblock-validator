@@ -19,9 +19,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
 use solana_pubkey::Pubkey;
-use solana_rpc_client::{
-    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
-};
+use solana_rpc_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
@@ -44,16 +42,8 @@ impl Clone for ActionsCallbackService {
 }
 
 impl ActionsCallbackService {
-    pub fn new(
-        rpc_client: Arc<RpcClient>,
-        authority: Keypair,
-        engine: Engine,
-    ) -> Self {
-        Self {
-            rpc_client,
-            authority,
-            engine,
-        }
+    pub fn new(rpc_client: Arc<RpcClient>, authority: Keypair, engine: Engine) -> Self {
+        Self { rpc_client, authority, engine }
     }
 
     fn build_transactions(
@@ -91,11 +81,8 @@ impl ActionsCallbackService {
                     Some(&authority_pubkey),
                     &blockhash,
                 );
-                VersionedTransaction::try_new(
-                    VersionedMessage::Legacy(message),
-                    &[&self.authority],
-                )
-                .map_err(|e| CallbackScheduleError::SigningError(e.to_string()))
+                VersionedTransaction::try_new(VersionedMessage::Legacy(message), &[&self.authority])
+                    .map_err(|e| CallbackScheduleError::SigningError(e.to_string()))
             })
             .collect()
     }
@@ -106,8 +93,7 @@ impl ActionsCallbackService {
         signature: Option<Signature>,
         result: Result<(), String>,
     ) -> Result<Instruction, CallbackScheduleError> {
-        let inner_instruction =
-            Self::build_inner_instruction(callback, signature, result)?;
+        let inner_instruction = Self::build_inner_instruction(callback, signature, result)?;
 
         // Mandatory accounts for magic-program
         let mut account_metas = vec![
@@ -116,26 +102,16 @@ impl ActionsCallbackService {
             AccountMeta::new_readonly(inner_instruction.program_id, false),
         ];
         account_metas.extend(
-            inner_instruction
-                .accounts
-                .clone()
-                .into_iter()
-                .map(|mut el| {
-                    // CALLBACK_SIGNER may be set to true in inner_instruction
-                    // Outer instruction can't have PDA as signer
-                    el.is_signer = false;
-                    el
-                }),
+            inner_instruction.accounts.clone().into_iter().map(|mut el| {
+                // CALLBACK_SIGNER may be set to true in inner_instruction
+                // Outer instruction can't have PDA as signer
+                el.is_signer = false;
+                el
+            }),
         );
 
-        let data = CallbackInstruction::ExecuteCallback {
-            instruction: inner_instruction,
-        };
-        let instruction = Instruction::new_with_wincode(
-            CALLBACK_PROGRAM_ID,
-            &data,
-            account_metas,
-        );
+        let data = CallbackInstruction::ExecuteCallback { instruction: inner_instruction };
+        let instruction = Instruction::new_with_wincode(CALLBACK_PROGRAM_ID, &data, account_metas);
 
         Ok(instruction)
     }
@@ -153,8 +129,7 @@ impl ActionsCallbackService {
         });
         let mut data = callback.discriminator;
         data.extend(
-            wincode::serialize(&response)
-                .map_err(CallbackScheduleError::SerializationError)?,
+            wincode::serialize(&response).map_err(CallbackScheduleError::SerializationError)?,
         );
 
         let account_metas = callback
@@ -186,8 +161,7 @@ impl ActionsCallbackScheduler for ActionsCallbackService {
         signature: Option<Signature>,
         result: ActionResult,
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
-        let transactions_result =
-            self.build_transactions(callbacks, signature, result);
+        let transactions_result = self.build_transactions(callbacks, signature, result);
 
         let mut valid_transactions = vec![];
         let signatures = transactions_result
@@ -205,22 +179,17 @@ impl ActionsCallbackScheduler for ActionsCallbackService {
         if !valid_transactions.is_empty() {
             let rpc_client = self.rpc_client.clone();
             tokio::spawn(async move {
-                let send_futs = valid_transactions
-                    .iter()
-                    .map(|tx| rpc_client.send_transaction(tx));
-                join_all(send_futs).await.into_iter().enumerate().for_each(
-                    |(i, result)| {
-                        if let Err(err) = result {
-                            let signature =
-                                valid_transactions[i].get_signature();
-                            info!(
-                                error = ?err,
-                                signature = ?signature,
-                                "Failed to send action callback transaction"
-                            );
-                        }
-                    },
-                );
+                let send_futs = valid_transactions.iter().map(|tx| rpc_client.send_transaction(tx));
+                join_all(send_futs).await.into_iter().enumerate().for_each(|(i, result)| {
+                    if let Err(err) = result {
+                        let signature = valid_transactions[i].get_signature();
+                        info!(
+                            error = ?err,
+                            signature = ?signature,
+                            "Failed to send action callback transaction"
+                        );
+                    }
+                });
             });
         }
 

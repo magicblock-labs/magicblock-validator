@@ -5,20 +5,16 @@ use std::{
 
 use dlp_api::pda::{
     delegate_buffer_pda_from_delegated_account_and_owner_program,
-    delegation_metadata_pda_from_delegated_account,
-    delegation_record_pda_from_delegated_account,
+    delegation_metadata_pda_from_delegated_account, delegation_record_pda_from_delegated_account,
 };
 use integration_test_tools::{
-    init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES,
-    IntegrationTestContext,
+    init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
 use magicblock_core::token_programs::{
     derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
     MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
 };
-use magicblock_magic_program_api::{
-    instruction::MagicBlockInstruction, ID as MAGIC_PROGRAM_ID,
-};
+use magicblock_magic_program_api::{instruction::MagicBlockInstruction, ID as MAGIC_PROGRAM_ID};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -28,9 +24,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use solana_system_interface::{
-    instruction as system_instruction, program as system_program,
-};
+use solana_system_interface::{instruction as system_instruction, program as system_program};
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 
@@ -47,10 +41,7 @@ const INITIALIZE_RENT_PDA: u8 = 23;
 const WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE: u8 = 26;
 const ENSURE_MAGIC_ATA_DESTINATION: u8 = 36;
 
-fn token_balance_ephem(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> Option<u64> {
+fn token_balance_ephem(ctx: &IntegrationTestContext, account: &Pubkey) -> Option<u64> {
     ctx.try_ephem_client()
         .unwrap()
         .get_token_account_balance(account)
@@ -58,10 +49,7 @@ fn token_balance_ephem(
         .and_then(|balance| balance.amount.parse::<u64>().ok())
 }
 
-fn ephem_account_exists(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> bool {
+fn ephem_account_exists(ctx: &IntegrationTestContext, account: &Pubkey) -> bool {
     ctx.try_ephem_client()
         .unwrap()
         .get_account_with_commitment(account, CommitmentConfig::confirmed())
@@ -72,10 +60,7 @@ fn ephem_account_exists(
 
 /// True when the ER account at `account` carries the Magic ATA marker
 /// (close_authority == rent sysvar).
-fn ephem_account_is_magic_ata(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> bool {
+fn ephem_account_is_magic_ata(ctx: &IntegrationTestContext, account: &Pubkey) -> bool {
     ctx.try_ephem_client()
         .unwrap()
         .get_account_with_commitment(account, CommitmentConfig::confirmed())
@@ -84,8 +69,7 @@ fn ephem_account_is_magic_ata(
         .is_some_and(|account| {
             account.data.len() >= 165
                 && account.data[129..133] == 1u32.to_le_bytes()
-                && account.data[133..165]
-                    == MAGIC_ATA_CLOSE_AUTHORITY.to_bytes()
+                && account.data[133..165] == MAGIC_ATA_CLOSE_AUTHORITY.to_bytes()
         })
 }
 
@@ -97,11 +81,7 @@ fn derive_rent_pda() -> Pubkey {
     Pubkey::find_program_address(&[b"rent"], &EATA_PROGRAM_ID).0
 }
 
-fn derive_shuttle_metadata(
-    owner: &Pubkey,
-    mint: &Pubkey,
-    shuttle_id: u32,
-) -> Pubkey {
+fn derive_shuttle_metadata(owner: &Pubkey, mint: &Pubkey, shuttle_id: u32) -> Pubkey {
     Pubkey::find_program_address(
         &[owner.as_ref(), mint.as_ref(), &shuttle_id.to_le_bytes()],
         &EATA_PROGRAM_ID,
@@ -130,11 +110,7 @@ fn initialize_global_vault_ix(payer: Pubkey, mint: Pubkey) -> Instruction {
     }
 }
 
-fn initialize_eata_ix(
-    payer: Pubkey,
-    user: Pubkey,
-    mint: Pubkey,
-) -> Instruction {
+fn initialize_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey) -> Instruction {
     Instruction {
         program_id: EATA_PROGRAM_ID,
         accounts: vec![
@@ -177,21 +153,12 @@ fn deposit_spl_tokens_ix(
     }
 }
 
-fn delegate_eata_ix(
-    payer: Pubkey,
-    user: Pubkey,
-    mint: Pubkey,
-    validator: Pubkey,
-) -> Instruction {
+fn delegate_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey, validator: Pubkey) -> Instruction {
     let eata = derive_eata(&user, &mint);
     let delegation_buffer =
-        delegate_buffer_pda_from_delegated_account_and_owner_program(
-            &eata,
-            &EATA_PROGRAM_ID,
-        );
+        delegate_buffer_pda_from_delegated_account_and_owner_program(&eata, &EATA_PROGRAM_ID);
     let delegation_record = delegation_record_pda_from_delegated_account(&eata);
-    let delegation_metadata =
-        delegation_metadata_pda_from_delegated_account(&eata);
+    let delegation_metadata = delegation_metadata_pda_from_delegated_account(&eata);
     let mut data = Vec::with_capacity(33);
     data.push(DELEGATE_EPHEMERAL_ATA);
     data.extend_from_slice(validator.as_ref());
@@ -256,15 +223,12 @@ fn withdraw_through_delegated_shuttle_ix(
     let shuttle_eata = derive_eata(&shuttle_metadata, &mint);
     let shuttle_wallet_ata = derive_ata(&shuttle_metadata, &mint);
     let owner_token = derive_ata(&owner, &mint);
-    let delegation_buffer =
-        delegate_buffer_pda_from_delegated_account_and_owner_program(
-            &shuttle_eata,
-            &EATA_PROGRAM_ID,
-        );
-    let delegation_record =
-        delegation_record_pda_from_delegated_account(&shuttle_eata);
-    let delegation_metadata =
-        delegation_metadata_pda_from_delegated_account(&shuttle_eata);
+    let delegation_buffer = delegate_buffer_pda_from_delegated_account_and_owner_program(
+        &shuttle_eata,
+        &EATA_PROGRAM_ID,
+    );
+    let delegation_record = delegation_record_pda_from_delegated_account(&shuttle_eata);
+    let delegation_metadata = delegation_metadata_pda_from_delegated_account(&shuttle_eata);
 
     let mut data = Vec::with_capacity(45);
     data.push(WITHDRAW_THROUGH_DELEGATED_SHUTTLE_WITH_MERGE);
@@ -299,26 +263,18 @@ fn withdraw_through_delegated_shuttle_ix(
 /// Sets up a mint whose supply is deposited into the eSPL global vault and
 /// delegated through the source authority's eATA, so the source's ER-projected
 /// ATA holds `SOURCE_EATA_BALANCE`. Returns (fee_payer, source_authority, mint).
-fn setup_delegated_source(
-    ctx: &IntegrationTestContext,
-) -> (Keypair, Keypair, Keypair) {
+fn setup_delegated_source(ctx: &IntegrationTestContext) -> (Keypair, Keypair, Keypair) {
     let fee_payer = Keypair::new();
     let source_authority = Keypair::new();
     let mint = Keypair::new();
     let source_ata = derive_ata(&source_authority.pubkey(), &mint.pubkey());
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
-    ctx.airdrop_chain(&fee_payer.pubkey(), 2_000_000_000)
-        .unwrap();
-    ctx.airdrop_chain(&source_authority.pubkey(), 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain(&fee_payer.pubkey(), 2_000_000_000).unwrap();
+    ctx.airdrop_chain(&source_authority.pubkey(), 2_000_000_000).unwrap();
 
     let chain_client = ctx.try_chain_client().unwrap();
-    let mint_rent = chain_client
-        .get_minimum_balance_for_rent_exemption(Mint::LEN)
-        .unwrap();
+    let mint_rent = chain_client.get_minimum_balance_for_rent_exemption(Mint::LEN).unwrap();
 
     let setup_ixs = vec![
         system_instruction::create_account(
@@ -352,23 +308,15 @@ fn setup_delegated_source(
         )
         .unwrap(),
     ];
-    let mut setup_tx =
-        Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
+    let mut setup_tx = Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut setup_tx,
-            &[&fee_payer, &mint, &source_authority],
-        )
+        .send_and_confirm_transaction_chain(&mut setup_tx, &[&fee_payer, &mint, &source_authority])
         .unwrap();
     assert!(confirmed, "setup transaction failed");
 
     let eata_ixs = vec![
         initialize_global_vault_ix(fee_payer.pubkey(), mint.pubkey()),
-        initialize_eata_ix(
-            fee_payer.pubkey(),
-            source_authority.pubkey(),
-            mint.pubkey(),
-        ),
+        initialize_eata_ix(fee_payer.pubkey(), source_authority.pubkey(), mint.pubkey()),
         deposit_spl_tokens_ix(
             source_authority.pubkey(),
             source_authority.pubkey(),
@@ -382,13 +330,9 @@ fn setup_delegated_source(
             validator,
         ),
     ];
-    let mut eata_tx =
-        Transaction::new_with_payer(&eata_ixs, Some(&fee_payer.pubkey()));
+    let mut eata_tx = Transaction::new_with_payer(&eata_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut eata_tx,
-            &[&fee_payer, &source_authority],
-        )
+        .send_and_confirm_transaction_chain(&mut eata_tx, &[&fee_payer, &source_authority])
         .unwrap();
     assert!(confirmed, "eATA setup transaction failed");
 
@@ -417,11 +361,7 @@ fn receive_into_magic_ata(
     let destination_ata = derive_ata(destination, mint);
 
     let ixs = vec![
-        ensure_magic_ata_destination_ix(
-            ephem_payer.pubkey(),
-            *destination,
-            *mint,
-        ),
+        ensure_magic_ata_destination_ix(ephem_payer.pubkey(), *destination, *mint),
         spl_token_ix::transfer(
             &spl_token::id(),
             &source_ata,
@@ -434,10 +374,7 @@ fn receive_into_magic_ata(
     ];
     let mut tx = Transaction::new_with_payer(&ixs, Some(&ephem_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(
-            &mut tx,
-            &[ephem_payer, source_authority],
-        )
+        .send_and_confirm_transaction_ephem(&mut tx, &[ephem_payer, source_authority])
         .unwrap();
     assert!(confirmed, "Magic ATA receive transaction failed");
 
@@ -454,8 +391,7 @@ fn test_magic_ata_receive_drain_and_close() {
     let source_ata = derive_ata(&source_authority.pubkey(), &mint);
 
     let ephem_payer = Keypair::new();
-    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000).unwrap();
 
     // Receive into a wallet without any ATA: Magic ATA is created
     // and funded inside the ER, nothing exists on chain.
@@ -472,10 +408,7 @@ fn test_magic_ata_receive_drain_and_close() {
     assert!(ctx
         .try_chain_client()
         .unwrap()
-        .get_account_with_commitment(
-            &destination_ata,
-            CommitmentConfig::confirmed()
-        )
+        .get_account_with_commitment(&destination_ata, CommitmentConfig::confirmed())
         .unwrap()
         .value
         .is_none());
@@ -486,13 +419,9 @@ fn test_magic_ata_receive_drain_and_close() {
 
     // Creation does not require a token transfer in the same transaction.
     let empty_destination = Keypair::new();
-    let ix = ensure_magic_ata_destination_ix(
-        ephem_payer.pubkey(),
-        empty_destination.pubkey(),
-        mint,
-    );
-    let mut tx =
-        Transaction::new_with_payer(&[ix], Some(&ephem_payer.pubkey()));
+    let ix =
+        ensure_magic_ata_destination_ix(ephem_payer.pubkey(), empty_destination.pubkey(), mint);
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&ephem_payer.pubkey()));
     assert!(
         ctx.send_and_confirm_transaction_ephem(&mut tx, &[&ephem_payer])
             .map(|(_, confirmed)| confirmed)
@@ -500,10 +429,7 @@ fn test_magic_ata_receive_drain_and_close() {
         "empty Magic ATA creation must succeed"
     );
     assert_eq!(
-        token_balance_ephem(
-            &ctx,
-            &derive_ata(&empty_destination.pubkey(), &mint)
-        ),
+        token_balance_ephem(&ctx, &derive_ata(&empty_destination.pubkey(), &mint)),
         Some(0)
     );
 
@@ -523,10 +449,7 @@ fn test_magic_ata_receive_drain_and_close() {
     ];
     let mut tx = Transaction::new_with_payer(&ixs, Some(&ephem_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(
-            &mut tx,
-            &[&ephem_payer, &destination],
-        )
+        .send_and_confirm_transaction_ephem(&mut tx, &[&ephem_payer, &destination])
         .unwrap();
     assert!(confirmed, "drain + close transaction failed");
 
@@ -550,13 +473,10 @@ fn test_magic_ata_requires_close_before_eata_projection() {
     let (fee_payer, source_authority, mint) = setup_delegated_source(&ctx);
     let mint = mint.pubkey();
     let source_ata = derive_ata(&source_authority.pubkey(), &mint);
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
     let ephem_payer = Keypair::new();
-    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000).unwrap();
 
     let destination = Keypair::new();
     let destination_ata = derive_ata(&destination.pubkey(), &mint);
@@ -579,13 +499,9 @@ fn test_magic_ata_requires_close_before_eata_projection() {
         RECEIVE_AMOUNT,
     )
     .unwrap();
-    let mut tx =
-        Transaction::new_with_payer(&[drain_ix], Some(&ephem_payer.pubkey()));
+    let mut tx = Transaction::new_with_payer(&[drain_ix], Some(&ephem_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(
-            &mut tx,
-            &[&ephem_payer, &destination],
-        )
+        .send_and_confirm_transaction_ephem(&mut tx, &[&ephem_payer, &destination])
         .unwrap();
     assert!(confirmed, "drain transaction failed");
     assert_eq!(token_balance_ephem(&ctx, &destination_ata), Some(0));
@@ -615,20 +531,11 @@ fn test_magic_ata_requires_close_before_eata_projection() {
             mint,
             EATA_DEPOSIT,
         ),
-        delegate_eata_ix(
-            fee_payer.pubkey(),
-            destination.pubkey(),
-            mint,
-            validator,
-        ),
+        delegate_eata_ix(fee_payer.pubkey(), destination.pubkey(), mint, validator),
     ];
-    let mut tx =
-        Transaction::new_with_payer(&base_ixs, Some(&fee_payer.pubkey()));
+    let mut tx = Transaction::new_with_payer(&base_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut tx,
-            &[&fee_payer, &source_authority, &destination],
-        )
+        .send_and_confirm_transaction_chain(&mut tx, &[&fee_payer, &source_authority, &destination])
         .unwrap();
     assert!(confirmed, "base eATA delegation transaction failed");
 
@@ -641,13 +548,9 @@ fn test_magic_ata_requires_close_before_eata_projection() {
     }
 
     let close_ix = close_magic_ata_ix(destination.pubkey(), mint);
-    let mut tx =
-        Transaction::new_with_payer(&[close_ix], Some(&ephem_payer.pubkey()));
+    let mut tx = Transaction::new_with_payer(&[close_ix], Some(&ephem_payer.pubkey()));
     let (_, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(
-            &mut tx,
-            &[&ephem_payer, &destination],
-        )
+        .send_and_confirm_transaction_ephem(&mut tx, &[&ephem_payer, &destination])
         .unwrap();
     assert!(confirmed, "explicit close transaction failed");
 
@@ -665,12 +568,8 @@ fn test_magic_ata_requires_close_before_eata_projection() {
         "Magic ATA marker must be gone after projection"
     );
     // The projection carries the base ATA layout, not the Magic ATA's.
-    let base_lamports = ctx
-        .try_chain_client()
-        .unwrap()
-        .get_account(&destination_ata)
-        .unwrap()
-        .lamports;
+    let base_lamports =
+        ctx.try_chain_client().unwrap().get_account(&destination_ata).unwrap().lamports;
     assert_eq!(
         ctx.fetch_ephem_account(destination_ata).unwrap().lamports,
         base_lamports,
@@ -685,13 +584,10 @@ fn test_magic_ata_full_withdrawal() {
 
     let (fee_payer, source_authority, mint) = setup_delegated_source(&ctx);
     let mint = mint.pubkey();
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
     let ephem_payer = Keypair::new();
-    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000).unwrap();
 
     let destination = Keypair::new();
     receive_into_magic_ata(
@@ -722,13 +618,9 @@ fn test_magic_ata_full_withdrawal() {
             validator,
         ),
     ];
-    let mut withdraw_tx =
-        Transaction::new_with_payer(&withdraw_ixs, Some(&fee_payer.pubkey()));
+    let mut withdraw_tx = Transaction::new_with_payer(&withdraw_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut withdraw_tx,
-            &[&fee_payer, &destination],
-        )
+        .send_and_confirm_transaction_chain(&mut withdraw_tx, &[&fee_payer, &destination])
         .unwrap();
     assert!(confirmed, "withdrawal transaction failed");
 
@@ -747,13 +639,10 @@ fn test_magic_ata_transparent_withdrawal() {
 
     let (fee_payer, source_authority, mint) = setup_delegated_source(&ctx);
     let mint = mint.pubkey();
-    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..])
-        .unwrap()
-        .pubkey();
+    let validator = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap().pubkey();
 
     let ephem_payer = Keypair::new();
-    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
-        .unwrap();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000).unwrap();
 
     let destination = Keypair::new();
     receive_into_magic_ata(
@@ -774,12 +663,7 @@ fn test_magic_ata_transparent_withdrawal() {
             &spl_token::id(),
         ),
         initialize_eata_ix(fee_payer.pubkey(), destination.pubkey(), mint),
-        delegate_eata_ix(
-            fee_payer.pubkey(),
-            destination.pubkey(),
-            mint,
-            validator,
-        ),
+        delegate_eata_ix(fee_payer.pubkey(), destination.pubkey(), mint, validator),
         withdraw_through_delegated_shuttle_ix(
             fee_payer.pubkey(),
             destination.pubkey(),
@@ -789,13 +673,9 @@ fn test_magic_ata_transparent_withdrawal() {
             validator,
         ),
     ];
-    let mut withdraw_tx =
-        Transaction::new_with_payer(&withdraw_ixs, Some(&fee_payer.pubkey()));
+    let mut withdraw_tx = Transaction::new_with_payer(&withdraw_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(
-            &mut withdraw_tx,
-            &[&fee_payer, &destination],
-        )
+        .send_and_confirm_transaction_chain(&mut withdraw_tx, &[&fee_payer, &destination])
         .unwrap();
     assert!(confirmed, "transparent withdrawal transaction failed");
 
@@ -851,11 +731,9 @@ fn fund_withdrawal_sponsors(ctx: &IntegrationTestContext, fee_payer: &Keypair) {
         Some(10_000_000),
         Some(255),
     ));
-    let mut setup_tx =
-        Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
-    let (_sig, confirmed) = ctx
-        .send_and_confirm_transaction_chain(&mut setup_tx, &[fee_payer])
-        .unwrap();
+    let mut setup_tx = Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
+    let (_sig, confirmed) =
+        ctx.send_and_confirm_transaction_chain(&mut setup_tx, &[fee_payer]).unwrap();
     assert!(confirmed, "withdrawal setup transaction failed");
 }
 
@@ -869,8 +747,7 @@ fn assert_withdrawal_settled(
     shuttle_id: u32,
 ) {
     let destination_ata = derive_ata(destination, mint);
-    let shuttle_metadata =
-        derive_shuttle_metadata(destination, mint, shuttle_id);
+    let shuttle_metadata = derive_shuttle_metadata(destination, mint, shuttle_id);
     let shuttle_wallet_ata = derive_ata(&shuttle_metadata, mint);
 
     let mut base_balance = 0;
@@ -904,17 +781,11 @@ fn assert_withdrawal_settled(
                     sig.signature, sig.err, sig.memo
                 );
                 if let Ok(parsed_sig) = sig.signature.parse() {
-                    if let Ok(tx) = ctx
-                        .try_ephem_client()
-                        .unwrap()
-                        .get_transaction(
+                    if let Ok(tx) = ctx.try_ephem_client().unwrap().get_transaction(
                         &parsed_sig,
                         solana_transaction_status_client_types::UiTransactionEncoding::Json,
                     ) {
-                        eprintln!(
-                            "  logs: {:#?}",
-                            tx.transaction.meta.map(|m| m.log_messages)
-                        );
+                        eprintln!("  logs: {:#?}", tx.transaction.meta.map(|m| m.log_messages));
                     }
                 }
             }
@@ -941,17 +812,10 @@ fn assert_withdrawal_settled(
 
     // Shuttle accounts are settled and closed on base.
     let chain_client = ctx.try_chain_client().unwrap();
-    for account in [
-        shuttle_metadata,
-        derive_eata(&shuttle_metadata, mint),
-        shuttle_wallet_ata,
-    ] {
+    for account in [shuttle_metadata, derive_eata(&shuttle_metadata, mint), shuttle_wallet_ata] {
         assert!(
             chain_client
-                .get_account_with_commitment(
-                    &account,
-                    CommitmentConfig::confirmed()
-                )
+                .get_account_with_commitment(&account, CommitmentConfig::confirmed())
                 .unwrap()
                 .value
                 .is_none(),

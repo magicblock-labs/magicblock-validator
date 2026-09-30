@@ -23,7 +23,7 @@ const MAX_BODY_SIZE: usize = 1024 * 1024;
 /// to establish persistent WebSocket connections for real-time event subscriptions.
 /// On shutdown, it stops accepting new connections without waiting for active
 /// WebSocket tasks to drain.
-pub struct WebsocketServer {
+pub(crate) struct WebsocketServer {
     /// The TCP listener that accepts new client connections.
     socket: TcpListener,
     /// The shared state required by each individual connection handler.
@@ -86,14 +86,12 @@ impl WebsocketServer {
         let state = self.state.clone();
 
         let io = TokioIo::new(stream);
-        let handler =
-            service_fn(move |request| handle_upgrade(request, state.clone()));
+        let handler = service_fn(move |request| handle_upgrade(request, state.clone()));
 
         tokio::spawn(async move {
             let builder = http1::Builder::new();
             // The `with_upgrades` method enables Hyper to handle the WebSocket upgrade protocol.
-            let connection =
-                builder.serve_connection(io, handler).with_upgrades();
+            let connection = builder.serve_connection(io, handler).with_upgrades();
             if let Err(error) = connection.await {
                 warn!(error = ?error, "WebSocket connection terminated");
             }

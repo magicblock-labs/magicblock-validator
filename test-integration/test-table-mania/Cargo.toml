@@ -19,3 +19,6 @@ tracing = { workspace = true }
 [features]
 default = []
 test_table_close = []
+
+[lints]
+workspace = true

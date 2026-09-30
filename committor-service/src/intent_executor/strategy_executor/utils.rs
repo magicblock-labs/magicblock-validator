@@ -1,9 +1,7 @@
 use std::{collections::HashMap, ops::ControlFlow, time::Duration};
 
 use async_trait::async_trait;
-use magicblock_core::traits::{
-    ActionError, ActionResult, ActionsCallbackScheduler,
-};
+use magicblock_core::traits::{ActionError, ActionResult, ActionsCallbackScheduler};
 use magicblock_program::{
     outbox::{ExecutionStage, PendingTransaction},
     outbox_intent_bundles::OutboxIntentBundleStatus,
@@ -29,18 +27,14 @@ use crate::{
             two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
         },
     },
-    outbox::{
-        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
-    },
+    outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
     tasks::{
         BaseTaskImpl,
         task_builder::TaskBuilderError,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
-    transaction_preparator::{
-        TransactionPreparator, error::TransactionPreparatorError,
-    },
+    transaction_preparator::{TransactionPreparator, error::TransactionPreparatorError},
 };
 
 const STAGE_LOOP_CEILING: u8 = 10;
@@ -65,9 +59,7 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     mut patcher: P,
     intent_id: u64,
     make_outbox_stage: impl Fn(PendingTransaction) -> ExecutionStage,
-    recover_outbox_pending: fn(
-        &OutboxIntentBundleStatus,
-    ) -> Option<PendingTransaction>,
+    recover_outbox_pending: fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
     map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
     state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
@@ -81,12 +73,8 @@ where
     loop {
         if state.pending_transaction.is_none() && !reconciled_outbox {
             reconciled_outbox = true;
-            *state.pending_transaction = recover_pending_from_outbox(
-                outbox_client,
-                intent_id,
-                recover_outbox_pending,
-            )
-            .await;
+            *state.pending_transaction =
+                recover_pending_from_outbox(outbox_client, intent_id, recover_outbox_pending).await;
         }
 
         if let &mut Some(ref pending) = state.pending_transaction {
@@ -170,9 +158,7 @@ where
 async fn recover_pending_from_outbox<O>(
     outbox_client: &O,
     intent_id: u64,
-    recover_outbox_pending: fn(
-        &OutboxIntentBundleStatus,
-    ) -> Option<PendingTransaction>,
+    recover_outbox_pending: fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
 ) -> Option<PendingTransaction>
 where
     O: OutboxClient,
@@ -195,9 +181,7 @@ pub(in crate::intent_executor) fn single_stage_pending(
     status: &OutboxIntentBundleStatus,
 ) -> Option<PendingTransaction> {
     match status {
-        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
-            pending,
-        )) => Some(*pending),
+        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(pending)) => Some(*pending),
         _ => None,
     }
 }
@@ -218,10 +202,7 @@ pub(in crate::intent_executor) fn finalizing_pending(
 ) -> Option<PendingTransaction> {
     match status {
         OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
-            magicblock_program::outbox::TwoStageProgress::Finalizing {
-                finalize,
-                ..
-            },
+            magicblock_program::outbox::TwoStageProgress::Finalizing { finalize, .. },
         )) => Some(*finalize),
         _ => None,
     }
@@ -233,9 +214,7 @@ pub(in crate::intent_executor) fn recovery_commit_nonces(
     tasks
         .iter()
         .filter_map(|task| match task {
-            BaseTaskImpl::Commit(task) => {
-                Some((task.committed_account.pubkey, task.commit_id))
-            }
+            BaseTaskImpl::Commit(task) => Some((task.committed_account.pubkey, task.commit_id)),
             BaseTaskImpl::CommitFinalize(task) => {
                 Some((task.committed_account.pubkey, task.commit_id))
             }
@@ -262,9 +241,8 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
     prepared_message.set_recent_blockhash(blockhash);
 
     // Create and sign transaction(Part of transaction preparation i guess, hence the errors)
-    let transaction =
-        VersionedTransaction::try_new(prepared_message, &[&authority])
-            .map_err(TransactionPreparatorError::SignerError)?;
+    let transaction = VersionedTransaction::try_new(prepared_message, &[&authority])
+        .map_err(TransactionPreparatorError::SignerError)?;
     Ok(transaction)
 }
 
@@ -389,10 +367,7 @@ pub async fn prepare_and_execute_strategy<T>(
     authority: &Keypair,
     transaction_preparator: &T,
     transaction_strategy: &mut TransactionStrategy,
-) -> Result<
-    Result<Signature, TransactionStrategyExecutionError>,
-    TransactionPreparatorError,
->
+) -> Result<Result<Signature, TransactionStrategyExecutionError>, TransactionPreparatorError>
 where
     T: TransactionPreparator,
 {
@@ -414,9 +389,7 @@ where
 /// Handles out of sync commit id error, fixes current strategy
 /// Returns strategy to be cleaned up
 /// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming is confusing for something that is cleaned up
-pub(in crate::intent_executor) async fn handle_commit_id_error<
-    T: TaskInfoFetcher,
->(
+pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetcher>(
     authority: &Pubkey,
     task_info_fetcher: &CacheTaskInfoFetcher<T>,
     committed_pubkeys: &[Pubkey],
@@ -438,15 +411,11 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
             _ => None,
         })
         .collect();
-    let min_context_slot =
-        snapshot_slots.values().copied().max().unwrap_or_default();
+    let min_context_slot = snapshot_slots.values().copied().max().unwrap_or_default();
     let committed_accounts: Vec<_> = committed_pubkeys
         .iter()
         .map(|pubkey| {
-            let slot = snapshot_slots
-                .get(pubkey)
-                .copied()
-                .unwrap_or(min_context_slot);
+            let slot = snapshot_slots.get(pubkey).copied().unwrap_or(min_context_slot);
             (*pubkey, slot)
         })
         .collect();
@@ -465,9 +434,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     for task in &mut strategy.optimized_tasks {
         match task {
             BaseTaskImpl::Commit(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
+                let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
                     continue;
                 };
                 if commit_id == &task.commit_id {
@@ -479,9 +446,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
                 task.reset_commit_id(*commit_id);
             }
             BaseTaskImpl::CommitFinalize(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
+                let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
                     continue;
                 };
                 if commit_id == &task.commit_id {
@@ -513,9 +478,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
 /// On the first commit of a delegation instance the nonce restarts at 1, so the
 /// transaction can be byte-identical to a prior instance's landed commit and
 /// alias its signature. Such intents must carry a per-intent uniqueness noop.
-pub(in crate::intent_executor) fn requires_uniqueness_nonce(
-    commit_tasks: &[BaseTaskImpl],
-) -> bool {
+pub(in crate::intent_executor) fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
     commit_tasks.iter().any(|task| match task {
         BaseTaskImpl::Commit(task) => task.commit_id <= 1,
         BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
@@ -641,8 +604,7 @@ where
             (callbacks, TransactionStrategy::default())
         }
         _ => {
-            let mut removed_actions =
-                transaction_strategy.remove_actions(authority);
+            let mut removed_actions = transaction_strategy.remove_actions(authority);
             let callbacks = removed_actions.extract_action_callbacks();
             (callbacks, removed_actions)
         }
@@ -672,10 +634,7 @@ pub(in crate::intent_executor) async fn execute_with_timeout(
                     // on the user smart contract side via TimeoutError.
                     // We must respect the timeout contract.
                     info!("Intent execution timed out, cleaning up actions");
-                    executor.execute_callbacks(
-                        None,
-                        Err(ActionError::TimeoutError),
-                    );
+                    executor.execute_callbacks(None, Err(ActionError::TimeoutError));
                 }
             }
         } else {
@@ -693,16 +652,11 @@ pub(in crate::intent_executor) async fn execute_with_timeout(
 pub(in crate::intent_executor) trait StageExecutor {
     fn has_callbacks(&self) -> bool;
     async fn execute(&mut self) -> IntentExecutorResult<Signature>;
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    );
+    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult);
 }
 
 pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F, O> {
-    pub(in crate::intent_executor) inner:
-        &'a mut SingleStageStrategyExecutor<'e, F, A, O>,
+    pub(in crate::intent_executor) inner: &'a mut SingleStageStrategyExecutor<'e, F, A, O>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
     pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
 }
@@ -721,26 +675,18 @@ where
     }
 
     async fn execute(&mut self) -> IntentExecutorResult<Signature> {
-        self.inner
-            .execute(self.committed_pubkeys, self.transaction_preparator)
-            .await
+        self.inner.execute(self.committed_pubkeys, self.transaction_preparator).await
     }
 
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
+    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
         self.inner.execute_callbacks(signature, result)
     }
 }
 
 pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F, O> {
-    pub(in crate::intent_executor) inner:
-        &'a mut TwoStageStrategyExecutor<'e, A, O, Initialized>,
+    pub(in crate::intent_executor) inner: &'a mut TwoStageStrategyExecutor<'e, A, O, Initialized>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
-    pub(in crate::intent_executor) task_info_fetcher:
-        &'a CacheTaskInfoFetcher<F>,
+    pub(in crate::intent_executor) task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
     pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
 }
 
@@ -767,18 +713,13 @@ where
             .await
     }
 
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
+    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
         self.inner.execute_callbacks(signature, result)
     }
 }
 
 pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T, O> {
-    pub(in crate::intent_executor) inner:
-        &'a mut TwoStageStrategyExecutor<'e, A, O, Committed>,
+    pub(in crate::intent_executor) inner: &'a mut TwoStageStrategyExecutor<'e, A, O, Committed>,
     pub(in crate::intent_executor) transaction_preparator: &'a T,
 }
 
@@ -798,11 +739,7 @@ where
         self.inner.finalize(self.transaction_preparator).await
     }
 
-    fn execute_callbacks(
-        &mut self,
-        signature: Option<Signature>,
-        result: ActionResult,
-    ) {
+    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
         self.inner.execute_callbacks(signature, result)
     }
 }
@@ -834,9 +771,7 @@ mod tests {
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(accounts
                 .iter()
-                .map(|(pubkey, _)| {
-                    (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 })
-                })
+                .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 }))
                 .collect())
         }
 
@@ -847,9 +782,7 @@ mod tests {
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
             Ok(accounts
                 .iter()
-                .map(|(pubkey, _)| {
-                    (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 })
-                })
+                .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 }))
                 .collect())
         }
 
@@ -857,8 +790,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>>
-        {
+        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| {
@@ -919,9 +851,7 @@ mod tests {
             uniqueness_nonce: None,
         };
 
-        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(
-            unchanged_pubkey,
-        )));
+        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(unchanged_pubkey)));
         let cleanup = handle_commit_id_error(
             &Pubkey::new_unique(),
             &fetcher,

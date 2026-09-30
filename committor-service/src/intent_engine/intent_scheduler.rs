@@ -5,9 +5,6 @@ use solana_pubkey::Pubkey;
 use thiserror::Error;
 use tracing::{error, warn};
 
-pub(crate) const POISONED_SCHEDULER_MSG: &str =
-    "Mutex on IntentScheduler is poisoned.";
-
 type IntentID = u64;
 struct IntentMeta {
     num_keys: usize,
@@ -88,7 +85,7 @@ pub(crate) struct IntentScheduler {
 }
 
 impl IntentScheduler {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             blocked_keys: HashMap::new(),
             blocked_intents: HashMap::new(),
@@ -99,7 +96,7 @@ impl IntentScheduler {
     /// Returns [`ScheduledIntentBundle`] if intent can be executed,
     /// otherwise consumes it and enqueues
     // TODO(edwin): tweak return type to reflect Poisoned, ScheduleResult
-    pub fn schedule(
+    pub(crate) fn schedule(
         &mut self,
         intent_bundle: OutboxIntentBundle,
     ) -> Option<OutboxIntentBundle> {
@@ -121,8 +118,7 @@ impl IntentScheduler {
         }
 
         // Check if intent is poisoned by existing poisonous keys
-        let is_poisoned =
-            pubkeys.iter().any(|el| self.poisoned_keys.contains(el));
+        let is_poisoned = pubkeys.iter().any(|el| self.poisoned_keys.contains(el));
         if is_poisoned {
             // Intent got poisoned by others
             warn!(
@@ -135,16 +131,11 @@ impl IntentScheduler {
         }
 
         // Check if there are any conflicting keys
-        let is_conflicting = pubkeys
-            .iter()
-            .any(|pubkey| self.blocked_keys.contains_key(pubkey));
+        let is_conflicting = pubkeys.iter().any(|pubkey| self.blocked_keys.contains_key(pubkey));
         // In any case block the corresponding accounts
-        pubkeys.iter().for_each(|pubkey| {
-            self.blocked_keys
-                .entry(*pubkey)
-                .or_default()
-                .push_back(intent_id)
-        });
+        pubkeys
+            .iter()
+            .for_each(|pubkey| self.blocked_keys.entry(*pubkey).or_default().push_back(intent_id));
 
         if is_conflicting {
             // Enqueue incoming intent
@@ -196,13 +187,7 @@ impl IntentScheduler {
         // Some of front queues contain intent id
         let mut some_front = false;
         for pubkey in pubkeys {
-            if let Some(blocked_intents) = self.blocked_keys.get(pubkey) {
-                // SAFETY: if entry exists it means that queue not empty
-                // This is ensured during scheduling as we always insert el-t in the queue
-                // Other state is not supposed to be possible
-                let front = blocked_intents.front().expect(
-                    "Invariant: if entry is occupied, queue is non-empty",
-                );
+            if let Some(front) = self.blocked_keys.get(pubkey).and_then(|queue| queue.front()) {
                 if front != &intent_id {
                     // This intent isn't executing
                     all_front = false;
@@ -244,7 +229,7 @@ impl IntentScheduler {
     /// Completes Intent, cleaning up data after itself and allowing Intents to move forward
     /// NOTE: This doesn't unblock intent, hence Self::intents_blocked will return old value.
     /// NOTE: this shall be called on executing intents to finalize their execution.
-    pub fn complete(
+    pub(crate) fn complete(
         &mut self,
         intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<()> {
@@ -260,16 +245,9 @@ impl IntentScheduler {
         self.validate_executing(intent_id, &pubkeys)?;
 
         // After all the checks we may safely complete
-        pubkeys.iter().for_each(|pubkey| {
-            let mut occupied = match self.blocked_keys.entry(*pubkey) {
-                Entry::Vacant(_) => {
-                    // SAFETY: prior to this we iterated all pubkeys
-                    // and ensured that they all exist, so we never will reach this point
-                    unreachable!(
-                        "entry exists since following was checked beforehand"
-                    )
-                }
-                Entry::Occupied(value) => value,
+        for pubkey in &pubkeys {
+            let Entry::Occupied(mut occupied) = self.blocked_keys.entry(*pubkey) else {
+                return Err(IntentSchedulerError::CorruptedIntentError);
             };
 
             let blocked_intents: &mut VecDeque<IntentID> = occupied.get_mut();
@@ -277,7 +255,7 @@ impl IntentScheduler {
             if blocked_intents.is_empty() {
                 occupied.remove();
             }
-        });
+        }
 
         Ok(())
     }
@@ -436,7 +414,7 @@ impl IntentScheduler {
     /// isolated from `I2`'s failure (no dependency chain reaches it — it's
     /// positioned *before* `I3` on `a2`, not after), which the lemma
     /// guarantees the drain-from-position walk can never touch.
-    pub fn failed(
+    pub(crate) fn failed(
         &mut self,
         intent_bundle: &OutboxIntentBundle,
     ) -> IntentSchedulerResult<Vec<OutboxIntentBundle>> {
@@ -455,11 +433,9 @@ impl IntentScheduler {
         let mut worklist = BTreeSet::new();
         for pubkey in pubkeys {
             self.poisoned_keys.insert(pubkey);
-            // SAFETY: validate_executing just confirmed intent_id is at the
-            // front of every one of these pubkeys' queues, so each queue
-            // is non-empty and must exist in blocked_keys.
-            let queue =
-                self.blocked_keys.remove(&pubkey).expect("front-checked");
+            let Some(queue) = self.blocked_keys.remove(&pubkey) else {
+                return Err(IntentSchedulerError::CorruptedIntentError);
+            };
             worklist.extend(queue.into_iter().skip(1));
         }
 
@@ -471,8 +447,7 @@ impl IntentScheduler {
 
             let pubkeys = meta.intent.get_all_committed_pubkeys();
             for pubkey in &pubkeys {
-                let Entry::Occupied(mut val) = self.blocked_keys.entry(*pubkey)
-                else {
+                let Entry::Occupied(mut val) = self.blocked_keys.entry(*pubkey) else {
                     continue;
                 };
                 let Ok(pos) = val.get_mut().binary_search(&intent_id) else {
@@ -496,18 +471,14 @@ impl IntentScheduler {
     }
 
     // Returns [`ScheduledBaseIntent`] that can be executed
-    pub fn pop_next_scheduled_intent(&mut self) -> Option<OutboxIntentBundle> {
+    pub(crate) fn pop_next_scheduled_intent(&mut self) -> Option<OutboxIntentBundle> {
         // TODO(edwin): optimize. Create counter im IntentMeta & update
         let mut execute_candidates: HashMap<IntentID, usize> = HashMap::new();
-        self.blocked_keys.iter().for_each(|(_, queue)| {
-            // SAFETY: if entry exists it means that queue not empty
-            // This is ensured during scheduling as we always insert el-t in the queue
-            // Other state is not supposed to be possible
-            let intent_id = queue
-                .front()
-                .expect("Invariant: we maintain ony non-empty queues");
-            *execute_candidates.entry(*intent_id).or_default() += 1;
-        });
+        for queue in self.blocked_keys.values() {
+            if let Some(intent_id) = queue.front() {
+                *execute_candidates.entry(*intent_id).or_default() += 1;
+            }
+        }
 
         // NOTE:
         // Not all self.blocked_intents would be in execute_candidates
@@ -541,11 +512,11 @@ impl IntentScheduler {
 
     /// Returns number of blocked intents
     /// Note: this doesn't include "executing" intents
-    pub fn intents_blocked(&self) -> usize {
+    pub(crate) fn intents_blocked(&self) -> usize {
         self.blocked_intents.len()
     }
 
-    pub fn poisoned_keys_count(&self) -> usize {
+    pub(crate) fn poisoned_keys_count(&self) -> usize {
         self.poisoned_keys.len()
     }
 }
@@ -1496,18 +1467,14 @@ pub(crate) fn create_test_intent_bundle(
     };
 
     if !commit_pubkeys.is_empty() {
-        intent.intent_bundle.commit =
-            Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
+        intent.intent_bundle.commit = Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
     }
 
     if !commit_and_undelegate_pubkeys.is_empty() {
-        intent.intent_bundle.commit_and_undelegate =
-            Some(CommitAndUndelegate {
-                commit_action: CommitType::Standalone(to_accounts(
-                    commit_and_undelegate_pubkeys,
-                )),
-                undelegate_action: UndelegateType::Standalone,
-            });
+        intent.intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(to_accounts(commit_and_undelegate_pubkeys)),
+            undelegate_action: UndelegateType::Standalone,
+        });
     }
 
     let bump = outbox_intent_pda_with_bump(id).1;

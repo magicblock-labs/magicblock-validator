@@ -12,8 +12,7 @@ use magicblock_core::{
     traits::MagicSys,
 };
 use magicblock_magic_program_api::{
-    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY,
-    OUTBOX_INTENT_PROGRAM_ID, id,
+    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, error::InstructionError};
@@ -25,16 +24,14 @@ use solana_program_runtime::{
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{native_loader, system_program};
 
-use self::magicblock_processor::{
-    Entrypoint, EphemeralSystemEntrypoint, OutboxIntentEntrypoint,
-};
+use self::magicblock_processor::{Entrypoint, EphemeralSystemEntrypoint, OutboxIntentEntrypoint};
 use super::*;
 use crate::validator;
 
 /// Registers the sibling builtins CPI'd into from within a test so
 /// `native_invoke` can resolve them — `mock_process_instruction` only wires
 /// up the single entrypoint under test.
-fn register_sibling_builtins(invoke_context: &mut InvokeContext) {
+fn register_sibling_builtins(invoke_context: &mut InvokeContext<'_, '_>) {
     invoke_context.program_cache_for_tx_batch.replenish(
         OUTBOX_INTENT_PROGRAM_ID,
         Arc::new(ProgramCacheEntry::new_builtin((
@@ -59,11 +56,9 @@ pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
     nonces: Option<StubNonces>,
 ) {
-    let validator_authority_id =
-        validator::generate_validator_authority_if_needed();
-    map.entry(validator_authority_id).or_insert_with(|| {
-        AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
-    });
+    let validator_authority_id = validator::generate_validator_authority_if_needed();
+    map.entry(validator_authority_id)
+        .or_insert_with(|| AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id()));
 
     // Ensure ephemeral vault account exists
     map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
@@ -124,9 +119,7 @@ pub fn process_instruction_with_logs(
         |invoke_context| {
             logs = invoke_context
                 .get_log_collector()
-                .map(|collector| {
-                    collector.borrow().get_recorded_content().to_vec()
-                })
+                .map(|collector| collector.borrow().get_recorded_content().to_vec())
                 .unwrap_or_default();
         },
     );
@@ -168,9 +161,7 @@ pub fn process_outbox_intent_instruction_with_logs(
         |invoke_context| {
             logs = invoke_context
                 .get_log_collector()
-                .map(|collector| {
-                    collector.borrow().get_recorded_content().to_vec()
-                })
+                .map(|collector| collector.borrow().get_recorded_content().to_vec())
                 .unwrap_or_default();
         },
     );
@@ -226,26 +217,19 @@ impl MagicSys for MagicSysStub {
         commits: &[CommittedAccount],
     ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
         match &self.nonces {
-            StubNonces::Global(nonce) => {
-                Ok(commits.iter().map(|c| (c.pubkey, *nonce)).collect())
-            }
+            StubNonces::Global(nonce) => Ok(commits.iter().map(|c| (c.pubkey, *nonce)).collect()),
             StubNonces::PerAccount(nonces) => commits
                 .iter()
                 .map(|c| {
                     nonces.get(&c.pubkey).copied().map(|n| (c.pubkey, n)).ok_or(
-                        InstructionError::Custom(
-                            crate::magic_sys::MISSING_COMMIT_NONCE_ERR,
-                        ),
+                        InstructionError::Custom(magic_sys::MISSING_COMMIT_NONCE_ERR),
                     )
                 })
                 .collect(),
         }
     }
 
-    fn validate_intent_size(
-        &self,
-        _intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError> {
+    fn validate_intent_size(&self, _intent: &MagicIntentBundle) -> Result<(), InstructionError> {
         Ok(())
     }
 }

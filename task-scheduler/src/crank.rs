@@ -9,8 +9,7 @@ use solana_pubkey::Pubkey;
 /// namespace: a different authority scheduling the same `task_id` gets an
 /// independent crank, and cancel/reschedule need no database lookup.
 fn crank_seed(authority: &Pubkey, task_id: i64) -> [u8; 32] {
-    solana_sha256_hasher::hashv(&[authority.as_ref(), &task_id.to_le_bytes()])
-        .to_bytes()
+    solana_sha256_hasher::hashv(&[authority.as_ref(), &task_id.to_le_bytes()]).to_bytes()
 }
 
 /// Derives the deterministic hydra crank account address for a task.
@@ -48,7 +47,7 @@ pub fn build_create_ix(
         })
         .collect();
 
-    let scheduled: Vec<ScheduledIx> = instructions
+    let scheduled: Vec<ScheduledIx<'_>> = instructions
         .iter()
         .zip(metas_per_ix.iter())
         .map(|(ix, metas)| ScheduledIx {

@@ -63,13 +63,9 @@ impl TableManiaComputeBudget {
 
     pub fn instructions(&self) -> (Instruction, Instruction) {
         let compute_budget_ix =
-            ComputeBudgetInstruction::set_compute_unit_limit(
-                self.compute_budget,
-            );
+            ComputeBudgetInstruction::set_compute_unit_limit(self.compute_budget);
         let compute_unit_price_ix =
-            ComputeBudgetInstruction::set_compute_unit_price(
-                self.compute_unit_price,
-            );
+            ComputeBudgetInstruction::set_compute_unit_price(self.compute_unit_price);
         (compute_budget_ix, compute_unit_price_ix)
     }
 }

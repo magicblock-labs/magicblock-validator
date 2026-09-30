@@ -1,4 +1,5 @@
 #![doc = include_str!("../README.md")]
+#![allow(warnings)]
 
 pub use database::{
     meta::PerfSample,

@@ -28,11 +28,9 @@ use crate::{
 };
 
 const REMOTE_TABLE_FINALIZATION_DEPTH_SLOTS: u32 = 32;
-const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration =
-    Duration::from_millis(400);
+const REMOTE_TABLE_FINALIZATION_SLOT_TIME: Duration = Duration::from_millis(400);
 const REMOTE_TABLE_FINALIZATION_BUFFER: Duration = Duration::from_millis(200);
-const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration =
-    Duration::from_millis(500);
+const REMOTE_TABLE_FALLBACK_POLL_INTERVAL: Duration = Duration::from_millis(500);
 const MAX_ALLOWED_EXTEND_ERRORS: u8 = 5;
 /// Keep the create+extend fallback payload minimal after an existing table rejects an extend.
 const FALLBACK_NEW_TABLE_INIT_PUBKEYS: usize = 1;
@@ -199,12 +197,8 @@ impl TableMania {
         }
 
         // 2. Add new reservations for pubkeys that are not in any table
-        self.reserve_new_pubkeys(
-            authority,
-            &remaining,
-            ExistingPubkeyAction::Reserve,
-        )
-        .await
+        self.reserve_new_pubkeys(authority, &remaining, ExistingPubkeyAction::Reserve)
+            .await
     }
 
     /// Ensures that pubkeys exist in any active table without increasing reference counts.
@@ -242,12 +236,8 @@ impl TableMania {
 
         // 2. If any pubkeys dont exist, create tables for them
         if !remaining.is_empty() {
-            self.reserve_new_pubkeys(
-                authority,
-                &remaining,
-                ExistingPubkeyAction::LeaveUnreserved,
-            )
-            .await?;
+            self.reserve_new_pubkeys(authority, &remaining, ExistingPubkeyAction::LeaveUnreserved)
+                .await?;
         }
 
         Ok(())
@@ -311,10 +301,7 @@ impl TableMania {
                         )
                         .await
                     {
-                        match Self::handle_extend_table_error(
-                            &err,
-                            &mut extend_errors,
-                        ) {
+                        match Self::handle_extend_table_error(&err, &mut extend_errors) {
                             ExtendTableErrorAction::CreateNewTable => {
                                 error!(
                                     error = ?err,
@@ -322,8 +309,7 @@ impl TableMania {
                                     "Failed to extend table with invalid instruction data; creating a new table"
                                 );
                                 table.mark_non_extendable();
-                                force_new_table_after =
-                                    Some(*table.table_address());
+                                force_new_table_after = Some(*table.table_address());
                             }
                             ExtendTableErrorAction::Retry => {
                                 error!(
@@ -346,8 +332,7 @@ impl TableMania {
             if !stored_in_existing && !remaining.is_empty() {
                 // We write lock the active tables to ensure that while we create a new
                 // table the requests looking for an existing table to extend are blocked
-                let mut active_tables_write_lock =
-                    self.active_tables.write().await;
+                let mut active_tables_write_lock = self.active_tables.write().await;
 
                 // Double-check if a new table was created while we were waiting for the lock
                 if let Some(table) = active_tables_write_lock.last()
@@ -367,11 +352,7 @@ impl TableMania {
                     MAX_ENTRIES_AS_PART_OF_EXTEND as usize
                 };
                 let table = self
-                    .create_new_table_and_extend(
-                        authority,
-                        &mut remaining,
-                        initial_pubkey_limit,
-                    )
+                    .create_new_table_and_extend(authority, &mut remaining, initial_pubkey_limit)
                     .await?;
 
                 tables_used.insert(*table.table_address());
@@ -391,9 +372,9 @@ impl TableMania {
         err: &TableManiaError,
         extend_errors: &mut u8,
     ) -> ExtendTableErrorAction {
-        if err.is_sent_transaction_invalid_instruction_data_at(
-            EXTEND_LOOKUP_TABLE_INSTRUCTION_INDEX,
-        ) {
+        if err
+            .is_sent_transaction_invalid_instruction_data_at(EXTEND_LOOKUP_TABLE_INSTRUCTION_INDEX)
+        {
             return ExtendTableErrorAction::CreateNewTable;
         }
         if *extend_errors < MAX_ALLOWED_EXTEND_ERRORS {
@@ -423,7 +404,7 @@ impl TableMania {
         fields(
             table_address = %table.table_address(),
             remaining_count = remaining.len(),
-            stored_count = tracing::field::Empty
+            stored_count = field::Empty
         )
     )]
     async fn extend_table(
@@ -435,8 +416,7 @@ impl TableMania {
         existing_pubkey_action: ExistingPubkeyAction,
     ) -> TableManiaResult<()> {
         let remaining_len = remaining.len();
-        let storing_len =
-            remaining_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
+        let storing_len = remaining_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
         trace!("Extending existing table");
         if table.is_deactivated() {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
@@ -461,36 +441,31 @@ impl TableMania {
                 // outer iteration sees accurate fullness, and reserve any of
                 // `storing` that turned out to already be on chain.
                 if table.reconcile_with_chain(&self.rpc_client).await.is_ok() {
-                    Self::filter_pubkeys_present_in_table(
-                        table,
-                        remaining,
-                        existing_pubkey_action,
-                    );
+                    Self::filter_pubkeys_present_in_table(table, remaining, existing_pubkey_action);
                 }
                 return Err(err);
             }
         };
         let stored_len = stored.len();
-        tracing::Span::current().record("stored_count", stored_len);
+        Span::current().record("stored_count", stored_len);
         trace!("Pubkeys stored");
         tables_used.insert(*table.table_address());
         remaining.retain(|pk| !stored.contains(pk));
 
         let remaining_count = remaining.len();
-        tracing::Span::current().record("remaining_count", remaining_count);
+        Span::current().record("remaining_count", remaining_count);
         trace!("Progress update in reservation");
 
         #[cfg(debug_assertions)]
         {
             for pk in &stored {
-                if !table.contains_key(pk) {
-                    panic!(
-                        "Pubkey {pk} stored as part of {} was not extended in table {} with {} items.",
-                        stored.len(),
-                        table.table_address(),
-                        table.pubkeys().map(|x| x.len()).unwrap_or(0)
-                    );
-                }
+                debug_assert!(
+                    table.contains_key(pk),
+                    "Pubkey {pk} stored as part of {} was not extended in table {} with {} items.",
+                    stored.len(),
+                    table.table_address(),
+                    table.pubkeys().map(|x| x.len()).unwrap_or(0)
+                );
             }
         }
 
@@ -588,16 +563,12 @@ impl TableMania {
         for table in matching_tables {
             if let Some(update_sent_at) = table.latest_update_sent_at {
                 let target = update_sent_at + delay;
-                wall_clock_deadline = Some(
-                    wall_clock_deadline
-                        .map_or(target, |x: Instant| x.max(target)),
-                );
+                wall_clock_deadline =
+                    Some(wall_clock_deadline.map_or(target, |x: Instant| x.max(target)));
             }
         }
 
-        RemoteReadinessTarget {
-            wall_clock_deadline,
-        }
+        RemoteReadinessTarget { wall_clock_deadline }
     }
 
     async fn wait_until_remote_readiness_target(
@@ -631,9 +602,9 @@ impl TableMania {
         skip(self),
         fields(
             pubkey_count = pubkeys.len(),
-            table_count = tracing::field::Empty,
-            timeout_ms = tracing::field::Empty,
-            current_slot = tracing::field::Empty,
+            table_count = field::Empty,
+            timeout_ms = field::Empty,
+            current_slot = field::Empty,
         )
     )]
     pub async fn try_get_active_address_lookup_table_accounts(
@@ -645,10 +616,7 @@ impl TableMania {
         // 1. Wait until all keys are present in a local table
         let matching_tables = {
             let start = Instant::now();
-            tracing::Span::current().record(
-                "timeout_ms",
-                wait_for_local_table_match.as_millis() as u64,
-            );
+            Span::current().record("timeout_ms", wait_for_local_table_match.as_millis() as u64);
             loop {
                 {
                     let active_local_tables = self.active_tables.read().await;
@@ -657,15 +625,12 @@ impl TableMania {
                     for table in active_local_tables.iter() {
                         let matching_keys = table.match_pubkeys(&keys_to_match);
                         if !matching_keys.is_empty() {
-                            keys_to_match
-                                .retain(|pk| !matching_keys.contains(pk));
+                            keys_to_match.retain(|pk| !matching_keys.contains(pk));
                             matching_tables.insert(
                                 *table.table_address(),
                                 MatchingTableReadiness {
                                     latest_update_sent_at: table
-                                        .latest_update_sent_at_for(
-                                            &matching_keys,
-                                        ),
+                                        .latest_update_sent_at_for(&matching_keys),
                                     local_keys: matching_keys,
                                 },
                             );
@@ -678,54 +643,39 @@ impl TableMania {
                 }
                 if start.elapsed() > wait_for_local_table_match {
                     error!("Timed out waiting for local tables to match");
-                    return Err(
-                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                            format!("{:?}", pubkeys),
-                        ),
-                    );
+                    return Err(TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                        format!("{:?}", pubkeys),
+                    ));
                 }
 
                 sleep(Duration::from_millis(200)).await;
             }
         };
-        tracing::Span::current().record("table_count", matching_tables.len());
-        tracing::Span::current().record(
-            "timeout_ms",
-            wait_for_remote_table_match.as_millis() as u64,
-        );
+        Span::current().record("table_count", matching_tables.len());
+        Span::current().record("timeout_ms", wait_for_remote_table_match.as_millis() as u64);
 
         // 2. Ensure that all matching keys are also present remotely and have been finalized
         let remote_tables = {
-            let matching_table_keys =
-                matching_tables.keys().cloned().collect::<Vec<_>>();
+            let matching_table_keys = matching_tables.keys().cloned().collect::<Vec<_>>();
 
             let start = Instant::now();
             let mut last_wait_log = Instant::now();
-            let table_keys_str = matching_table_keys
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
+            let table_keys_str =
+                matching_table_keys.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(", ");
 
-            let readiness_target =
-                Self::remote_readiness_target(matching_tables.values());
+            let readiness_target = Self::remote_readiness_target(matching_tables.values());
             let wait_delay_ms = readiness_target
                 .wall_clock_deadline
                 .map(|deadline| {
-                    deadline
-                        .saturating_duration_since(Instant::now())
-                        .as_millis() as u64
+                    deadline.saturating_duration_since(Instant::now()).as_millis() as u64
                 })
                 .unwrap_or(0);
             debug!(
                 wait_delay_ms,
                 "Delaying first finalized remote table fetch using required-pubkey transaction send-time estimate"
             );
-            Self::wait_until_remote_readiness_target(
-                readiness_target,
-                wait_for_remote_table_match,
-            )
-            .await;
+            Self::wait_until_remote_readiness_target(readiness_target, wait_for_remote_table_match)
+                .await;
 
             loop {
                 metrics::inc_table_mania_a_count();
@@ -745,20 +695,13 @@ impl TableMania {
                     .into_iter()
                     .enumerate()
                     .flat_map(|(idx, acc)| {
-                        acc.and_then(
-                            |acc| match AddressLookupTable::deserialize(
-                                &acc.data,
-                            ) {
-                                Ok(table) => Some((
-                                    matching_table_keys[idx],
-                                    table.addresses.to_vec(),
-                                )),
-                                Err(err) => {
-                                    error!(error = ?err, "Failed to deserialize table");
-                                    None
-                                }
-                            },
-                        )
+                        acc.and_then(|acc| match AddressLookupTable::deserialize(&acc.data) {
+                            Ok(table) => Some((matching_table_keys[idx], table.addresses.to_vec())),
+                            Err(err) => {
+                                error!(error = ?err, "Failed to deserialize table");
+                                None
+                            }
+                        })
                     })
                     .collect::<HashMap<_, _>>();
 
@@ -767,14 +710,9 @@ impl TableMania {
                     // And that all locally matched keys are in the finalized remote table
                     let all_matches_are_remote =
                         matching_tables.iter().all(|(address, readiness)| {
-                            remote_tables.get(address).is_some_and(
-                                |remote_keys| {
-                                    readiness
-                                        .local_keys
-                                        .iter()
-                                        .all(|pk| remote_keys.contains(pk))
-                                },
-                            )
+                            remote_tables.get(address).is_some_and(|remote_keys| {
+                                readiness.local_keys.iter().all(|pk| remote_keys.contains(pk))
+                            })
                         });
                     if all_matches_are_remote {
                         break remote_tables;
@@ -783,16 +721,13 @@ impl TableMania {
 
                 if start.elapsed() > wait_for_remote_table_match {
                     error!(
-                        timeout_ms =
-                            wait_for_remote_table_match.as_millis() as u64,
+                        timeout_ms = wait_for_remote_table_match.as_millis() as u64,
                         elapsed_ms = start.elapsed().as_millis() as u64,
                         "Timed out waiting for remote tables to match"
                     );
-                    return Err(
-                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
-                            table_keys_str,
-                        ),
-                    );
+                    return Err(TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(
+                        table_keys_str,
+                    ));
                 }
 
                 sleep(REMOTE_TABLE_FALLBACK_POLL_INTERVAL).await;
@@ -803,15 +738,20 @@ impl TableMania {
             }
         };
 
-        Ok(matching_tables
+        matching_tables
             .into_keys()
-            .map(|address| AddressLookupTableAccount {
-                key: address,
-                // SAFETY: we confirmed above that we have a remote table for all matching
-                // tables and that they contain the addresses we need
-                addresses: remote_tables.get(&address).unwrap().to_vec(),
+            .map(|address| {
+                remote_tables
+                    .get(&address)
+                    .map(|addresses| AddressLookupTableAccount {
+                        key: address,
+                        addresses: addresses.to_vec(),
+                    })
+                    .ok_or_else(|| {
+                        TableManiaError::TimedOutWaitingForRemoteTablesToUpdate(address.to_string())
+                    })
             })
-            .collect())
+            .collect::<TableManiaResult<_>>()
     }
 
     // -----------------
@@ -837,15 +777,10 @@ impl TableMania {
         tokio::spawn(async move {
             let mut last_deactivate = tokio::time::Instant::now();
             let mut last_close = tokio::time::Instant::now();
-            let mut sleep_ms =
-                config.deactivate_interval_ms.min(config.close_interval_ms);
+            let mut sleep_ms = config.deactivate_interval_ms.min(config.close_interval_ms);
             loop {
                 let now = tokio::time::Instant::now();
-                if now
-                    .duration_since(last_deactivate)
-                    .as_millis()
-                    .try_into()
-                    .unwrap_or(u64::MAX)
+                if now.duration_since(last_deactivate).as_millis().try_into().unwrap_or(u64::MAX)
                     >= config.deactivate_interval_ms
                 {
                     Self::deactivate_tables(
@@ -858,11 +793,7 @@ impl TableMania {
                     last_deactivate = now;
                     sleep_ms = sleep_ms.min(config.deactivate_interval_ms);
                 }
-                if now
-                    .duration_since(last_close)
-                    .as_millis()
-                    .try_into()
-                    .unwrap_or(u64::MAX)
+                if now.duration_since(last_close).as_millis().try_into().unwrap_or(u64::MAX)
                     >= config.close_interval_ms
                 {
                     Self::close_tables(
@@ -876,16 +807,13 @@ impl TableMania {
                     sleep_ms = sleep_ms.min(config.close_interval_ms);
                 }
 
-                tokio::time::sleep(tokio::time::Duration::from_millis(
-                    sleep_ms,
-                ))
-                .await;
+                sleep(Duration::from_millis(sleep_ms)).await;
             }
         })
     }
 
     /// Deactivates tables that were previously released
-    #[instrument(skip(rpc_client, authority, released_tables, compute_budget), fields(table_count = tracing::field::Empty, table_address = tracing::field::Empty))]
+    #[instrument(skip(rpc_client, authority, released_tables, compute_budget), fields(table_count = field::Empty, table_address = field::Empty))]
     async fn deactivate_tables(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
@@ -898,26 +826,21 @@ impl TableMania {
             .iter()
             .filter(|x| !x.deactivate_triggered())
             .count();
-        tracing::Span::current().record("table_count", table_count);
-        for table in released_tables
-            .lock()
-            .await
-            .iter_mut()
-            .filter(|x| !x.deactivate_triggered())
-        {
-            tracing::Span::current()
-                .record("table_address", table.table_address().to_string());
+        Span::current().record("table_count", table_count);
+        for table in released_tables.lock().await.iter_mut().filter(|x| !x.deactivate_triggered()) {
+            Span::current().record("table_address", table.table_address().to_string());
             // We don't bubble errors as there is no reasonable way to handle them.
             // Instead the next GC cycle will try again to deactivate the table.
-            let _ = table
-                .deactivate(rpc_client, authority, compute_budget)
-                .await
-                .inspect_err(|err| {
-                    error!(
-                        error = ?err,
-                        "Failed to deactivate table"
-                    )
-                });
+            let _ =
+                table
+                    .deactivate(rpc_client, authority, compute_budget)
+                    .await
+                    .inspect_err(|err| {
+                        error!(
+                            error = ?err,
+                            "Failed to deactivate table"
+                        )
+                    });
         }
     }
 
@@ -925,8 +848,8 @@ impl TableMania {
     #[instrument(
         skip(rpc_client, authority, released_tables, compute_budget),
         fields(
-            deactivated_table_count = tracing::field::Empty,
-            current_slot = tracing::field::Empty,
+            deactivated_table_count = field::Empty,
+            current_slot = field::Empty,
         )
     )]
     async fn close_tables(
@@ -937,51 +860,37 @@ impl TableMania {
     ) {
         // Avoid doing any work if there aren't any deactivated tables to close.
         // Mainly we avoid the `get_slot` call in that case
-        let has_deactivated_tables = released_tables
-            .lock()
-            .await
-            .iter()
-            .any(|x| x.deactivate_triggered());
+        let has_deactivated_tables =
+            released_tables.lock().await.iter().any(|x| x.deactivate_triggered());
         if !has_deactivated_tables {
             return;
         }
 
-        let deactivated_count = released_tables
-            .lock()
-            .await
-            .iter()
-            .filter(|x| x.deactivate_triggered())
-            .count();
-        tracing::Span::current()
-            .record("deactivated_table_count", deactivated_count);
+        let deactivated_count =
+            released_tables.lock().await.iter().filter(|x| x.deactivate_triggered()).count();
+        Span::current().record("deactivated_table_count", deactivated_count);
 
-        let Ok(latest_slot) = rpc_client.get_slot().await.inspect_err(
-            |err| error!(error = ?err, "Failed to get latest slot"),
-        ) else {
+        let Ok(latest_slot) = rpc_client
+            .get_slot()
+            .await
+            .inspect_err(|err| error!(error = ?err, "Failed to get latest slot"))
+        else {
             return;
         };
 
-        tracing::Span::current().record("current_slot", latest_slot);
+        Span::current().record("current_slot", latest_slot);
 
         let mut closed_tables = vec![];
         {
-            for deactivated_table in released_tables
-                .lock()
-                .await
-                .iter_mut()
-                .filter(|x| x.deactivate_triggered())
+            for deactivated_table in
+                released_tables.lock().await.iter_mut().filter(|x| x.deactivate_triggered())
             {
                 // NOTE: [LookupTable::close] will only close the table if it was deactivated
                 //        according to the provided slot
                 // We don't bubble errors as there is no reasonable way to handle them.
                 // Instead the next GC cycle will try again to close the table.
                 match deactivated_table
-                    .close(
-                        rpc_client,
-                        authority,
-                        Some(latest_slot),
-                        compute_budget,
-                    )
+                    .close(rpc_client, authority, Some(latest_slot), compute_budget)
                     .await
                 {
                     Ok((closed, _)) if closed => {
@@ -1036,27 +945,19 @@ mod tests {
     use solana_signature::Signature;
     use solana_transaction_error::TransactionError;
 
-    use super::{
-        ExtendTableErrorAction, MAX_ALLOWED_EXTEND_ERRORS, TableMania,
-        TableManiaError,
-    };
+    use super::{ExtendTableErrorAction, MAX_ALLOWED_EXTEND_ERRORS, TableMania, TableManiaError};
 
-    fn sent_transaction_error(
-        instruction_error: InstructionError,
-    ) -> TableManiaError {
-        TableManiaError::MagicBlockRpcClientError(
-            MagicBlockRpcClientError::SentTransactionError(
-                TransactionError::InstructionError(2, instruction_error),
-                Signature::default(),
-            ),
-        )
+    fn sent_transaction_error(instruction_error: InstructionError) -> TableManiaError {
+        TableManiaError::MagicBlockRpcClientError(MagicBlockRpcClientError::SentTransactionError(
+            TransactionError::InstructionError(2, instruction_error),
+            Signature::default(),
+        ))
     }
 
     #[test]
     fn invalid_instruction_data_forces_new_table_without_retrying() {
         let mut extend_errors = 0;
-        let err =
-            sent_transaction_error(InstructionError::InvalidInstructionData);
+        let err = sent_transaction_error(InstructionError::InvalidInstructionData);
 
         assert_eq!(
             TableMania::handle_extend_table_error(&err, &mut extend_errors),

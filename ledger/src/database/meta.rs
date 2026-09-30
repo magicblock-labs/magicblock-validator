@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
-pub struct AddressSignatureMeta {
+pub(crate) struct AddressSignatureMeta {
     pub writeable: bool,
 }
 

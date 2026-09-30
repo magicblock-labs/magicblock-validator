@@ -24,3 +24,6 @@ toml = { workspace = true }
 tracing = { workspace = true }
 ureq = { workspace = true }
 url = { workspace = true }
+
+[lints]
+workspace = true

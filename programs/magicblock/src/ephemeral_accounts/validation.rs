@@ -18,16 +18,12 @@ use crate::utils::accounts::{self, InstructionAccount};
 fn get_caller_program_id(
     invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<Pubkey, InstructionError> {
-    invoke_context
-        .effective_caller()?
-        .ok_or(InstructionError::IncorrectProgramId)
+    invoke_context.effective_caller()?.ok_or(InstructionError::IncorrectProgramId)
 }
 
 /// Validates that the sponsor account is a signer.
 /// PDAs may satisfy this via `invoke_signed`.
-fn validate_sponsor(
-    tc: &TransactionContext<'_>,
-) -> Result<(), InstructionError> {
+fn validate_sponsor(tc: &TransactionContext<'_>) -> Result<(), InstructionError> {
     let ix_ctx = tc.get_current_instruction_context()?;
     if !ix_ctx.is_instruction_account_signer(SPONSOR_IDX)? {
         return Err(InstructionError::MissingRequiredSignature);
@@ -37,8 +33,7 @@ fn validate_sponsor(
 
 /// Validates the vault account matches the expected pubkey.
 fn validate_vault(tc: &TransactionContext<'_>) -> Result<(), InstructionError> {
-    let vault_pubkey =
-        accounts::get_instruction_pubkey_with_idx(tc, VAULT_IDX)?;
+    let vault_pubkey = accounts::get_instruction_pubkey_with_idx(tc, VAULT_IDX)?;
     if *vault_pubkey != EPHEMERAL_VAULT_PUBKEY {
         return Err(InstructionError::InvalidAccountData);
     }
@@ -79,8 +74,7 @@ pub(super) fn validate_ephemeral_signer(
 pub(super) fn validate_new_ephemeral<'a, 'ix_data>(
     tc: &'a TransactionContext<'ix_data>,
 ) -> Result<InstructionAccount<'a, 'ix_data>, InstructionError> {
-    let ephemeral =
-        accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
+    let ephemeral = accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
     let acc = ephemeral.borrow()?;
     if acc.lamports() != 0 || *acc.owner() != system_program::ID {
         return Err(InstructionError::InvalidAccountData);
@@ -95,8 +89,7 @@ pub(super) fn validate_existing_ephemeral<'a, 'ix_data>(
     tc: &'a TransactionContext<'ix_data>,
     caller_program_id: &Pubkey,
 ) -> Result<InstructionAccount<'a, 'ix_data>, InstructionError> {
-    let ephemeral =
-        accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
+    let ephemeral = accounts::get_instruction_account_with_idx(tc, EPHEMERAL_IDX)?;
     let ep_ref = ephemeral.borrow()?;
 
     if !ep_ref.is(AccountMode::Magic) {

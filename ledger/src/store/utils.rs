@@ -4,16 +4,12 @@ use solana_signature::Signature;
 use crate::errors::LedgerError;
 
 #[cfg(not(unix))]
-pub fn adjust_ulimit_nofile(
-    _enforce_ulimit_nofile: bool,
-) -> std::result::Result<(), LedgerError> {
+pub fn adjust_ulimit_nofile(_enforce_ulimit_nofile: bool) -> std::result::Result<(), LedgerError> {
     Ok(())
 }
 
 #[cfg(unix)]
-pub fn adjust_ulimit_nofile(
-    enforce_ulimit_nofile: bool,
-) -> std::result::Result<(), LedgerError> {
+pub(super) fn adjust_ulimit_nofile(enforce_ulimit_nofile: bool) -> Result<(), LedgerError> {
     use tracing::*;
 
     // Rocks DB likes to have many open files.  The default open file descriptor limit is
@@ -24,10 +20,7 @@ pub fn adjust_ulimit_nofile(
     let desired_nofile = 1_000_000;
 
     fn get_nofile() -> libc::rlimit {
-        let mut nofile = libc::rlimit {
-            rlim_cur: 0,
-            rlim_max: 0,
-        };
+        let mut nofile = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
         if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut nofile) } != 0 {
             warn!("getrlimit(RLIMIT_NOFILE) failed");
         }
@@ -62,7 +55,7 @@ pub fn adjust_ulimit_nofile(
 }
 
 #[cfg(test)]
-pub fn short_signature(sig: &Signature) -> String {
+pub(super) fn short_signature(sig: &Signature) -> String {
     let sig_str = sig.to_string();
     if sig_str.len() < 8 {
         "<invalid signature>".to_string()

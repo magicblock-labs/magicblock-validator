@@ -1,11 +1,12 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use magicblock_chainlink::{
     AccountFetchEntrypoint,
     testing::{
         context::TestContext,
         deleg::add_delegation_record_for,
         eatas::{
-            EATA_PROGRAM_ID, create_ata_account, create_eata_account,
-            derive_ata, derive_eata,
+            EATA_PROGRAM_ID, create_ata_account, create_eata_account, derive_ata, derive_eata,
         },
         init_logger,
     },
@@ -44,12 +45,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
 
     // Add delegation record for ATA delegated to our validator
     let validator = ctx.validator_pubkey;
-    add_delegation_record_for(
-        &ctx.rpc_client,
-        eata_pubkey,
-        validator,
-        EATA_PROGRAM_ID,
-    );
+    add_delegation_record_for(&ctx.rpc_client, eata_pubkey, validator, EATA_PROGRAM_ID);
 
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];

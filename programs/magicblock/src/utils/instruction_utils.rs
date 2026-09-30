@@ -36,14 +36,9 @@ impl InstructionUtils {
         Self::into_transaction(payer, ix, recent_blockhash)
     }
 
-    pub fn schedule_commit_instruction(
-        payer: &Pubkey,
-        pdas: Vec<Pubkey>,
-    ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
+    pub fn schedule_commit_instruction(payer: &Pubkey, pdas: Vec<Pubkey>) -> Instruction {
+        let mut account_metas =
+            vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new_readonly(*pubkey, true));
         }
@@ -61,10 +56,8 @@ impl InstructionUtils {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Instruction {
-        let mut account_metas = vec![
-            AccountMeta::new(*payer, true),
-            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-        ];
+        let mut account_metas =
+            vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new(*pubkey, true));
         }
@@ -132,17 +125,12 @@ impl InstructionUtils {
     // -----------------
     // Scheduled Commit Sent
     // -----------------
-    pub fn scheduled_commit_sent(
-        intent_id: u64,
-        recent_blockhash: Hash,
-    ) -> Transaction {
+    pub fn scheduled_commit_sent(intent_id: u64, recent_blockhash: Hash) -> Transaction {
         let ix = Self::scheduled_commit_sent_instruction(intent_id);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub(crate) fn scheduled_commit_sent_instruction(
-        intent_id: u64,
-    ) -> Instruction {
+    pub(crate) fn scheduled_commit_sent_instruction(intent_id: u64) -> Instruction {
         static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
         let account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
@@ -161,17 +149,12 @@ impl InstructionUtils {
     // -----------------
     // Close Outbox Intent
     // -----------------
-    pub fn close_outbox_intent(
-        intent_id: u64,
-        recent_blockhash: Hash,
-    ) -> Transaction {
+    pub fn close_outbox_intent(intent_id: u64, recent_blockhash: Hash) -> Transaction {
         let ix = Self::close_outbox_intent_instruction(intent_id);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
-    pub(crate) fn close_outbox_intent_instruction(
-        intent_id: u64,
-    ) -> Instruction {
+    pub(crate) fn close_outbox_intent_instruction(intent_id: u64) -> Instruction {
         let account_metas = vec![
             AccountMeta::new_readonly(validator_authority_id(), true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
@@ -227,11 +210,8 @@ impl InstructionUtils {
         stage: outbox::ExecutionStage,
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Transaction {
-        let ix = Self::set_intent_execution_stage_instruction(
-            intent_id,
-            stage,
-            recovery_commit_nonces,
-        );
+        let ix =
+            Self::set_intent_execution_stage_instruction(intent_id, stage, recovery_commit_nonces);
         Self::into_transaction(&validator_authority(), ix, recent_blockhash)
     }
 
@@ -275,10 +255,7 @@ impl InstructionUtils {
     // -----------------
     // Schedule Task
     // -----------------
-    pub fn schedule_task_instruction(
-        payer: &Pubkey,
-        args: ScheduleTaskArgs,
-    ) -> Instruction {
+    pub fn schedule_task_instruction(payer: &Pubkey, args: ScheduleTaskArgs) -> Instruction {
         let account_metas = vec![AccountMeta::new(*payer, true)];
 
         Instruction::new_with_wincode(
@@ -291,10 +268,7 @@ impl InstructionUtils {
     // -----------------
     // Cancel Task
     // -----------------
-    pub fn cancel_task_instruction(
-        authority: &Pubkey,
-        task_id: i64,
-    ) -> Instruction {
+    pub fn cancel_task_instruction(authority: &Pubkey, task_id: i64) -> Instruction {
         let account_metas = vec![AccountMeta::new(*authority, true)];
 
         Instruction::new_with_wincode(
@@ -308,10 +282,6 @@ impl InstructionUtils {
     // Noop
     // -----------------
     pub fn noop_instruction(data: u64) -> Instruction {
-        Instruction::new_with_wincode(
-            crate::id(),
-            &MagicBlockInstruction::Noop(data),
-            vec![],
-        )
+        Instruction::new_with_wincode(crate::id(), &MagicBlockInstruction::Noop(data), vec![])
     }
 }

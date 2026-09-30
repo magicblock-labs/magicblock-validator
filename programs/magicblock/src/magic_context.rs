@@ -1,5 +1,3 @@
-use std::mem;
-
 use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_instruction::error::InstructionError;
@@ -28,10 +26,7 @@ impl MagicContext {
         }
     }
 
-    pub(crate) fn write_to(
-        &self,
-        data: &mut [u8],
-    ) -> Result<(), InstructionError> {
+    pub(crate) fn write_to(&self, data: &mut [u8]) -> Result<(), InstructionError> {
         let size = serialized_size(self, magic_context_config())
             .map_err(|_| InstructionError::GenericError)?;
         if size > data.len() as u64 {
@@ -50,17 +45,11 @@ impl MagicContext {
         output
     }
 
-    pub(crate) fn add_scheduled_action(
-        &mut self,
-        base_intent: ScheduledIntentBundle,
-    ) {
+    pub(crate) fn add_scheduled_action(&mut self, base_intent: ScheduledIntentBundle) {
         self.scheduled_base_intents.push(base_intent);
     }
 
-    pub(crate) fn take_front_scheduled_commits(
-        &mut self,
-        n: usize,
-    ) -> Vec<ScheduledIntentBundle> {
+    pub(crate) fn take_front_scheduled_commits(&mut self, n: usize) -> Vec<ScheduledIntentBundle> {
         let n = n.min(self.scheduled_base_intents.len());
         self.scheduled_base_intents.drain(..n).collect()
     }
@@ -68,24 +57,24 @@ impl MagicContext {
     /// Returns `intent_id` store in `MagicContext` without deserializing whole account
     pub fn intent_id(data: &[u8]) -> Option<u64> {
         const ID_OFFSET: usize = 0;
-        const ID_END: usize = mem::size_of::<u64>();
+        const ID_END: usize = size_of::<u64>();
 
         let raw_id = data.get(ID_OFFSET..ID_END)?;
 
-        let mut buf = [0; mem::size_of::<u64>()];
+        let mut buf = [0; size_of::<u64>()];
         buf.copy_from_slice(raw_id);
         Some(u64::from_le_bytes(buf))
     }
 
     pub fn scheduled_intents_len(data: &[u8]) -> Option<u64> {
-        const LEN_OFFSET: usize = mem::size_of::<u64>();
-        const LEN_END: usize = LEN_OFFSET + mem::size_of::<u64>();
+        const LEN_OFFSET: usize = size_of::<u64>();
+        const LEN_END: usize = LEN_OFFSET + size_of::<u64>();
 
         if is_zeroed(data) {
             return None;
         }
         let raw_len = data.get(LEN_OFFSET..LEN_END)?;
-        let mut len = [0; mem::size_of::<u64>()];
+        let mut len = [0; size_of::<u64>()];
         len.copy_from_slice(raw_len);
         Some(u64::from_le_bytes(len))
     }
@@ -96,8 +85,7 @@ impl MagicContext {
 }
 
 fn magic_context_config() -> impl wincode::config::Config {
-    Configuration::default()
-        .with_preallocation_size_limit::<MAGIC_CONTEXT_SIZE>()
+    Configuration::default().with_preallocation_size_limit::<MAGIC_CONTEXT_SIZE>()
 }
 
 fn is_zeroed(buf: &[u8]) -> bool {

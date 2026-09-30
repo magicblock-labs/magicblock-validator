@@ -3802,6 +3802,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "parking_lot",
  "pin-project",
  "rusqlite",
  "solana-account 4.3.1",
@@ -4210,9 +4211,9 @@ dependencies = [
 name = "magicblock-table-mania"
 version = "0.15.4"
 dependencies = [
- "ed25519-dalek 1.0.1",
  "magicblock-metrics",
  "magicblock-rpc-client",
+ "parking_lot",
  "rand 0.9.5",
  "sha3",
  "solana-address-lookup-table-interface 3.1.0",
@@ -5819,6 +5820,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "parking_lot",
  "program-flexi-counter",
  "program-schedulecommit",
  "rand 0.8.7",
@@ -9814,6 +9816,7 @@ dependencies = [
  "magicblock-config",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",
+ "parking_lot",
  "solana-loader-v4-interface 3.1.0",
  "solana-system-interface 3.2.0",
  "spl-associated-token-account-interface 2.0.0",
@@ -9890,6 +9893,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "parking_lot",
  "program-flexi-counter",
  "serde_json",
  "serial_test",

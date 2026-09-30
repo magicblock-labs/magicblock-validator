@@ -3,8 +3,7 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 use magicblock_core::traits::ActionsCallbackScheduler;
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::TwoStageProgress,
+    magic_scheduled_base_intent::ScheduledIntentBundle, outbox::TwoStageProgress,
 };
 use solana_keypair::Keypair;
 use solana_signature::Signature;
@@ -12,8 +11,8 @@ use solana_signer::Signer;
 
 use crate::{
     intent_executor::{
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult, IntentExecutor,
+        IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
@@ -23,10 +22,7 @@ use crate::{
                 resolve_pending_signature,
             },
         },
-        utils::{
-            build_commit_finalize_tasks, execute_two_stage_flow,
-            report_and_close_intent,
-        },
+        utils::{build_commit_finalize_tasks, execute_two_stage_flow, report_and_close_intent},
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
@@ -86,25 +82,20 @@ where
     ) -> IntentExecutorResult<ExecutionOutput> {
         // This stage was chosen prior so we build tasks for it
         // Build tasks for commit & finalize stages
-        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
-            &intent_bundle,
-            &self.ctx.task_info_fetcher,
-        )
-        .await?;
+        let (commit_tasks, finalize_tasks) =
+            build_commit_finalize_tasks(&intent_bundle, &self.ctx.task_info_fetcher).await?;
 
-        let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
-            .then_some(intent_bundle.intent_id);
+        let uniqueness_nonce =
+            requires_uniqueness_nonce(&commit_tasks).then_some(intent_bundle.intent_id);
 
         // As strategy was chosen build two stage
-        let TwoStageExecutionMode {
-            commit_stage,
-            finalize_stage,
-        } = TaskStrategist::build_two_stage(
-            commit_tasks,
-            finalize_tasks,
-            &self.authority.pubkey(),
-            uniqueness_nonce,
-        )?;
+        let TwoStageExecutionMode { commit_stage, finalize_stage } =
+            TaskStrategist::build_two_stage(
+                commit_tasks,
+                finalize_tasks,
+                &self.authority.pubkey(),
+                uniqueness_nonce,
+            )?;
 
         let state = Initialized::new(commit_stage, finalize_stage);
         execute_two_stage_flow(
@@ -126,13 +117,9 @@ where
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         // Commit succeeded so we skip those tasks all together
-        let finalize_tasks = TaskBuilderImpl::finalize_tasks(
-            &self.ctx.task_info_fetcher,
-            &intent,
-        )
-        .await?;
-        let uniqueness_nonce =
-            self.finalizing_uniqueness_nonce(&intent).await?;
+        let finalize_tasks =
+            TaskBuilderImpl::finalize_tasks(&self.ctx.task_info_fetcher, &intent).await?;
+        let uniqueness_nonce = self.finalizing_uniqueness_nonce(&intent).await?;
 
         // Build strategy for finalize tasks
         let finalize_strategy = TaskStrategist::build_strategy(
@@ -141,18 +128,16 @@ where
             uniqueness_nonce,
         )?;
 
-        let committed_state =
-            Committed::new(commit_signature, finalize_strategy);
-        let mut finalize_strategy_executor =
-            TwoStageStrategyExecutor::committed(
-                committed_state,
-                self.authority.insecure_clone(),
-                intent.intent_id,
-                self.ctx.intent_client.clone(),
-                self.ctx.outbox_client.clone(),
-                self.ctx.actions_callback_executor.clone(),
-                execution_report,
-            );
+        let committed_state = Committed::new(commit_signature, finalize_strategy);
+        let mut finalize_strategy_executor = TwoStageStrategyExecutor::committed(
+            committed_state,
+            self.authority.insecure_clone(),
+            intent.intent_id,
+            self.ctx.intent_client.clone(),
+            self.ctx.outbox_client.clone(),
+            self.ctx.actions_callback_executor.clone(),
+            execution_report,
+        );
 
         let finalize_signature = execute_with_timeout(
             self.time_left(),
@@ -163,8 +148,7 @@ where
         )
         .await?;
 
-        let finalized_stage =
-            finalize_strategy_executor.done(finalize_signature);
+        let finalized_stage = finalize_strategy_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
             commit_signature: finalized_stage.commit_signature,
             finalize_signature: finalized_stage.finalize_signature,
@@ -184,11 +168,8 @@ where
             return Ok(None);
         }
 
-        let min_context_slot = committed_accounts
-            .iter()
-            .map(|(_, slot)| *slot)
-            .max()
-            .unwrap_or_default();
+        let min_context_slot =
+            committed_accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
         let current_commit_nonces = self
             .ctx
             .task_info_fetcher
@@ -208,33 +189,20 @@ where
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
         let pending = *self.stage.pending_transaction();
-        let succeeded =
-            resolve_pending_signature(&self.ctx.intent_client, &pending)
-                .await?;
+        let succeeded = resolve_pending_signature(&self.ctx.intent_client, &pending).await?;
 
         match (&self.stage, succeeded) {
             // Signature wasn't confirmed - need to reexecute from commit
             (TwoStageProgress::Committing(_), false) => {
-                self.execute_committing_intent(intent, execution_report)
-                    .await
+                self.execute_committing_intent(intent, execution_report).await
             }
             // Signature confirmed - commit was executed, finalizing...
             (TwoStageProgress::Committing(commit), true) => {
-                self.execute_finalizing_intent(
-                    intent,
-                    commit.signature,
-                    execution_report,
-                )
-                .await
+                self.execute_finalizing_intent(intent, commit.signature, execution_report).await
             }
             // Finalize didn't occur - execute
             (TwoStageProgress::Finalizing { commit, .. }, false) => {
-                self.execute_finalizing_intent(
-                    intent,
-                    *commit,
-                    execution_report,
-                )
-                .await
+                self.execute_finalizing_intent(intent, *commit, execution_report).await
             }
             // Finalize was already executed on a previous run - notify the
             // outbox so it isn't left pending and rediscovered again.
@@ -279,16 +247,12 @@ where
         if !pubkeys.is_empty() {
             if result.is_err() {
                 // We can't know what landed on chain, resync everything
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             } else if !undelegated_pubkeys.is_empty() {
                 // Only undelegated accounts' nonces become stale. Keep the
                 // rest cached: a chain re-fetch can race the just-landed
                 // finalize and reuse a nonce (buffer PDA collision).
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&undelegated_pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&undelegated_pubkeys));
             }
         }
         let close_buffers = result.is_ok();
@@ -298,8 +262,7 @@ where
             patched_errors: execution_report.patched_errors,
             callbacks_report: execution_report.callbacks_report,
             #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: execution_report
-                .successful_transaction_strategies,
+            successful_transaction_strategies: execution_report.successful_transaction_strategies,
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,

@@ -1,14 +1,15 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use dlp_api::{
     args::{
-        EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
-        PostDelegationActions,
+        EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
     },
     pda::delegation_record_pda_from_delegated_account,
     state::DelegationRecord,
 };
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_not_subscribed,
-    assert_remain_undelegating, assert_subscribed_without_delegation_record,
+    assert_cloned_as_delegated, assert_not_subscribed, assert_remain_undelegating,
+    assert_subscribed_without_delegation_record,
     testing::{context::TestContext, deleg::delegation_record_to_vec},
 };
 use solana_account::{Account, ReadableAccount};
@@ -95,14 +96,7 @@ async fn redelegation_without_readonly_notification() {
     let record = add_record(&ctx, pubkey, owner, slot, None);
     remote.lamports += 123;
     remote.data = vec![2, 3, 4];
-    assert!(
-        ctx.send_and_receive_account_update(
-            pubkey,
-            remote.clone(),
-            Some(8_000)
-        )
-        .await
-    );
+    assert!(ctx.send_and_receive_account_update(pubkey, remote.clone(), Some(8_000)).await);
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
     ctx.bank
         .accounts()
@@ -122,10 +116,7 @@ async fn old_delegation_keeps_recovery_subscription() {
     let (ctx, pubkey, owner, remote) = undelegating_account().await;
     ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
     add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
-    assert!(
-        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000))
-            .await
-    );
+    assert!(ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
     assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
 }
@@ -137,23 +128,13 @@ async fn failed_redelegation_can_recover() {
     let (ctx, pubkey, owner, remote) = undelegating_account().await;
     let slot = ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
     let record = add_record(&ctx, pubkey, owner, slot, Some(failing_action()));
-    assert!(
-        ctx.send_and_receive_account_update(
-            pubkey,
-            remote.clone(),
-            Some(8_000)
-        )
-        .await
-    );
+    assert!(ctx.send_and_receive_account_update(pubkey, remote.clone(), Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
     assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
 
     let slot = ctx.rpc_client.set_slot(slot + 1);
     add_record(&ctx, pubkey, owner, slot, None);
-    assert!(
-        ctx.send_and_receive_account_update(pubkey, remote, Some(8_000))
-            .await
-    );
+    assert!(ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await);
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
 }

@@ -10,16 +10,12 @@
 
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_rpc_client_api::response::{
-    RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply,
-    RpcVoteAccountStatus,
+    RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply, RpcVoteAccountStatus,
 };
 
 use super::HandlerResult;
 use crate::{
-    requests::{
-        JsonHttpRequest as JsonRequest, params::Serde32Bytes,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
@@ -27,10 +23,7 @@ impl HttpDispatcher {
     /// Handles the `getSlotLeader` RPC request.
     /// This is a **mocked implementation** that always returns the validator's own
     /// identity as the current slot leader.
-    pub(crate) fn get_slot_leader(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_slot_leader(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             Serde32Bytes::from(self.engine.authority()),
@@ -44,20 +37,14 @@ impl HttpDispatcher {
     /// Handles the `getSlotLeaders` RPC request.
     /// This is a **mocked implementation** that always returns a list containing
     /// only the validator's own identity.
-    pub(crate) fn get_slot_leaders(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_slot_leaders(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             [Serde32Bytes::from(self.engine.authority())],
         ))
     }
 
-    pub(crate) fn mock_empty_context(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn mock_empty_context(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
@@ -67,10 +54,7 @@ impl HttpDispatcher {
 
     /// Handles the `getTokenSupply` RPC request.
     /// This is a **mocked implementation** that returns an empty token supply struct.
-    pub(crate) fn get_token_supply(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_token_supply(&self, request: &JsonRequest) -> HandlerResult {
         let supply = UiTokenAmount {
             ui_amount: Some(0.0),
             decimals: 0,
@@ -103,14 +87,8 @@ impl HttpDispatcher {
 
     /// Handles the `getHighestSnapshotSlot` RPC request.
     /// This is a **mocked implementation** that returns a default snapshot info struct.
-    pub(crate) fn get_highest_snapshot_slot(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
-        let info = RpcSnapshotSlotInfo {
-            full: 0,
-            incremental: None,
-        };
+    pub(crate) fn get_highest_snapshot_slot(&self, request: &JsonRequest) -> HandlerResult {
+        let info = RpcSnapshotSlotInfo { full: 0, incremental: None };
         Ok(ResponsePayload::encode_no_context(&request.id, info))
     }
 
@@ -122,10 +100,7 @@ impl HttpDispatcher {
 
     /// Handles the `getGenesisHash` RPC request.
     /// This is a **placeholder implementation** that returns a default hash.
-    pub(crate) fn get_genesis_hash(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_genesis_hash(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             Serde32Bytes::from(solana_hash::Hash::default()),
@@ -134,10 +109,7 @@ impl HttpDispatcher {
 
     /// Handles the `getEpochInfo` RPC request.
     /// Derives epoch progress from Engine's schedule at the latest completed slot.
-    pub(crate) fn get_epoch_info(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_epoch_info(&self, request: &JsonRequest) -> HandlerResult {
         let slot = self.engine.blocks().latest().slot;
         let schedule = self.engine.epoch_schedule();
         let (epoch, slot_index) = schedule.get_epoch_and_slot_index(slot);
@@ -154,10 +126,7 @@ impl HttpDispatcher {
 
     /// Handles the `getEpochSchedule` RPC request.
     /// Returns the same local schedule used by Engine's runtime sysvars.
-    pub(crate) fn get_epoch_schedule(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_epoch_schedule(&self, request: &JsonRequest) -> HandlerResult {
         Ok(ResponsePayload::encode_no_context(
             &request.id,
             self.engine.epoch_schedule(),
@@ -166,10 +135,7 @@ impl HttpDispatcher {
 
     /// Handles the `getBlockCommitment` RPC request.
     /// This is a **mocked implementation** that returns a default block commitment object.
-    pub(crate) fn get_block_commitment(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_block_commitment(&self, request: &JsonRequest) -> HandlerResult {
         let response = RpcBlockCommitment {
             commitment: Some([0; 32]),
             total_stake: 0,
@@ -180,10 +146,7 @@ impl HttpDispatcher {
     /// Handles the `getClusterNodes` RPC request.
     /// This is a **mocked implementation** that returns a list containing only this
     /// validator's contact information.
-    pub(crate) fn get_cluster_nodes(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_cluster_nodes(&self, request: &JsonRequest) -> HandlerResult {
         let info = RpcContactInfo {
             pubkey: self.engine.authority().to_string(),
             gossip: None,
@@ -204,10 +167,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode_no_context(&request.id, [info]))
     }
 
-    pub(crate) fn get_vote_accounts(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_vote_accounts(&self, request: &JsonRequest) -> HandlerResult {
         let status = RpcVoteAccountStatus {
             current: Vec::new(),
             delinquent: Vec::new(),

@@ -12,21 +12,11 @@ async fn test_single_table_two_requests_with_overlapping_pubkeys() {
     let authority = Keypair::new();
     let table_mania = utils::setup_table_mania(&authority).await;
 
-    let pubkeys_req1 = (0..10)
-        .map(|idx| Pubkey::from([idx; 32]))
-        .collect::<HashSet<_>>();
-    let pubkeys_req2 = (6..10)
-        .map(|idx| Pubkey::from([idx; 32]))
-        .collect::<HashSet<_>>();
+    let pubkeys_req1 = (0..10).map(|idx| Pubkey::from([idx; 32])).collect::<HashSet<_>>();
+    let pubkeys_req2 = (6..10).map(|idx| Pubkey::from([idx; 32])).collect::<HashSet<_>>();
 
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_req1)
-        .await
-        .unwrap();
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_req2)
-        .await
-        .unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_req1).await.unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_req2).await.unwrap();
 
     utils::log_active_table_addresses(&table_mania).await;
 
@@ -57,9 +47,7 @@ async fn test_two_table_three_requests_with_one_overlapping_pubkey() {
     let table_mania = utils::setup_table_mania(&authority).await;
 
     let common_pubkey = Pubkey::new_unique();
-    let mut pubkeys_req1 = (0..300)
-        .map(|_| Pubkey::new_unique())
-        .collect::<HashSet<_>>();
+    let mut pubkeys_req1 = (0..300).map(|_| Pubkey::new_unique()).collect::<HashSet<_>>();
 
     // The common pubkey will be stored in the second table
     pubkeys_req1.insert(common_pubkey);
@@ -67,18 +55,9 @@ async fn test_two_table_three_requests_with_one_overlapping_pubkey() {
     let pubkeys_req2 = HashSet::from([common_pubkey]);
     let pubkeys_req3 = HashSet::from([common_pubkey]);
 
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_req1)
-        .await
-        .unwrap();
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_req2)
-        .await
-        .unwrap();
-    table_mania
-        .reserve_pubkeys(&authority, &pubkeys_req3)
-        .await
-        .unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_req1).await.unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_req2).await.unwrap();
+    table_mania.reserve_pubkeys(&authority, &pubkeys_req3).await.unwrap();
 
     utils::log_active_table_addresses(&table_mania).await;
 

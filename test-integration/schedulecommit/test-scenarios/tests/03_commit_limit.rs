@@ -5,30 +5,23 @@ use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
 use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
     api::{
-        init_order_book_instruction,
-        schedule_commit_and_undelegate_cpi_instruction,
-        schedule_commit_cpi_instruction,
-        schedule_commit_cpi_with_vault_instruction,
+        init_order_book_instruction, schedule_commit_and_undelegate_cpi_instruction,
+        schedule_commit_cpi_instruction, schedule_commit_cpi_with_vault_instruction,
         schedule_commit_with_vault_and_order_book_instruction, UserSeeds,
     },
-    ScheduleCommitCpiWithVaultArgs, ScheduleCommitType,
-    ScheduleCommitWithOrderBookArgs,
+    ScheduleCommitCpiWithVaultArgs, ScheduleCommitType, ScheduleCommitWithOrderBookArgs,
 };
-use schedulecommit_client::{
-    verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
-};
+use schedulecommit_client::{verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields};
 use serial_test::serial;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Signer,
-    transaction::Transaction,
+    instruction::InstructionError, pubkey::Pubkey, signature::Signer, transaction::Transaction,
 };
 use tracing::*;
 use utils::{
     assert_account_was_undelegated_on_chain, assert_committee_was_committed,
-    assert_is_instruction_error, extract_transaction_error,
-    get_context_with_delegated_committees,
+    assert_is_instruction_error, extract_transaction_error, get_context_with_delegated_committees,
 };
 mod utils;
 
@@ -46,10 +39,7 @@ static PREPARED: OnceLock<ScheduleCommitTestContext> = OnceLock::new();
 
 fn get_prepared() -> &'static ScheduleCommitTestContext {
     PREPARED.get_or_init(|| {
-        let ctx = get_context_with_delegated_committees(
-            NUM_TESTS,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_context_with_delegated_committees(NUM_TESTS, UserSeeds::MagicScheduleCommit);
 
         let ScheduleCommitTestContextFields {
             payer_chain: payer,
@@ -59,8 +49,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
             ..
         } = ctx.fields();
 
-        let players: Vec<_> =
-            committees.iter().map(|(p, _)| p.pubkey()).collect();
+        let players: Vec<_> = committees.iter().map(|(p, _)| p.pubkey()).collect();
         let pdas: Vec<_> = committees.iter().map(|(_, pda)| *pda).collect();
 
         for n in 0..COMMIT_LIMIT {
@@ -91,12 +80,7 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
                     },
                 )
                 .unwrap_or_else(|e| {
-                    panic!(
-                        "prepare commit {}/{} failed: {:?}",
-                        n + 1,
-                        COMMIT_LIMIT,
-                        e
-                    )
+                    panic!("prepare commit {}/{} failed: {:?}", n + 1, COMMIT_LIMIT, e)
                 });
             info!("prepare commit {}/{}: {}", n + 1, COMMIT_LIMIT, sig);
             verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
@@ -133,22 +117,17 @@ fn test_schedule_commit_fails_at_commit_limit() {
             ScheduleCommitType::CommitFinalize,
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
-        let res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
+        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
 
         let (tx_result_err, tx_err) = extract_transaction_error(res);
         assert_is_instruction_error(
@@ -181,12 +160,8 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
             &[committee.1],
         );
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
         let sig = *tx.get_signature();
         ephem_client
@@ -202,11 +177,7 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
 
         let res = verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
         assert_committee_was_committed(committee.1, &res, true);
-        assert_account_was_undelegated_on_chain(
-            ctx,
-            committee.1,
-            program_schedulecommit::id(),
-        );
+        assert_account_was_undelegated_on_chain(ctx, committee.1, program_schedulecommit::id());
     });
 }
 
@@ -227,10 +198,8 @@ static VAULT_PREPARED: OnceLock<ScheduleCommitTestContext> = OnceLock::new();
 
 fn get_vault_prepared() -> &'static ScheduleCommitTestContext {
     VAULT_PREPARED.get_or_init(|| {
-        let ctx = get_context_with_delegated_committees(
-            NUM_VAULT_TESTS,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx =
+            get_context_with_delegated_committees(NUM_VAULT_TESTS, UserSeeds::MagicScheduleCommit);
 
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
@@ -332,22 +301,17 @@ fn test_payer_delegated_vault_absent_error() {
         );
 
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
 
-        let res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
+        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
 
         let (tx_result_err, tx_err) = extract_transaction_error(res);
         assert_is_instruction_error(
@@ -376,8 +340,7 @@ fn test_no_fee_charged_within_actual_commit_limit() {
 
         let committee = &committees[IDX_WITHIN_LIMIT];
 
-        let payer_balance_before =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
@@ -393,12 +356,8 @@ fn test_no_fee_charged_within_actual_commit_limit() {
         );
 
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
         let sig = *tx.get_signature();
         ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -413,8 +372,7 @@ fn test_no_fee_charged_within_actual_commit_limit() {
 
         verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
 
-        let payer_balance_after =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let payer_balance_after = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
         assert_eq!(
             payer_balance_before, payer_balance_after,
@@ -442,14 +400,10 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
-            validator_identity,
-        );
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
 
-        let payer_balance_before =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_before =
-            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+        let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_before = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
@@ -465,12 +419,8 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         );
 
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
         let sig = *tx.get_signature();
         ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -485,10 +435,8 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
 
         verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
 
-        let payer_balance_after =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_after =
-            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+        let payer_balance_after = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_after = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         assert_eq!(
             payer_balance_after,
@@ -532,14 +480,10 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
-            validator_identity,
-        );
+        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
 
-        let payer_balance_before =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_before =
-            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+        let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_before = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         // Derive and lazily init the order book PDA on chain.
         let (order_book_pda, _) = Pubkey::find_program_address(
@@ -552,11 +496,8 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
                 payer_chain.pubkey(),
                 order_book_pda,
             );
-            ctx.send_and_confirm_instructions_with_payer_chain(
-                &[ix],
-                payer_chain,
-            )
-            .unwrap_or_else(|e| panic!("init_order_book failed: {:?}", e));
+            ctx.send_and_confirm_instructions_with_payer_chain(&[ix], payer_chain)
+                .unwrap_or_else(|e| panic!("init_order_book failed: {:?}", e));
             info!("Initialized order_book: {}", order_book_pda);
         }
 
@@ -574,12 +515,8 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         );
 
         let blockhash = ephem_client.get_latest_blockhash().unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
-        );
+        let tx =
+            Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[&payer], blockhash);
         let sig = *tx.get_signature();
         ephem_client
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -591,20 +528,15 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
                 },
             )
             .unwrap_or_else(|e| {
-                panic!(
-                    "schedule_commit_with_vault_and_order_book failed: {:?}",
-                    e
-                )
+                panic!("schedule_commit_with_vault_and_order_book failed: {:?}", e)
             });
 
         let res = verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
         assert_committee_was_committed(committee.1, &res, true);
 
         // Verify that both the commit fee and the action fee were charged.
-        let payer_balance_after =
-            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-        let vault_balance_after =
-            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+        let payer_balance_after = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_after = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
 
         assert_eq!(
             payer_balance_after,

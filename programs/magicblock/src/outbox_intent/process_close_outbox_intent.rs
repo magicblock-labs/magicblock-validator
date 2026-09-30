@@ -13,9 +13,7 @@ use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
+        accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     },
     validator::authority,
 };
@@ -25,9 +23,9 @@ const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
 /// Closes the outbox intent PDA
 /// Validates intent execution stage to see if it can be closed
-pub fn process_close_outbox_intent(
+pub(crate) fn process_close_outbox_intent(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     validate(&signers, invoke_context, intent_id)?;
@@ -36,7 +34,7 @@ pub fn process_close_outbox_intent(
 
 fn validate(
     signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
@@ -52,8 +50,7 @@ fn validate(
     }
 
     // Assert validator identity matches
-    let validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
+    let validator_pubkey = get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
     let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
@@ -76,12 +73,8 @@ fn validate(
 
     // Deserialize first so the PDA can be validated cheaply against its
     // own stored bump, instead of re-deriving via find_program_address.
-    let intent_acc =
-        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let bundle = OutboxIntentBundle::try_from_bytes(
-        intent_acc.borrow()?.data(),
-    )
-    .map_err(|_| {
+    let intent_acc = get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data()).map_err(|_| {
         ic_msg!(
             invoke_context,
             "CloseOutboxIntent ERR: failed to deserialize outbox intent {}",
@@ -91,8 +84,7 @@ fn validate(
     })?;
 
     // Validate outbox intent PDA
-    let provided_pda =
-        get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let provided_pda = get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
     if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
@@ -119,11 +111,10 @@ fn validate(
 }
 
 fn close_outbox_ephemeral_account(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
-    let pda =
-        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let pda = get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
 
     let mut acc = pda.borrow_mut()?;
     acc.set_lamports(0);
@@ -136,9 +127,7 @@ fn close_outbox_ephemeral_account(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::{
-        MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
-    };
+    use magicblock_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
     use magicblock_magic_program_api::{
         EPHEMERAL_VAULT_PUBKEY,
         outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
@@ -156,9 +145,7 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{
-            ensure_started_validator, process_outbox_intent_instruction,
-        },
+        test_utils::{ensure_started_validator, process_outbox_intent_instruction},
     };
 
     fn transaction_accounts_from_map(
@@ -168,18 +155,12 @@ mod tests {
         ix.accounts
             .iter()
             .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
+                account_data.remove(&acc.pubkey).map(|shared_data| (acc.pubkey, shared_data))
             })
             .collect()
     }
 
-    fn outbox_bundle_bytes(
-        intent_id: u64,
-        bump: u8,
-        stage: Option<ExecutionStage>,
-    ) -> Vec<u8> {
+    fn outbox_bundle_bytes(intent_id: u64, bump: u8, stage: Option<ExecutionStage>) -> Vec<u8> {
         let inner = ScheduledIntentBundle {
             intent_id,
             slot: 0,
@@ -213,13 +194,9 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor -
         // refund is rent-exempt-minimum for the PDA's actual data length
-        let vault = AccountBuilder::from(AccountSharedData::new(
-            1_000_000,
-            0,
-            &crate::id(),
-        ))
-        .mode(AccountMode::Magic)
-        .build::<AccountSharedData>();
+        let vault = AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &crate::id()))
+            .mode(AccountMode::Magic)
+            .build::<AccountSharedData>();
         map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
         // Add outbox PDA as existing ephemeral account (created by accept)
         map.insert(pda, pda_account);
@@ -239,12 +216,10 @@ mod tests {
         let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix =
-            InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let mut ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         ix.accounts[0].is_signer = false;
 
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -264,11 +239,9 @@ mod tests {
         );
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix =
-            InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let mut ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
         ix.accounts[0].pubkey = fake_validator.pubkey();
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -284,8 +257,7 @@ mod tests {
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -302,8 +274,7 @@ mod tests {
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -315,18 +286,16 @@ mod tests {
     #[test]
     fn test_rejects_close_when_two_stage_still_committing() {
         let intent_id: u64 = rand::random();
-        let committing = ExecutionStage::TwoStage(
-            TwoStageProgress::Committing(PendingTransaction {
+        let committing =
+            ExecutionStage::TwoStage(TwoStageProgress::Committing(PendingTransaction {
                 signature: Signature::default(),
                 blockhash: Hash::default(),
-            }),
-        );
+            }));
         let mut account_data = setup_outbox_pda(intent_id, Some(committing));
         ensure_started_validator(&mut account_data, None);
 
         let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,

@@ -16,10 +16,7 @@ pub struct ActionArgs {
 
 impl ActionArgs {
     pub fn new(data: Vec<u8>) -> Self {
-        Self {
-            escrow_index: 255,
-            data,
-        }
+        Self { escrow_index: 255, data }
     }
     pub fn escrow_index(&self) -> u8 {
         self.escrow_index
@@ -39,9 +36,9 @@ impl ActionArgs {
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct BaseActionArgs {
     pub args: ActionArgs,
-    pub compute_units: u32, // compute units your action will use
-    pub escrow_authority: u8, // index of account authorizing action on actor pda
-    pub destination_program: Pubkey, // address of destination program
+    pub compute_units: u32,              // compute units your action will use
+    pub escrow_authority: u8,            // index of account authorizing action on actor pda
+    pub destination_program: Pubkey,     // address of destination program
     pub accounts: Vec<ShortAccountMeta>, // short account metas
 }
 
@@ -59,9 +56,7 @@ impl CommitTypeArgs {
     pub fn committed_accounts_indices(&self) -> &Vec<u8> {
         match self {
             Self::Standalone(value) => value,
-            Self::WithBaseActions {
-                committed_accounts, ..
-            } => committed_accounts,
+            Self::WithBaseActions { committed_accounts, .. } => committed_accounts,
         }
     }
 }
@@ -110,16 +105,12 @@ impl From<MagicBaseIntentArgs> for MagicIntentBundleArgs {
     fn from(value: MagicBaseIntentArgs) -> Self {
         let mut this = Self::default();
         match value {
-            MagicBaseIntentArgs::BaseActions(value) => {
-                this.standalone_actions.extend(value)
-            }
+            MagicBaseIntentArgs::BaseActions(value) => this.standalone_actions.extend(value),
             MagicBaseIntentArgs::Commit(value) => this.commit = Some(value),
             MagicBaseIntentArgs::CommitAndUndelegate(value) => {
                 this.commit_and_undelegate = Some(value)
             }
-            MagicBaseIntentArgs::CommitFinalize(value) => {
-                this.commit_finalize = Some(value)
-            }
+            MagicBaseIntentArgs::CommitFinalize(value) => this.commit_finalize = Some(value),
             MagicBaseIntentArgs::CommitFinalizeAndUndelegate(value) => {
                 this.commit_finalize_and_undelegate = Some(value)
             }

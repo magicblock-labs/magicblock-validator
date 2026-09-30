@@ -15,8 +15,7 @@ use helius_laserstream::{
 use magicblock_config::config::GrpcConfig;
 use magicblock_core::logger::log_trace_debug;
 use magicblock_metrics::metrics::{
-    inc_account_subscription_account_updates_count,
-    inc_per_program_account_updates_count,
+    inc_account_subscription_account_updates_count, inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count,
 };
 use solana_account::Account;
@@ -31,17 +30,16 @@ use tonic::Code;
 use tracing::*;
 
 use super::{
-    LaserResult, SharedSubscriptions, StreamFactory, StreamHandle,
-    StreamManager, StreamManagerConfig, StreamUpdateSource,
+    LaserResult, SharedSubscriptions, StreamFactory, StreamHandle, StreamManager,
+    StreamManagerConfig, StreamUpdateSource,
 };
 use crate::remote_account_provider::{
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-    SubscriptionUpdate,
+    RemoteAccountProviderError, RemoteAccountProviderResult, SubscriptionUpdate,
     chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl},
     chain_slot::ChainSlot,
     pubsub_common::{
-        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE,
-        SUBSCRIPTION_UPDATE_CHANNEL_SIZE, SubscriptionSource,
+        ChainPubsubActorMessage, MESSAGE_CHANNEL_SIZE, SUBSCRIPTION_UPDATE_CHANNEL_SIZE,
+        SubscriptionSource,
     },
 };
 
@@ -101,7 +99,7 @@ impl fmt::Display for AccountUpdateSource {
 ///   triggers reconnection.
 /// - The actor itself doesn't attempt to reconnect; it relies
 ///   on external recovery.
-pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
+pub(crate) struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
     /// Manager for creating and polling laser streams
     stream_manager: StreamManager<H, S>,
     /// Receives subscribe/unsubscribe messages to this actor
@@ -128,7 +126,7 @@ pub struct ChainLaserActor<H: StreamHandle, S: StreamFactory<H>> {
 
 impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_from_url(
+    pub(crate) fn new_from_url(
         pubsub_url: &str,
         client_id: &str,
         api_key: &str,
@@ -170,7 +168,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
         )
     }
 
-    pub fn new(
+    pub(crate) fn new(
         client_id: &str,
         laser_client_config: LaserstreamConfig,
         commitment: SolanaCommitmentLevel,
@@ -199,7 +197,7 @@ impl ChainLaserActor<super::StreamHandleImpl, super::StreamFactoryImpl> {
 
 impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// Create actor with a custom stream factory (for testing)
-    pub fn with_stream_factory(
+    pub(crate) fn with_stream_factory(
         client_id: &str,
         stream_factory: S,
         commitment: SolanaCommitmentLevel,
@@ -215,8 +213,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     ) {
         let (subscription_updates_sender, subscription_updates_receiver) =
             mpsc::channel(SUBSCRIPTION_UPDATE_CHANNEL_SIZE);
-        let (messages_sender, messages_receiver) =
-            mpsc::channel(MESSAGE_CHANNEL_SIZE);
+        let (messages_sender, messages_receiver) = mpsc::channel(MESSAGE_CHANNEL_SIZE);
         let commitment = grpc_commitment_from_solana(commitment);
 
         let chain_slot = slots.chain_slot.clone();
@@ -228,9 +225,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         );
         let shared_subscriptions = Arc::clone(stream_manager.subscriptions());
 
-        let optimization_interval_duration = Duration::from_secs(
-            grpc_config.max_time_without_optimization_secs.max(10),
-        );
+        let optimization_interval_duration =
+            Duration::from_secs(grpc_config.max_time_without_optimization_secs.max(10));
         let me = Self {
             stream_manager,
             messages_receiver,
@@ -252,7 +248,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     }
 
     #[instrument(skip(self), fields(client_id = %self.client_id))]
-    pub async fn run(mut self) {
+    pub(crate) async fn run(mut self) {
         // Every stream carries a slot-update filter, so a healthy stream
         // delivers updates every chain slot (~400ms). Silence is judged
         // per stream: a single stream can die without erroring (e.g. an
@@ -263,10 +259,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         const STREAM_LIVENESS_TIMEOUT: Duration = Duration::from_secs(5);
         const LIVENESS_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
-        let mut optimization_interval =
-            interval(self.optimization_interval_duration);
-        optimization_interval
-            .set_missed_tick_behavior(MissedTickBehavior::Delay);
+        let mut optimization_interval = interval(self.optimization_interval_duration);
+        optimization_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
         // The first tick completes immediately; consume it so
         // the timer starts counting from now.
         optimization_interval.tick().await;
@@ -354,15 +348,11 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     async fn handle_msg(&mut self, msg: ChainPubsubActorMessage) -> bool {
         use ChainPubsubActorMessage::*;
         match msg {
-            AccountSubscribe {
-                pubkey, response, ..
-            } => {
+            AccountSubscribe { pubkey, response, .. } => {
                 self.add_sub(pubkey, response).await;
                 false
             }
-            AccountSubscribeMultiple {
-                pubkeys, response, ..
-            } => {
+            AccountSubscribeMultiple { pubkeys, response, .. } => {
                 self.add_subs(pubkeys, response).await;
                 false
             }
@@ -371,10 +361,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
                 false
             }
             ProgramSubscribe { pubkey, response } => {
-                let result = self
-                    .stream_manager
-                    .add_program_subscription(pubkey, &self.commitment)
-                    .await;
+                let result =
+                    self.stream_manager.add_program_subscription(pubkey, &self.commitment).await;
                 let _ = response.send(result).inspect_err(|_| {
                     warn!(client_id = self.client_id, program_id = %pubkey, "Failed to send program subscribe response");
                 });
@@ -508,9 +496,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         } else {
             unsub_response
                 .send(Err(
-                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(
-                        pubkey.to_string(),
-                    ),
+                    RemoteAccountProviderError::AccountSubscriptionDoesNotExist(pubkey.to_string()),
                 ))
                 .unwrap_or_else(|_| {
                     warn!(pubkey = %pubkey, "Failed to send unsubscribe response");
@@ -532,22 +518,14 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 
     /// Handles an update from any subscription stream.
     #[instrument(skip(self), fields(client_id = %self.client_id))]
-    async fn handle_stream_result(
-        &mut self,
-        src: StreamUpdateSource,
-        result: LaserResult,
-    ) {
+    async fn handle_stream_result(&mut self, src: StreamUpdateSource, result: LaserResult) {
         let update_source = match src {
             StreamUpdateSource::Account => AccountUpdateSource::Account,
             StreamUpdateSource::Program => AccountUpdateSource::Program,
         };
         match result {
             Ok(subscribe_update) => {
-                self.process_subscription_update(
-                    subscribe_update,
-                    update_source,
-                )
-                .await;
+                self.process_subscription_update(subscribe_update, update_source).await;
             }
             Err(err) => {
                 let label = match src {
@@ -567,11 +545,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
     /// stream itself with slot replay, while signaling a connection issue
     /// here would tear down every healthy stream and resubscribe all
     /// accounts on each routine provider reset.
-    async fn handle_stream_error(
-        &mut self,
-        err: &LaserstreamError,
-        source: &str,
-    ) {
+    async fn handle_stream_error(&mut self, err: &LaserstreamError, source: &str) {
         if is_fallen_behind_error(err) {
             // Replay from our tracked slot is no longer possible; a full
             // resubscribe with a fresh slot is required.
@@ -617,16 +591,13 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         const MAX_ALLOWED_LAG_SLOTS: u64 = TIMEOUT_SECS * 5;
 
         tokio::spawn(async move {
-            let rpc_result = tokio::time::timeout(
-                Duration::from_secs(TIMEOUT_SECS),
-                rpc_client.get_slot(),
-            )
-            .await;
+            let rpc_result =
+                tokio::time::timeout(Duration::from_secs(TIMEOUT_SECS), rpc_client.get_slot())
+                    .await;
 
             match rpc_result {
                 Ok(Ok(rpc_chain_slot)) => {
-                    let slot_lag =
-                        rpc_chain_slot.saturating_sub(last_chain_slot);
+                    let slot_lag = rpc_chain_slot.saturating_sub(last_chain_slot);
                     chain_slot.update(rpc_chain_slot);
                     if slot_lag > MAX_ALLOWED_LAG_SLOTS {
                         warn!(
@@ -709,8 +680,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         skip(self, update),
         fields(
             client_id = %self.client_id,
-            pubkey = tracing::field::Empty,
-            slot = tracing::field::Empty,
+            pubkey = field::Empty,
+            slot = field::Empty,
             source = %source,
         )
     )]
@@ -742,15 +713,12 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             return;
         };
 
-        tracing::Span::current()
-            .record("pubkey", tracing::field::display(pubkey));
+        Span::current().record("pubkey", field::display(pubkey));
 
-        let log_trace = if tracing::enabled!(tracing::Level::TRACE) {
+        let log_trace = if tracing::enabled!(Level::TRACE) {
             if pubkey.eq(&clock::ID) {
                 static TRACE_CLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
-                TRACE_CLOCK_COUNT
-                    .fetch_add(1, Ordering::Relaxed)
-                    .is_multiple_of(100)
+                TRACE_CLOCK_COUNT.fetch_add(1, Ordering::Relaxed).is_multiple_of(100)
             } else {
                 true
             }
@@ -758,7 +726,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
             false
         };
 
-        tracing::Span::current().record("slot", slot);
+        Span::current().record("slot", slot);
 
         if log_trace {
             trace!("Received subscription update");
@@ -770,15 +738,11 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         };
 
         if matches!(source, AccountUpdateSource::Program) {
-            inc_per_program_account_updates_count(
-                &self.client_id,
-                &owner.to_string(),
-            );
+            inc_per_program_account_updates_count(&self.client_id, &owner.to_string());
         }
 
         let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&dlp_api::id());
+            || matches!(source, AccountUpdateSource::Program) && owner.eq(&dlp_api::id());
         if !should_forward {
             return;
         }
@@ -804,14 +768,10 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         if pubkey != clock::ID {
             match source {
                 AccountUpdateSource::Account => {
-                    inc_account_subscription_account_updates_count(
-                        &self.client_id,
-                    );
+                    inc_account_subscription_account_updates_count(&self.client_id);
                 }
                 AccountUpdateSource::Program => {
-                    inc_program_subscription_account_updates_count(
-                        &self.client_id,
-                    );
+                    inc_program_subscription_account_updates_count(&self.client_id);
                 }
             }
         }
@@ -828,9 +788,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
 // -----------------
 // Helpers
 // -----------------
-fn grpc_commitment_from_solana(
-    commitment: SolanaCommitmentLevel,
-) -> CommitmentLevel {
+fn grpc_commitment_from_solana(commitment: SolanaCommitmentLevel) -> CommitmentLevel {
     use SolanaCommitmentLevel::*;
     match commitment {
         Finalized => CommitmentLevel::Finalized,
@@ -846,10 +804,7 @@ fn is_fallen_behind_error(err: &LaserstreamError) -> bool {
     match err {
         LaserstreamError::Status(status) => {
             status.code() == Code::DataLoss
-                && status
-                    .message()
-                    .to_ascii_lowercase()
-                    .contains("fallen behind")
+                && status.message().to_ascii_lowercase().contains("fallen behind")
         }
         _ => false,
     }
@@ -882,9 +837,9 @@ mod tests {
         assert!(is_fallen_behind_error(&fallen_behind));
         assert!(!is_sdk_reconnectable_status(&fallen_behind));
 
-        let terminal = LaserstreamError::MaxReconnectAttempts(
-            tonic::Status::cancelled("Connection failed after 10 attempts"),
-        );
+        let terminal = LaserstreamError::MaxReconnectAttempts(tonic::Status::cancelled(
+            "Connection failed after 10 attempts",
+        ));
         assert!(!is_sdk_reconnectable_status(&terminal));
 
         assert!(!is_sdk_reconnectable_status(&LaserstreamError::StreamEnded));

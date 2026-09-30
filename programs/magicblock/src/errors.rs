@@ -11,16 +11,12 @@ pub mod custom_error_codes {
     pub const CANNOT_FIND_SCHEDULED_COMMIT: u32 = 10_002;
 }
 
-#[derive(
-    Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive,
-)]
+#[derive(Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive)]
 pub enum MagicBlockProgramError {
     #[error("need at least one account to modify")]
     NoAccountsToModify,
 
-    #[error(
-        "number of accounts to modify needs to match number of account modifications"
-    )]
+    #[error("number of accounts to modify needs to match number of account modifications")]
     AccountsToModifyNotMatchingAccountModifications,
 
     #[error("The account modification for the provided key is missing")]

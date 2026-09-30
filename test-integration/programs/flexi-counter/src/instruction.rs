@@ -237,11 +237,7 @@ pub enum FlexiCounterInstruction {
     /// 4. [write]         magic context
     /// 5. []              magic program
     /// 6. [write]         magic fee vault
-    CreateTransferIntent {
-        amount: u64,
-        fail: bool,
-        compute_units: u32,
-    },
+    CreateTransferIntent { amount: u64, fail: bool, compute_units: u32 },
 
     /// Post-commit base-layer action: transfers `amount` lamports from the
     /// payer's escrow to `destination`, or returns `TRANSFER_FAIL_CODE` when
@@ -263,10 +259,7 @@ pub enum FlexiCounterInstruction {
     /// 2.      `[signer]` Payer (escrow authority)
     /// 3.      `[write]` Commit counters
     /// ..      `[write]` CommitFinalize counters
-    CreateIntentBundleCommitAndFinalize {
-        num_commit: u8,
-        num_commit_finalize: u8,
-    },
+    CreateIntentBundleCommitAndFinalize { num_commit: u8, num_commit_finalize: u8 },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -284,11 +277,7 @@ pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
     )
 }
 
-pub fn create_realloc_ix(
-    payer: Pubkey,
-    bytes: u64,
-    invocation_count: u16,
-) -> Instruction {
+pub fn create_realloc_ix(payer: Pubkey, bytes: u64, invocation_count: u16) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
     let accounts = vec![
@@ -298,10 +287,7 @@ pub fn create_realloc_ix(
     ];
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::Realloc {
-            bytes,
-            invocation_count,
-        },
+        &FlexiCounterInstruction::Realloc { bytes, invocation_count },
         accounts,
     )
 }
@@ -309,10 +295,7 @@ pub fn create_realloc_ix(
 pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts = vec![
-        AccountMeta::new_readonly(payer, true),
-        AccountMeta::new(pda, false),
-    ];
+    let accounts = vec![AccountMeta::new_readonly(payer, true), AccountMeta::new(pda, false)];
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Add { count },
@@ -345,8 +328,7 @@ pub fn create_add_error_ix(payer: Pubkey, count: u8) -> Instruction {
 pub fn create_mul_ix(payer: Pubkey, multiplier: u8) -> Instruction {
     let program_id = &crate::id();
     let (pda, _) = FlexiCounter::pda(&payer);
-    let accounts =
-        vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
+    let accounts = vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Mul { multiplier },
@@ -420,10 +402,7 @@ pub fn create_add_and_schedule_commit_ix(
     )
 }
 
-pub fn create_add_counter_ix(
-    payer: Pubkey,
-    source_payer: Pubkey,
-) -> Instruction {
+pub fn create_add_counter_ix(payer: Pubkey, source_payer: Pubkey) -> Instruction {
     let program_id = &crate::id();
     let (pda_main, _) = FlexiCounter::pda(&payer);
     let (pda_source, _) = FlexiCounter::pda(&source_payer);
@@ -432,11 +411,7 @@ pub fn create_add_counter_ix(
         AccountMeta::new(pda_main, false),
         AccountMeta::new_readonly(pda_source, false),
     ];
-    Instruction::new_with_borsh(
-        *program_id,
-        &FlexiCounterInstruction::AddCounter,
-        accounts,
-    )
+    Instruction::new_with_borsh(*program_id, &FlexiCounterInstruction::AddCounter, accounts)
 }
 
 pub fn create_intent_single_committee_ix(
@@ -479,18 +454,14 @@ pub fn create_intent_ix(
 ) -> Instruction {
     let program_id = &crate::id();
 
-    let (is_undelegate, counter_diffs) =
-        if let Some(counter_diffs) = counter_diffs {
-            (true, counter_diffs)
-        } else {
-            (false, vec![])
-        };
-    let payers_meta = payers
-        .iter()
-        .map(|payer| AccountMeta::new_readonly(*payer, true));
-    let counter_metas = payers
-        .iter()
-        .map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false));
+    let (is_undelegate, counter_diffs) = if let Some(counter_diffs) = counter_diffs {
+        (true, counter_diffs)
+    } else {
+        (false, vec![])
+    };
+    let payers_meta = payers.iter().map(|payer| AccountMeta::new_readonly(*payer, true));
+    let counter_metas =
+        payers.iter().map(|payer| AccountMeta::new(FlexiCounter::pda(payer).0, false));
     let mut accounts = vec![
         AccountMeta::new_readonly(crate::id(), false),
         AccountMeta::new(MAGIC_CONTEXT_ID, false),
@@ -582,11 +553,7 @@ pub fn create_transfer_intent_ix(
     ];
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::CreateTransferIntent {
-            amount,
-            fail,
-            compute_units,
-        },
+        &FlexiCounterInstruction::CreateTransferIntent { amount, fail, compute_units },
         accounts,
     )
 }
@@ -619,11 +586,7 @@ pub fn create_intent_bundle_ix(
     ];
 
     // Add commit-only payers (escrow authorities)
-    accounts.extend(
-        commit_only_payers
-            .iter()
-            .map(|payer| AccountMeta::new_readonly(*payer, true)),
-    );
+    accounts.extend(commit_only_payers.iter().map(|payer| AccountMeta::new_readonly(*payer, true)));
     // Add commit-only counters
     accounts.extend(
         commit_only_payers
@@ -632,11 +595,7 @@ pub fn create_intent_bundle_ix(
     );
 
     // Add undelegate payers (escrow authorities)
-    accounts.extend(
-        undelegate_payers
-            .iter()
-            .map(|payer| AccountMeta::new_readonly(*payer, true)),
-    );
+    accounts.extend(undelegate_payers.iter().map(|payer| AccountMeta::new_readonly(*payer, true)));
     // Add undelegate counters
     accounts.extend(
         undelegate_payers
@@ -667,16 +626,8 @@ pub fn create_intent_bundle_commit_and_finalize_ix(
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
         AccountMeta::new_readonly(payer, true),
     ];
-    accounts.extend(
-        commit_accounts
-            .iter()
-            .map(|pubkey| AccountMeta::new(*pubkey, false)),
-    );
-    accounts.extend(
-        commit_finalize_accounts
-            .iter()
-            .map(|pubkey| AccountMeta::new(*pubkey, false)),
-    );
+    accounts.extend(commit_accounts.iter().map(|pubkey| AccountMeta::new(*pubkey, false)));
+    accounts.extend(commit_finalize_accounts.iter().map(|pubkey| AccountMeta::new(*pubkey, false)));
 
     Instruction::new_with_borsh(
         *program_id,

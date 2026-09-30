@@ -12,24 +12,18 @@ use integration_test_tools::{
 use program_schedulecommit::{
     api::{
         increase_count_instruction, request_undelegation_cpi_instruction,
-        schedule_commit_and_undelegate_cpi_instruction,
-        schedule_commit_and_undelegate_cpi_twice,
+        schedule_commit_and_undelegate_cpi_instruction, schedule_commit_and_undelegate_cpi_twice,
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
         schedule_commit_instruction_for_order_book, set_count_instruction,
         update_order_book_instruction, UserSeeds,
     },
-    BookUpdate, MainAccount, OrderLevel, ScheduleCommitType,
-    FAIL_UNDELEGATION_COUNT,
+    BookUpdate, MainAccount, OrderLevel, ScheduleCommitType, FAIL_UNDELEGATION_COUNT,
 };
 use rand::{RngCore, SeedableRng};
-use schedulecommit_client::{
-    verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
-};
+use schedulecommit_client::{verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
-use solana_rpc_client_api::{
-    client_error::Error as ClientError, config::RpcSendTransactionConfig,
-};
+use solana_rpc_client_api::{client_error::Error as ClientError, config::RpcSendTransactionConfig};
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
@@ -39,18 +33,14 @@ use solana_sdk::{
 };
 use tracing::*;
 use utils::{
-    assert_one_committee_account_was_undelegated_on_chain,
-    assert_one_committee_synchronized_count,
-    assert_one_committee_was_committed,
-    assert_two_committee_accounts_were_undelegated_on_chain,
-    assert_two_committees_synchronized_count,
-    assert_two_committees_were_committed, extract_transaction_error,
-    get_context_with_delegated_committees,
+    assert_one_committee_account_was_undelegated_on_chain, assert_one_committee_synchronized_count,
+    assert_one_committee_was_committed, assert_two_committee_accounts_were_undelegated_on_chain,
+    assert_two_committees_synchronized_count, assert_two_committees_were_committed,
+    extract_transaction_error, get_context_with_delegated_committees,
 };
 
 use crate::utils::{
-    assert_is_one_of_instruction_errors,
-    assert_one_committee_account_was_not_undelegated_on_chain,
+    assert_is_one_of_instruction_errors, assert_one_committee_account_was_not_undelegated_on_chain,
 };
 
 mod utils;
@@ -65,10 +55,7 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(
-        1,
-        UserSeeds::MagicScheduleCommit,
-    );
+    let ctx = get_context_with_delegated_committees(1, UserSeeds::MagicScheduleCommit);
     let ScheduleCommitTestContextFields {
         payer_chain: payer,
         committees,
@@ -82,10 +69,7 @@ fn commit_and_undelegate_one_account(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     } else {
@@ -94,10 +78,7 @@ fn commit_and_undelegate_one_account(
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     };
@@ -110,15 +91,14 @@ fn commit_and_undelegate_one_account(
     );
 
     let sig = tx.get_signature();
-    let tx_res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig, tx_res)
 }
@@ -154,23 +134,18 @@ fn commit_order_book_account(
     ];
 
     let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-    let tx = Transaction::new_signed_with_payer(
-        &ixs,
-        Some(&payer.pubkey()),
-        &[&payer],
-        ephem_blockhash,
-    );
+    let tx =
+        Transaction::new_signed_with_payer(&ixs, Some(&payer.pubkey()), &[&payer], ephem_blockhash);
 
     let sig = tx.get_signature();
-    let tx_res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     debug!("txhash (scheduled_commit): {:?}", tx_res);
 
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
@@ -184,10 +159,7 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(
-        2,
-        UserSeeds::MagicScheduleCommit,
-    );
+    let ctx = get_context_with_delegated_committees(2, UserSeeds::MagicScheduleCommit);
     let ScheduleCommitTestContextFields {
         payer_chain: payer,
         committees,
@@ -201,10 +173,7 @@ fn commit_and_undelegate_two_accounts(
             payer.pubkey(),
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     } else {
@@ -213,10 +182,7 @@ fn commit_and_undelegate_two_accounts(
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     };
@@ -230,15 +196,14 @@ fn commit_and_undelegate_two_accounts(
     );
 
     let sig = tx.get_signature();
-    let tx_res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig, tx_res)
 }
@@ -248,10 +213,7 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(
-        2,
-        UserSeeds::MagicScheduleCommit,
-    );
+    let ctx = get_context_with_delegated_committees(2, UserSeeds::MagicScheduleCommit);
     let ScheduleCommitTestContextFields {
         payer_chain: payer,
         committees,
@@ -264,10 +226,7 @@ fn commit_and_undelegate_two_accounts_twice() -> (
         payer.pubkey(),
         magicblock_magic_program_api::id(),
         magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-        &committees
-            .iter()
-            .map(|(player, _)| player.pubkey())
-            .collect::<Vec<_>>(),
+        &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -280,15 +239,14 @@ fn commit_and_undelegate_two_accounts_twice() -> (
     );
 
     let sig = tx.get_signature();
-    let tx_res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
 
     debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig, tx_res)
@@ -322,22 +280,18 @@ fn wait_for_requested_undelegation_on_chain(
                     .map(|account| account.count)
                     .map_err(|err| err.to_string())
             });
-        let count_matches =
-            matches!(&count_result, Ok(count) if *count == expected_count);
+        let count_matches = matches!(&count_result, Ok(count) if *count == expected_count);
 
         if owner_restored && !request_exists && count_matches {
             return;
         }
 
-        last_state = format!(
-            "owner={owner_state}, request_exists={request_exists}, count={count_result:?}"
-        );
+        last_state =
+            format!("owner={owner_state}, request_exists={request_exists}, count={count_result:?}");
         sleep(REQUESTED_UNDELEGATION_RETRY_DELAY);
     }
 
-    panic!(
-        "timed out waiting for requested undelegation of {pda}; last state: {last_state}"
-    );
+    panic!("timed out waiting for requested undelegation of {pda}; last state: {last_state}");
 }
 
 #[test]
@@ -358,10 +312,7 @@ fn test_committing_and_undelegating_one_account() {
 #[test]
 fn test_request_undelegation_commits_and_undelegates_one_account() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(
-            1,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_context_with_delegated_committees(1, UserSeeds::MagicScheduleCommit);
         let ScheduleCommitTestContextFields {
             payer_ephem,
             payer_chain,
@@ -371,20 +322,14 @@ fn test_request_undelegation_commits_and_undelegates_one_account() {
             ..
         } = ctx.fields();
         let (player, committee_pda) = &committees[0];
-        let request_pda =
-            undelegation_request_pda_from_delegated_account(committee_pda);
+        let request_pda = undelegation_request_pda_from_delegated_account(committee_pda);
 
         assert!(
             ctx.fetch_chain_account(request_pda).is_err(),
             "request PDA should not exist before request"
         );
 
-        assert_can_increase_committee_count(
-            *committee_pda,
-            payer_ephem,
-            ephem_client,
-            commitment,
-        );
+        assert_can_increase_committee_count(*committee_pda, payer_ephem, ephem_client, commitment);
 
         let ix = request_undelegation_cpi_instruction(
             payer_chain.pubkey(),
@@ -415,32 +360,21 @@ fn test_request_undelegation_commits_and_undelegates_one_account() {
             "request undelegation transaction failed: {request_res:?}"
         );
 
-        wait_for_requested_undelegation_on_chain(
-            &ctx,
-            *committee_pda,
-            request_pda,
-            1,
-        );
+        wait_for_requested_undelegation_on_chain(&ctx, *committee_pda, request_pda, 1);
     });
 }
 
 #[test]
 fn test_commit_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalize,
-    );
+    run_test_for_commit_huge_order_book_account(ScheduleCommitType::CommitFinalize);
 }
 
 #[test]
 fn test_commit_and_undelegate_huge_order_book_account() {
-    run_test_for_commit_huge_order_book_account(
-        ScheduleCommitType::CommitFinalizeAndUndelegate,
-    );
+    run_test_for_commit_huge_order_book_account(ScheduleCommitType::CommitFinalizeAndUndelegate);
 }
 
-fn run_test_for_commit_huge_order_book_account(
-    commit_type: ScheduleCommitType,
-) {
+fn run_test_for_commit_huge_order_book_account(commit_type: ScheduleCommitType) {
     run_test!({
         let (rng_seed, update) = {
             use rand::{
@@ -451,36 +385,25 @@ fn run_test_for_commit_huge_order_book_account(
             println!("Important: use {rng_seed} as seed to regenerate the random inputs in case of test failure");
             let mut random = StdRng::seed_from_u64(rng_seed);
             let mut update = BookUpdate::default();
-            update.bids.extend((0..random.gen_range(5..100)).map(|_| {
-                OrderLevel {
-                    price: random.gen_range(75000..90000),
-                    size: random.gen_range(1..10),
-                }
+            update.bids.extend((0..random.gen_range(5..100)).map(|_| OrderLevel {
+                price: random.gen_range(75000..90000),
+                size: random.gen_range(1..10),
             }));
-            update.asks.extend((0..random.gen_range(5..100)).map(|_| {
-                OrderLevel {
-                    price: random.gen_range(125000..150000),
-                    size: random.gen_range(1..10),
-                }
+            update.asks.extend((0..random.gen_range(5..100)).map(|_| OrderLevel {
+                price: random.gen_range(125000..150000),
+                size: random.gen_range(1..10),
             }));
             (rng_seed, update)
         };
-        let (ctx, sig, tx_res) =
-            commit_order_book_account(update.clone(), commit_type);
+        let (ctx, sig, tx_res) = commit_order_book_account(update.clone(), commit_type);
         println!(
             "run_test_for_commit_huge_order_book_account: '{}' {:?}",
             sig, tx_res
         );
 
-        let res = verify::fetch_and_verify_order_book_commit_result_from_logs(
-            &ctx, sig,
-        );
+        let res = verify::fetch_and_verify_order_book_commit_result_from_logs(&ctx, sig);
 
-        let book = res
-            .included
-            .values()
-            .next()
-            .expect("one order-book must exist");
+        let book = res.included.values().next().expect("one order-book must exist");
 
         assert_eq!(
             book.bids.len(),
@@ -538,11 +461,7 @@ fn test_committing_and_undelegating_two_accounts_success() {
 // Delegate -> Increase in Ephem -> Undelegate -> Increase in Chain
 // -> Redelegate -> Increase in Ephem
 // -----------------
-fn assert_cannot_increase_committee_count(
-    pda: Pubkey,
-    payer: &Keypair,
-    rpc_client: &RpcClient,
-) {
+fn assert_cannot_increase_committee_count(pda: Pubkey, payer: &Keypair, rpc_client: &RpcClient) {
     // NOTE: in the case of checking this on the ephemeral there are two reasons why an account
     //       cannot be modified in case it was _just_ undelegted:
     //
@@ -560,8 +479,7 @@ fn assert_cannot_increase_committee_count(
         rpc_client.get_latest_blockhash().unwrap(),
     );
     let simulation_result = rpc_client.simulate_transaction(&tx).unwrap();
-    let simulation =
-        stringify_simulation_result(simulation_result.value, &tx.signatures[0]);
+    let simulation = stringify_simulation_result(simulation_result.value, &tx.signatures[0]);
     debug!(
         "{}\nExpecting Immutable | ExternalAccountDataModified | ProgramFailedToComplete ({})",
         simulation,
@@ -577,15 +495,14 @@ fn assert_cannot_increase_committee_count(
         return;
     }
 
-    let tx_res = rpc_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            rpc_client.commitment(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = rpc_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        rpc_client.commitment(),
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
     if let Some(tx_err) = tx_err {
         // The account may become undelegated between the simulation above and
@@ -656,11 +573,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use it in the ephemeral anymore
-        assert_cannot_increase_committee_count(
-            committees[0].1,
-            payer_ephem,
-            ephem_client,
-        );
+        assert_cannot_increase_committee_count(committees[0].1, payer_ephem, ephem_client);
         debug!("✅ Cannot increase count in ephemeral after undelegation triggered");
 
         // 2. Wait for commit + undelegation to finish and try chain again
@@ -674,25 +587,19 @@ fn test_committed_and_undelegated_single_account_redelegation() {
                 chain_client,
                 commitment,
             );
-            debug!(
-                "✅ Can increase count on chain after undelegation completed"
-            );
+            debug!("✅ Can increase count on chain after undelegation completed");
         }
 
         // 3. Re-delegate the same account
         {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            sleep(Duration::from_secs(2));
             ctx.delegate_committees().unwrap();
             debug!("✅ Redelegated committees");
         }
 
         // 4. Now we can modify it in the ephemeral again and no longer on chain
         {
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer_chain,
-                chain_client,
-            );
+            assert_cannot_increase_committee_count(committees[0].1, payer_chain, chain_client);
             debug!("✅ Cannot increase count on chain after redelegation");
 
             assert_can_increase_committee_count(
@@ -728,16 +635,8 @@ fn test_committed_and_undelegated_accounts_redelegation() {
 
         // 1. Show we cannot use them in the ephemeral anymore
         {
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer_ephem,
-                ephem_client,
-            );
-            assert_cannot_increase_committee_count(
-                committees[1].1,
-                payer_ephem,
-                ephem_client,
-            );
+            assert_cannot_increase_committee_count(committees[0].1, payer_ephem, ephem_client);
+            assert_cannot_increase_committee_count(committees[1].1, payer_ephem, ephem_client);
             debug!("✅ Cannot increase counts in ephemeral after undelegation triggered");
         }
 
@@ -758,30 +657,20 @@ fn test_committed_and_undelegated_accounts_redelegation() {
                 chain_client,
                 commitment,
             );
-            debug!(
-                "✅ Can increase counts on chain after undelegation completed"
-            );
+            debug!("✅ Can increase counts on chain after undelegation completed");
         }
 
         // 3. Re-delegate the same accounts
         {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            sleep(Duration::from_secs(2));
             ctx.delegate_committees().unwrap();
             debug!("✅ Redelegated committees");
         }
 
         // 4. Now we can modify them in the ephemeral again and no longer on chain
         {
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer_chain,
-                chain_client,
-            );
-            assert_cannot_increase_committee_count(
-                committees[1].1,
-                payer_chain,
-                chain_client,
-            );
+            assert_cannot_increase_committee_count(committees[0].1, payer_chain, chain_client);
+            assert_cannot_increase_committee_count(committees[1].1, payer_chain, chain_client);
             debug!("✅ Cannot increase counts on chain after redelegation");
 
             assert_can_increase_committee_count(
@@ -823,16 +712,10 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
 
         // 2. Retrieve the signature of the scheduled commit sent
         let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
-        let sig =
-            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
+        let sig = extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
 
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
-        assert!(!ctx
-            .ephem_client
-            .as_ref()
-            .unwrap()
-            .confirm_transaction(&sig)
-            .unwrap());
+        assert!(!ctx.ephem_client.as_ref().unwrap().confirm_transaction(&sig).unwrap());
         debug!("✅ Verified that not commit was scheduled since tx failed");
     });
 }
@@ -895,9 +778,7 @@ fn test_committing_and_undelegating_two_accounts_twice() {
 
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         debug!("Verifying that commit was not scheduled: {scheduled_commmit_sent_sig}");
-        assert!(!ctx
-            .confirm_transaction_ephem(&scheduled_commmit_sent_sig, None)
-            .unwrap());
+        assert!(!ctx.confirm_transaction_ephem(&scheduled_commmit_sent_sig, None).unwrap());
         debug!("✅ Verified that not commit was scheduled since tx failed");
     });
 }
@@ -905,10 +786,7 @@ fn test_committing_and_undelegating_two_accounts_twice() {
 #[test]
 fn test_committing_after_failed_undelegation() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(
-            1,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_context_with_delegated_committees(1, UserSeeds::MagicScheduleCommit);
         let ScheduleCommitTestContextFields {
             payer_chain: payer,
             committees,
@@ -916,8 +794,7 @@ fn test_committing_after_failed_undelegation() {
             ephem_client,
             ..
         } = ctx.fields();
-        let [(_committee_authority, committee_pda)] = committees.as_slice()
-        else {
+        let [(_committee_authority, committee_pda)] = committees.as_slice() else {
             panic!("Unexpected num of committees");
         };
 
@@ -930,19 +807,21 @@ fn test_committing_after_failed_undelegation() {
                 &[&payer],
                 ephem_blockhash,
             );
-            let tx_res = ephem_client
-                .send_and_confirm_transaction_with_spinner_and_config(
-                    &tx,
-                    *commitment,
-                    RpcSendTransactionConfig {
-                        skip_preflight: true,
-                        ..Default::default()
-                    },
-                );
+            let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                *commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            );
 
             match tx_res {
                 Ok(sig) if expect_failure => {
-                    panic!("Expected failure when setting counter to {} with sig {}", counter, sig);
+                    panic!(
+                        "Expected failure when setting counter to {} with sig {}",
+                        counter, sig
+                    );
                 }
                 Ok(sig) => {
                     debug!("set_counter sigs: {:?}", sig);
@@ -950,7 +829,10 @@ fn test_committing_after_failed_undelegation() {
                     assert!(res.unwrap());
                 }
                 Err(err) if !expect_failure => {
-                    panic!("Did not expect failure when setting counter to {} ({:?}", counter, err);
+                    panic!(
+                        "Did not expect failure when setting counter to {} ({:?}",
+                        counter, err
+                    );
                 }
                 _ => {}
             }
@@ -967,10 +849,7 @@ fn test_committing_after_failed_undelegation() {
                 magicblock_magic_program_api::id(),
                 magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
                 None,
-                &committees
-                    .iter()
-                    .map(|(player, _)| player.pubkey())
-                    .collect::<Vec<_>>(),
+                &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
                 &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
             );
 
@@ -983,28 +862,24 @@ fn test_committing_after_failed_undelegation() {
             );
 
             let sig = tx.get_signature();
-            let tx_res = ephem_client
-                .send_and_confirm_transaction_with_spinner_and_config(
-                    &tx,
-                    *commitment,
-                    RpcSendTransactionConfig {
-                        skip_preflight: true,
-                        ..Default::default()
-                    },
-                );
+            let tx_res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                *commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            );
             debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
 
             // 2. Retrieve the signature of the scheduled commit sent
             let logs = ctx.fetch_ephemeral_logs(*sig).unwrap();
             let scheduled_commmit_sent_sig =
-                extract_scheduled_commit_sent_signature_from_logs(&logs)
-                    .unwrap();
+                extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
 
             debug!("sent_sig: {}", scheduled_commmit_sent_sig);
             // 3. Confirm commit was scheduled
-            assert!(ctx
-                .confirm_transaction_ephem(&scheduled_commmit_sent_sig, None)
-                .unwrap());
+            assert!(ctx.confirm_transaction_ephem(&scheduled_commmit_sent_sig, None).unwrap());
         }
 
         set_counter(2222, true);

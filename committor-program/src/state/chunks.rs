@@ -58,14 +58,15 @@ impl Chunks {
         count.div_ceil(BITS_PER_BYTE)
     }
 
-    /// Returns how many bytes [`Chunks`] will occupy certain count
+    /// Returns the Borsh size of [`Chunks`] for a given chunk count.
     pub fn struct_size(count: usize) -> usize {
-        // bits: Vec<u8>,
-        Self::count_to_bitfield_bytes(count)
-        // count: usize,
-        + std::mem::size_of::<usize>()
-        // chunk_size: u16,
-        + std::mem::size_of::<u16>()
+        // Vector length prefix, bits, usize encoded as u64, and chunk size.
+        4 + Self::count_to_bitfield_bytes(count) + size_of::<u64>() + size_of::<u16>()
+    }
+
+    /// Borsh length, including the vector's four-byte length prefix.
+    pub fn serialized_size(&self) -> usize {
+        Self::struct_size(self.count)
     }
 
     /// Returns `true` if the chunk at index has been delivered
@@ -80,10 +81,7 @@ impl Chunks {
     }
 
     /// Sets the chunk at index to `true` denoting that it has been delivered
-    pub(super) fn set_chunk_delivered(
-        &mut self,
-        idx: usize,
-    ) -> Result<(), ChunksError> {
+    pub(super) fn set_chunk_delivered(&mut self, idx: usize) -> Result<(), ChunksError> {
         if idx < self.count {
             let vec_idx = idx / BITS_PER_BYTE;
             let bit_idx = idx % BITS_PER_BYTE;
@@ -95,10 +93,7 @@ impl Chunks {
     }
 
     /// Marks that chunk at offset was written to
-    pub fn set_offset_delivered(
-        &mut self,
-        offset: usize,
-    ) -> Result<(), ChunksError> {
+    pub fn set_offset_delivered(&mut self, offset: usize) -> Result<(), ChunksError> {
         if offset % self.chunk_size as usize != 0 {
             Err(ChunksError::InvalidOffsetError(offset, self.chunk_size))
         } else {
@@ -110,19 +105,12 @@ impl Chunks {
 
     /// Return [`true`] if offset delivered
     /// Returns error if offset isn't multuple of chunk
-    pub fn is_offset_delivered(
-        &self,
-        offset: usize,
-    ) -> Result<bool, ChunksError> {
+    pub fn is_offset_delivered(&self, offset: usize) -> Result<bool, ChunksError> {
         if offset % self.chunk_size as usize != 0 {
-            return Err(ChunksError::InvalidOffsetError(
-                offset,
-                self.chunk_size,
-            ));
+            return Err(ChunksError::InvalidOffsetError(offset, self.chunk_size));
         }
         let idx = offset / self.chunk_size as usize;
-        self.is_chunk_delivered(idx)
-            .ok_or(ChunksError::OutOfBoundsError)
+        self.is_chunk_delivered(idx).ok_or(ChunksError::OutOfBoundsError)
     }
 
     pub fn count(&self) -> usize {
@@ -133,6 +121,8 @@ impl Chunks {
         self.chunk_size
     }
 
+    // Every index below count is addressable in the bitfield created by new.
+    #[allow(clippy::expect_used)]
     pub fn get_missing_chunks(&self) -> HashSet<usize> {
         (0..self.count)
             .filter(|&i| !self.is_chunk_delivered(i).expect("invariant"))
@@ -145,6 +135,8 @@ impl Chunks {
 }
 
 impl From<(Vec<bool>, u16)> for Chunks {
+    // The constructor creates exactly one bit for every input element.
+    #[allow(clippy::expect_used)]
     fn from((vec, chunk_size): (Vec<bool>, u16)) -> Self {
         let mut this = Chunks::new(vec.len(), chunk_size);
         vec.into_iter().enumerate().for_each(|(i, d)| {
@@ -187,10 +179,7 @@ mod test {
 
     impl Chunks {
         pub(super) fn iter(&self) -> ChunksIter<'_> {
-            ChunksIter {
-                chunks: self,
-                idx: 0,
-            }
+            ChunksIter { chunks: self, idx: 0 }
         }
     }
 

@@ -18,16 +18,9 @@ use crate::tasks::{BaseTask, BaseTaskImpl};
 #[derive(Clone, Debug)]
 pub enum CommitDelivery {
     StateInArgs,
-    StateInBuffer {
-        prepared: bool,
-    },
-    DiffInArgs {
-        base_account: Account,
-    },
-    DiffInBuffer {
-        base_account: Account,
-        prepared: bool,
-    },
+    StateInBuffer { prepared: bool },
+    DiffInArgs { base_account: Account },
+    DiffInBuffer { base_account: Account, prepared: bool },
 }
 
 /// A task that commits a delegated account's state to the base layer.
@@ -61,12 +54,11 @@ impl CommitTask {
 
     #[inline(always)]
     fn commit_state_from_buffer_ix(&self, validator: &Pubkey) -> Instruction {
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &self.committed_account.pubkey,
-                &self.commit_id.to_le_bytes(),
-            );
+        let (commit_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+            validator,
+            &self.committed_account.pubkey,
+            &self.commit_id.to_le_bytes(),
+        );
         dlp_api::instruction_builder::commit_state_from_buffer(
             *validator,
             self.committed_account.pubkey,
@@ -81,19 +73,11 @@ impl CommitTask {
     }
 
     #[inline(always)]
-    fn commit_diff_ix(
-        &self,
-        validator: &Pubkey,
-        base_account: &Account,
-    ) -> Instruction {
+    fn commit_diff_ix(&self, validator: &Pubkey, base_account: &Account) -> Instruction {
         let args = CommitDiffArgs {
             nonce: self.commit_id,
             lamports: self.committed_account.account.lamports,
-            diff: compute_diff(
-                base_account.data(),
-                self.committed_account.account.data(),
-            )
-            .to_vec(),
+            diff: compute_diff(base_account.data(), self.committed_account.account.data()).to_vec(),
             allow_undelegation: self.allow_undelegation,
         };
 
@@ -107,12 +91,11 @@ impl CommitTask {
 
     #[inline(always)]
     fn commit_diff_from_buffer_ix(&self, validator: &Pubkey) -> Instruction {
-        let (commit_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &self.committed_account.pubkey,
-                &self.commit_id.to_le_bytes(),
-            );
+        let (commit_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+            validator,
+            &self.committed_account.pubkey,
+            &self.commit_id.to_le_bytes(),
+        );
         dlp_api::instruction_builder::commit_diff_from_buffer(
             *validator,
             self.committed_account.pubkey,
@@ -129,8 +112,7 @@ impl CommitTask {
     pub fn is_buffer(&self) -> bool {
         matches!(
             self.delivery_details,
-            CommitDelivery::StateInBuffer { .. }
-                | CommitDelivery::DiffInBuffer { .. }
+            CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. }
         )
     }
 
@@ -138,9 +120,7 @@ impl CommitTask {
         self.commit_id = commit_id;
         match &mut self.delivery_details {
             CommitDelivery::StateInBuffer { prepared }
-            | CommitDelivery::DiffInBuffer { prepared, .. } => {
-                *prepared = false
-            }
+            | CommitDelivery::DiffInBuffer { prepared, .. } => *prepared = false,
             _ => {}
         };
     }
@@ -154,38 +134,28 @@ impl BaseTask for CommitTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery_details {
             CommitDelivery::StateInArgs => self.commit_state_ix(validator),
-            CommitDelivery::StateInBuffer { .. } => {
-                self.commit_state_from_buffer_ix(validator)
-            }
+            CommitDelivery::StateInBuffer { .. } => self.commit_state_from_buffer_ix(validator),
             CommitDelivery::DiffInArgs { base_account } => {
                 self.commit_diff_ix(validator, base_account)
             }
-            CommitDelivery::DiffInBuffer { .. } => {
-                self.commit_diff_from_buffer_ix(validator)
-            }
+            CommitDelivery::DiffInBuffer { .. } => self.commit_diff_from_buffer_ix(validator),
         }
     }
 
     fn try_optimize_tx_size(&mut self) -> bool {
-        let details = std::mem::replace(
-            &mut self.delivery_details,
-            CommitDelivery::StateInArgs,
-        );
+        let details = std::mem::replace(&mut self.delivery_details, CommitDelivery::StateInArgs);
         match details {
             CommitDelivery::StateInArgs => {
-                self.delivery_details =
-                    CommitDelivery::StateInBuffer { prepared: false };
+                self.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
                 true
             }
             CommitDelivery::DiffInArgs { base_account } => {
-                self.delivery_details = CommitDelivery::DiffInBuffer {
-                    base_account,
-                    prepared: false,
-                };
+                self.delivery_details =
+                    CommitDelivery::DiffInBuffer { base_account, prepared: false };
                 true
             }
-            other @ (CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. }) => {
+            other
+            @ (CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. }) => {
                 self.delivery_details = other;
                 false
             }
@@ -198,25 +168,16 @@ impl BaseTask for CommitTask {
 
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery_details {
-            CommitDelivery::StateInArgs => {
-                dlp_api::instruction_builder::commit_size_budget(
-                    AccountSizeClass::Dynamic(
-                        self.committed_account.account.data.len() as u32,
-                    ),
-                )
-            }
-            CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. } => {
-                dlp_api::instruction_builder::commit_size_budget(
-                    AccountSizeClass::Huge,
-                )
+            CommitDelivery::StateInArgs => dlp_api::instruction_builder::commit_size_budget(
+                AccountSizeClass::Dynamic(self.committed_account.account.data.len() as u32),
+            ),
+            CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. } => {
+                dlp_api::instruction_builder::commit_size_budget(AccountSizeClass::Huge)
             }
             CommitDelivery::DiffInArgs { .. } => {
-                dlp_api::instruction_builder::commit_diff_size_budget(
-                    AccountSizeClass::Dynamic(
-                        self.committed_account.account.data.len() as u32,
-                    ),
-                )
+                dlp_api::instruction_builder::commit_diff_size_budget(AccountSizeClass::Dynamic(
+                    self.committed_account.account.data.len() as u32,
+                ))
             }
         }
     }

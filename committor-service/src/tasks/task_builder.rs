@@ -13,12 +13,10 @@ use tracing::error;
 
 use crate::tasks::{
     BaseTaskImpl, FinalizeTask, UndelegateTask,
-    task_info_fetcher::{
-        TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult,
-    },
+    task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult},
     utils::{
-        COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks,
-        create_commit_finalize_task, create_commit_task,
+        COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks, create_commit_finalize_task,
+        create_commit_task,
     },
 };
 
@@ -71,15 +69,11 @@ impl TaskBuilderImpl {
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         let diffable_pubkeys = accounts
             .iter()
-            .filter(|account| {
-                account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD
-            })
+            .filter(|account| account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD)
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
-        task_info_fetcher
-            .get_base_accounts(&diffable_pubkeys, min_context_slot)
-            .await
+        task_info_fetcher.get_base_accounts(&diffable_pubkeys, min_context_slot).await
     }
 
     fn get_finalize_stage_metadata_accounts(
@@ -87,9 +81,7 @@ impl TaskBuilderImpl {
     ) -> Vec<(Pubkey, u64)> {
         [
             intent_bundle.get_undelegate_intent_accounts(),
-            intent_bundle
-                .intent_bundle
-                .get_commit_finalize_and_undelegate_intent_accounts(),
+            intent_bundle.intent_bundle.get_commit_finalize_and_undelegate_intent_accounts(),
         ]
         .into_iter()
         .flatten()
@@ -111,28 +103,20 @@ impl TaskBuilderImpl {
             .max()
             .unwrap_or(0);
         let (commit_ids, base_accounts) = tokio::join!(
-            Self::fetch_commit_nonces(
-                task_info_fetcher,
-                &all_committed_accounts,
-                min_context_slot
-            ),
+            Self::fetch_commit_nonces(task_info_fetcher, &all_committed_accounts, min_context_slot),
             Self::fetch_diffable_accounts(
                 task_info_fetcher,
                 &all_committed_accounts,
                 min_context_slot
             )
         );
-        let commit_nonces =
-            commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
+        let commit_nonces = commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let base_accounts = base_accounts.unwrap_or_else(|err| {
             tracing::warn!(intent_id = intent_bundle.intent_id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
             Default::default()
         });
 
-        Ok(CommitStageTaskInfo {
-            commit_nonces,
-            base_accounts,
-        })
+        Ok(CommitStageTaskInfo { commit_nonces, base_accounts })
     }
 }
 
@@ -153,8 +137,7 @@ impl TasksBuilder for TaskBuilderImpl {
         let CommitStageTaskInfo {
             mut commit_nonces,
             mut base_accounts,
-        } = Self::fetch_commit_stage_info(intent_bundle, task_info_fetcher)
-            .await?;
+        } = Self::fetch_commit_stage_info(intent_bundle, task_info_fetcher).await?;
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
@@ -175,9 +158,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 .build(value),
             );
         }
-        if let Some(ref value) =
-            intent_bundle.intent_bundle.commit_and_undelegate
-        {
+        if let Some(ref value) = intent_bundle.intent_bundle.commit_and_undelegate {
             tasks.extend(
                 CommitAndUndelegateBuilder {
                     commit_nonces: &mut commit_nonces,
@@ -186,9 +167,7 @@ impl TasksBuilder for TaskBuilderImpl {
                 .build(&value.commit_action),
             );
         }
-        if let Some(ref value) =
-            intent_bundle.intent_bundle.commit_finalize_and_undelegate
-        {
+        if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize_and_undelegate {
             tasks.extend(
                 CommitFinalizeAndUndelegateBuilder {
                     commit_nonces: &mut commit_nonces,
@@ -232,17 +211,10 @@ impl TasksBuilder for TaskBuilderImpl {
         // Helper to process commit types
         fn create_finalize_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
             match commit {
-                CommitType::Standalone(accounts) => {
-                    accounts.iter().map(finalize_task).collect()
-                }
-                CommitType::WithBaseActions {
-                    committed_accounts,
-                    base_actions,
-                } => {
-                    let mut tasks = committed_accounts
-                        .iter()
-                        .map(finalize_task)
-                        .collect::<Vec<_>>();
+                CommitType::Standalone(accounts) => accounts.iter().map(finalize_task).collect(),
+                CommitType::WithBaseActions { committed_accounts, base_actions } => {
+                    let mut tasks =
+                        committed_accounts.iter().map(finalize_task).collect::<Vec<_>>();
                     tasks.extend(create_action_tasks(base_actions));
                     tasks
                 }
@@ -258,15 +230,12 @@ impl TasksBuilder for TaskBuilderImpl {
             let mut tasks = accounts
                 .iter()
                 .map(|account| {
-                    let metadata = delegation_metadata_for_pubkey(
-                        account.pubkey,
-                        delegation_metadata,
-                    )?;
+                    let metadata =
+                        delegation_metadata_for_pubkey(account.pubkey, delegation_metadata)?;
                     Ok(undelegate_task(
                         account,
                         &metadata.rent_payer,
-                        metadata.undelegation_requester
-                            == UndelegationRequester::OwnerProgram,
+                        metadata.undelegation_requester == UndelegationRequester::OwnerProgram,
                     ))
                 })
                 .collect::<TaskBuilderResult<Vec<_>>>()?;
@@ -280,8 +249,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         let mut tasks = Vec::new();
-        let finalize_metadata_accounts =
-            Self::get_finalize_stage_metadata_accounts(intent_bundle);
+        let finalize_metadata_accounts = Self::get_finalize_stage_metadata_accounts(intent_bundle);
         let min_context_slot = intent_bundle
             .get_all_committed_accounts()
             .iter()
@@ -289,10 +257,7 @@ impl TasksBuilder for TaskBuilderImpl {
             .max()
             .unwrap_or(0);
         let delegation_metadata = info_fetcher
-            .fetch_delegation_metadata(
-                &finalize_metadata_accounts,
-                min_context_slot,
-            )
+            .fetch_delegation_metadata(&finalize_metadata_accounts, min_context_slot)
             .await
             .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
 
@@ -300,16 +265,12 @@ impl TasksBuilder for TaskBuilderImpl {
             tasks.extend(create_finalize_tasks(value));
         }
 
-        if let Some(ref value) =
-            intent_bundle.intent_bundle.commit_and_undelegate
-        {
+        if let Some(ref value) = intent_bundle.intent_bundle.commit_and_undelegate {
             tasks.extend(create_finalize_tasks(&value.commit_action));
             tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
         }
 
-        if let Some(ref value) =
-            intent_bundle.intent_bundle.commit_finalize_and_undelegate
-        {
+        if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize_and_undelegate {
             tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
         }
 
@@ -328,8 +289,7 @@ impl<'a> CommitBuilder<'a> {
             .get_committed_accounts()
             .iter()
             .map(|account| {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let nonce = take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
                 create_commit_task(nonce, false, account.clone(), base).into()
             })
@@ -348,8 +308,7 @@ impl<'a> CommitAndUndelegateBuilder<'a> {
             .get_committed_accounts()
             .iter()
             .map(|account| {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let nonce = take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
                 create_commit_task(nonce, true, account.clone(), base).into()
             })
@@ -368,11 +327,9 @@ impl<'a> CommitFinalizeBuilder<'a> {
             .get_committed_accounts()
             .iter()
             .map(|account| {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let nonce = take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                create_commit_finalize_task(nonce, false, account.clone(), base)
-                    .into()
+                create_commit_finalize_task(nonce, false, account.clone(), base).into()
             })
             .collect();
         if let CommitType::WithBaseActions { base_actions, .. } = &commit_type {
@@ -393,11 +350,9 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
             .get_committed_accounts()
             .iter()
             .map(|account| {
-                let nonce =
-                    take_commit_nonce(self.commit_nonces, account.pubkey);
+                let nonce = take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                create_commit_finalize_task(nonce, true, account.clone(), base)
-                    .into()
+                create_commit_finalize_task(nonce, true, account.clone(), base).into()
             })
             .collect();
         if let CommitType::WithBaseActions { base_actions, .. } = &commit_type {
@@ -407,10 +362,7 @@ impl<'a> CommitFinalizeAndUndelegateBuilder<'a> {
     }
 }
 
-fn take_commit_nonce(
-    commit_nonces: &mut HashMap<Pubkey, u64>,
-    pubkey: Pubkey,
-) -> u64 {
+fn take_commit_nonce(commit_nonces: &mut HashMap<Pubkey, u64>, pubkey: Pubkey) -> u64 {
     commit_nonces.remove(&pubkey).unwrap_or_else(|| {
         // This shall not ever happen since TaskInfoFetcher
         // returns commit ids for all pubkeys or throws
@@ -450,8 +402,9 @@ impl TaskBuilderError {
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::CommitTasksBuildError(err)
-            | Self::FinalizedTasksBuildError(err) => err.is_transient(),
+            Self::CommitTasksBuildError(err) | Self::FinalizedTasksBuildError(err) => {
+                err.is_transient()
+            }
             Self::MissingDelegationMetadata(_) => false,
         }
     }

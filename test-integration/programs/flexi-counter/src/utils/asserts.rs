@@ -1,10 +1,10 @@
 #![allow(unused)]
 use solana_program::{
-    account_info::AccountInfo, entrypoint::ProgramResult, msg,
-    program_error::ProgramError, pubkey::Pubkey,
+    account_info::AccountInfo, entrypoint::ProgramResult, msg, program_error::ProgramError,
+    pubkey::Pubkey,
 };
 
-pub fn assert_keys_equal<F: FnOnce() -> String>(
+pub(crate) fn assert_keys_equal<F: FnOnce() -> String>(
     provided_key: &Pubkey,
     expected_key: &Pubkey,
     get_msg: F,
@@ -18,10 +18,7 @@ pub fn assert_keys_equal<F: FnOnce() -> String>(
     }
 }
 
-pub fn assert_is_signer(
-    account: &AccountInfo,
-    account_label: &str,
-) -> ProgramResult {
+pub(crate) fn assert_is_signer(account: &AccountInfo<'_>, account_label: &str) -> ProgramResult {
     if !account.is_signer {
         msg!(
             "Err: account '{}' ({}) should be signer",
@@ -34,8 +31,8 @@ pub fn assert_is_signer(
     }
 }
 
-pub fn assert_size(
-    account: &AccountInfo,
+pub(crate) fn assert_size(
+    account: &AccountInfo<'_>,
     size: usize,
     account_label: &str,
 ) -> ProgramResult {

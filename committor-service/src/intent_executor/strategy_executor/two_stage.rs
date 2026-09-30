@@ -1,9 +1,7 @@
 use std::{mem, sync::Arc};
 
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
-use magicblock_program::outbox::{
-    ExecutionStage, PendingTransaction, TwoStageProgress,
-};
+use magicblock_program::outbox::{ExecutionStage, PendingTransaction, TwoStageProgress};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -19,8 +17,8 @@ use crate::{
             patcher::{CommitStagePatcher, FinalizeStagePatcher},
             two_stage::sealed::Sealed,
             utils::{
-                ExecutionState, committing_pending, finalizing_pending,
-                handle_actions_result, stage_execution_loop,
+                ExecutionState, committing_pending, finalizing_pending, handle_actions_result,
+                stage_execution_loop,
             },
         },
     },
@@ -69,10 +67,7 @@ pub struct Committed {
 }
 
 impl Committed {
-    pub fn new(
-        commit_signature: Signature,
-        finalize_strategy: TransactionStrategy,
-    ) -> Self {
+    pub fn new(commit_signature: Signature, finalize_strategy: TransactionStrategy) -> Self {
         Self {
             commit_signature,
             finalize_strategy,
@@ -128,12 +123,7 @@ where
     }
 
     #[instrument(
-        skip(
-            self,
-            committed_pubkeys,
-            transaction_preparator,
-            task_info_fetcher,
-        ),
+        skip(self, committed_pubkeys, transaction_preparator, task_info_fetcher,),
         fields(stage = "commit")
     )]
     pub async fn commit<T, F>(
@@ -170,11 +160,7 @@ where
             transaction_preparator,
             commit_stage_patcher,
             self.intent_id,
-            |pending_tx| {
-                ExecutionStage::TwoStage(TwoStageProgress::Committing(
-                    pending_tx,
-                ))
-            },
+            |pending_tx| ExecutionStage::TwoStage(TwoStageProgress::Committing(pending_tx)),
             committing_pending,
             IntentExecutorError::FailedCommitPreparationError,
             execution_state,
@@ -184,21 +170,16 @@ where
         // A commit-id retry may have re-tagged the commit stage as a first
         // commit; the finalize stage aliases the same way and must carry
         // the same uniqueness noop.
-        self.state.finalize_strategy.uniqueness_nonce =
-            self.state.commit_strategy.uniqueness_nonce;
+        self.state.finalize_strategy.uniqueness_nonce = self.state.commit_strategy.uniqueness_nonce;
         self.execute_callbacks(
             commit_result.as_ref().ok().copied(),
             commit_result.as_ref().map(|_| ()),
         );
-        self.execution_report
-            .dispose(self.state.commit_strategy.clone());
+        self.execution_report.dispose(self.state.commit_strategy.clone());
         if commit_result.is_err() {
-            self.execution_report
-                .dispose(mem::take(&mut self.state.finalize_strategy));
+            self.execution_report.dispose(mem::take(&mut self.state.finalize_strategy));
         }
-        commit_result.map_err(|err| {
-            IntentExecutorError::from_commit_execution_error(err)
-        })
+        commit_result.map_err(IntentExecutorError::from_commit_execution_error)
     }
 
     /// Preparation/outbox/patch failure before a strategy-level result was
@@ -206,10 +187,8 @@ where
     /// reservations or buffer accounts may have been partially set up
     /// already.
     fn dispose_commit_strategies(&mut self) {
-        self.execution_report
-            .dispose(mem::take(&mut self.state.commit_strategy));
-        self.execution_report
-            .dispose(mem::take(&mut self.state.finalize_strategy));
+        self.execution_report.dispose(mem::take(&mut self.state.commit_strategy));
+        self.execution_report.dispose(mem::take(&mut self.state.finalize_strategy));
     }
 
     pub fn has_callbacks(&self) -> bool {
@@ -257,9 +236,7 @@ where
     ) -> TwoStageStrategyExecutor<'a, A, O, Committed> {
         #[cfg(feature = "dev-context-only-utils")]
         self.execution_report
-            .add_succeeded_transaction_strategy(mem::take(
-                &mut self.state.commit_strategy,
-            ));
+            .add_succeeded_transaction_strategy(mem::take(&mut self.state.commit_strategy));
 
         TwoStageStrategyExecutor {
             authority: self.authority,
@@ -304,10 +281,7 @@ where
         }
     }
 
-    #[instrument(
-        skip(self, transaction_preparator),
-        fields(stage = "finalize")
-    )]
+    #[instrument(skip(self, transaction_preparator), fields(stage = "finalize"))]
     pub async fn finalize<T>(
         &mut self,
         transaction_preparator: &T,
@@ -347,16 +321,14 @@ where
         )
         .await
         .inspect_err(|_| {
-            self.execution_report
-                .dispose(mem::take(&mut self.state.finalize_strategy))
+            self.execution_report.dispose(mem::take(&mut self.state.finalize_strategy))
         })?;
         // Even if failed - dump finalize into junk
         self.execute_callbacks(
             finalize_result.as_ref().ok().copied(),
             finalize_result.as_ref().map(|_| ()),
         );
-        self.execution_report
-            .dispose(self.state.finalize_strategy.clone());
+        self.execution_report.dispose(self.state.finalize_strategy.clone());
         finalize_result.map_err(|err| {
             IntentExecutorError::from_finalize_execution_error(
                 err,
@@ -392,9 +364,7 @@ where
     pub fn done(mut self, finalize_signature: Signature) -> Finalized {
         #[cfg(feature = "dev-context-only-utils")]
         self.execution_report
-            .add_succeeded_transaction_strategy(mem::take(
-                &mut self.state.finalize_strategy,
-            ));
+            .add_succeeded_transaction_strategy(mem::take(&mut self.state.finalize_strategy));
 
         Finalized {
             commit_signature: self.state.commit_signature,

@@ -1,10 +1,10 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use engine::IntoTransactionView;
 use magicblock_chainlink::{
-    AccountFetchEntrypoint, assert_cloned_as_delegated,
-    assert_cloned_as_undelegated, assert_not_subscribed, assert_subscribed,
-    testing::{
-        context::TestContext, deleg::add_delegation_record_for, init_logger,
-    },
+    AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_undelegated,
+    assert_not_subscribed, assert_subscribed,
+    testing::{context::TestContext, deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
@@ -39,12 +39,7 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
             ..Default::default()
         },
     );
-    add_delegation_record_for(
-        &ctx.rpc_client,
-        writable,
-        ctx.validator_pubkey,
-        owner,
-    );
+    add_delegation_record_for(&ctx.rpc_client, writable, ctx.validator_pubkey, owner);
     ctx.rpc_client.add_account(
         readonly,
         Account {
@@ -57,10 +52,7 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
     let instruction = Instruction::new_with_bytes(
         V42_ID,
         &[],
-        vec![
-            AccountMeta::new(writable, false),
-            AccountMeta::new_readonly(readonly, false),
-        ],
+        vec![AccountMeta::new(writable, false), AccountMeta::new_readonly(readonly, false)],
     );
     let transaction = Transaction::new_signed_with_payer(
         &[instruction],
@@ -74,9 +66,7 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
     ctx.chainlink
         .ensure_accounts(
             transaction.static_account_keys(),
-            AccountFetchEntrypoint::SendTransaction(
-                transaction.signatures()[0],
-            ),
+            AccountFetchEntrypoint::SendTransaction(transaction.signatures()[0]),
         )
         .await
         .unwrap();

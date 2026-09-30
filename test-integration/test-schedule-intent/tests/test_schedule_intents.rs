@@ -7,16 +7,13 @@ use integration_test_tools::{
 use program_flexi_counter::{
     delegation_program_id,
     instruction::{
-        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix,
-        create_intent_ix, create_transfer_intent_ix,
+        create_intent_bundle_commit_and_finalize_ix, create_intent_bundle_ix, create_intent_ix,
+        create_transfer_intent_ix,
     },
     state::FlexiCounter,
 };
 use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
-use solana_sdk::{
-    pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
-};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer, transaction::Transaction};
 use tracing::*;
 
 #[test]
@@ -313,8 +310,7 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     let ctx = IntegrationTestContext::try_new().unwrap();
 
     // Create 2 payers for commit-only and 1 for undelegate
-    let commit_only_payers: Vec<Keypair> =
-        (0..2).map(|_| setup_payer(&ctx)).collect();
+    let commit_only_payers: Vec<Keypair> = (0..2).map(|_| setup_payer(&ctx)).collect();
     let undelegate_payer = setup_payer(&ctx);
 
     debug!(
@@ -412,8 +408,7 @@ fn test_intent_bundle_commit_only() {
 
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    let commit_only_payers: Vec<Keypair> =
-        (0..2).map(|_| setup_payer(&ctx)).collect();
+    let commit_only_payers: Vec<Keypair> = (0..2).map(|_| setup_payer(&ctx)).collect();
 
     // Init and delegate counters
     let values: [u8; 2] = [42, 88];
@@ -463,8 +458,7 @@ fn test_intent_bundle_undelegate_only() {
 
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    let undelegate_payers: Vec<Keypair> =
-        (0..2).map(|_| setup_payer(&ctx)).collect();
+    let undelegate_payers: Vec<Keypair> = (0..2).map(|_| setup_payer(&ctx)).collect();
 
     // Init and delegate counters
     let values: [u8; 2] = [200, 250];
@@ -501,10 +495,7 @@ fn test_intent_bundle_undelegate_only() {
 
     // Verify undelegation
     verify_undelegation_in_ephem_via_owner(
-        &undelegate_payers
-            .iter()
-            .map(|p| p.pubkey())
-            .collect::<Vec<_>>(),
+        &undelegate_payers.iter().map(|p| p.pubkey()).collect::<Vec<_>>(),
         &ctx,
     );
 }
@@ -529,20 +520,16 @@ fn test_transfer_intent_success() {
     delegate_counter(&ctx, &payer);
     ctx.delegate_account(&chain_payer, &payer).unwrap();
 
-    let payer_balance_before =
-        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
     schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, false);
 
     // Destination received the lamports from the escrow.
-    let dest_balance = ctx
-        .fetch_chain_account_balance(&destination.pubkey())
-        .unwrap();
+    let dest_balance = ctx.fetch_chain_account_balance(&destination.pubkey()).unwrap();
     assert_eq!(dest_balance, AMOUNT);
 
     // Payer got deducted
-    let payer_balance_after =
-        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_after = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
     assert_eq!(payer_balance_after + CHARGED_AMOUNT, payer_balance_before);
 }
 
@@ -565,20 +552,16 @@ fn test_transfer_intent_failure_refunds_payer() {
     delegate_counter(&ctx, &payer);
     ctx.delegate_account(&payer_chain, &payer).unwrap();
 
-    let payer_balance_before =
-        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
 
     schedule_transfer_intent(&ctx, &payer, destination.pubkey(), AMOUNT, true);
 
     // Nothing reached the destination.
-    let dest_balance = ctx
-        .fetch_chain_account_balance(&destination.pubkey())
-        .unwrap_or(0);
+    let dest_balance = ctx.fetch_chain_account_balance(&destination.pubkey()).unwrap_or(0);
     assert_eq!(dest_balance, 0);
 
     // Payer was refunded exactly AMOUNT on Base by the callback.
-    let payer_balance_after =
-        ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+    let payer_balance_after = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
     assert_eq!(
         payer_balance_after + BASE_ACTION_FEE + CALLBACK_FEE,
         payer_balance_before
@@ -628,9 +611,7 @@ fn test_intent_bundle_commit_and_commit_finalize() {
         .fetch_chain_account_owner(FlexiCounter::pda(&commit_payer.pubkey()).0)
         .unwrap();
     let owner_finalize = ctx
-        .fetch_chain_account_owner(
-            FlexiCounter::pda(&commit_finalize_payer.pubkey()).0,
-        )
+        .fetch_chain_account_owner(FlexiCounter::pda(&commit_finalize_payer.pubkey()).0)
         .unwrap();
     assert_eq!(owner_commit, delegation_program_id());
     assert_eq!(owner_finalize, delegation_program_id());
@@ -653,24 +634,17 @@ fn schedule_intent(
     );
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payers[0].pubkey()));
-    let (sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(&mut tx, payers)
-        .unwrap();
+    let (sig, confirmed) = ctx.send_and_confirm_transaction_ephem(&mut tx, payers).unwrap();
     assert!(confirmed);
 
     // Confirm was sent on Base Layer
-    let commit_result = ctx
-        .fetch_schedule_commit_result::<FlexiCounter>(sig)
-        .unwrap();
+    let commit_result = ctx.fetch_schedule_commit_result::<FlexiCounter>(sig).unwrap();
     assert_eq!(commit_result.commit_sent_result, Ok(()));
-    commit_result
-        .confirm_commit_transactions_on_chain(ctx)
-        .unwrap();
+    commit_result.confirm_commit_transactions_on_chain(ctx).unwrap();
 
     // ensure Prize = 1_000_000 is transferred
-    let transfer_destination_balance = ctx
-        .fetch_chain_account_balance(&transfer_destination.pubkey())
-        .unwrap();
+    let transfer_destination_balance =
+        ctx.fetch_chain_account_balance(&transfer_destination.pubkey()).unwrap();
 
     let mutiplier = if counter_diffs.is_some() { 2 } else { 1 };
     assert_eq!(
@@ -690,10 +664,8 @@ fn schedule_intent_bundle(
     ctx.wait_for_next_slot_ephem().unwrap();
 
     let transfer_destination = Keypair::new();
-    let commit_only_pubkeys: Vec<Pubkey> =
-        commit_only_payers.iter().map(|p| p.pubkey()).collect();
-    let undelegate_pubkeys: Vec<Pubkey> =
-        undelegate_payers.iter().map(|p| p.pubkey()).collect();
+    let commit_only_pubkeys: Vec<Pubkey> = commit_only_payers.iter().map(|p| p.pubkey()).collect();
+    let undelegate_pubkeys: Vec<Pubkey> = undelegate_payers.iter().map(|p| p.pubkey()).collect();
 
     let ix = create_intent_bundle_ix(
         commit_only_pubkeys,
@@ -704,39 +676,28 @@ fn schedule_intent_bundle(
     );
 
     // Collect all signers - need at least one
-    let all_payers: Vec<&Keypair> = commit_only_payers
-        .iter()
-        .chain(undelegate_payers.iter())
-        .copied()
-        .collect();
+    let all_payers: Vec<&Keypair> =
+        commit_only_payers.iter().chain(undelegate_payers.iter()).copied().collect();
 
     assert!(
         !all_payers.is_empty(),
         "At least one payer required for intent bundle"
     );
 
-    let mut tx =
-        Transaction::new_with_payer(&[ix], Some(&all_payers[0].pubkey()));
-    let (sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(&mut tx, &all_payers)
-        .unwrap();
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&all_payers[0].pubkey()));
+    let (sig, confirmed) = ctx.send_and_confirm_transaction_ephem(&mut tx, &all_payers).unwrap();
     assert!(confirmed);
 
     // Confirm was sent on Base Layer
-    let commit_result = ctx
-        .fetch_schedule_commit_result::<FlexiCounter>(sig)
-        .unwrap();
+    let commit_result = ctx.fetch_schedule_commit_result::<FlexiCounter>(sig).unwrap();
     assert_eq!(commit_result.commit_sent_result, Ok(()));
-    commit_result
-        .confirm_commit_transactions_on_chain(ctx)
-        .unwrap();
+    commit_result.confirm_commit_transactions_on_chain(ctx).unwrap();
 
     // Verify Prize = 1_000_000 is transferred for each action
     // - commit-only payers: 1 action each (commit)
     // - undelegate payers: 2 actions each (commit + undelegate)
-    let transfer_destination_balance = ctx
-        .fetch_chain_account_balance(&transfer_destination.pubkey())
-        .unwrap();
+    let transfer_destination_balance =
+        ctx.fetch_chain_account_balance(&transfer_destination.pubkey()).unwrap();
 
     let expected_balance = (commit_only_payers.len() as u64 * 1_000_000)
         + (undelegate_payers.len() as u64 * 2 * 1_000_000);
@@ -753,12 +714,10 @@ fn schedule_transfer_intent(
     ctx.wait_for_next_slot_ephem().unwrap();
 
     let validator = ctx.ephem_validator_identity.unwrap();
-    let validator_keypair =
-        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
+    let validator_keypair = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
     assert_eq!(validator_keypair.pubkey(), validator);
-    let magic_fee_vault = ctx
-        .ensure_magic_fee_vault_delegated_on_chain(&validator_keypair)
-        .unwrap();
+    let magic_fee_vault =
+        ctx.ensure_magic_fee_vault_delegated_on_chain(&validator_keypair).unwrap();
     ctx.fetch_ephem_account(magic_fee_vault).unwrap();
 
     let ix = create_transfer_intent_ix(
@@ -771,18 +730,12 @@ fn schedule_transfer_intent(
     );
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let (sig, confirmed) = ctx
-        .send_and_confirm_transaction_ephem(&mut tx, &[payer])
-        .unwrap();
+    let (sig, confirmed) = ctx.send_and_confirm_transaction_ephem(&mut tx, &[payer]).unwrap();
     assert!(confirmed);
 
-    let commit_result = ctx
-        .fetch_schedule_commit_result::<FlexiCounter>(sig)
-        .unwrap();
+    let commit_result = ctx.fetch_schedule_commit_result::<FlexiCounter>(sig).unwrap();
     assert_eq!(commit_result.commit_sent_result, Ok(()));
-    commit_result
-        .confirm_commit_transactions_on_chain(ctx)
-        .unwrap();
+    commit_result.confirm_commit_transactions_on_chain(ctx).unwrap();
 }
 
 fn schedule_intent_bundle_commit_and_finalize(
@@ -799,41 +752,24 @@ fn schedule_intent_bundle_commit_and_finalize(
     );
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let (sig, confirmed) =
-        match ctx.send_and_confirm_transaction_ephem(&mut tx, &[payer]) {
-            Ok(res) => res,
-            Err(err) => {
-                dump_ephem_simulation(
-                    ctx,
-                    &tx,
-                    "schedule_intent_bundle_commit_and_finalize",
-                );
-                panic!("Failed to send/confirm ephem tx: {err:#}");
-            }
-        };
+    let (sig, confirmed) = match ctx.send_and_confirm_transaction_ephem(&mut tx, &[payer]) {
+        Ok(res) => res,
+        Err(err) => {
+            dump_ephem_simulation(ctx, &tx, "schedule_intent_bundle_commit_and_finalize");
+            panic!("Failed to send/confirm ephem tx: {err:#}");
+        }
+    };
     if !confirmed {
-        dump_ephem_simulation(
-            ctx,
-            &tx,
-            "schedule_intent_bundle_commit_and_finalize",
-        );
+        dump_ephem_simulation(ctx, &tx, "schedule_intent_bundle_commit_and_finalize");
         panic!("Ephem tx not confirmed: {sig}");
     }
 
-    let commit_result = ctx
-        .fetch_schedule_commit_result::<FlexiCounter>(sig)
-        .unwrap();
+    let commit_result = ctx.fetch_schedule_commit_result::<FlexiCounter>(sig).unwrap();
     assert_eq!(commit_result.commit_sent_result, Ok(()));
-    commit_result
-        .confirm_commit_transactions_on_chain(ctx)
-        .unwrap();
+    commit_result.confirm_commit_transactions_on_chain(ctx).unwrap();
 }
 
-fn dump_ephem_simulation(
-    ctx: &IntegrationTestContext,
-    tx: &Transaction,
-    label: &str,
-) {
+fn dump_ephem_simulation(ctx: &IntegrationTestContext, tx: &Transaction, label: &str) {
     let Ok(client) = ctx.try_ephem_client() else {
         eprintln!("[{label}] failed to get ephem client for simulation");
         return;
@@ -850,10 +786,7 @@ fn dump_ephem_simulation(
         },
     ) {
         Ok(res) => {
-            eprintln!(
-                "[{label}] {}",
-                stringify_simulation_result(res.value, &sig)
-            );
+            eprintln!("[{label}] {}", stringify_simulation_result(res.value, &sig));
         }
         Err(err) => {
             eprintln!("[{label}] simulation request failed: {err:?}");

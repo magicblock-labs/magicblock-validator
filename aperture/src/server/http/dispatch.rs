@@ -8,16 +8,13 @@ use hyper::{
     Method, Request, Response,
     body::{Bytes, Incoming},
     header::{
-        ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS,
-        ACCESS_CONTROL_ALLOW_ORIGIN, ACCESS_CONTROL_MAX_AGE, HeaderName,
-        HeaderValue,
+        ACCESS_CONTROL_ALLOW_HEADERS, ACCESS_CONTROL_ALLOW_METHODS, ACCESS_CONTROL_ALLOW_ORIGIN,
+        ACCESS_CONTROL_MAX_AGE, HeaderName, HeaderValue,
     },
 };
 use magicblock_chainlink::ProdChainlink;
 use magicblock_ledger_deprecated::Ledger;
-use magicblock_metrics::metrics::{
-    RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT,
-};
+use magicblock_metrics::metrics::{RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT};
 use tokio::sync::Semaphore;
 
 use crate::{
@@ -88,9 +85,7 @@ async fn extract_bytes(request: Request<Incoming>) -> crate::RpcResult<Data> {
             Data::Multi(buffer) => buffer.extend_from_slice(&chunk),
         }
         if data.len() > MAX_BODY_SIZE {
-            return Err(RpcError::invalid_request(
-                "request body exceed 1MiB limit",
-            ));
+            return Err(RpcError::invalid_request("request body exceed 1MiB limit"));
         }
     }
     Ok(data)
@@ -148,9 +143,8 @@ impl HttpDispatcher {
         let (mut response, claims) = match request {
             RpcRequest::Single(r) => {
                 let (result, claims) = self.process(&r).await;
-                let response = result.unwrap_or_else(|error| {
-                    ResponseErrorPayload::encode(Some(&r.id), error)
-                });
+                let response =
+                    result.unwrap_or_else(|error| ResponseErrorPayload::encode(Some(&r.id), error));
                 (response, claims)
             }
             RpcRequest::Multi(requests) => {
@@ -168,9 +162,7 @@ impl HttpDispatcher {
                 }
                 let mut body = vec![OPEN_BR];
                 let mut claims = 0;
-                while let Some(((response, request_claims), request)) =
-                    jobs.next().await
-                {
+                while let Some(((response, request_claims), request)) = jobs.next().await {
                     claims += request_claims;
                     if body.len() != 1 {
                         body.push(COMA);
@@ -193,9 +185,7 @@ impl HttpDispatcher {
         use crate::requests::JsonRpcHttpMethod::*;
         let method = request.method.as_str();
         RPC_REQUESTS_COUNT.with_label_values(&[method]).inc();
-        let _timer = RPC_REQUEST_HANDLING_TIME
-            .with_label_values(&[method])
-            .start_timer();
+        let _timer = RPC_REQUEST_HANDLING_TIME.with_label_values(&[method]).start_timer();
 
         let result: HandlerResult = match request.method {
             GetAccountInfo => return self.get_account_info(request).await,
@@ -221,13 +211,9 @@ impl HttpDispatcher {
                 return self.get_multiple_accounts(request).await;
             }
             GetProgramAccounts => self.get_program_accounts(request),
-            GetRecentPerformanceSamples => {
-                self.get_recent_performance_samples(request)
-            }
+            GetRecentPerformanceSamples => self.get_recent_performance_samples(request),
             GetSignatureStatuses => self.get_signature_statuses(request).await,
-            GetSignaturesForAddress => {
-                self.get_signatures_for_address(request).await
-            }
+            GetSignaturesForAddress => self.get_signatures_for_address(request).await,
             GetSlot => self.get_slot(request),
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
@@ -235,8 +221,9 @@ impl HttpDispatcher {
             GetTokenAccountBalance => {
                 return self.get_token_account_balance(request).await;
             }
-            GetTokenAccountsByDelegate => self
-                .get_token_accounts(request, TokenAccountAuthority::Delegate),
+            GetTokenAccountsByDelegate => {
+                self.get_token_accounts(request, TokenAccountAuthority::Delegate)
+            }
             GetTokenAccountsByOwner => {
                 self.get_token_accounts(request, TokenAccountAuthority::Owner)
             }
@@ -269,21 +256,24 @@ impl HttpDispatcher {
     /// until the synchronous read and any enclosed encoding finish.
     ///
     /// Current-thread runtimes run inline because `block_in_place` is unsupported.
-    pub(crate) async fn with_ledger<T>(
+    pub(crate) async fn with_ledger<T, E>(
         &self,
-        read: impl FnOnce(&Ledger) -> T,
-    ) -> T {
+        read: impl FnOnce(&Ledger) -> Result<T, E>,
+    ) -> Result<T, RpcError>
+    where
+        E: Into<RpcError>,
+    {
         use tokio::runtime::{Handle, RuntimeFlavor};
 
         let _permit = self
             .ledger_reads
             .acquire()
             .await
-            .expect("ledger semaphore is never closed");
+            .map_err(|_| RpcError::internal("legacy ledger read limiter closed"))?;
         if Handle::current().runtime_flavor() == RuntimeFlavor::MultiThread {
-            tokio::task::block_in_place(|| read(&self.ledger))
+            tokio::task::block_in_place(|| read(&self.ledger)).map_err(Into::into)
         } else {
-            read(&self.ledger)
+            read(&self.ledger).map_err(Into::into)
         }
     }
 

@@ -1,3 +1,5 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use std::time::Duration;
 
 use futures::StreamExt;
@@ -7,10 +9,7 @@ use setup::{PROGRAM_ID, RpcTestEnv, transfer};
 use solana_account::AccountMode;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::{
-    config::{
-        RpcBlockSubscribeFilter, RpcTransactionLogsConfig,
-        RpcTransactionLogsFilter,
-    },
+    config::{RpcBlockSubscribeFilter, RpcTransactionLogsConfig, RpcTransactionLogsFilter},
     response::{ProcessedSignatureResult, RpcSignatureResult},
 };
 use tokio::time::timeout;
@@ -31,19 +30,13 @@ async fn test_unknown_http_and_websocket_methods() {
         .send()
         .await
         .expect("failed to send unknown HTTP method");
-    let body: Value = json::from_str(
-        &response.text().await.expect("failed to read HTTP response"),
-    )
-    .expect("failed to parse HTTP response");
+    let body: Value = json::from_str(&response.text().await.expect("failed to read HTTP response"))
+        .expect("failed to parse HTTP response");
     assert_eq!(body["id"].as_i64(), Some(1));
     assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
     assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
 
-    let error = match env
-        .pubsub
-        .block_subscribe(RpcBlockSubscribeFilter::All, None)
-        .await
-    {
+    let error = match env.pubsub.block_subscribe(RpcBlockSubscribeFilter::All, None).await {
         Ok(_) => panic!("unknown WebSocket method unexpectedly succeeded"),
         Err(error) => error,
     };
@@ -52,8 +45,7 @@ async fn test_unknown_http_and_websocket_methods() {
     };
     assert_eq!(reason, "Method not found (-32601)");
 
-    let body: Value =
-        json::from_str(&message).expect("failed to parse WebSocket response");
+    let body: Value = json::from_str(&message).expect("failed to parse WebSocket response");
     assert_eq!(body["id"].as_i64(), Some(1));
     assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
     assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
@@ -166,9 +158,7 @@ async fn test_signature_subscribe_before_execution() {
     assert!(
         matches!(
             notification,
-            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult {
-                err: None
-            })
+            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult { err: None })
         ),
         "transaction should succeed"
     );
@@ -206,9 +196,7 @@ async fn test_signature_subscribe_after_execution() {
     assert!(
         matches!(
             notification,
-            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult {
-                err: None
-            })
+            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult { err: None })
         ),
         "transaction should succeed"
     );
@@ -221,8 +209,7 @@ async fn test_signature_subscribe_failure() {
     let sender = store_v42(&env.engine, 0, AccountMode::Magic);
     let recipient = store_v42(&env.engine, 0, AccountMode::Magic);
     let amount = load_v42_lamports(&env.engine, sender).unwrap() + 1;
-    let (signature, view) =
-        signed_view(&env.engine, None, transfer(sender, recipient, amount));
+    let (signature, view) = signed_view(&env.engine, None, transfer(sender, recipient, amount));
 
     let (mut stream, _) = env
         .pubsub
@@ -246,9 +233,7 @@ async fn test_signature_subscribe_failure() {
     assert!(
         matches!(
             notification,
-            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult {
-                err: Some(_)
-            })
+            RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult { err: Some(_) })
         ),
         "transaction should have failed"
     );
@@ -258,11 +243,8 @@ async fn test_signature_subscribe_failure() {
 #[tokio::test]
 async fn test_slot_subscribe() {
     let mut env = RpcTestEnv::new().await;
-    let (mut stream, unsub) = env
-        .pubsub
-        .slot_subscribe()
-        .await
-        .expect("failed to subscribe to slots");
+    let (mut stream, unsub) =
+        env.pubsub.slot_subscribe().await.expect("failed to subscribe to slots");
     // Each deterministic advance produces exactly one block, so the subscription
     // should deliver exactly one strictly-increasing slot notification per step.
     let mut last_slot: Option<u64> = None;

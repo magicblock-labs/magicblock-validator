@@ -1,6 +1,4 @@
-use solana_account::{
-    AccountMode, AccountSharedData, ReadableAccount, WritableAccount,
-};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -9,7 +7,7 @@ use super::DELEGATION_PROGRAM_ID;
 use crate::utils::accounts::InstructionAccount;
 
 pub(crate) fn set_account_mode(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     acc: &mut AccountSharedData,
     mode: AccountMode,
 ) -> Result<(), InstructionError> {
@@ -21,7 +19,7 @@ pub(crate) fn set_account_mode(
 
 /// Sets proper account values during undelegation
 pub(crate) fn mark_account_as_undelegated(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     acc: &InstructionAccount<'_, '_>,
 ) -> Result<(), InstructionError> {
     let mut acc = acc.borrow_mut()?;

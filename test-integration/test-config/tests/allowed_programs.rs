@@ -31,15 +31,13 @@ fn test_allowed_programs_none_restricts_no_cloning() {
 fn run_allowed_programs(allow_committor_program: bool) {
     init_logger!();
 
-    let allowed_programs =
-        (!allow_committor_program).then(|| vec![AllowedProgram { id: V42_ID }]);
+    let allowed_programs = (!allow_committor_program).then(|| vec![AllowedProgram { id: V42_ID }]);
 
     // Create another random program ID that we'll block
     // we use the commmittor helper program ID as an example since that is
     // present in the chain validator
     let blocked_program_id =
-        Pubkey::from_str("ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq")
-            .unwrap();
+        Pubkey::from_str("ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq").unwrap();
 
     let config = LeaderParams {
         programs: vec![],

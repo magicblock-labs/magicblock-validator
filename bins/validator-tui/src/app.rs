@@ -17,11 +17,9 @@ use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::{
     config::{RpcTransactionLogsConfig, RpcTransactionLogsFilter},
     custom_error::{
-        JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP,
-        JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
+        JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP, JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
         JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
-        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED, JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
         JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
     },
 };
@@ -32,8 +30,8 @@ use tracing::Level;
 use crate::{
     events::{EventAction, handle_event, poll_event},
     state::{
-        LogEntry, TransactionAccount, TransactionDetail, TransactionEntry,
-        TransactionSource, TuiConfig, TuiState,
+        LogEntry, TransactionAccount, TransactionDetail, TransactionEntry, TransactionSource,
+        TuiConfig, TuiState,
     },
     ui,
     utils::{url_encode, websocket_url_from_rpc_url},
@@ -53,7 +51,7 @@ enum AppEvent {
     Log(LogEntry),
 }
 
-pub async fn run_tui(
+pub(crate) async fn run_tui(
     config: TuiConfig,
     validator_log_rx: Option<UnboundedReceiver<LogEntry>>,
 ) -> io::Result<()> {
@@ -89,8 +87,7 @@ pub async fn run_tui(
     );
     if let Some(remote_rpc_url) = state.remote_rpc_url.clone() {
         let (remote_slot_tx, remote_slot_rx) = mpsc::unbounded_channel();
-        if let Some(remote_ws_url) = websocket_url_from_rpc_url(&remote_rpc_url)
-        {
+        if let Some(remote_ws_url) = websocket_url_from_rpc_url(&remote_rpc_url) {
             spawn_slot_subscription(
                 remote_ws_url,
                 "remote_slot_subscribe",
@@ -119,16 +116,8 @@ pub async fn run_tui(
         }
     }
     if let Some(validator_log_rx) = validator_log_rx {
-        spawn_transaction_subscription(
-            local_ws_url,
-            event_tx.clone(),
-            cancel.clone(),
-        );
-        spawn_validator_log_feed(
-            validator_log_rx,
-            event_tx.clone(),
-            cancel.clone(),
-        );
+        spawn_transaction_subscription(local_ws_url, event_tx.clone(), cancel.clone());
+        spawn_validator_log_feed(validator_log_rx, event_tx.clone(), cancel.clone());
     } else {
         spawn_logs_subscription(local_ws_url, event_tx.clone(), cancel.clone());
     }
@@ -145,7 +134,7 @@ pub async fn run_tui(
     result
 }
 
-pub async fn enrich_config_from_rpc(config: &mut TuiConfig) {
+pub(crate) async fn enrich_config_from_rpc(config: &mut TuiConfig) {
     let client = reqwest::Client::new();
 
     if config.validator_identity.is_empty()
@@ -154,11 +143,8 @@ pub async fn enrich_config_from_rpc(config: &mut TuiConfig) {
         config.validator_identity = identity;
     }
 
-    if let Ok(server_version) =
-        get_server_version(&client, &config.rpc_url).await
-    {
-        config.version =
-            format!("{} | validator {}", config.version, server_version);
+    if let Ok(server_version) = get_server_version(&client, &config.rpc_url).await {
+        config.version = format!("{} | validator {}", config.version, server_version);
     }
 }
 
@@ -215,9 +201,7 @@ async fn run_event_loop(
             let is_resize = matches!(event, Event::Resize(_, _));
             let terminal_area = terminal
                 .size()
-                .map(|size| {
-                    ratatui::layout::Rect::new(0, 0, size.width, size.height)
-                })
+                .map(|size| ratatui::layout::Rect::new(0, 0, size.width, size.height))
                 .unwrap_or_default();
 
             let action = handle_event(state, event, terminal_area);
@@ -227,20 +211,16 @@ async fn run_event_loop(
                     let event_tx = event_tx.clone();
 
                     tokio::spawn(async move {
-                        let detail = match fetch_transaction_detail(
-                            &client, &rpc_url, &signature,
-                        )
-                        .await
-                        {
-                            Ok(detail) => detail,
-                            Err(e) => build_failed_tx_detail(
-                                &rpc_url,
-                                signature,
-                                format!("Failed to fetch: {}", e),
-                            ),
-                        };
-                        let _ =
-                            event_tx.send(AppEvent::TransactionDetail(detail));
+                        let detail =
+                            match fetch_transaction_detail(&client, &rpc_url, &signature).await {
+                                Ok(detail) => detail,
+                                Err(e) => build_failed_tx_detail(
+                                    &rpc_url,
+                                    signature,
+                                    format!("Failed to fetch: {}", e),
+                                ),
+                            };
+                        let _ = event_tx.send(AppEvent::TransactionDetail(detail));
                     });
                 }
                 EventAction::OpenUrl(url) => {
@@ -258,12 +238,8 @@ async fn run_event_loop(
         while let Ok(event) = event_rx.try_recv() {
             match event {
                 AppEvent::Slot(slot) => state.update_slot(slot),
-                AppEvent::Transaction(source, tx) => {
-                    state.push_transaction(source, tx)
-                }
-                AppEvent::TransactionDetail(detail) => {
-                    state.show_tx_detail(detail)
-                }
+                AppEvent::Transaction(source, tx) => state.push_transaction(source, tx),
+                AppEvent::TransactionDetail(detail) => state.show_tx_detail(detail),
                 AppEvent::Log(log) => state.push_log(log),
             }
         }
@@ -321,12 +297,11 @@ fn spawn_slot_subscription(
                             let _ = unsubscribe().await;
                         }
                         Err(err) => {
-                            let _ =
-                                event_tx.send(AppEvent::Log(LogEntry::new(
-                                    Level::ERROR,
-                                    log_target.to_string(),
-                                    format!("Subscription failed: {}", err),
-                                )));
+                            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                                Level::ERROR,
+                                log_target.to_string(),
+                                format!("Subscription failed: {}", err),
+                            )));
                         }
                     }
                 }
@@ -356,12 +331,9 @@ fn spawn_block_transaction_feed(
 ) {
     tokio::spawn(async move {
         let client = reqwest::Client::new();
-        let mut latest_target_slot = initialize_transaction_backfill(
-            &client, &rpc_url, log_target, &event_tx,
-        )
-        .await;
-        let mut next_slot_to_fetch =
-            latest_target_slot.map(backfill_start_slot);
+        let mut latest_target_slot =
+            initialize_transaction_backfill(&client, &rpc_url, log_target, &event_tx).await;
+        let mut next_slot_to_fetch = latest_target_slot.map(backfill_start_slot);
 
         let _ = event_tx.send(AppEvent::Log(LogEntry::new(
             Level::INFO,
@@ -387,8 +359,7 @@ fn spawn_block_transaction_feed(
                 {
                     Ok((BlockFetchOutcome::Entries, entries)) => {
                         for entry in entries {
-                            let _ = event_tx
-                                .send(AppEvent::Transaction(source, entry));
+                            let _ = event_tx.send(AppEvent::Transaction(source, entry));
                         }
                         true
                     }
@@ -398,10 +369,7 @@ fn spawn_block_transaction_feed(
                         let _ = event_tx.send(AppEvent::Log(LogEntry::new(
                             Level::WARN,
                             log_target.to_string(),
-                            format!(
-                                "getBlock slot {} failed: {}",
-                                next_slot, err
-                            ),
+                            format!("getBlock slot {} failed: {}", next_slot, err),
                         )));
                         false
                     }
@@ -522,12 +490,11 @@ fn spawn_logs_subscription(
                             let _ = unsubscribe().await;
                         }
                         Err(err) => {
-                            let _ =
-                                event_tx.send(AppEvent::Log(LogEntry::new(
-                                    Level::ERROR,
-                                    "logs_subscribe".to_string(),
-                                    format!("Subscription failed: {}", err),
-                                )));
+                            let _ = event_tx.send(AppEvent::Log(LogEntry::new(
+                                Level::ERROR,
+                                "logs_subscribe".to_string(),
+                                format!("Subscription failed: {}", err),
+                            )));
                         }
                     }
                 }
@@ -796,10 +763,7 @@ async fn initialize_transaction_backfill(
     }
 }
 
-async fn get_identity(
-    client: &reqwest::Client,
-    rpc_url: &str,
-) -> Result<String, String> {
+async fn get_identity(client: &reqwest::Client, rpc_url: &str) -> Result<String, String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -815,10 +779,8 @@ async fn get_identity(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<IdentityResponse> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<IdentityResponse> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         return Err(err.message);
@@ -830,10 +792,7 @@ async fn get_identity(
         .ok_or_else(|| "missing result".to_string())
 }
 
-async fn get_server_version(
-    client: &reqwest::Client,
-    rpc_url: &str,
-) -> Result<String, String> {
+async fn get_server_version(client: &reqwest::Client, rpc_url: &str) -> Result<String, String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -849,10 +808,8 @@ async fn get_server_version(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<VersionResponse> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<VersionResponse> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         return Err(err.message);
@@ -883,24 +840,17 @@ async fn get_epoch_info(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<EpochInfoResponse> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<EpochInfoResponse> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         return Err(err.message);
     }
 
-    rpc_response
-        .result
-        .ok_or_else(|| "missing result".to_string())
+    rpc_response.result.ok_or_else(|| "missing result".to_string())
 }
 
-async fn get_confirmed_slot(
-    client: &reqwest::Client,
-    rpc_url: &str,
-) -> Result<u64, String> {
+async fn get_confirmed_slot(client: &reqwest::Client, rpc_url: &str) -> Result<u64, String> {
     let request_body = serde_json::json!({
         "jsonrpc": "2.0",
         "id": 1,
@@ -918,18 +868,14 @@ async fn get_confirmed_slot(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<u64> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<u64> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         return Err(err.message);
     }
 
-    rpc_response
-        .result
-        .ok_or_else(|| "missing result".to_string())
+    rpc_response.result.ok_or_else(|| "missing result".to_string())
 }
 
 async fn fetch_transaction_detail(
@@ -947,28 +893,17 @@ async fn fetch_transaction_detail(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<TransactionResponse> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<TransactionResponse> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         return Err(err.message);
     }
 
-    let tx = rpc_response
-        .result
-        .ok_or_else(|| "Transaction not found".to_string())?;
-    let TransactionResponse {
-        slot,
-        meta,
-        transaction,
-    } = tx;
+    let tx = rpc_response.result.ok_or_else(|| "Transaction not found".to_string())?;
+    let TransactionResponse { slot, meta, transaction } = tx;
     let success = meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
-    let error = meta
-        .as_ref()
-        .and_then(|m| m.err.as_ref())
-        .map(|e| format!("{}", e));
+    let error = meta.as_ref().and_then(|m| m.err.as_ref()).map(|e| format!("{}", e));
     let accounts = build_transaction_accounts(
         transaction.message,
         meta.as_ref().and_then(|m| m.loaded_addresses.clone()),
@@ -981,10 +916,7 @@ async fn fetch_transaction_detail(
         success,
         fee: meta.as_ref().map(|m| m.fee).unwrap_or(0),
         compute_units: meta.as_ref().and_then(|m| m.compute_units_consumed),
-        logs: meta
-            .as_ref()
-            .and_then(|m| m.log_messages.clone())
-            .unwrap_or_default(),
+        logs: meta.as_ref().and_then(|m| m.log_messages.clone()).unwrap_or_default(),
         accounts,
         error,
         rpc_url: rpc_url.to_string(),
@@ -1010,11 +942,7 @@ fn build_transaction_detail_request(signature: &str) -> serde_json::Value {
     })
 }
 
-fn build_failed_tx_detail(
-    rpc_url: &str,
-    signature: String,
-    error: String,
-) -> TransactionDetail {
+fn build_failed_tx_detail(rpc_url: &str, signature: String, error: String) -> TransactionDetail {
     let explorer_url = build_explorer_url(rpc_url, &signature);
     TransactionDetail {
         signature,
@@ -1041,14 +969,7 @@ async fn fetch_block_transactions_with_retry(
     const MAX_ATTEMPTS: usize = 4;
 
     for attempt in 0..MAX_ATTEMPTS {
-        match fetch_block_transactions(
-            client,
-            rpc_url,
-            slot,
-            exclude_vote_transactions,
-        )
-        .await
-        {
+        match fetch_block_transactions(client, rpc_url, slot, exclude_vote_transactions).await {
             Ok((BlockFetchOutcome::Entries, entries)) => {
                 return Ok((BlockFetchOutcome::Entries, entries));
             }
@@ -1103,10 +1024,8 @@ async fn fetch_block_transactions(
         .await
         .map_err(|e| format!("HTTP error: {}", e))?;
 
-    let rpc_response: RpcResponse<BlockResponse> = response
-        .json()
-        .await
-        .map_err(|e| format!("Parse error: {}", e))?;
+    let rpc_response: RpcResponse<BlockResponse> =
+        response.json().await.map_err(|e| format!("Parse error: {}", e))?;
 
     if let Some(err) = rpc_response.error {
         if is_retryable_block_error(err.code) {
@@ -1131,20 +1050,15 @@ async fn fetch_block_transactions(
             let should_exclude = exclude_vote_transactions
                 && is_vote_transaction(
                     &tx.transaction.message,
-                    tx.meta
-                        .as_ref()
-                        .and_then(|meta| meta.loaded_addresses.as_ref()),
+                    tx.meta.as_ref().and_then(|meta| meta.loaded_addresses.as_ref()),
                 );
             if should_exclude {
                 return None;
             }
 
             let mut accounts = tx.transaction.message.account_keys;
-            let success =
-                tx.meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
-            if let Some(loaded_addresses) =
-                tx.meta.and_then(|m| m.loaded_addresses)
-            {
+            let success = tx.meta.as_ref().map(|m| m.err.is_none()).unwrap_or(true);
+            if let Some(loaded_addresses) = tx.meta.and_then(|m| m.loaded_addresses) {
                 accounts.extend(loaded_addresses.writable);
                 accounts.extend(loaded_addresses.readonly);
             }
@@ -1165,16 +1079,12 @@ fn build_transaction_accounts(
     message: TransactionMessage,
     loaded_addresses: Option<LoadedAddresses>,
 ) -> Vec<TransactionAccount> {
-    let TransactionMessage {
-        header,
-        account_keys,
-    } = message;
+    let TransactionMessage { header, account_keys } = message;
     let required_signatures = header.num_required_signatures;
     let signed_writable_cutoff =
         required_signatures.saturating_sub(header.num_readonly_signed_accounts);
-    let unsigned_writable_cutoff = account_keys
-        .len()
-        .saturating_sub(header.num_readonly_unsigned_accounts);
+    let unsigned_writable_cutoff =
+        account_keys.len().saturating_sub(header.num_readonly_unsigned_accounts);
 
     let mut accounts = Vec::with_capacity(
         account_keys.len()
@@ -1241,12 +1151,8 @@ fn resolve_account_key<'a>(
         return Some(pubkey.as_str());
     }
 
-    let readonly_index =
-        loaded_index.checked_sub(loaded_addresses.writable.len())?;
-    loaded_addresses
-        .readonly
-        .get(readonly_index)
-        .map(String::as_str)
+    let readonly_index = loaded_index.checked_sub(loaded_addresses.writable.len())?;
+    loaded_addresses.readonly.get(readonly_index).map(String::as_str)
 }
 
 fn is_retryable_block_error(code: i64) -> bool {
@@ -1275,7 +1181,7 @@ fn build_explorer_url(rpc_url: &str, signature: &str) -> String {
     )
 }
 
-fn open_url_in_browser(url: &str) -> std::io::Result<()> {
+fn open_url_in_browser(url: &str) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     {
         std::process::Command::new("open").arg(url).spawn()?;
@@ -1286,15 +1192,9 @@ fn open_url_in_browser(url: &str) -> std::io::Result<()> {
     }
     #[cfg(target_os = "windows")]
     {
-        std::process::Command::new("cmd")
-            .args(["/C", "start", "", url])
-            .spawn()?;
+        std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn()?;
     }
-    #[cfg(not(any(
-        target_os = "macos",
-        target_os = "linux",
-        target_os = "windows"
-    )))]
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
     {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
@@ -1309,17 +1209,15 @@ mod tests {
     use solana_rpc_client_api::custom_error::{
         JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE,
         JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET,
-        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED,
-        JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
+        JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED, JSON_RPC_SERVER_ERROR_SLOT_SKIPPED,
         JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE,
     };
 
     use super::{
-        BlockTransactionMessage, CompiledInstruction, LoadedAddresses,
-        TransactionMessage, TransactionMessageHeader, VOTE_PROGRAM_ID,
-        backfill_start_slot, build_transaction_accounts,
-        build_transaction_detail_request, is_retryable_block_error,
-        is_skippable_block_error, is_vote_transaction, live_feed_target_slot,
+        BlockTransactionMessage, CompiledInstruction, LoadedAddresses, TransactionMessage,
+        TransactionMessageHeader, VOTE_PROGRAM_ID, backfill_start_slot, build_transaction_accounts,
+        build_transaction_detail_request, is_retryable_block_error, is_skippable_block_error,
+        is_vote_transaction, live_feed_target_slot,
     };
 
     #[test]
@@ -1368,21 +1266,14 @@ mod tests {
     #[test]
     fn vote_detection_checks_static_and_loaded_program_ids() {
         let static_vote = BlockTransactionMessage {
-            account_keys: vec![
-                "payer".to_string(),
-                VOTE_PROGRAM_ID.to_string(),
-            ],
-            instructions: vec![CompiledInstruction {
-                program_id_index: 1,
-            }],
+            account_keys: vec!["payer".to_string(), VOTE_PROGRAM_ID.to_string()],
+            instructions: vec![CompiledInstruction { program_id_index: 1 }],
         };
         assert!(is_vote_transaction(&static_vote, None));
 
         let loaded_vote = BlockTransactionMessage {
             account_keys: vec!["payer".to_string()],
-            instructions: vec![CompiledInstruction {
-                program_id_index: 1,
-            }],
+            instructions: vec![CompiledInstruction { program_id_index: 1 }],
         };
         assert!(is_vote_transaction(
             &loaded_vote,
@@ -1393,13 +1284,8 @@ mod tests {
         ));
 
         let non_vote = BlockTransactionMessage {
-            account_keys: vec![
-                "payer".to_string(),
-                "11111111111111111111111111111111".to_string(),
-            ],
-            instructions: vec![CompiledInstruction {
-                program_id_index: 1,
-            }],
+            account_keys: vec!["payer".to_string(), "11111111111111111111111111111111".to_string()],
+            instructions: vec![CompiledInstruction { program_id_index: 1 }],
         };
         assert!(!is_vote_transaction(&non_vote, None));
     }

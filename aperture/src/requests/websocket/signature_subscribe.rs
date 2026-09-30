@@ -1,7 +1,5 @@
 use super::prelude::*;
-use crate::{
-    encoder::TransactionResultEncoder, requests::params::SerdeSignature,
-};
+use crate::{encoder::TransactionResultEncoder, requests::params::SerdeSignature};
 
 impl WsDispatcher {
     pub(crate) async fn signature_subscribe(
@@ -24,8 +22,7 @@ impl WsDispatcher {
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
             if let Ok(status) = rx.await
-                && let Some(bytes) =
-                    encoder.encode(context_slot(&engine), &status.result, id)
+                && let Some(bytes) = encoder.encode(context_slot(&engine), &status.result, id)
             {
                 let _ = tx.send(bytes).await;
             }

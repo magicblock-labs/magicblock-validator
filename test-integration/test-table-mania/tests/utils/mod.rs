@@ -4,30 +4,25 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use tracing::*;
 
 #[allow(unused)] // used in tests
-pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
+pub(crate) const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
 
-pub async fn sleep_millis(millis: u64) {
-    tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
+pub(crate) async fn sleep_millis(millis: u64) {
+    tokio::time::sleep(Duration::from_millis(millis)).await;
 }
 
 // request_airdrop only submits the transfer; wait until the funds are visible
 // so the first transaction a test sends can debit the authority.
 #[allow(unused)] // used in tests
-pub async fn airdrop_and_wait(
+pub(crate) async fn airdrop_and_wait(
     rpc_client: &MagicblockRpcClient,
     auth: &Keypair,
     lamports: u64,
 ) {
-    rpc_client
-        .request_airdrop(&auth.pubkey(), lamports)
-        .await
-        .unwrap();
+    rpc_client.request_airdrop(&auth.pubkey(), lamports).await.unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         match rpc_client.get_account(&auth.pubkey()).await {
@@ -41,7 +36,7 @@ pub async fn airdrop_and_wait(
 }
 
 #[allow(unused)] // used in tests
-pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
+pub(crate) async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
     let rpc_client = {
         let client = RpcClient::new_with_commitment(
             "http://localhost:7799".to_string(),
@@ -63,7 +58,7 @@ pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
 }
 
 #[allow(unused)] // used in tests
-pub async fn close_released_tables(table_mania: &TableMania) {
+pub(crate) async fn close_released_tables(table_mania: &TableMania) {
     if TEST_TABLE_CLOSE {
         // Tables deactivate after ~2.5 mins (150secs), but most times
         // it takes a lot longer so we allow double the time
@@ -109,7 +104,7 @@ pub async fn close_released_tables(table_mania: &TableMania) {
 }
 
 #[allow(unused)] // used in tests
-pub async fn log_active_table_addresses(table_mania: &TableMania) {
+pub(crate) async fn log_active_table_addresses(table_mania: &TableMania) {
     debug!(
         "Active Tables: {}",
         table_mania

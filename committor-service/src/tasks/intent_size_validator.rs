@@ -11,8 +11,7 @@ use crate::{
         commit_task::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{
-            TransactionUtils, create_action_tasks, create_commit_finalize_task,
-            create_commit_task,
+            TransactionUtils, create_action_tasks, create_commit_finalize_task, create_commit_task,
         },
     },
     utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
@@ -100,17 +99,10 @@ impl IntentSizeValidator {
             .into()
         }
 
-        fn commit_type_finalize_tasks(
-            commit_type: &CommitType,
-        ) -> Vec<BaseTaskImpl> {
-            let mut tasks: Vec<BaseTaskImpl> = commit_type
-                .get_committed_accounts()
-                .iter()
-                .map(finalize_task)
-                .collect();
-            if let CommitType::WithBaseActions { base_actions, .. } =
-                commit_type
-            {
+        fn commit_type_finalize_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+            let mut tasks: Vec<BaseTaskImpl> =
+                commit_type.get_committed_accounts().iter().map(finalize_task).collect();
+            if let CommitType::WithBaseActions { base_actions, .. } = commit_type {
                 tasks.extend(create_action_tasks(base_actions));
             }
             tasks
@@ -124,15 +116,8 @@ impl IntentSizeValidator {
 
         if let Some(ref cau) = intent.commit_and_undelegate {
             tasks.extend(commit_type_finalize_tasks(&cau.commit_action));
-            tasks.extend(
-                cau.commit_action
-                    .get_committed_accounts()
-                    .iter()
-                    .map(undelegate_task),
-            );
-            if let UndelegateType::WithBaseActions(actions) =
-                &cau.undelegate_action
-            {
+            tasks.extend(cau.commit_action.get_committed_accounts().iter().map(undelegate_task));
+            if let UndelegateType::WithBaseActions(actions) = &cau.undelegate_action {
                 tasks.extend(create_action_tasks(actions));
             }
         }
@@ -140,15 +125,8 @@ impl IntentSizeValidator {
         // `commit_finalize` needs no separate finalize step: commit and
         // finalize already happen together in a single `CommitFinalizeTask`.
         if let Some(ref cfau) = intent.commit_finalize_and_undelegate {
-            tasks.extend(
-                cfau.commit_action
-                    .get_committed_accounts()
-                    .iter()
-                    .map(undelegate_task),
-            );
-            if let UndelegateType::WithBaseActions(actions) =
-                &cfau.undelegate_action
-            {
+            tasks.extend(cfau.commit_action.get_committed_accounts().iter().map(undelegate_task));
+            if let UndelegateType::WithBaseActions(actions) = &cfau.undelegate_action {
                 tasks.extend(create_action_tasks(actions));
             }
         }
@@ -170,12 +148,7 @@ impl IntentSizeValidator {
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
     /// built in [`Self::finalize_tasks`].
     fn commit_task(account: &CommittedAccount) -> BaseTaskImpl {
-        let mut task = create_commit_task(
-            0,
-            false,
-            account.clone(),
-            Some(account.account.clone()),
-        );
+        let mut task = create_commit_task(0, false, account.clone(), Some(account.account.clone()));
         if matches!(task.delivery_details, CommitDelivery::DiffInArgs { .. }) {
             task.try_optimize_tx_size();
         }
@@ -184,12 +157,8 @@ impl IntentSizeValidator {
 
     /// Same as [`Self::commit_task`] but for `CommitFinalizeTask`.
     fn commit_finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
-        let mut task = create_commit_finalize_task(
-            0,
-            false,
-            account.clone(),
-            Some(account.account.clone()),
-        );
+        let mut task =
+            create_commit_finalize_task(0, false, account.clone(), Some(account.account.clone()));
         if matches!(task.delivery, CommitDelivery::DiffInArgs { .. }) {
             task.try_optimize_tx_size();
         }
@@ -200,16 +169,10 @@ impl IntentSizeValidator {
     /// `WithBaseActions` actions are excluded: they run in the finalize
     /// stage, not the commit stage.
     fn commit_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
-        commit_type
-            .get_committed_accounts()
-            .iter()
-            .map(Self::commit_task)
-            .collect()
+        commit_type.get_committed_accounts().iter().map(Self::commit_task).collect()
     }
 
-    fn commit_finalize_type_tasks(
-        commit_type: &CommitType,
-    ) -> Vec<BaseTaskImpl> {
+    fn commit_finalize_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
         let mut tasks: Vec<BaseTaskImpl> = commit_type
             .get_committed_accounts()
             .iter()
@@ -223,18 +186,14 @@ impl IntentSizeValidator {
 
     /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any), assembled
     /// with full ALT coverage, fit within [`MAX_TRANSACTION_WIRE_SIZE`].
-    fn tasks_fit(
-        tasks: &[BaseTaskImpl],
-        uniqueness_nonce: Option<u64>,
-    ) -> bool {
+    fn tasks_fit(tasks: &[BaseTaskImpl], uniqueness_nonce: Option<u64>) -> bool {
         let placeholder = Keypair::new();
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),
             tasks,
             uniqueness_nonce,
         );
-        let lookup_tables =
-            TransactionUtils::dummy_lookup_table(&lookup_table_keys);
+        let lookup_tables = TransactionUtils::dummy_lookup_table(&lookup_table_keys);
 
         TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             &placeholder,
@@ -293,9 +252,7 @@ mod tests {
     #[test]
     fn test_small_commit_fits() {
         let intent = MagicIntentBundle {
-            commit: Some(CommitType::Standalone(vec![make_committed_account(
-                10,
-            )])),
+            commit: Some(CommitType::Standalone(vec![make_committed_account(10)])),
             ..Default::default()
         };
         assert!(IntentSizeValidator::fits(&intent));
@@ -306,9 +263,7 @@ mod tests {
         // Well above COMMIT_STATE_SIZE_THRESHOLD -- would never fit inline,
         // but must be escalated to buffer mode by the validator.
         let intent = MagicIntentBundle {
-            commit: Some(CommitType::Standalone(vec![make_committed_account(
-                50_000,
-            )])),
+            commit: Some(CommitType::Standalone(vec![make_committed_account(50_000)])),
             ..Default::default()
         };
         assert!(IntentSizeValidator::fits(&intent));

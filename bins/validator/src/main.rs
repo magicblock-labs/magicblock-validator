@@ -20,15 +20,12 @@ static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn init_logger() {
     use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
-    init_with_config(LoggingConfig {
-        style: LogStyle::from_env(),
-    });
+    init_with_config(LoggingConfig { style: LogStyle::from_env() });
 }
 
 fn main() -> ExitCode {
     init_logger();
-    let reason =
-        try_main().unwrap_or_else(|error| ShutdownReason::Error(error.into()));
+    let reason = try_main().unwrap_or_else(|error| ShutdownReason::Error(error.into()));
     exit(reason)
 }
 
@@ -59,11 +56,11 @@ async fn run() -> Result<ShutdownReason> {
     let identity = config.engine.authority.local.pubkey().to_string();
     let remote_rpc_url = config.rpc_url().to_owned();
 
-    let mut leader = Leader::try_from_config(config)
+    let leader = Leader::try_from_config(config)
         .await
         .context("failed to create leader runtime")?;
 
-    leader.start();
+    let leader = leader.start();
 
     print_startup(&rpc_url, &ws_url, &remote_rpc_url, &identity);
     Ok(leader.wait().await)
@@ -90,12 +87,7 @@ fn load_config() -> Result<Option<LeaderParams>> {
     }
 }
 
-fn print_startup(
-    rpc_url: &str,
-    ws_url: &str,
-    remote_rpc_url: &str,
-    identity: &str,
-) {
+fn print_startup(rpc_url: &str, ws_url: &str, remote_rpc_url: &str, identity: &str) {
     let version = magicblock_version::Version::default();
     for line in [
         String::new(),

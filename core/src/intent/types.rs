@@ -7,9 +7,7 @@ use crate::token_programs::try_remap_ata_to_eata;
 
 pub type CommittedAccountRef = (Pubkey, AccountSharedData);
 
-#[derive(
-    Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite,
-)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct CommittedAccount {
     pub pubkey: Pubkey,
     pub account: Account,
@@ -30,14 +28,9 @@ impl From<CommittedAccountRef> for CommittedAccount {
 impl CommittedAccount {
     /// Build a CommittedAccount from an AccountSharedData reference, remapping
     /// ATA -> eATA if applicable.
-    pub fn from_account_shared(
-        pubkey: Pubkey,
-        account_shared: &AccountSharedData,
-    ) -> Self {
+    pub fn from_account_shared(pubkey: Pubkey, account_shared: &AccountSharedData) -> Self {
         let remote_slot = account_shared.slot();
-        if let Some((eata_pubkey, eata)) =
-            try_remap_ata_to_eata(&pubkey, account_shared)
-        {
+        if let Some((eata_pubkey, eata)) = try_remap_ata_to_eata(&pubkey, account_shared) {
             return CommittedAccount {
                 pubkey: eata_pubkey,
                 account: eata.into(),
@@ -52,11 +45,7 @@ impl CommittedAccount {
             executable: account_shared.executable(),
             rent_epoch: account_shared.rent_epoch(),
         };
-        CommittedAccount {
-            pubkey,
-            account,
-            remote_slot,
-        }
+        CommittedAccount { pubkey, account, remote_slot }
     }
 }
 
@@ -74,10 +63,7 @@ mod tests {
         let mut account = AccountSharedData::default();
         account.set_owner(owner);
 
-        let committed = CommittedAccount::from_account_shared(
-            Pubkey::new_unique(),
-            &account,
-        );
+        let committed = CommittedAccount::from_account_shared(Pubkey::new_unique(), &account);
 
         assert_eq!(committed.account.owner, owner);
     }

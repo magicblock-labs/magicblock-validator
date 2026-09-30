@@ -2,9 +2,7 @@ use solana_account::Account;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_rpc_client_api::config::{
-    RpcSendTransactionConfig, RpcTransactionConfig,
-};
+use solana_rpc_client_api::config::{RpcSendTransactionConfig, RpcTransactionConfig};
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature, Signer},
@@ -27,10 +25,7 @@ macro_rules! get_account {
         let mut remaining_tries = GET_ACCOUNT_RETRIES;
         loop {
             let acc = $rpc_client
-                .get_account_with_commitment(
-                    &$pubkey,
-                    CommitmentConfig::confirmed(),
-                )
+                .get_account_with_commitment(&$pubkey, CommitmentConfig::confirmed())
                 .await
                 .ok()
                 .and_then(|acc| acc.value);
@@ -70,10 +65,7 @@ macro_rules! get_account {
 }
 
 #[allow(dead_code)]
-pub async fn fetch_tx_logs(
-    rpc_client: &RpcClient,
-    signature: &Signature,
-) -> Vec<String> {
+pub(crate) async fn fetch_tx_logs(rpc_client: &RpcClient, signature: &Signature) -> Vec<String> {
     // NOTE: we encountered the following error a few times which makes tests fail for the
     //       wrong reason:
     //       Error {
@@ -103,13 +95,9 @@ pub async fn fetch_tx_logs(
                 tracing::error!("Failed to get transaction: {}", err);
                 retries -= 1;
                 if retries == 0 {
-                    panic!(
-                        "Failed to get transaction after {} retries",
-                        MAX_RETRIES
-                    );
+                    panic!("Failed to get transaction after {} retries", MAX_RETRIES);
                 }
-                tokio::time::sleep(tokio::time::Duration::from_millis(100))
-                    .await;
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         };
     };
@@ -123,16 +111,11 @@ pub async fn fetch_tx_logs(
 }
 
 #[allow(dead_code)]
-pub async fn print_tx_logs(rpc_client: &RpcClient, signature: &Signature) {
+pub(crate) async fn print_tx_logs(rpc_client: &RpcClient, signature: &Signature) {
     println!("logs: {:#?}", fetch_tx_logs(rpc_client, signature).await);
 }
 
-async fn airdrop_and_confirm(
-    rpc_client: &RpcClient,
-    pubkey: &Pubkey,
-    lamports: u64,
-    label: &str,
-) {
+async fn airdrop_and_confirm(rpc_client: &RpcClient, pubkey: &Pubkey, lamports: u64, label: &str) {
     const AIRDROP_CHUNK: u64 = LAMPORTS_PER_SOL;
     const MAX_ROUNDS: usize = 50;
     const RETRY_SLEEP_MS: u64 = 200;
@@ -166,44 +149,36 @@ async fn airdrop_and_confirm(
         }
     }
 
-    panic!(
-        "Failed to fund {label} to required balance: current={current}, target={lamports}"
-    );
+    panic!("Failed to fund {label} to required balance: current={current}, target={lamports}");
 }
 
 #[allow(dead_code)]
-pub async fn tx_logs_contain(
+pub(crate) async fn tx_logs_contain(
     rpc_client: &RpcClient,
     signature: &Signature,
     needle: &str,
 ) -> bool {
-    fetch_tx_logs(rpc_client, signature)
-        .await
-        .iter()
-        .any(|log| {
-            // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
-            // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
-            // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
-            // the decision and passing either CommitState or CommitDiff from the tests themselves.
-            if needle == "CommitState" {
-                log.contains(needle)
-                    || log.contains("CommitDiff")
-                    || log.contains("CommitFinalize")
-            } else {
-                log.contains(needle)
-            }
-        })
+    fetch_tx_logs(rpc_client, signature).await.iter().any(|log| {
+        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
+        // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
+        // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
+        // the decision and passing either CommitState or CommitDiff from the tests themselves.
+        if needle == "CommitState" {
+            log.contains(needle) || log.contains("CommitDiff") || log.contains("CommitFinalize")
+        } else {
+            log.contains(needle)
+        }
+    })
 }
 
 /// This needs to be run for each test that required a new counter to be delegated
 #[allow(dead_code)]
-pub async fn init_and_delegate_account_on_chain(
+pub(crate) async fn init_and_delegate_account_on_chain(
     counter_auth: &Keypair,
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let ixs =
-        init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
+    let ixs = init_account_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
     run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
 }
 
@@ -211,16 +186,12 @@ pub async fn init_and_delegate_account_on_chain(
 /// used only where a test needs flexi-counter's own on-chain behavior (e.g.
 /// its `FAIL_UNDELEGATION_LABEL` forced-undelegation-failure hook).
 #[allow(dead_code)]
-pub async fn init_and_delegate_flexi_counter_on_chain(
+pub(crate) async fn init_and_delegate_flexi_counter_on_chain(
     counter_auth: &Keypair,
     bytes: u64,
     label: Option<String>,
 ) -> (Pubkey, Account) {
-    let ixs = init_flexi_counter_and_delegate_ixs(
-        counter_auth.pubkey(),
-        bytes,
-        label,
-    );
+    let ixs = init_flexi_counter_and_delegate_ixs(counter_auth.pubkey(), bytes, label);
     run_init_and_delegate_ixs(counter_auth, bytes, ixs).await
 }
 
@@ -274,11 +245,7 @@ async fn run_init_and_delegate_ixs(
     rpc_client
         .send_and_confirm_transaction_with_spinner_and_config(
             &Transaction::new_signed_with_payer(
-                &[system_instruction::transfer(
-                    &counter_auth.pubkey(),
-                    &pda,
-                    rent_excempt,
-                )],
+                &[system_instruction::transfer(&counter_auth.pubkey(), &pda, rent_excempt)],
                 Some(&counter_auth.pubkey()),
                 &[&counter_auth],
                 rpc_client.get_latest_blockhash().await.unwrap(),
@@ -346,9 +313,7 @@ async fn run_init_and_delegate_ixs(
 
 /// This needs to be run for each test that required a new order_book to be delegated
 #[allow(dead_code)]
-pub async fn init_and_delegate_order_book_on_chain(
-    payer: &Keypair,
-) -> (Pubkey, Account) {
+pub(crate) async fn init_and_delegate_order_book_on_chain(payer: &Keypair) -> (Pubkey, Account) {
     const MIN_ORDER_BOOK_PAYER_BALANCE: u64 = 2 * LAMPORTS_PER_SOL;
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
@@ -410,9 +375,7 @@ pub async fn init_and_delegate_order_book_on_chain(
 }
 
 /// This needs to be run once for all tests
-pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
-    validator_auth: &Keypair,
-) {
+pub(crate) async fn fund_validator_auth_and_ensure_validator_fees_vault(validator_auth: &Keypair) {
     const MIN_VALIDATOR_BALANCE: u64 = 20 * LAMPORTS_PER_SOL;
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
@@ -426,17 +389,12 @@ pub async fn fund_validator_auth_and_ensure_validator_fees_vault(
     debug!("Airdropped to validator: {} ", validator_auth.pubkey(),);
 
     let validator_fees_vault =
-        dlp_api::pda::validator_fees_vault_pda_from_validator(
-            &validator_auth.pubkey(),
-        );
-    let validator_fees_vault_exists =
-        rpc_client.get_account(&validator_fees_vault).await.is_ok();
+        dlp_api::pda::validator_fees_vault_pda_from_validator(&validator_auth.pubkey());
+    let validator_fees_vault_exists = rpc_client.get_account(&validator_fees_vault).await.is_ok();
 
     if !validator_fees_vault_exists {
-        let latest_block_hash =
-            rpc_client.get_latest_blockhash().await.unwrap();
-        let init_validator_fees_vault_ix =
-            init_validator_fees_vault_ix(validator_auth.pubkey());
+        let latest_block_hash = rpc_client.get_latest_blockhash().await.unwrap();
+        let init_validator_fees_vault_ix = init_validator_fees_vault_ix(validator_auth.pubkey());
         // If this fails it might be due to a race condition where another test
         // already initialized it, so we can safely ignore the error
         let _ = rpc_client

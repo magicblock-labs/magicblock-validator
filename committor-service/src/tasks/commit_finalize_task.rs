@@ -2,9 +2,7 @@ use dlp_api::{
     AccountSizeClass,
     args::CommitFinalizeArgs,
     diff::compute_diff,
-    instruction_builder::{
-        commit_finalize_from_buffer_size_budget, commit_finalize_size_budget,
-    },
+    instruction_builder::{commit_finalize_from_buffer_size_budget, commit_finalize_size_budget},
 };
 use magicblock_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
@@ -35,11 +33,7 @@ impl CommitFinalizeTask {
     ) -> Instruction {
         let (data, data_is_diff) = if let Some(base_account) = base_account {
             (
-                compute_diff(
-                    base_account.data(),
-                    self.committed_account.account.data(),
-                )
-                .to_vec(),
+                compute_diff(base_account.data(), self.committed_account.account.data()).to_vec(),
                 true,
             )
         } else {
@@ -70,12 +64,11 @@ impl CommitFinalizeTask {
         validator: &Pubkey,
         base_account: Option<&Account>,
     ) -> Instruction {
-        let (data_buffer_pubkey, _) =
-            magicblock_committor_program::pdas::buffer_pda(
-                validator,
-                &self.committed_account.pubkey,
-                &self.commit_id.to_le_bytes(),
-            );
+        let (data_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+            validator,
+            &self.committed_account.pubkey,
+            &self.commit_id.to_le_bytes(),
+        );
 
         let mut args = CommitFinalizeArgs {
             commit_id: self.commit_id,
@@ -98,8 +91,7 @@ impl CommitFinalizeTask {
     pub fn is_buffer(&self) -> bool {
         matches!(
             self.delivery,
-            CommitDelivery::StateInBuffer { .. }
-                | CommitDelivery::DiffInBuffer { .. }
+            CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. }
         )
     }
 
@@ -107,9 +99,7 @@ impl CommitFinalizeTask {
         self.commit_id = commit_id;
         match &mut self.delivery {
             CommitDelivery::StateInBuffer { prepared }
-            | CommitDelivery::DiffInBuffer { prepared, .. } => {
-                *prepared = false
-            }
+            | CommitDelivery::DiffInBuffer { prepared, .. } => *prepared = false,
             _ => {}
         };
     }
@@ -122,38 +112,32 @@ impl BaseTask for CommitFinalizeTask {
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery {
-            CommitDelivery::StateInArgs => {
-                self.commit_finalize_ix(validator, None)
-            }
+            CommitDelivery::StateInArgs => self.commit_finalize_ix(validator, None),
             CommitDelivery::StateInBuffer { .. } => {
                 self.commit_finalize_from_buffer_ix(validator, None)
             }
             CommitDelivery::DiffInArgs { base_account } => {
                 self.commit_finalize_ix(validator, Some(base_account))
             }
-            CommitDelivery::DiffInBuffer { base_account, .. } => self
-                .commit_finalize_from_buffer_ix(validator, Some(base_account)),
+            CommitDelivery::DiffInBuffer { base_account, .. } => {
+                self.commit_finalize_from_buffer_ix(validator, Some(base_account))
+            }
         }
     }
 
     fn try_optimize_tx_size(&mut self) -> bool {
-        let delivery =
-            std::mem::replace(&mut self.delivery, CommitDelivery::StateInArgs);
+        let delivery = std::mem::replace(&mut self.delivery, CommitDelivery::StateInArgs);
         match delivery {
             CommitDelivery::StateInArgs => {
-                self.delivery =
-                    CommitDelivery::StateInBuffer { prepared: false };
+                self.delivery = CommitDelivery::StateInBuffer { prepared: false };
                 true
             }
             CommitDelivery::DiffInArgs { base_account } => {
-                self.delivery = CommitDelivery::DiffInBuffer {
-                    base_account,
-                    prepared: false,
-                };
+                self.delivery = CommitDelivery::DiffInBuffer { base_account, prepared: false };
                 true
             }
-            other @ (CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. }) => {
+            other
+            @ (CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. }) => {
                 self.delivery = other;
                 false
             }
@@ -166,20 +150,15 @@ impl BaseTask for CommitFinalizeTask {
 
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
-            CommitDelivery::StateInArgs => {
-                commit_finalize_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
-            }
-            CommitDelivery::StateInBuffer { .. }
-            | CommitDelivery::DiffInBuffer { .. } => {
+            CommitDelivery::StateInArgs => commit_finalize_size_budget(AccountSizeClass::Dynamic(
+                self.committed_account.account.data.len() as u32,
+            )),
+            CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. } => {
                 commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
             }
-            CommitDelivery::DiffInArgs { .. } => {
-                commit_finalize_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
-            }
+            CommitDelivery::DiffInArgs { .. } => commit_finalize_size_budget(
+                AccountSizeClass::Dynamic(self.committed_account.account.data.len() as u32),
+            ),
         }
     }
 }

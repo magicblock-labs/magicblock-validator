@@ -19,8 +19,8 @@ pub trait SubscribedAccountsTracker: Send + Sync + 'static {
 }
 
 #[cfg(test)]
-pub mod mock {
-    use std::sync::Mutex;
+pub(super) mod mock {
+    use parking_lot::Mutex;
 
     use super::*;
 
@@ -29,26 +29,26 @@ pub mod mock {
     ///
     /// The stored subscriptions should be unique to comply with the
     /// `SubscribedAccountsTracker` trait contract.
-    pub struct MockSubscribedAccountsTracker {
+    pub(crate) struct MockSubscribedAccountsTracker {
         subscriptions: Mutex<Vec<Pubkey>>,
     }
 
     impl MockSubscribedAccountsTracker {
-        pub fn new(subscriptions: Vec<Pubkey>) -> Self {
+        pub(crate) fn new(subscriptions: Vec<Pubkey>) -> Self {
             Self {
                 subscriptions: Mutex::new(subscriptions),
             }
         }
 
         #[allow(dead_code)]
-        pub fn set_subscriptions(&self, subscriptions: Vec<Pubkey>) {
-            *self.subscriptions.lock().unwrap() = subscriptions;
+        pub(crate) fn set_subscriptions(&self, subscriptions: Vec<Pubkey>) {
+            *self.subscriptions.lock() = subscriptions;
         }
     }
 
     impl SubscribedAccountsTracker for MockSubscribedAccountsTracker {
         fn subscribed_accounts(&self) -> HashSet<Pubkey> {
-            self.subscriptions.lock().unwrap().iter().copied().collect()
+            self.subscriptions.lock().iter().copied().collect()
         }
     }
 }

@@ -9,7 +9,7 @@ use solana_metrics::datapoint_info;
 
 use crate::database::options::LedgerColumnOptions;
 
-pub const BLOCKSTORE_METRICS_ERROR: i64 = -1;
+pub(crate) const BLOCKSTORE_METRICS_ERROR: i64 = -1;
 
 // -----------------
 // PerfSamplingStatus
@@ -34,7 +34,7 @@ pub struct PerfSamplingStatus {
 /// The list of completed RocksDB internal properties can be found
 /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
 #[derive(Default)]
-pub struct BlockstoreRocksDbColumnFamilyMetrics {
+pub(crate) struct BlockstoreRocksDbColumnFamilyMetrics {
     // Size related
 
     // The storage size occupied by the column family.
@@ -127,7 +127,7 @@ impl BlockstoreRocksDbColumnFamilyMetrics {
     /// `metric_name_and_cf_tag` with the following format.
     ///
     /// For example, "blockstore_rocksdb_cfs,cf_name=shred_data".
-    pub fn report_metrics(
+    pub(crate) fn report_metrics(
         &self,
         cf_name: &'static str,
         column_options: &LedgerColumnOptions,
@@ -497,14 +497,12 @@ pub(crate) struct LedgerRpcApiMetrics {
 
 impl LedgerRpcApiMetrics {
     #[allow(unused)]
-    pub fn report(&self) {
+    pub(crate) fn report(&self) {
         let num_get_complete_transaction =
             self.num_get_complete_transaction.swap(0, Ordering::Relaxed);
-        let num_get_confirmed_signatures_for_address = self
-            .num_get_confirmed_signatures_for_address
-            .swap(0, Ordering::Relaxed);
-        let num_get_transaction_status =
-            self.num_get_transaction_status.swap(0, Ordering::Relaxed);
+        let num_get_confirmed_signatures_for_address =
+            self.num_get_confirmed_signatures_for_address.swap(0, Ordering::Relaxed);
+        let num_get_transaction_status = self.num_get_transaction_status.swap(0, Ordering::Relaxed);
 
         let total_num_queries = num_get_complete_transaction
             .saturating_add(num_get_confirmed_signatures_for_address)

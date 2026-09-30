@@ -22,7 +22,7 @@ use tracing::info;
 use self::{deadline::Deadline, expression::random};
 
 #[derive(clap::Args, Deserialize)]
-pub struct Args {
+pub(crate) struct Args {
     /// Validator HTTP RPC URL.
     #[arg(long)]
     url: Remote,
@@ -32,7 +32,7 @@ pub struct Args {
 }
 
 impl Args {
-    pub async fn run(self) -> Result<()> {
+    pub(crate) async fn run(self) -> Result<()> {
         let mut timer = EventTimer::new("healthcheck");
         let deadline = Deadline::new(self.timeout);
         let rpc_url = self.url.url_str().to_owned();
@@ -42,10 +42,7 @@ impl Args {
             .context("healthcheck requires an HTTP RPC URL")?
             .url_str()
             .to_owned();
-        let rpc = RpcClient::new_with_commitment(
-            rpc_url.clone(),
-            CommitmentConfig::processed(),
-        );
+        let rpc = RpcClient::new_with_commitment(rpc_url.clone(), CommitmentConfig::processed());
         info!(rpc = %rpc_url, websocket = %ws_url, timeout = ?self.timeout, "Starting healthcheck");
 
         let signer = Keypair::new();
@@ -80,9 +77,7 @@ impl Args {
                 pubsub.account_subscribe(&HEALTHCHECK_ACCOUNT_PUBKEY, None),
             )
             .await
-            .with_context(|| {
-                format!("accountSubscribe {HEALTHCHECK_ACCOUNT_PUBKEY}")
-            })?;
+            .with_context(|| format!("accountSubscribe {HEALTHCHECK_ACCOUNT_PUBKEY}"))?;
         timer.record("subscriptions registered");
 
         let returned = deadline
@@ -114,9 +109,7 @@ async fn verify_signature(
     signature: Signature,
     mut stream: impl Stream<Item = Response<RpcSignatureResult>> + Unpin,
 ) -> Result<()> {
-    deadline
-        .next("waiting for signature notification", &mut stream)
-        .await?;
+    deadline.next("waiting for signature notification", &mut stream).await?;
     info!(%signature,  "Received successful signature notification");
 
     let statuses = deadline
@@ -132,9 +125,9 @@ async fn verify_signature(
         .next()
         .flatten()
         .context("getSignatureStatuses returned no transaction status")?;
-    status.status.map_err(|error| {
-        anyhow!("getSignatureStatuses reported execution failure: {error:?}")
-    })?;
+    status
+        .status
+        .map_err(|error| anyhow!("getSignatureStatuses reported execution failure: {error:?}"))?;
     info!(%signature, "Verified signature status");
     Ok(())
 }
@@ -143,9 +136,7 @@ async fn wait_for_update<T>(
     deadline: Deadline,
     mut stream: impl Stream<Item = T> + Unpin,
 ) -> Result<()> {
-    deadline
-        .next("waiting for account notification", &mut stream)
-        .await?;
+    deadline.next("waiting for account notification", &mut stream).await?;
     info!("Received account notification");
     Ok(())
 }

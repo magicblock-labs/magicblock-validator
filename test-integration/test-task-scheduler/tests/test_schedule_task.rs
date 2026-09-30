@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use integration_test_tools::{expect, validator::cleanup};
 use magicblock_task_scheduler::crank_pubkey;
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use test_task_scheduler::{
     cancel_task, schedule_noop_task, setup_validator, wait_for_hydra_crank,
     wait_for_hydra_crank_closed,
@@ -28,21 +26,11 @@ fn test_schedule_task_creates_and_cancels_hydra_crank() {
     // The crank lives at a PDA derived from (authority, task_id), so the test
     // can locate it without asking the scheduler.
     let crank_pda = crank_pubkey(&payer.pubkey(), task_id);
-    wait_for_hydra_crank(
-        &ctx,
-        &crank_pda,
-        Duration::from_secs(10),
-        &mut validator,
-    );
+    wait_for_hydra_crank(&ctx, &crank_pda, Duration::from_secs(10), &mut validator);
 
     cancel_task(&ctx, &mut validator, &payer, task_id);
 
-    wait_for_hydra_crank_closed(
-        &ctx,
-        &crank_pda,
-        Duration::from_secs(10),
-        &mut validator,
-    );
+    wait_for_hydra_crank_closed(&ctx, &crank_pda, Duration::from_secs(10), &mut validator);
 
     cleanup(&mut validator);
 }
@@ -75,29 +63,14 @@ fn test_tasks_are_namespaced_per_authority() {
     );
 
     for crank in [&payer_crank, &other_crank] {
-        wait_for_hydra_crank(
-            &ctx,
-            crank,
-            Duration::from_secs(10),
-            &mut validator,
-        );
+        wait_for_hydra_crank(&ctx, crank, Duration::from_secs(10), &mut validator);
     }
 
     cancel_task(&ctx, &mut validator, &payer, task_id);
-    wait_for_hydra_crank_closed(
-        &ctx,
-        &payer_crank,
-        Duration::from_secs(10),
-        &mut validator,
-    );
+    wait_for_hydra_crank_closed(&ctx, &payer_crank, Duration::from_secs(10), &mut validator);
 
     // The other authority's crank is untouched by that cancellation.
-    wait_for_hydra_crank(
-        &ctx,
-        &other_crank,
-        Duration::from_secs(10),
-        &mut validator,
-    );
+    wait_for_hydra_crank(&ctx, &other_crank, Duration::from_secs(10), &mut validator);
 
     cleanup(&mut validator);
 }

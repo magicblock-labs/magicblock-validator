@@ -9,16 +9,14 @@ use tracing::trace;
 
 use crate::{
     intent_executor::{
-        ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
-        IntentExecutor, IntentExecutorCtx,
+        ExecutionOutput, IntentExecutionReport, IntentExecutionResult, IntentExecutor,
+        IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::{
-            two_stage::Initialized, utils::requires_uniqueness_nonce,
-        },
+        strategy_executor::{two_stage::Initialized, utils::requires_uniqueness_nonce},
         utils::{
-            build_commit_finalize_tasks, execute_single_stage_flow,
-            execute_two_stage_flow, report_and_close_intent,
+            build_commit_finalize_tasks, execute_single_stage_flow, execute_two_stage_flow,
+            report_and_close_intent,
         },
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
@@ -27,8 +25,7 @@ use crate::{
         task_builder::TasksBuilder,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
         task_strategist::{
-            StrategyExecutionMode, TaskStrategist, TransactionStrategy,
-            TwoStageExecutionMode,
+            StrategyExecutionMode, TaskStrategist, TransactionStrategy, TwoStageExecutionMode,
         },
     },
     transaction_preparator::TransactionPreparator,
@@ -51,10 +48,7 @@ where
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
 {
-    pub fn new(
-        ctx: IntentExecutorCtx<T, F, A, O>,
-        actions_timeout: Duration,
-    ) -> Self {
+    pub fn new(ctx: IntentExecutorCtx<T, F, A, O>, actions_timeout: Duration) -> Self {
         let authority = ctx.authority.insecure_clone();
         Self {
             ctx,
@@ -78,11 +72,8 @@ where
             // Build tasks for commit stage
             // TODO (snawaz): it's actually MagicBaseIntent::BaseActions scenario, not Commit
             // scenario, so the related code needs little bit of refactoring and proper renaming.
-            let commit_tasks = TaskBuilderImpl::commit_tasks(
-                &self.ctx.task_info_fetcher,
-                &intent_bundle,
-            )
-            .await?;
+            let commit_tasks =
+                TaskBuilderImpl::commit_tasks(&self.ctx.task_info_fetcher, &intent_bundle).await?;
 
             // Standalone actions executed in single stage
             let strategy = TaskStrategist::build_strategy(
@@ -91,23 +82,16 @@ where
                 Some(intent_bundle.intent_id),
             )?;
             return self
-                .single_stage_execution_flow(
-                    intent_bundle,
-                    strategy,
-                    execution_report,
-                )
+                .single_stage_execution_flow(intent_bundle, strategy, execution_report)
                 .await;
         };
 
         // Build tasks for commit & finalize stages
-        let (commit_tasks, finalize_tasks) = build_commit_finalize_tasks(
-            &intent_bundle,
-            &self.ctx.task_info_fetcher,
-        )
-        .await?;
+        let (commit_tasks, finalize_tasks) =
+            build_commit_finalize_tasks(&intent_bundle, &self.ctx.task_info_fetcher).await?;
 
-        let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
-            .then_some(intent_bundle.intent_id);
+        let uniqueness_nonce =
+            requires_uniqueness_nonce(&commit_tasks).then_some(intent_bundle.intent_id);
 
         // Build execution strategy
         match TaskStrategist::build_execution_strategy(
@@ -118,12 +102,8 @@ where
         )? {
             StrategyExecutionMode::SingleStage(strategy) => {
                 trace!("Single stage execution");
-                self.single_stage_execution_flow(
-                    intent_bundle,
-                    strategy,
-                    execution_report,
-                )
-                .await
+                self.single_stage_execution_flow(intent_bundle, strategy, execution_report)
+                    .await
             }
             StrategyExecutionMode::TwoStage(TwoStageExecutionMode {
                 commit_stage,
@@ -205,8 +185,7 @@ where
 
         let mut execution_report = IntentExecutionReport::default();
         let result = {
-            let result =
-                self.execute_inner(base_intent, &mut execution_report).await;
+            let result = self.execute_inner(base_intent, &mut execution_report).await;
             report_and_close_intent(
                 result,
                 meta,
@@ -218,16 +197,12 @@ where
         if !pubkeys.is_empty() {
             if result.is_err() {
                 // We can't know what landed on chain, resync everything
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
             } else if !undelegated_pubkeys.is_empty() {
                 // Only undelegated accounts' nonces become stale. Keep the
                 // rest cached: a chain re-fetch can race the just-landed
                 // finalize and reuse a nonce (buffer PDA collision).
-                self.ctx
-                    .task_info_fetcher
-                    .reset(ResetType::Specific(&undelegated_pubkeys));
+                self.ctx.task_info_fetcher.reset(ResetType::Specific(&undelegated_pubkeys));
             }
         }
 
@@ -235,9 +210,7 @@ where
         let intent_client = self.ctx.intent_client.clone();
         let result = result.inspect(|output| {
             let output_copy = *output;
-            tokio::spawn(async move {
-                intent_client.intent_metrics(output_copy).await
-            });
+            tokio::spawn(async move { intent_client.intent_metrics(output_copy).await });
         });
 
         let close_buffers = result.is_ok();
@@ -247,8 +220,7 @@ where
             patched_errors: execution_report.patched_errors,
             callbacks_report: execution_report.callbacks_report,
             #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: execution_report
-                .successful_transaction_strategies,
+            successful_transaction_strategies: execution_report.successful_transaction_strategies,
         };
         let cleanup_handle = CleanupHandle::new(
             self.authority,

@@ -8,27 +8,23 @@ use solana_transaction_context::transaction::TransactionContext;
 
 use crate::utils::{
     account_actions::set_account_mode,
-    accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
+    accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
 };
 
 const OWNER_IDX: u16 = 0;
 const ATA_IDX: u16 = 1;
 
 pub(crate) fn process_close_magic_ata(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &InvokeContext<'_, '_>,
+    transaction_context: &TransactionContext<'_>,
 ) -> Result<(), InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     if !ix_ctx.is_instruction_account_signer(OWNER_IDX)? {
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let owner =
-        *get_instruction_pubkey_with_idx(transaction_context, OWNER_IDX)?;
-    let ata_pubkey =
-        *get_instruction_pubkey_with_idx(transaction_context, ATA_IDX)?;
+    let owner = *get_instruction_pubkey_with_idx(transaction_context, OWNER_IDX)?;
+    let ata_pubkey = *get_instruction_pubkey_with_idx(transaction_context, ATA_IDX)?;
 
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
 
@@ -68,18 +64,12 @@ mod tests {
     use solana_instruction::{AccountMeta, Instruction};
     use solana_program::{program_option::COption, program_pack::Pack};
     use solana_sdk_ids::system_program;
-    use spl_token::state::{
-        Account as SplAccount, AccountState as SplAccountState,
-    };
+    use spl_token::state::{Account as SplAccount, AccountState as SplAccountState};
 
     use super::*;
     use crate::test_utils::process_instruction;
 
-    fn magic_ata_account(
-        wallet_owner: Pubkey,
-        mint: Pubkey,
-        amount: u64,
-    ) -> AccountSharedData {
+    fn magic_ata_account(wallet_owner: Pubkey, mint: Pubkey, amount: u64) -> AccountSharedData {
         let token_account = SplAccount {
             mint,
             owner: wallet_owner,
@@ -90,22 +80,16 @@ mod tests {
             delegated_amount: 0,
             close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
-        let mut account =
-            AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
+        let mut account = AccountSharedData::new(0, SplAccount::LEN, &TOKEN_PROGRAM_ID);
         SplAccount::pack(token_account, account.data_as_mut_slice()).unwrap();
-        AccountBuilder::from(account)
-            .mode(AccountMode::Magic)
-            .build()
+        AccountBuilder::from(account).mode(AccountMode::Magic).build()
     }
 
     fn close_ix(owner: Pubkey, ata: Pubkey) -> Instruction {
         Instruction::new_with_bincode(
             crate::id(),
             &MagicBlockInstruction::CloseMagicAta,
-            vec![
-                AccountMeta::new_readonly(owner, true),
-                AccountMeta::new(ata, false),
-            ],
+            vec![AccountMeta::new_readonly(owner, true), AccountMeta::new(ata, false)],
         )
     }
 

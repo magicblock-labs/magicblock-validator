@@ -1,13 +1,11 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
-use magicblock_committor_program::{
-    Chunks, instruction_chunks::chunk_realloc_ixs,
-};
+use magicblock_committor_program::{Chunks, instruction_chunks::chunk_realloc_ixs};
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
+    MagicblockRpcClient,
     utils::{
         SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow,
         map_magicblock_client_error, send_transaction_with_retries,
@@ -17,9 +15,7 @@ use magicblock_table_mania::{TableMania, error::TableManiaError};
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_instruction::{Instruction, error::InstructionError};
 use solana_keypair::Keypair;
-use solana_message::{
-    AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message,
-};
+use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
@@ -65,34 +61,22 @@ impl DeliveryPreparator {
         strategy: &mut TransactionStrategy,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures =
-            strategy.optimized_tasks.iter_mut().map(|task| async move {
-                let _timer =
-                    metrics::observe_committor_intent_task_preparation_time(
-                        &*task,
-                    );
-                self.prepare_task_handling_errors(
-                    authority,
-                    task,
-                    uniqueness_nonce,
-                )
-                .await
-            });
+        let preparation_futures = strategy.optimized_tasks.iter_mut().map(|task| async move {
+            let _timer = metrics::observe_committor_intent_task_preparation_time(&*task);
+            self.prepare_task_handling_errors(authority, task, uniqueness_nonce).await
+        });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations = async {
-            let _timer =
-                metrics::observe_committor_intent_alt_preparation_time();
-            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys)
-                .await
+            let _timer = metrics::observe_committor_intent_alt_preparation_time();
+            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys).await
         };
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
         res1.into_iter()
             .collect::<Result<Vec<_>, _>>()
             .map_err(DeliveryPreparatorError::FailedToPrepareBufferAccounts)?;
-        let lookup_tables =
-            res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
+        let lookup_tables = res2.map_err(DeliveryPreparatorError::FailedToCreateALTError)?;
 
         Ok(lookup_tables)
     }
@@ -105,9 +89,7 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
-            BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
-            }
+            BaseTaskImpl::Commit(commit_task) => PreparationTask::from_commit(commit_task),
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                 PreparationTask::from_commit_finalize(commit_finalize_task)
             }
@@ -118,20 +100,12 @@ impl DeliveryPreparator {
         };
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(
-            authority,
-            &preparation_task,
-            uniqueness_nonce,
-        )
-        .await?;
+        self.initialize_buffer_account(authority, &preparation_task, uniqueness_nonce)
+            .await?;
 
         // Writing chunks with some retries
-        self.write_buffer_with_retries(
-            authority,
-            &preparation_task,
-            uniqueness_nonce,
-        )
-        .await?;
+        self.write_buffer_with_retries(authority, &preparation_task, uniqueness_nonce)
+            .await?;
 
         preparation_task.done();
         Ok(())
@@ -148,10 +122,7 @@ impl DeliveryPreparator {
         let res = self.prepare_task(authority, task, uniqueness_nonce).await;
         match res {
             Err(InternalError::BufferExecutionError(
-                BufferExecutionError::AccountAlreadyInitializedError(
-                    err,
-                    signature,
-                ),
+                BufferExecutionError::AccountAlreadyInitializedError(err, signature),
             )) => {
                 info!(error = ?err, signature = ?signature, "Buffer already was initialized");
             }
@@ -161,9 +132,7 @@ impl DeliveryPreparator {
 
         // Preparation failed due to buffer existing - cleanup and retry
         let preparation_task = match task {
-            BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
-            }
+            BaseTaskImpl::Commit(commit_task) => PreparationTask::from_commit(commit_task),
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                 PreparationTask::from_commit_finalize(commit_finalize_task)
             }
@@ -175,8 +144,7 @@ impl DeliveryPreparator {
 
         // Cleanup
         let cleanup_task = preparation_task.cleanup_task();
-        self.cleanup_buffers(authority, &[cleanup_task], uniqueness_nonce)
-            .await?;
+        self.cleanup_buffers(authority, &[cleanup_task], uniqueness_nonce).await?;
         self.rpc_client.invalidate_cached_blockhash().await;
 
         // Retry preparation
@@ -192,10 +160,8 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
-        let init_instruction =
-            preparation_task.init_instruction(&authority_pubkey);
-        let realloc_instructions =
-            preparation_task.realloc_instructions(&authority_pubkey);
+        let init_instruction = preparation_task.init_instruction(&authority_pubkey);
+        let realloc_instructions = preparation_task.realloc_instructions(&authority_pubkey);
 
         let preparation_instructions =
             chunk_realloc_ixs(realloc_instructions, Some(init_instruction));
@@ -204,16 +170,12 @@ impl DeliveryPreparator {
             .enumerate()
             .map(|(i, ixs)| {
                 let mut ixs_with_budget = if i == 0 {
-                    let init_budget_ixs = self
-                        .compute_budget_config
-                        .buffer_init
-                        .instructions(ixs.len());
+                    let init_budget_ixs =
+                        self.compute_budget_config.buffer_init.instructions(ixs.len());
                     init_budget_ixs
                 } else {
-                    let realloc_budget_ixs = self
-                        .compute_budget_config
-                        .buffer_realloc
-                        .instructions(ixs.len());
+                    let realloc_budget_ixs =
+                        self.compute_budget_config.buffer_realloc.instructions(ixs.len());
                     realloc_budget_ixs
                 };
                 ixs_with_budget.extend(ixs);
@@ -231,16 +193,9 @@ impl DeliveryPreparator {
         .await?;
 
         // Reallocs can be performed in parallel
-        for batch in
-            preparation_instructions[1..].chunks_mut(MAX_PARALLEL_BUFFER_SENDS)
-        {
+        for batch in preparation_instructions[1..].chunks_mut(MAX_PARALLEL_BUFFER_SENDS) {
             let preparation_futs = batch.iter_mut().map(|instructions| {
-                self.send_ixs_with_retry(
-                    instructions,
-                    authority,
-                    5,
-                    uniqueness_nonce,
-                )
+                self.send_ixs_with_retry(instructions, authority, 5, uniqueness_nonce)
             });
             try_join_all(preparation_futs).await?;
         }
@@ -256,8 +211,7 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
-        let write_instructions =
-            preparation_task.write_instructions(&authority_pubkey);
+        let write_instructions = preparation_task.write_instructions(&authority_pubkey);
 
         self.write_missing_chunks(
             authority,
@@ -281,25 +235,16 @@ impl DeliveryPreparator {
             .into_iter()
             .map(|missing_index| {
                 let instruction = write_instructions[missing_index].clone();
-                let mut instructions = self
-                    .compute_budget_config
-                    .buffer_write
-                    .instructions(instruction.data.len());
+                let mut instructions =
+                    self.compute_budget_config.buffer_write.instructions(instruction.data.len());
                 instructions.push(instruction);
                 instructions
             })
             .collect::<Vec<_>>();
 
-        for batch in
-            chunks_write_instructions.chunks_mut(MAX_PARALLEL_BUFFER_SENDS)
-        {
+        for batch in chunks_write_instructions.chunks_mut(MAX_PARALLEL_BUFFER_SENDS) {
             let fut_iter = batch.iter_mut().map(|instructions| {
-                self.send_ixs_with_retry(
-                    instructions,
-                    authority,
-                    5,
-                    uniqueness_nonce,
-                )
+                self.send_ixs_with_retry(instructions, authority, 5, uniqueness_nonce)
             });
             try_join_all(fut_iter).await?;
         }
@@ -316,8 +261,7 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if let Some(nonce) = uniqueness_nonce {
-            instructions
-                .push(TransactionUtils::uniqueness_noop_instruction(nonce));
+            instructions.push(TransactionUtils::uniqueness_noop_instruction(nonce));
         }
 
         /// Error mappers
@@ -333,11 +277,9 @@ impl DeliveryPreparator {
                     err @ TransactionError::InstructionError(
                         _,
                         InstructionError::AccountAlreadyInitialized,
-                    ) => Ok(
-                        BufferExecutionError::AccountAlreadyInitializedError(
-                            err, signature,
-                        ),
-                    ),
+                    ) => Ok(BufferExecutionError::AccountAlreadyInitializedError(
+                        err, signature,
+                    )),
                     err => Err(err),
                 }
             }
@@ -348,26 +290,19 @@ impl DeliveryPreparator {
         }
         impl<TxMap> SendErrorMapper<TransactionSendError> for BufferErrorMapper<TxMap>
         where
-            TxMap:
-                TransactionErrorMapper<ExecutionError = BufferExecutionError>,
+            TxMap: TransactionErrorMapper<ExecutionError = BufferExecutionError>,
         {
             type ExecutionError = BufferExecutionError;
             fn map(&self, error: TransactionSendError) -> Self::ExecutionError {
                 match error {
                     TransactionSendError::MagicBlockRpcClientError(err) => {
-                        map_magicblock_client_error(
-                            &self.transaction_error_mapper,
-                            *err,
-                        )
+                        map_magicblock_client_error(&self.transaction_error_mapper, *err)
                     }
                     err => BufferExecutionError::TransactionSendError(err),
                 }
             }
 
-            fn decide_flow(
-                &self,
-                err: &Self::ExecutionError,
-            ) -> ControlFlow<(), Duration> {
+            fn decide_flow(&self, err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
                 match err {
                     BufferExecutionError::TransactionSendError(
                         TransactionSendError::MagicBlockRpcClientError(err),
@@ -380,13 +315,10 @@ impl DeliveryPreparator {
         let default_error_mapper = BufferErrorMapper {
             transaction_error_mapper: IntentTransactionErrorMapper,
         };
-        let attempt =
-            || async { self.try_send_ixs(instructions, authority).await };
+        let attempt = || async { self.try_send_ixs(instructions, authority).await };
 
-        send_transaction_with_retries(attempt, default_error_mapper, |i, _| {
-            i >= max_attempts
-        })
-        .await?;
+        send_transaction_with_retries(attempt, default_error_mapper, |i, _| i >= max_attempts)
+            .await?;
         Ok(())
     }
 
@@ -394,21 +326,12 @@ impl DeliveryPreparator {
         &self,
         instructions: &[Instruction],
         authority: &Keypair,
-    ) -> DeliveryPreparatorResult<
-        MagicBlockSendTransactionOutcome,
-        TransactionSendError,
-    > {
+    ) -> DeliveryPreparatorResult<MagicBlockSendTransactionOutcome, TransactionSendError> {
         let latest_block_hash = self.rpc_client.get_latest_blockhash().await?;
-        let message = Message::try_compile(
-            &authority.pubkey(),
-            instructions,
-            &[],
-            latest_block_hash,
-        )?;
-        let transaction = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[authority],
-        )?;
+        let message =
+            Message::try_compile(&authority.pubkey(), instructions, &[], latest_block_hash)?;
+        let transaction =
+            VersionedTransaction::try_new(VersionedMessage::V0(message), &[authority])?;
 
         let outcome = self
             .rpc_client
@@ -425,16 +348,13 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         lookup_table_keys: &[Pubkey],
-    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError>
-    {
+    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError> {
         if lookup_table_keys.is_empty() {
             return Ok(vec![]);
         }
 
         let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
-        self.table_mania
-            .reserve_pubkeys(authority, &pubkeys)
-            .await?;
+        self.table_mania.reserve_pubkeys(authority, &pubkeys).await?;
 
         let alts = self
             .table_mania
@@ -471,11 +391,7 @@ impl DeliveryPreparator {
 
         if close_buffers {
             let (res, ()) = join(
-                self.cleanup_buffers(
-                    authority,
-                    cleanup_tasks,
-                    uniqueness_nonce,
-                ),
+                self.cleanup_buffers(authority, cleanup_tasks, uniqueness_nonce),
                 fut2,
             )
             .await;
@@ -496,51 +412,37 @@ impl DeliveryPreparator {
             return Ok(());
         }
 
-        let close_futs = cleanup_tasks
-            .chunks(CleanupTask::max_tx_fit_count_with_budget())
-            .map(|cleanup_tasks| {
-                let compute_units = cleanup_tasks[0].compute_units()
-                    * cleanup_tasks.len() as u32;
+        let close_futs = cleanup_tasks.chunks(CleanupTask::max_tx_fit_count_with_budget()).map(
+            |cleanup_tasks| {
+                let compute_units = cleanup_tasks[0].compute_units() * cleanup_tasks.len() as u32;
                 let mut instructions = vec![
-                    ComputeBudgetInstruction::set_compute_unit_limit(
-                        compute_units,
-                    ),
+                    ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
                     ComputeBudgetInstruction::set_compute_unit_price(
                         self.compute_budget_config.compute_unit_price,
                     ),
                 ];
-                instructions.extend(
-                    cleanup_tasks
-                        .iter()
-                        .map(|task| task.instruction(&authority.pubkey())),
-                );
+                instructions
+                    .extend(cleanup_tasks.iter().map(|task| task.instruction(&authority.pubkey())));
 
                 async move {
                     (
                         cleanup_tasks,
-                        self.send_ixs_with_retry(
-                            &mut instructions,
-                            authority,
-                            1,
-                            uniqueness_nonce,
-                        )
-                        .await,
+                        self.send_ixs_with_retry(&mut instructions, authority, 1, uniqueness_nonce)
+                            .await,
                     )
                 }
-            });
+            },
+        );
 
-        join_all(close_futs)
-            .await
-            .into_iter()
-            .try_for_each(|(cleanup_tasks, res)| {
-                res.inspect_err(|err| {
-                    let buffer_pdas = cleanup_tasks
-                        .iter()
-                        .map(|el| el.buffer_pda(&authority.pubkey()))
-                        .collect::<Vec<_>>();
-                    error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
-                })
+        join_all(close_futs).await.into_iter().try_for_each(|(cleanup_tasks, res)| {
+            res.inspect_err(|err| {
+                let buffer_pdas = cleanup_tasks
+                    .iter()
+                    .map(|el| el.buffer_pda(&authority.pubkey()))
+                    .collect::<Vec<_>>();
+                error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
             })
+        })
     }
 }
 
@@ -579,10 +481,7 @@ impl TransactionSendError {
 #[derive(thiserror::Error, Debug)]
 pub enum BufferExecutionError {
     #[error("AccountAlreadyInitializedError: {0}")]
-    AccountAlreadyInitializedError(
-        #[source] TransactionError,
-        Option<Signature>,
-    ),
+    AccountAlreadyInitializedError(#[source] TransactionError, Option<Signature>),
     #[error("TransactionSendError: {0}")]
     TransactionSendError(#[from] TransactionSendError),
 }
@@ -607,9 +506,9 @@ impl BufferExecutionError {
 
 impl From<MagicBlockRpcClientError> for BufferExecutionError {
     fn from(value: MagicBlockRpcClientError) -> Self {
-        Self::TransactionSendError(
-            TransactionSendError::MagicBlockRpcClientError(Box::new(value)),
-        )
+        Self::TransactionSendError(TransactionSendError::MagicBlockRpcClientError(Box::new(
+            value,
+        )))
     }
 }
 
@@ -670,18 +569,19 @@ pub enum DeliveryPreparatorError {
 impl DeliveryPreparatorError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
-            Self::FailedToCreateALTError(err)
-            | Self::FailedToPrepareBufferAccounts(err) => err.signature(),
+            Self::FailedToCreateALTError(err) | Self::FailedToPrepareBufferAccounts(err) => {
+                err.signature()
+            }
         }
     }
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::FailedToCreateALTError(err)
-            | Self::FailedToPrepareBufferAccounts(err) => err.is_transient(),
+            Self::FailedToCreateALTError(err) | Self::FailedToPrepareBufferAccounts(err) => {
+                err.is_transient()
+            }
         }
     }
 }
 
-pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> =
-    Result<T, E>;
+pub type DeliveryPreparatorResult<T, E = DeliveryPreparatorError> = Result<T, E>;

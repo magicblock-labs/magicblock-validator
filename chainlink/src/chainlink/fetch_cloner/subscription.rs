@@ -6,16 +6,12 @@ use tracing::*;
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, RemoteAccountProvider,
-        SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, RemoteAccountProvider, SubscriptionReason,
     },
 };
 
 pub(crate) enum SubscriptionRelease {
-    Pubkey {
-        pubkey: Pubkey,
-        reason: SubscriptionReason,
-    },
+    Pubkey { pubkey: Pubkey, reason: SubscriptionReason },
 }
 
 pub(crate) async fn acquire_subs<T: ChainRpcClient, U: ChainPubsubClient>(
@@ -29,14 +25,12 @@ pub(crate) async fn acquire_subs<T: ChainRpcClient, U: ChainPubsubClient>(
         if let Err(err) = provider.acquire_subscription(&pubkey, reason).await {
             release_subs(
                 provider,
-                acquired.into_iter().map(|pubkey| {
-                    SubscriptionRelease::Pubkey { pubkey, reason }
-                }),
+                acquired
+                    .into_iter()
+                    .map(|pubkey| SubscriptionRelease::Pubkey { pubkey, reason }),
             )
             .await;
-            return Err(ChainlinkError::FailedToSubscribeToAccount(
-                pubkey, err,
-            ));
+            return Err(ChainlinkError::FailedToSubscribeToAccount(pubkey, err));
         }
         acquired.push(pubkey);
     }
@@ -51,18 +45,13 @@ pub(crate) async fn release_subs<T: ChainRpcClient, U: ChainPubsubClient>(
 ) {
     for release in releases {
         let SubscriptionRelease::Pubkey { pubkey, reason } = release;
-        if let Err(err) =
-            provider.release_single_subscription(&pubkey, reason).await
-        {
+        if let Err(err) = provider.release_single_subscription(&pubkey, reason).await {
             warn!(pubkey = %pubkey, ?reason, error = ?err, "Failed to release subscription reason");
         }
     }
 }
 
-pub(crate) async fn release_program_data_subs<
-    T: ChainRpcClient,
-    U: ChainPubsubClient,
->(
+pub(crate) async fn release_program_data_subs<T: ChainRpcClient, U: ChainPubsubClient>(
     provider: &Arc<RemoteAccountProvider<T, U>>,
     program_data_pubkey: Pubkey,
 ) {

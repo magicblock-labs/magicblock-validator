@@ -2,9 +2,7 @@ use magicblock_program::SentCommit;
 use tracing::{error, info};
 
 use crate::{
-    intent_executor::{
-        ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult,
-    },
+    intent_executor::{ExecutionOutput, IntentExecutionReport, error::IntentExecutorResult},
     outbox::ScheduledBaseIntentMeta,
 };
 
@@ -29,9 +27,7 @@ pub(crate) fn build_sent_commit(
                 meta.id, meta.slot, meta.blockhash, err
             );
             err.base_signatures()
-                .map(|(commit, finalize)| {
-                    finalize.map(|f| vec![commit, f]).unwrap_or(vec![commit])
-                })
+                .map(|(commit, finalize)| finalize.map(|f| vec![commit, f]).unwrap_or(vec![commit]))
                 .unwrap_or_default()
         }
     };
@@ -51,10 +47,7 @@ pub(crate) fn build_sent_commit(
         .map(|r| match r {
             Ok(sig) => format!("OK: {sig}"),
             Err(err) => {
-                error!(
-                    "Callback failed to schedule: {}. error: {}",
-                    meta.id, err
-                );
+                error!("Callback failed to schedule: {}. error: {}", meta.id, err);
                 format!("ERR: {err}")
             }
         })

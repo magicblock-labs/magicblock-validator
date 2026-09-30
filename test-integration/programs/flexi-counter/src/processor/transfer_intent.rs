@@ -1,9 +1,6 @@
 use borsh::to_vec;
 use ephemeral_rollups_sdk::{
-    ephem::{
-        ActionCallback, CallHandler, FoldableIntentBuilder,
-        MagicIntentBundleBuilder,
-    },
+    ephem::{ActionCallback, CallHandler, FoldableIntentBuilder, MagicIntentBundleBuilder},
     ActionArgs, ShortAccountMeta,
 };
 use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
@@ -15,10 +12,7 @@ use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     instruction::FlexiCounterInstruction,
-    processor::{
-        callback::TRANSFER_CALLBACK_DISCRIMINATOR,
-        schedule_intent::ACTOR_ESCROW_INDEX,
-    },
+    processor::{callback::TRANSFER_CALLBACK_DISCRIMINATOR, schedule_intent::ACTOR_ESCROW_INDEX},
 };
 
 /// On ER: deducts `amount` lamports from `payer` into the counter PDA as
@@ -41,8 +35,8 @@ use crate::{
 /// 4. [write]         magic context
 /// 5. []              magic
 /// 6. [write]         magic fee vault
-pub fn process_create_transfer_intent(
-    accounts: &[AccountInfo],
+pub(super) fn process_create_transfer_intent(
+    accounts: &[AccountInfo<'_>],
     amount: u64,
     fail: bool,
     compute_units: u32,
@@ -67,8 +61,7 @@ pub fn process_create_transfer_intent(
     )?;
 
     // Post-commit action: transfer amount from escrow to destination (or fail).
-    let action_ix =
-        FlexiCounterInstruction::TransferActionHandler { amount, fail };
+    let action_ix = FlexiCounterInstruction::TransferActionHandler { amount, fail };
     let call_handler = CallHandler {
         args: ActionArgs {
             data: to_vec(&action_ix).unwrap(),
@@ -110,14 +103,10 @@ pub fn process_create_transfer_intent(
         ],
     };
 
-    MagicIntentBundleBuilder::new(
-        payer.clone(),
-        magic_context.clone(),
-        magic_program.clone(),
-    )
-    .magic_fee_vault(magic_fee_vault.clone())
-    .commit(std::slice::from_ref(counter_pda))
-    .add_post_commit_action(call_handler)
-    .then(callback)
-    .build_and_invoke()
+    MagicIntentBundleBuilder::new(payer.clone(), magic_context.clone(), magic_program.clone())
+        .magic_fee_vault(magic_fee_vault.clone())
+        .commit(std::slice::from_ref(counter_pda))
+        .add_post_commit_action(call_handler)
+        .then(callback)
+        .build_and_invoke()
 }

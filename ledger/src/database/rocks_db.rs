@@ -8,9 +8,8 @@ use std::{
 };
 
 use rocksdb::{
-    AsColumnFamilyRef, CStrLike, ColumnFamily, DB, DBIterator, DBPinnableSlice,
-    DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
-    Options, WriteBatch as RWriteBatch,
+    AsColumnFamilyRef, CStrLike, ColumnFamily, DB, DBIterator, DBPinnableSlice, DBRawIterator,
+    FlushOptions, IteratorMode as RocksIteratorMode, LiveFile, Options, WriteBatch as RWriteBatch,
 };
 use solana_clock::Slot;
 
@@ -46,17 +45,11 @@ impl Rocks {
         let descriptors = cf_descriptors(path, &options, &oldest_slot);
 
         let db = match access_type {
-            AccessType::Primary => {
-                DB::open_cf_descriptors(&db_options, path, descriptors)?
-            }
+            AccessType::Primary => DB::open_cf_descriptors(&db_options, path, descriptors)?,
             _ => unreachable!("Only primary access is supported"),
         };
 
-        Ok(Self {
-            db,
-            access_type,
-            oldest_slot,
-        })
+        Ok(Self { db, access_type, oldest_slot })
     }
 
     pub fn destroy(path: &Path) -> LedgerResult<()> {
@@ -66,16 +59,10 @@ impl Rocks {
     }
 
     pub fn cf_handle(&self, cf: &str) -> &ColumnFamily {
-        self.db
-            .cf_handle(cf)
-            .expect("should never get an unknown column")
+        self.db.cf_handle(cf).expect("should never get an unknown column")
     }
 
-    pub fn get_cf(
-        &self,
-        cf: &ColumnFamily,
-        key: &[u8],
-    ) -> LedgerResult<Option<Vec<u8>>> {
+    pub fn get_cf(&self, cf: &ColumnFamily, key: &[u8]) -> LedgerResult<Option<Vec<u8>>> {
         let opt = self.db.get_cf(cf, key)?;
         Ok(opt)
     }
@@ -89,12 +76,7 @@ impl Rocks {
         Ok(opt)
     }
 
-    pub fn put_cf(
-        &self,
-        cf: &ColumnFamily,
-        key: &[u8],
-        value: &[u8],
-    ) -> LedgerResult<()> {
+    pub fn put_cf(&self, cf: &ColumnFamily, key: &[u8], value: &[u8]) -> LedgerResult<()> {
         self.db.put_cf(cf, key, value)?;
         Ok(())
     }
@@ -242,11 +224,7 @@ impl Rocks {
     ///
     /// Full list of properties that return int values could be found
     /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
-    pub fn get_int_property_cf(
-        &self,
-        cf: &ColumnFamily,
-        name: impl CStrLike,
-    ) -> LedgerResult<i64> {
+    pub fn get_int_property_cf(&self, cf: &ColumnFamily, name: impl CStrLike) -> LedgerResult<i64> {
         match self.db.property_int_value_cf(cf, name) {
             Ok(Some(value)) => Ok(value.try_into().unwrap()),
             Ok(None) => Ok(0),
@@ -305,10 +283,7 @@ mod tests {
             let mut rocks = Rocks::open(db_path, options).unwrap();
 
             // Introduce a new column that will not be known
-            rocks
-                .db
-                .create_cf("new_column", &Options::default())
-                .unwrap();
+            rocks.db.create_cf("new_column", &Options::default()).unwrap();
         }
 
         // Opening with either Secondary or Primary access should succeed,

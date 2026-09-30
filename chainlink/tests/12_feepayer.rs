@@ -1,11 +1,11 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use engine::IntoTransactionView;
 use magicblock_chainlink::{
-    AccountFetchEntrypoint, assert_cloned_as_undelegated, assert_not_cloned,
-    assert_not_subscribed, assert_subscribed,
-    testing::{
-        context::TestContext, deleg::add_delegation_record_for, init_logger,
-    },
+    AccountFetchEntrypoint, assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
+    assert_subscribed,
+    testing::{context::TestContext, deleg::add_delegation_record_for, init_logger},
 };
 use solana_account::Account;
 use solana_instruction::{AccountMeta, Instruction};
@@ -13,10 +13,7 @@ use solana_keypair::Keypair;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 
-fn fee_payer_transaction(
-    ctx: &TestContext,
-    payer: &Keypair,
-) -> nucleus::runtime::TransactionView {
+fn fee_payer_transaction(ctx: &TestContext, payer: &Keypair) -> nucleus::runtime::TransactionView {
     let instruction = Instruction::new_with_bytes(
         solana_sdk_ids::system_program::id(),
         &[],
@@ -67,9 +64,7 @@ async fn transaction_ensure_ignores_ephemeral_balance_pda() {
         .chainlink
         .ensure_accounts(
             transaction.static_account_keys(),
-            AccountFetchEntrypoint::SendTransaction(
-                transaction.signatures()[0],
-            ),
+            AccountFetchEntrypoint::SendTransaction(transaction.signatures()[0]),
         )
         .await
         .unwrap();

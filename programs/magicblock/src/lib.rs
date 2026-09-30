@@ -12,16 +12,12 @@ mod outbox_intent;
 pub mod test_utils;
 mod utils;
 pub mod validator;
-pub use intent_bundles::{
-    magic_scheduled_base_intent, schedule as schedule_transactions,
-};
+pub use intent_bundles::{magic_scheduled_base_intent, schedule as schedule_transactions};
 pub use magic_sys::init_magic_sys;
 pub use magicblock_magic_program_api::*;
 pub use outbox_intent::{
     outbox_intent_bundles,
-    process_scheduled_commit_sent::{
-        SentCommit, register_scheduled_commit_sent,
-    },
+    process_scheduled_commit_sent::{SentCommit, register_scheduled_commit_sent},
 };
 pub use schedule_transactions::transaction_scheduler::TransactionScheduler;
 pub use utils::instruction_utils;

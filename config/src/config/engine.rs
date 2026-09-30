@@ -1,8 +1,6 @@
 use std::{fmt, net::SocketAddr, path::PathBuf, sync::Arc, time::Duration};
 
-use nucleus::config::{
-    AccountsDBParams, Authority, BlockstoreParams, LedgerParams,
-};
+use nucleus::config::{AccountsDBParams, Authority, BlockstoreParams, LedgerParams};
 use serde::{Deserialize, Serialize};
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -55,11 +53,12 @@ pub struct FollowerReplication {
     pub allowed_followers: Vec<SerdePubkey>,
 }
 
+// The development keypair and bind address are fixed, validated constants.
+#[allow(clippy::expect_used)]
 impl<R: Default> Default for EngineConfig<R> {
     fn default() -> Self {
-        let local =
-            Keypair::try_from_base58_string(consts::DEFAULT_VALIDATOR_KEYPAIR)
-                .expect("default validator keypair must be valid");
+        let local = Keypair::try_from_base58_string(consts::DEFAULT_VALIDATOR_KEYPAIR)
+            .expect("default validator keypair must be valid");
         Self {
             authority: Arc::new(local).into(),
             accountsdb: default_accountsdb(),
@@ -90,6 +89,7 @@ impl Default for FollowerReplication {
     }
 }
 
+#[allow(clippy::expect_used)]
 fn default_replication_bind_address() -> BindAddress {
     consts::DEFAULT_REPLICATION_BIND_ADDRESS
         .parse()
@@ -138,11 +138,7 @@ mod accountsdb {
     use super::*;
 
     #[derive(Serialize, Deserialize)]
-    #[serde(
-        remote = "AccountsDBParams",
-        rename_all = "kebab-case",
-        deny_unknown_fields
-    )]
+    #[serde(remote = "AccountsDBParams", rename_all = "kebab-case", deny_unknown_fields)]
     pub(super) struct AccountsDBParamsDef {
         #[serde(default = "default_directory")]
         directory: PathBuf,
@@ -151,8 +147,7 @@ mod accountsdb {
     }
 
     pub(super) fn default_directory() -> PathBuf {
-        PathBuf::from(consts::DEFAULT_ENGINE_LEDGER_DIRECTORY)
-            .join("accountsdb")
+        PathBuf::from(consts::DEFAULT_ENGINE_LEDGER_DIRECTORY).join("accountsdb")
     }
 
     pub(super) const fn default_lru_capacity() -> usize {
@@ -164,11 +159,7 @@ mod blockstore {
     use super::*;
 
     #[derive(Serialize, Deserialize)]
-    #[serde(
-        remote = "BlockstoreParams",
-        rename_all = "kebab-case",
-        deny_unknown_fields
-    )]
+    #[serde(remote = "BlockstoreParams", rename_all = "kebab-case", deny_unknown_fields)]
     pub(super) struct BlockstoreParamsDef {
         #[serde(default = "default_blocktime", with = "humantime")]
         blocktime: Duration,
@@ -193,11 +184,7 @@ mod ledger {
     use super::*;
 
     #[derive(Serialize, Deserialize)]
-    #[serde(
-        remote = "LedgerParams",
-        rename_all = "kebab-case",
-        deny_unknown_fields
-    )]
+    #[serde(remote = "LedgerParams", rename_all = "kebab-case", deny_unknown_fields)]
     pub(super) struct LedgerParamsDef {
         #[serde(default = "default_directory")]
         directory: PathBuf,

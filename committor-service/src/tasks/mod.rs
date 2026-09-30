@@ -15,9 +15,7 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::{
-    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
-};
+use crate::tasks::{commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
@@ -82,9 +80,7 @@ impl BaseTask for BaseTaskImpl {
             Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Finalize(_) => {
-                dlp_api::instruction_builder::finalize_size_budget(
-                    AccountSizeClass::Huge,
-                )
+                dlp_api::instruction_builder::finalize_size_budget(AccountSizeClass::Huge)
             }
             Self::Undelegate(value) => {
                 if value.include_undelegation_request {
@@ -92,9 +88,7 @@ impl BaseTask for BaseTaskImpl {
                         AccountSizeClass::Huge,
                     )
                 } else {
-                    dlp_api::instruction_builder::undelegate_size_budget(
-                        AccountSizeClass::Huge,
-                    )
+                    dlp_api::instruction_builder::undelegate_size_budget(AccountSizeClass::Huge)
                 }
             }
         }
@@ -105,9 +99,7 @@ impl BaseTaskImpl {
     pub fn strategy(&self) -> TaskStrategy {
         match self {
             Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
-            Self::CommitFinalize(task) if task.is_buffer() => {
-                TaskStrategy::Buffer
-            }
+            Self::CommitFinalize(task) if task.is_buffer() => TaskStrategy::Buffer,
             _ => TaskStrategy::Args,
         }
     }
@@ -142,11 +134,7 @@ impl LabelValue for BaseTaskImpl {
 pub trait BaseTask: Send + Sync + Clone {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
-        self.instruction(validator)
-            .accounts
-            .iter()
-            .map(|meta| meta.pubkey)
-            .collect()
+        self.instruction(validator).accounts.iter().map(|meta| meta.pubkey).collect()
     }
 
     /// Gets target program for task execution
@@ -210,10 +198,7 @@ pub struct FinalizeTask {
 
 impl FinalizeTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp_api::instruction_builder::finalize(
-            *validator,
-            self.delegated_account,
-        )
+        dlp_api::instruction_builder::finalize(*validator, self.delegated_account)
     }
 }
 
@@ -257,10 +242,7 @@ impl BaseActionTask {
         // Recheck persisted actions before discarding their authenticated source
         // and handing the response to the validator's signing service. The V2
         // task's separate source_program is not callback authorization.
-        if action
-            .validate_callback_destination(&callback.destination_program)
-            .is_err()
-        {
+        if action.validate_callback_destination(&callback.destination_program).is_err() {
             tracing::warn!(
                 action_id = action.id,
                 source_program = ?action.source_program,
@@ -279,24 +261,19 @@ impl BaseActionTask {
     pub fn accounts_size_budget(&self) -> u32 {
         let action = self.action();
         // assume all other accounts are Small accounts.
-        let other_accounts_budget = action.account_metas_per_program.len()
-            as u32
-            * AccountSizeClass::Small.size_budget();
+        let other_accounts_budget =
+            action.account_metas_per_program.len() as u32 * AccountSizeClass::Small.size_budget();
 
         match self {
-            Self::V1(_) => {
-                dlp_api::instruction_builder::call_handler_size_budget(
-                    AccountSizeClass::Medium,
-                    other_accounts_budget,
-                )
-            }
-            Self::V2(_) => {
-                dlp_api::instruction_builder::call_handler_v2_size_budget(
-                    AccountSizeClass::Medium,
-                    AccountSizeClass::Medium,
-                    other_accounts_budget,
-                )
-            }
+            Self::V1(_) => dlp_api::instruction_builder::call_handler_size_budget(
+                AccountSizeClass::Medium,
+                other_accounts_budget,
+            ),
+            Self::V2(_) => dlp_api::instruction_builder::call_handler_v2_size_budget(
+                AccountSizeClass::Medium,
+                AccountSizeClass::Medium,
+                other_accounts_budget,
+            ),
         }
     }
 }
@@ -419,11 +396,9 @@ mod callback_tests {
     fn test_callback_destination_bound_to_recorded_source() {
         let source = Pubkey::new_unique();
         let other = Pubkey::new_unique();
-        for (recorded_source, destination, accepted) in [
-            (Some(source), source, true),
-            (Some(source), other, false),
-            (None, other, false),
-        ] {
+        for (recorded_source, destination, accepted) in
+            [(Some(source), source, true), (Some(source), other, false), (None, other, false)]
+        {
             let callback = BaseActionCallback {
                 destination_program: destination,
                 discriminator: vec![1],
@@ -438,21 +413,13 @@ mod callback_tests {
                 destination_program: other,
                 source_program: recorded_source,
                 escrow_authority: Pubkey::new_unique(),
-                data_per_program: ProgramArgs {
-                    data: vec![],
-                    escrow_index: 0,
-                },
+                data_per_program: ProgramArgs { data: vec![], escrow_index: 0 },
                 account_metas_per_program: vec![],
                 callback: Some(callback.clone()),
             };
             for task in [
-                BaseActionTask::V1(BaseActionTaskV1 {
-                    action: action.clone(),
-                }),
-                BaseActionTask::V2(BaseActionTaskV2 {
-                    action,
-                    source_program: other,
-                }),
+                BaseActionTask::V1(BaseActionTaskV1 { action: action.clone() }),
+                BaseActionTask::V2(BaseActionTaskV2 { action, source_program: other }),
             ] {
                 let mut strategy = TransactionStrategy {
                     optimized_tasks: vec![BaseTaskImpl::BaseAction(task)],
@@ -463,11 +430,7 @@ mod callback_tests {
                 // from reaching the validator's callback signing service.
                 assert_eq!(
                     callbacks,
-                    if accepted {
-                        vec![callback.clone()]
-                    } else {
-                        vec![]
-                    }
+                    if accepted { vec![callback.clone()] } else { vec![] }
                 );
                 assert!(!strategy.has_actions_callbacks());
                 assert!(strategy.extract_action_callbacks().is_empty());
@@ -480,8 +443,7 @@ mod callback_tests {
 mod serialization_safety_test {
 
     use dlp_api::{
-        discriminator::DlpDiscriminator,
-        pda::undelegation_request_pda_from_delegated_account,
+        discriminator::DlpDiscriminator, pda::undelegation_request_pda_from_delegated_account,
     };
     use magicblock_core::intent::{ProgramArgs, types::CommittedAccount};
     use magicblock_program::args::ShortAccountMeta;
@@ -530,8 +492,7 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         // Test Commit variant (StateInArgs)
-        let commit_task: BaseTaskImpl =
-            make_commit_task(123, true, vec![1, 2, 3], 1000).into();
+        let commit_task: BaseTaskImpl = make_commit_task(123, true, vec![1, 2, 3], 1000).into();
         assert_serializable(&commit_task.instruction(&validator));
 
         // Test Finalize variant
@@ -574,27 +535,26 @@ mod serialization_safety_test {
         assert_serializable(&base_action.instruction(&validator));
 
         // Test BaseAction V2 variant
-        let base_action_v2: BaseTaskImpl =
-            BaseActionTask::V2(BaseActionTaskV2 {
-                action: BaseAction {
-                    id: 0,
-                    destination_program: Pubkey::new_unique(),
-                    source_program: Some(Pubkey::new_unique()),
-                    escrow_authority: Pubkey::new_unique(),
-                    account_metas_per_program: vec![ShortAccountMeta {
-                        pubkey: Pubkey::new_unique(),
-                        is_writable: true,
-                    }],
-                    data_per_program: ProgramArgs {
-                        data: vec![7, 8, 9],
-                        escrow_index: 2,
-                    },
-                    compute_units: 15_000,
-                    callback: None,
+        let base_action_v2: BaseTaskImpl = BaseActionTask::V2(BaseActionTaskV2 {
+            action: BaseAction {
+                id: 0,
+                destination_program: Pubkey::new_unique(),
+                source_program: Some(Pubkey::new_unique()),
+                escrow_authority: Pubkey::new_unique(),
+                account_metas_per_program: vec![ShortAccountMeta {
+                    pubkey: Pubkey::new_unique(),
+                    is_writable: true,
+                }],
+                data_per_program: ProgramArgs {
+                    data: vec![7, 8, 9],
+                    escrow_index: 2,
                 },
-                source_program: Pubkey::new_unique(),
-            })
-            .into();
+                compute_units: 15_000,
+                callback: None,
+            },
+            source_program: Pubkey::new_unique(),
+        })
+        .into();
         assert_serializable(&base_action_v2.instruction(&validator));
     }
 
@@ -627,8 +587,7 @@ mod serialization_safety_test {
         data: Vec<u8>,
         lamports: u64,
     ) -> CommitTask {
-        let task =
-            make_commit_task(commit_id, allow_undelegation, data, lamports);
+        let task = make_commit_task(commit_id, allow_undelegation, data, lamports);
         CommitTask {
             delivery_details: CommitDelivery::StateInBuffer { prepared: false },
             ..task
@@ -639,8 +598,7 @@ mod serialization_safety_test {
     fn test_buffer_task_instruction_serialization() {
         let validator = Pubkey::new_unique();
 
-        let commit_task =
-            make_buffer_commit_task(456, false, vec![7, 8, 9], 2000);
+        let commit_task = make_buffer_commit_task(456, false, vec![7, 8, 9], 2000);
         assert!(commit_task.is_buffer());
         assert_serializable(&commit_task.instruction(&validator));
     }
@@ -649,12 +607,9 @@ mod serialization_safety_test {
     fn test_preparation_instructions_serialization() {
         let authority = Pubkey::new_unique();
 
-        let mut commit_task =
-            make_buffer_commit_task(789, true, vec![0; 1024], 3000);
+        let mut commit_task = make_buffer_commit_task(789, true, vec![0; 1024], 3000);
 
-        let Some(preparation_task) =
-            PreparationTask::from_commit(&mut commit_task)
-        else {
+        let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task) else {
             panic!("invalid preparation state on creation!");
         };
         assert_serializable(&preparation_task.init_instruction(&authority));
@@ -667,9 +622,8 @@ mod serialization_safety_test {
     }
 
     fn assert_serializable(ix: &Instruction) {
-        wincode::serialize(ix).unwrap_or_else(|e| {
-            panic!("Failed to serialize instruction {:?}: {}", ix, e)
-        });
+        wincode::serialize(ix)
+            .unwrap_or_else(|e| panic!("Failed to serialize instruction {:?}: {}", ix, e));
     }
 }
 
@@ -692,10 +646,8 @@ fn test_close_buffer_limit() {
     let authority = Keypair::new();
 
     // Budget ixs (fixed)
-    let compute_budget_ix =
-        ComputeBudgetInstruction::set_compute_unit_limit(30_000);
-    let compute_unit_price_ix =
-        ComputeBudgetInstruction::set_compute_unit_price(101);
+    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(30_000);
+    let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(101);
 
     // Each task unique: commit_id increments; pubkey is new_unique each time
     let base_commit_id = 101u64;
@@ -707,10 +659,8 @@ fn test_close_buffer_limit() {
         task.instruction(&authority.pubkey())
     });
 
-    let mut ixs: Vec<_> = [compute_budget_ix, compute_unit_price_ix]
-        .into_iter()
-        .chain(ixs_iter)
-        .collect();
+    let mut ixs: Vec<_> =
+        [compute_budget_ix, compute_unit_price_ix].into_iter().chain(ixs_iter).collect();
     ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
@@ -720,8 +670,7 @@ fn test_close_buffer_limit() {
 
     // One more unique task should overflow
     let overflow_task = CleanupTask {
-        commit_id: base_commit_id
-            + CleanupTask::max_tx_fit_count_with_budget() as u64,
+        commit_id: base_commit_id + CleanupTask::max_tx_fit_count_with_budget() as u64,
         pubkey: Pubkey::new_unique(),
     };
     let uniqueness_noop = ixs.pop().expect("uniqueness noop");

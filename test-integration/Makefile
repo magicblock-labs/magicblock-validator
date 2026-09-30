@@ -228,13 +228,13 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		$(DIR)/target/deploy/program_flexi_counter.so
 
 fmt:
-	cargo +nightly fmt -- --config-path ../rustfmt-nightly.toml
+	cargo fmt
 
 lint:
 	cargo clippy --all-targets -- -D warnings
 
 ci-fmt:
-	cargo +nightly fmt --check -- --config-path ../rustfmt-nightly.toml
+	cargo fmt --check
 
 ci-lint:
 	cargo clippy --workspace --all-targets --locked -- -D warnings

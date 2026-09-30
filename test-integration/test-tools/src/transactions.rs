@@ -19,7 +19,7 @@ use tracing::*;
 use crate::conversions::stringify_simulation_result;
 
 pub fn send_and_confirm_instructions_with_payer(
-    rpc_client: &solana_rpc_client::rpc_client::RpcClient,
+    rpc_client: &RpcClient,
     ixs: &[Instruction],
     payer: &Keypair,
     commitment: CommitmentConfig,
@@ -33,8 +33,7 @@ pub fn send_and_confirm_instructions_with_payer(
     );
     let (sig, tx) = send_instructions_with_payer(rpc_client, ixs, payer)?;
     debug!("Confirming transaction with signature: {}", sig);
-    confirm_transaction(&sig, rpc_client, commitment, Some(&tx))
-        .map(|confirmed| (sig, confirmed))
+    confirm_transaction(&sig, rpc_client, commitment, Some(&tx)).map(|confirmed| (sig, confirmed))
 }
 
 pub fn send_instructions_with_payer(
@@ -74,8 +73,7 @@ pub fn send_and_confirm_transaction(
     commitment: CommitmentConfig,
 ) -> Result<(Signature, bool), client_error::Error> {
     let sig = send_transaction(rpc_client, tx, signers, true)?;
-    confirm_transaction(&sig, rpc_client, commitment, Some(tx))
-        .map(|confirmed| (sig, confirmed))
+    confirm_transaction(&sig, rpc_client, commitment, Some(tx)).map(|confirmed| (sig, confirmed))
 }
 
 pub fn confirm_transaction(
@@ -96,9 +94,7 @@ pub fn confirm_transaction(
     let mut unconfirmed_count = 0;
 
     loop {
-        match rpc_client
-            .confirm_transaction_with_commitment(sig, commitment_config)
-        {
+        match rpc_client.confirm_transaction_with_commitment(sig, commitment_config) {
             Ok(res) if res.value => {
                 return Ok(res.value);
             }
@@ -120,16 +116,10 @@ pub fn confirm_transaction(
                             },
                         ) {
                             Ok(res) => {
-                                warn!(
-                                    "{}",
-                                    stringify_simulation_result(res.value, sig)
-                                );
+                                warn!("{}", stringify_simulation_result(res.value, sig));
                             }
                             Err(err) => {
-                                warn!(
-                                    "Failed to simulate transaction: {:?}",
-                                    err
-                                );
+                                warn!("Failed to simulate transaction: {:?}", err);
                             }
                         }
                     }

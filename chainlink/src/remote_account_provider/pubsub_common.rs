@@ -1,8 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use dlp_api::state::{
-    CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
-};
+use dlp_api::state::{CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig};
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
 use solana_clock::Slot;
@@ -22,10 +20,7 @@ pub struct PubsubClientConfig {
 }
 
 impl PubsubClientConfig {
-    pub fn from_url(
-        pubsub_url: impl Into<String>,
-        commitment_config: CommitmentConfig,
-    ) -> Self {
+    pub fn from_url(pubsub_url: impl Into<String>, commitment_config: CommitmentConfig) -> Self {
         Self::from_url_with_limit(pubsub_url, commitment_config, None)
     }
 
@@ -36,9 +31,8 @@ impl PubsubClientConfig {
         commitment_config: CommitmentConfig,
         limit_override: Option<usize>,
     ) -> Self {
-        let per_stream_subscription_limit = Some(
-            limit_override.unwrap_or(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT),
-        );
+        let per_stream_subscription_limit =
+            Some(limit_override.unwrap_or(DEFAULT_PER_STREAM_SUBSCRIPTION_LIMIT));
         Self {
             pubsub_url: pubsub_url.into(),
             commitment_config,
@@ -112,8 +106,7 @@ pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
 mod tests {
     use dlp_api::{
         args::{
-            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData,
-            PostDelegationActions,
+            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
         },
         state::DelegationRecord,
     };

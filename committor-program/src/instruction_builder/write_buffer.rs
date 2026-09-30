@@ -22,16 +22,10 @@ pub fn create_write_ix(args: CreateWriteIxArgs) -> Instruction {
         data_chunk,
         commit_id,
     } = args;
-    let (chunks_pda, chunks_bump) = pdas::chunks_pda(
-        &authority,
-        &pubkey,
-        commit_id.to_le_bytes().as_slice(),
-    );
-    let (buffer_pda, buffer_bump) = pdas::buffer_pda(
-        &authority,
-        &pubkey,
-        commit_id.to_le_bytes().as_slice(),
-    );
+    let (chunks_pda, chunks_bump) =
+        pdas::chunks_pda(&authority, &pubkey, commit_id.to_le_bytes().as_slice());
+    let (buffer_pda, buffer_bump) =
+        pdas::buffer_pda(&authority, &pubkey, commit_id.to_le_bytes().as_slice());
 
     let program_id = crate::id();
     let ix = CommittorInstruction::Write {

@@ -1,6 +1,7 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 use magicblock_chainlink::{
-    AccountFetchEntrypoint, assert_cloned_as_delegated,
-    assert_cloned_as_undelegated,
+    AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_undelegated,
     testing::{
         accounts::account_shared_with_owner_and_slot, context::TestContext,
         deleg::add_delegation_record_for,
@@ -18,12 +19,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
     let slot: u64 = 11;
 
     let ctx = TestContext::init(slot).await;
-    let TestContext {
-        chainlink,
-        bank,
-        rpc_client,
-        ..
-    } = ctx.clone();
+    let TestContext { chainlink, bank, rpc_client, .. } = ctx.clone();
 
     // Setup chain to hold our account
     let pubkey = Pubkey::new_unique();
@@ -39,10 +35,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
 
     // 1. Read account first time which fetches it from chain
     chainlink
-        .ensure_accounts(
-            &[pubkey],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
     assert_cloned_as_undelegated!(bank, &[pubkey], slot, owner);
@@ -50,10 +43,7 @@ async fn test_remote_slot_of_accounts_read_from_bank() {
 
     // 2. Read account again which gets it from bank (without fetching again)
     chainlink
-        .ensure_accounts(
-            &[pubkey],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
     assert_cloned_as_undelegated!(bank, &[pubkey], slot, owner);
@@ -69,12 +59,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
     let slot: u64 = 11;
 
     let ctx = TestContext::init(slot).await;
-    let TestContext {
-        chainlink,
-        bank,
-        rpc_client,
-        ..
-    } = ctx.clone();
+    let TestContext { chainlink, bank, rpc_client, .. } = ctx.clone();
 
     // Setup chain to hold our delegated account
     let pubkey = Pubkey::new_unique();
@@ -83,8 +68,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         lamports: 1_000_000,
         ..Default::default()
     };
-    let delegated_acc =
-        account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
+    let delegated_acc = account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
     rpc_client.add_account(pubkey, delegated_acc.into());
     add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, owner);
 
@@ -92,10 +76,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
 
     // 1. Ensure account first time which fetches it from chain
     chainlink
-        .ensure_accounts(
-            &[pubkey],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
     assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);
@@ -106,10 +87,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
 
     // 2. Ensure account again which gets it from bank (without fetching again)
     chainlink
-        .ensure_accounts(
-            &[pubkey],
-            AccountFetchEntrypoint::RpcGetMultipleAccounts,
-        )
+        .ensure_accounts(&[pubkey], AccountFetchEntrypoint::RpcGetMultipleAccounts)
         .await
         .unwrap();
     assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);

@@ -31,18 +31,13 @@ use crate::{
     transaction_preparator::TransactionPreparator,
 };
 
-pub(in crate::intent_executor) async fn build_commit_finalize_tasks<
-    F: TaskInfoFetcher,
->(
+pub(in crate::intent_executor) async fn build_commit_finalize_tasks<F: TaskInfoFetcher>(
     intent_bundle: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<F>,
 ) -> IntentExecutorResult<(Vec<BaseTaskImpl>, Vec<BaseTaskImpl>)> {
-    let commit_tasks_fut =
-        TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
-    let finalize_tasks_fut =
-        TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent_bundle);
-    let (commit_tasks, finalize_tasks) =
-        join(commit_tasks_fut, finalize_tasks_fut).await;
+    let commit_tasks_fut = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
+    let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent_bundle);
+    let (commit_tasks, finalize_tasks) = join(commit_tasks_fut, finalize_tasks_fut).await;
 
     Ok((commit_tasks?, finalize_tasks?))
 }
@@ -93,20 +88,13 @@ where
             err,
             commit_signature: _,
             finalize_signature: _,
-        }) if !committed_pubkeys.is_empty()
-            && err.is_recoverable_by_two_stage() =>
-        {
-            err
-        }
+        }) if !committed_pubkeys.is_empty() && err.is_recoverable_by_two_stage() => err,
         res => {
             let signature = res.as_ref().ok().copied();
-            single_stage_executor
-                .execute_callbacks(signature, res.as_ref().map(|_| ()));
+            single_stage_executor.execute_callbacks(signature, res.as_ref().map(|_| ()));
             let transaction_strategy = single_stage_executor.consume_strategy();
             #[cfg(feature = "dev-context-only-utils")]
-            execution_report.add_succeeded_transaction_strategy(
-                transaction_strategy.clone(),
-            );
+            execution_report.add_succeeded_transaction_strategy(transaction_strategy.clone());
             execution_report.dispose(transaction_strategy);
             return res.map(ExecutionOutput::SingleStage);
         }
@@ -221,9 +209,7 @@ where
     result
 }
 
-fn should_report_to_outbox(
-    result: &IntentExecutorResult<ExecutionOutput>,
-) -> bool {
+fn should_report_to_outbox(result: &IntentExecutorResult<ExecutionOutput>) -> bool {
     match result {
         Ok(_) => true,
         Err(err) => is_terminal_execution_error(err),
@@ -237,14 +223,14 @@ fn is_terminal_execution_error(err: &IntentExecutorError) -> bool {
         | IntentExecutorError::PendingSignatureResolutionError(_)
         | IntentExecutorError::FailedCommitPreparationError(_)
         | IntentExecutorError::FailedFinalizePreparationError(_)
+        | IntentExecutorError::SchedulerError(_)
         | IntentExecutorError::PoisonedIntentError => false,
         IntentExecutorError::FailedToCommitError { err, .. }
-        | IntentExecutorError::FailedToFinalizeError { err, .. } => {
-            is_terminal_strategy_error(err)
-        }
+        | IntentExecutorError::FailedToFinalizeError { err, .. } => is_terminal_strategy_error(err),
         IntentExecutorError::TaskBuilderError(err) => !err.is_transient(),
         IntentExecutorError::EmptyIntentError
         | IntentExecutorError::FailedToFitError
+        | IntentExecutorError::CompileError(_)
         | IntentExecutorError::SignerError(_) => true,
     }
 }

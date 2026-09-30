@@ -40,19 +40,13 @@ impl Endpoints {
     /// slice. If no RPC endpoint is found, returns None.
     pub fn rpc_url(&self) -> Option<String> {
         self.iter().find_map(|ep| {
-            if let Endpoint::Rpc { url, .. } = ep {
-                Some(url.clone())
-            } else {
-                None
-            }
+            if let Endpoint::Rpc { url, .. } = ep { Some(url.clone()) } else { None }
         })
     }
 
     pub fn pubsubs(&self) -> Vec<&Endpoint> {
         self.iter()
-            .filter(|ep| {
-                matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. })
-            })
+            .filter(|ep| matches!(ep, Endpoint::WebSocket { .. } | Endpoint::Grpc { .. }))
             .collect()
     }
 }
@@ -77,10 +71,7 @@ impl TryFrom<&Remote> for Endpoint {
         match config {
             Remote::Http(url) => {
                 let label = extract_label(url);
-                Ok(Endpoint::Rpc {
-                    url: url.to_string(),
-                    label,
-                })
+                Ok(Endpoint::Rpc { url: url.to_string(), label })
             }
             Remote::Websocket(url, subs_per_connection) => {
                 let label = extract_label(url);
@@ -100,11 +91,7 @@ impl TryFrom<&Remote> for Endpoint {
                     ))
                 })?;
 
-                Ok(Endpoint::Grpc {
-                    url,
-                    label,
-                    api_key,
-                })
+                Ok(Endpoint::Grpc { url, label, api_key })
             }
         }
     }
@@ -145,13 +132,13 @@ impl From<&[Endpoint]> for Endpoints {
 
 fn parse_url_api_key(url: &Url) -> (String, Option<String>) {
     // Try to extract api-key from query parameters
-    if let Some(api_key) = url.query_pairs().find_map(|(k, v)| {
-        if k == "api-key" {
-            Some(v.to_string())
-        } else {
-            None
-        }
-    }) {
+    if let Some(api_key) =
+        url.query_pairs().find_map(
+            |(k, v)| {
+                if k == "api-key" { Some(v.to_string()) } else { None }
+            },
+        )
+    {
         // Build URL without query parameters
         let mut url_without_query = url.clone();
         url_without_query.set_query(None);
@@ -159,16 +146,13 @@ fn parse_url_api_key(url: &Url) -> (String, Option<String>) {
     }
 
     // Check for api-key in path (last segment after final '/')
-    let path_segments: Vec<&str> =
-        url.path_segments().map(|s| s.collect()).unwrap_or_default();
+    let path_segments: Vec<&str> = url.path_segments().map(|s| s.collect()).unwrap_or_default();
 
     if let Some(last_segment) = path_segments.last() {
         // If the last segment looks like an API key (not empty and contains
         // hex chars or other typical api key patterns), treat it as api-key
         if !last_segment.is_empty()
-            && last_segment
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            && last_segment.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
             let mut base_url = url.clone();
             // Remove the last path segment by setting path without it
@@ -194,11 +178,7 @@ fn extract_label(url: &Url) -> String {
         .and_then(|host| {
             let parts: Vec<&str> = host.split('.').collect();
             // Get the second-to-last part (before TLD)
-            if parts.len() >= 2 {
-                Some(parts[parts.len() - 2].to_string())
-            } else {
-                None
-            }
+            if parts.len() >= 2 { Some(parts[parts.len() - 2].to_string()) } else { None }
         })
         .unwrap_or_else(|| "unknown".to_string())
 }
@@ -217,9 +197,7 @@ mod tests {
 
     #[test]
     fn test_parse_url_with_api_key_via_query() {
-        let input =
-            Url::parse("https://api.devnet.solana.com?api-key=secret123")
-                .unwrap();
+        let input = Url::parse("https://api.devnet.solana.com?api-key=secret123").unwrap();
         let (url, api_key) = parse_url_api_key(&input);
         assert_eq!(url, "https://api.devnet.solana.com/");
         assert_eq!(api_key, Some("secret123".to_string()));
@@ -227,10 +205,8 @@ mod tests {
 
     #[test]
     fn test_parse_url_with_api_key_in_path() {
-        let input = Url::parse(
-            "https://magicblo-devd137-9da1.devnet.rpcpool.com/secret-123",
-        )
-        .unwrap();
+        let input =
+            Url::parse("https://magicblo-devd137-9da1.devnet.rpcpool.com/secret-123").unwrap();
         let (url, api_key) = parse_url_api_key(&input);
         assert_eq!(url, "https://magicblo-devd137-9da1.devnet.rpcpool.com/");
         assert_eq!(api_key, Some("secret-123".to_string()));
@@ -238,10 +214,8 @@ mod tests {
 
     #[test]
     fn test_parse_url_with_non_api_key_in_path() {
-        let input = Url::parse(
-            "https://magicblo-devd137-9da1.devnet.rpcpool.com/notanapi%key",
-        )
-        .unwrap();
+        let input =
+            Url::parse("https://magicblo-devd137-9da1.devnet.rpcpool.com/notanapi%key").unwrap();
         let (url, api_key) = parse_url_api_key(&input);
         assert_eq!(
             url,
@@ -252,16 +226,13 @@ mod tests {
 
     #[test]
     fn test_extract_label_helius_rpc() {
-        let url =
-            Url::parse("wss://mainnet.helius-rpc.com/?api-key=secret").unwrap();
+        let url = Url::parse("wss://mainnet.helius-rpc.com/?api-key=secret").unwrap();
         assert_eq!(extract_label(&url), "helius-rpc");
     }
 
     #[test]
     fn test_extract_label_syndica() {
-        let url =
-            Url::parse("wss://solana-mainnet.api.syndica.io/api-key/readactec")
-                .unwrap();
+        let url = Url::parse("wss://solana-mainnet.api.syndica.io/api-key/readactec").unwrap();
         assert_eq!(extract_label(&url), "syndica");
     }
 
@@ -289,8 +260,7 @@ mod tests {
 
     #[test]
     fn test_extract_label_with_query_params() {
-        let url =
-            Url::parse("https://example.rpcpool.com?param=value").unwrap();
+        let url = Url::parse("https://example.rpcpool.com?param=value").unwrap();
         assert_eq!(extract_label(&url), "rpcpool");
     }
 
@@ -308,8 +278,7 @@ mod tests {
 
     #[test]
     fn test_extract_label_http_protocol() {
-        let url = Url::parse("http://mainnet.helius-rpc.com/?api-key=secret")
-            .unwrap();
+        let url = Url::parse("http://mainnet.helius-rpc.com/?api-key=secret").unwrap();
         assert_eq!(extract_label(&url), "helius-rpc");
     }
 
@@ -321,18 +290,12 @@ mod tests {
 
     #[test]
     fn test_generic_grpc_endpoint_with_api_key_is_accepted() {
-        let remote: Remote = "grpcs://generic.example.com/path?api-key=secret"
-            .parse()
-            .unwrap();
+        let remote: Remote = "grpcs://generic.example.com/path?api-key=secret".parse().unwrap();
 
         let endpoint = Endpoint::try_from(&remote).unwrap();
 
         match endpoint {
-            Endpoint::Grpc {
-                url,
-                label,
-                api_key,
-            } => {
+            Endpoint::Grpc { url, label, api_key } => {
                 assert_eq!(url, "https://generic.example.com/path");
                 assert_eq!(label, "example");
                 assert_eq!(api_key, "secret");

@@ -7,20 +7,15 @@ use magicblock_committor_service::{
     config::ChainConfig,
     intent_engine::db::DummyDB,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
-    tasks::{
-        commit_task::CommitDelivery, task_strategist::TransactionStrategy,
-        BaseTaskImpl,
-    },
+    tasks::{commit_task::CommitDelivery, task_strategist::TransactionStrategy, BaseTaskImpl},
     ComputeBudgetConfig,
 };
 use magicblock_core::intent::{
-    outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
-    CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle,
-    UndelegateType,
+    outbox::outbox_intent_pda_with_bump, types::CommittedAccount, CommitAndUndelegate, CommitType,
+    MagicBaseIntent, MagicIntentBundle, UndelegateType,
 };
 use magicblock_program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox_intent_bundles::OutboxIntentBundle,
+    magic_scheduled_base_intent::ScheduledIntentBundle, outbox_intent_bundles::OutboxIntentBundle,
 };
 use program_schedulecommit::MainAccount;
 use solana_account::{Account, ReadableAccount};
@@ -36,8 +31,7 @@ use self::utils::transactions::init_and_delegate_order_book_on_chain;
 use crate::utils::{
     ensure_validator_authority,
     transactions::{
-        fund_validator_auth_and_ensure_validator_fees_vault,
-        init_and_delegate_account_on_chain,
+        fund_validator_auth_and_ensure_validator_fees_vault, init_and_delegate_account_on_chain,
     },
 };
 
@@ -58,51 +52,40 @@ pub struct AccountCommitInfo {
 }
 
 impl AccountCommitInfo {
-    fn from_strategy(
-        strategy: TransactionStrategy,
-    ) -> Vec<(Pubkey, AccountCommitInfo)> {
+    fn from_strategy(strategy: TransactionStrategy) -> Vec<(Pubkey, AccountCommitInfo)> {
         let uses_alts = strategy.uses_alts();
-        strategy
-            .optimized_tasks
-            .iter()
-            .fold(vec![], |mut infos, task| {
-                let commit_info = match task {
-                    BaseTaskImpl::Commit(val) => {
-                        let info = AccountCommitInfo {
-                            commit_nonce: val.commit_id,
-                            data: val.committed_account.account.data.clone(),
-                            allow_undelegation: val.allow_undelegation,
-                            strategy: CommitStrategy::new(
-                                uses_alts,
-                                val.delivery_details.clone(),
-                            ),
-                        };
+        strategy.optimized_tasks.iter().fold(vec![], |mut infos, task| {
+            let commit_info = match task {
+                BaseTaskImpl::Commit(val) => {
+                    let info = AccountCommitInfo {
+                        commit_nonce: val.commit_id,
+                        data: val.committed_account.account.data.clone(),
+                        allow_undelegation: val.allow_undelegation,
+                        strategy: CommitStrategy::new(uses_alts, val.delivery_details.clone()),
+                    };
 
-                        Some((val.committed_account.pubkey, info))
-                    }
-                    BaseTaskImpl::CommitFinalize(val) => {
-                        let info = AccountCommitInfo {
-                            commit_nonce: val.commit_id,
-                            data: val.committed_account.account.data.clone(),
-                            allow_undelegation: val.allow_undelegation,
-                            strategy: CommitStrategy::new(
-                                uses_alts,
-                                val.delivery.clone(),
-                            ),
-                        };
-
-                        Some((val.committed_account.pubkey, info))
-                    }
-                    _ => None,
-                };
-
-                if let Some(commit_info) = commit_info {
-                    infos.push(commit_info);
-                    infos
-                } else {
-                    infos
+                    Some((val.committed_account.pubkey, info))
                 }
-            })
+                BaseTaskImpl::CommitFinalize(val) => {
+                    let info = AccountCommitInfo {
+                        commit_nonce: val.commit_id,
+                        data: val.committed_account.account.data.clone(),
+                        allow_undelegation: val.allow_undelegation,
+                        strategy: CommitStrategy::new(uses_alts, val.delivery.clone()),
+                    };
+
+                    Some((val.committed_account.pubkey, info))
+                }
+                _ => None,
+            };
+
+            if let Some(commit_info) = commit_info {
+                infos.push(commit_info);
+                infos
+            } else {
+                infos
+            }
+        })
     }
 }
 
@@ -135,18 +118,10 @@ impl CommitStrategy {
             (false, CommitDelivery::StateInBuffer { .. }) => Self::StateBuffer,
             (false, CommitDelivery::DiffInArgs { .. }) => Self::DiffArgs,
             (false, CommitDelivery::DiffInBuffer { .. }) => Self::DiffBuffer,
-            (true, CommitDelivery::StateInArgs) => {
-                Self::StateArgsWithLookupTable
-            }
-            (true, CommitDelivery::StateInBuffer { .. }) => {
-                Self::StateBufferWithLookupTable
-            }
-            (true, CommitDelivery::DiffInArgs { .. }) => {
-                Self::DiffArgsWithLookupTable
-            }
-            (true, CommitDelivery::DiffInBuffer { .. }) => {
-                Self::DiffBufferWithLookupTable
-            }
+            (true, CommitDelivery::StateInArgs) => Self::StateArgsWithLookupTable,
+            (true, CommitDelivery::StateInBuffer { .. }) => Self::StateBufferWithLookupTable,
+            (true, CommitDelivery::DiffInArgs { .. }) => Self::DiffArgsWithLookupTable,
+            (true, CommitDelivery::DiffInBuffer { .. }) => Self::DiffBufferWithLookupTable,
         }
     }
 }
@@ -165,9 +140,7 @@ enum CommitIntentKind {
     CommitFinalizeAndUndelegate,
 }
 
-fn expect_strategies(
-    strategies: &[(CommitStrategy, u8)],
-) -> ExpectedStrategies {
+fn expect_strategies(strategies: &[(CommitStrategy, u8)]) -> ExpectedStrategies {
     let mut expected_strategies = HashMap::new();
     for (strategy, count) in strategies {
         *expected_strategies.entry(*strategy).or_insert(0) += count;
@@ -185,12 +158,7 @@ fn expect_strategies(
 
 #[tokio::test]
 async fn test_ix_commit_single_account_100_bytes() {
-    commit_single_account(
-        100,
-        CommitStrategy::StateArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_single_account(100, CommitStrategy::StateArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -205,22 +173,12 @@ async fn test_ix_commit_single_account_100_bytes_and_undelegate() {
 
 #[tokio::test]
 async fn test_ix_commit_single_account_256_bytes() {
-    commit_single_account(
-        256,
-        CommitStrategy::StateArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_single_account(256, CommitStrategy::StateArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_single_account_257_bytes() {
-    commit_single_account(
-        257,
-        CommitStrategy::DiffArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_single_account(257, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -245,12 +203,7 @@ async fn test_ix_commit_single_account_257_bytes_and_undelegate() {
 
 #[tokio::test]
 async fn test_ix_commit_single_account_800_bytes() {
-    commit_single_account(
-        800,
-        CommitStrategy::DiffArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_single_account(800, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -265,12 +218,7 @@ async fn test_ix_commit_single_account_800_bytes_and_undelegate() {
 
 #[tokio::test]
 async fn test_ix_commit_single_account_one_kb() {
-    commit_single_account(
-        1024,
-        CommitStrategy::DiffArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_single_account(1024, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -285,22 +233,12 @@ async fn test_ix_commit_single_account_ten_kb() {
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_100_bytes() {
-    commit_book_order_account(
-        100,
-        CommitStrategy::DiffArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_book_order_account(100, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_636_bytes() {
-    commit_book_order_account(
-        636,
-        CommitStrategy::DiffArgs,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_book_order_account(636, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -308,12 +246,7 @@ async fn test_ix_commit_order_book_change_637_bytes() {
     // 636 bytes still produces a raw tx within the 1232-byte packet limit
     // (including the first-commit uniqueness noop). 637 bytes crosses it
     // by one byte.
-    commit_book_order_account(
-        637,
-        CommitStrategy::DiffBuffer,
-        CommitIntentKind::Commit,
-    )
-    .await;
+    commit_book_order_account(637, CommitStrategy::DiffBuffer, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -358,8 +291,7 @@ async fn commit_single_account(
 
     let counter_auth = Keypair::new();
     let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None)
-            .await;
+        init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None).await;
 
     let counter = MainAccount {
         player: counter_auth.pubkey(),
@@ -376,9 +308,7 @@ async fn commit_single_account(
         remote_slot: Default::default(),
     };
     let base_intent = match commit_type {
-        CommitIntentKind::Commit => {
-            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
-        }
+        CommitIntentKind::Commit => MagicBaseIntent::Commit(CommitType::Standalone(vec![account])),
         CommitIntentKind::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
@@ -386,9 +316,7 @@ async fn commit_single_account(
             })
         }
         CommitIntentKind::CommitFinalize => {
-            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
-                account,
-            ]))
+            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![account]))
         }
         CommitIntentKind::CommitFinalizeAndUndelegate => {
             MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -438,8 +366,7 @@ async fn commit_book_order_account(
     ));
 
     let payer = Keypair::new();
-    let (order_book_pk, mut order_book_ac) =
-        init_and_delegate_order_book_on_chain(&payer).await;
+    let (order_book_pk, mut order_book_ac) = init_and_delegate_order_book_on_chain(&payer).await;
 
     // Modify bytes so that a diff is produced and is sent to DLP
     let data = &mut order_book_ac.data;
@@ -456,9 +383,7 @@ async fn commit_book_order_account(
         remote_slot: Default::default(),
     };
     let base_intent = match commit_type {
-        CommitIntentKind::Commit => {
-            MagicBaseIntent::Commit(CommitType::Standalone(vec![account]))
-        }
+        CommitIntentKind::Commit => MagicBaseIntent::Commit(CommitType::Standalone(vec![account])),
         CommitIntentKind::CommitAndUndelegate => {
             MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: CommitType::Standalone(vec![account]),
@@ -466,9 +391,7 @@ async fn commit_book_order_account(
             })
         }
         CommitIntentKind::CommitFinalize => {
-            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![
-                account,
-            ]))
+            MagicBaseIntent::CommitFinalize(CommitType::Standalone(vec![account]))
         }
         CommitIntentKind::CommitFinalizeAndUndelegate => {
             MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -743,8 +666,7 @@ async fn test_commitfinalize_20_accounts_1kb_bundle_size_11() {
 }
 
 #[tokio::test]
-async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts(
-) {
+async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_accounts() {
     execute_intent_bundle(
         &[1024, 2048],
         &[],
@@ -805,13 +727,7 @@ async fn commit_5_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        commit_type,
-        expected_strategies,
-    )
-    .await;
+    commit_multiple_accounts(&accs, bundle_size, commit_type, expected_strategies).await;
 }
 
 async fn commit_8_accounts_1kb(
@@ -821,13 +737,7 @@ async fn commit_8_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        commit_type,
-        expected_strategies,
-    )
-    .await;
+    commit_multiple_accounts(&accs, bundle_size, commit_type, expected_strategies).await;
 }
 
 async fn commit_20_accounts_1kb(
@@ -837,29 +747,17 @@ async fn commit_20_accounts_1kb(
 ) {
     init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
-    commit_multiple_accounts(
-        &accs,
-        bundle_size,
-        commit_type,
-        expected_strategies,
-    )
-    .await;
+    commit_multiple_accounts(&accs, bundle_size, commit_type, expected_strategies).await;
 }
 
-async fn create_and_delegate_accounts(
-    bytess: &[usize],
-) -> Vec<CommittedAccount> {
+async fn create_and_delegate_accounts(bytess: &[usize]) -> Vec<CommittedAccount> {
     let mut join_set = JoinSet::new();
     for bytes in bytess {
         let bytes = *bytes;
         join_set.spawn(async move {
             let counter_auth = Keypair::new();
-            let (pda, mut pda_acc) = init_and_delegate_account_on_chain(
-                &counter_auth,
-                bytes as u64,
-                None,
-            )
-            .await;
+            let (pda, mut pda_acc) =
+                init_and_delegate_account_on_chain(&counter_auth, bytes as u64, None).await;
 
             pda_acc.owner = program_schedulecommit::id();
             pda_acc.data = vec![0u8; bytes];
@@ -875,15 +773,9 @@ async fn create_and_delegate_accounts(
     join_set.join_all().await
 }
 
-async fn create_bundles(
-    bundle_size: usize,
-    bytess: &[usize],
-) -> Vec<Vec<CommittedAccount>> {
+async fn create_bundles(bundle_size: usize, bytess: &[usize]) -> Vec<Vec<CommittedAccount>> {
     let committed = create_and_delegate_accounts(bytess).await;
-    committed
-        .chunks(bundle_size)
-        .map(|chunk| chunk.to_vec())
-        .collect()
+    committed.chunks(bundle_size).map(|chunk| chunk.to_vec()).collect()
 }
 
 async fn commit_multiple_accounts(
@@ -912,9 +804,7 @@ async fn commit_multiple_accounts(
     let intents = bundles_of_committees
         .into_iter()
         .map(|committees| match commit_type {
-            CommitIntentKind::Commit => {
-                MagicBaseIntent::Commit(CommitType::Standalone(committees))
-            }
+            CommitIntentKind::Commit => MagicBaseIntent::Commit(CommitType::Standalone(committees)),
             CommitIntentKind::CommitAndUndelegate => {
                 MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
                     commit_action: CommitType::Standalone(committees),
@@ -922,17 +812,13 @@ async fn commit_multiple_accounts(
                 })
             }
             CommitIntentKind::CommitFinalize => {
-                MagicBaseIntent::CommitFinalize(CommitType::Standalone(
-                    committees,
-                ))
+                MagicBaseIntent::CommitFinalize(CommitType::Standalone(committees))
             }
             CommitIntentKind::CommitFinalizeAndUndelegate => {
-                MagicBaseIntent::CommitFinalizeAndUndelegate(
-                    CommitAndUndelegate {
-                        commit_action: CommitType::Standalone(committees),
-                        undelegate_action: UndelegateType::Standalone,
-                    },
-                )
+                MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
+                    commit_action: CommitType::Standalone(committees),
+                    undelegate_action: UndelegateType::Standalone,
+                })
             }
         })
         .enumerate()
@@ -977,8 +863,7 @@ async fn execute_intent_bundle(
 
     // Create bundles of committed accounts
     let to_commit = create_and_delegate_accounts(bytess_to_commit);
-    let to_commit_finalize =
-        create_and_delegate_accounts(bytess_to_commit_finalize);
+    let to_commit_finalize = create_and_delegate_accounts(bytess_to_commit_finalize);
     let to_undelegate = create_and_delegate_accounts(bytes_to_undelegate);
     let (committees, commit_finalize_committees, undelegetees) =
         tokio::join!(to_commit, to_commit_finalize, to_undelegate);
@@ -988,8 +873,7 @@ async fn execute_intent_bundle(
         intent_bundle.commit = Some(CommitType::Standalone(committees));
     }
     if !commit_finalize_committees.is_empty() {
-        intent_bundle.commit_finalize =
-            Some(CommitType::Standalone(commit_finalize_committees));
+        intent_bundle.commit_finalize = Some(CommitType::Standalone(commit_finalize_committees));
     }
     if !undelegetees.is_empty() {
         intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
@@ -1068,9 +952,7 @@ async fn ix_commit_local(
 
     let rpc_client = RpcClient::new("http://localhost:7799".to_string());
     let mut strategies = ExpectedStrategies::new();
-    for (execution_result, base_intent) in
-        execution_outputs.into_iter().zip(intent_bundles)
-    {
+    for (execution_result, base_intent) in execution_outputs.into_iter().zip(intent_bundles) {
         let output = match execution_result.inner {
             Ok(output) => output,
             Err(err) => {
@@ -1088,8 +970,7 @@ async fn ix_commit_local(
                         }
                     }
                     IntentExecutorError::FailedToCommitError {
-                        signature: Some(signature),
-                        ..
+                        signature: Some(signature), ..
                     } => {
                         print_tx_logs(&rpc_client, signature).await;
                     }
@@ -1109,8 +990,7 @@ async fn ix_commit_local(
         debug!("finalize signature: {}", finalize_signature);
 
         let committed_accounts = base_intent.get_commit_intent_accounts();
-        let committed_finalize_accounts =
-            base_intent.get_commit_finalize_intent_accounts();
+        let committed_finalize_accounts = base_intent.get_commit_finalize_intent_accounts();
         let undelegated_accounts = base_intent.get_undelegate_intent_accounts();
         let commit_finalized_and_undelegated_accounts =
             base_intent.get_commit_finalize_and_undelegate_intent_accounts();
@@ -1125,32 +1005,27 @@ async fn ix_commit_local(
         ]
         .into_iter()
         .flat_map(|(allow_undelegation, accounts)| {
-            accounts.into_iter().flatten().map(move |account| {
-                (account.pubkey, (allow_undelegation, account))
-            })
+            accounts
+                .into_iter()
+                .flatten()
+                .map(move |account| (account.pubkey, (allow_undelegation, account)))
         })
         .collect();
 
-        let account_commit_infos: Vec<(Pubkey, AccountCommitInfo)> =
-            execution_result
-                .successful_transaction_strategies
-                .iter()
-                .flat_map(|s| AccountCommitInfo::from_strategy(s.clone()))
-                .collect();
+        let account_commit_infos: Vec<(Pubkey, AccountCommitInfo)> = execution_result
+            .successful_transaction_strategies
+            .iter()
+            .flat_map(|s| AccountCommitInfo::from_strategy(s.clone()))
+            .collect();
 
         assert_eq!(account_commit_infos.len(), committed_accounts.len());
 
         for (pubkey, commit_info) in account_commit_infos {
-            let (is_undelegate, account) = committed_accounts
-                .remove(&pubkey)
-                .expect("Account should be persisted");
+            let (is_undelegate, account) =
+                committed_accounts.remove(&pubkey).expect("Account should be persisted");
 
             // When we finalize it is possible to also undelegate the account
-            let expected_owner = if is_undelegate {
-                program_id
-            } else {
-                dlp_api::id()
-            };
+            let expected_owner = if is_undelegate { program_id } else { dlp_api::id() };
 
             let lamports = account.account.lamports;
             get_account!(
@@ -1194,8 +1069,7 @@ fn validate_account(
     account_pubkey: Pubkey,
     is_undelegate: bool,
 ) -> bool {
-    let matches_data =
-        acc.data() == expected_data && acc.lamports() == expected_lamports;
+    let matches_data = acc.data() == expected_data && acc.lamports() == expected_lamports;
     let matches_undelegation = acc.owner().eq(&expected_owner);
     let matches_all = matches_data && matches_undelegation;
 
@@ -1214,11 +1088,7 @@ fn validate_account(
             trace!(
                 "Account ({}) is {} but should be. Owner {} != {}",
                 account_pubkey,
-                if is_undelegate {
-                    "not undelegated"
-                } else {
-                    "undelegated"
-                },
+                if is_undelegate { "not undelegated" } else { "undelegated" },
                 acc.owner(),
                 expected_owner,
             );

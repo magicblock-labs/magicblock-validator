@@ -1,4 +1,3 @@
-use ed25519_dalek::SecretKey;
 use solana_clock::Slot;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
@@ -9,11 +8,7 @@ use solana_signer::Signer;
 /// given the same authority, cycling through slot/sub_slot combinations.
 /// Using slot and sub_slot as seeds allows is only one option and we may change this
 /// to use a different source for seeds in the future (as long as they are deterministic).
-pub fn derive_keypair(
-    authority: &Keypair,
-    slot: Slot,
-    sub_slot: Slot,
-) -> Keypair {
+pub(crate) fn derive_keypair(authority: &Keypair, slot: Slot, sub_slot: Slot) -> Keypair {
     let mut seeds = authority.pubkey().to_bytes().to_vec();
     seeds.extend_from_slice(&slot.to_le_bytes());
     seeds.extend_from_slice(&sub_slot.to_le_bytes());
@@ -27,11 +22,8 @@ fn derive_from_keypair(keypair: &Keypair, message: &[u8]) -> Keypair {
 
 fn derive_insecure(message: &[u8]) -> Keypair {
     let hash = <sha3::Sha3_512 as sha3::Digest>::digest(message);
-    let seed = &hash.as_slice()[0..32];
-
-    let secret = SecretKey::from_bytes(seed).unwrap();
     let mut secret_bytes = [0u8; Keypair::SECRET_KEY_LENGTH];
-    secret_bytes.copy_from_slice(secret.as_bytes());
+    secret_bytes.copy_from_slice(&hash.as_slice()[..Keypair::SECRET_KEY_LENGTH]);
     Keypair::new_from_array(secret_bytes)
 }
 

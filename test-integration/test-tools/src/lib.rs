@@ -1,3 +1,6 @@
+// Integration test helpers intentionally fail the calling test on setup errors.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
 pub mod conversions;
 pub mod dlp_interface;
 mod integration_test_context;

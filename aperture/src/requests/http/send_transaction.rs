@@ -14,10 +14,7 @@ use super::ClaimedHandlerResult;
 use crate::{
     RpcResult,
     error::RpcError,
-    requests::{
-        JsonHttpRequest as JsonRequest, params::SerdeSignature,
-        payload::ResponsePayload,
-    },
+    requests::{JsonHttpRequest as JsonRequest, params::SerdeSignature, payload::ResponsePayload},
     server::http::dispatch::HttpDispatcher,
 };
 
@@ -35,17 +32,15 @@ impl HttpDispatcher {
         kind: TransactionKind,
     ) -> (RpcResult<TransactionView>, u64) {
         let bytes = match encoding {
-            UiTransactionEncoding::Base58 => bs58::decode(transaction)
-                .into_vec()
-                .map_err(RpcError::parse_error),
-            UiTransactionEncoding::Base64 => BASE64_STANDARD
-                .decode(transaction)
-                .map_err(RpcError::parse_error),
+            UiTransactionEncoding::Base58 => {
+                bs58::decode(transaction).into_vec().map_err(RpcError::parse_error)
+            }
+            UiTransactionEncoding::Base64 => {
+                BASE64_STANDARD.decode(transaction).map_err(RpcError::parse_error)
+            }
             _ => {
                 return (
-                    Err(RpcError::invalid_params(
-                        "unsupported transaction encoding",
-                    )),
+                    Err(RpcError::invalid_params("unsupported transaction encoding")),
                     0,
                 );
             }
@@ -54,26 +49,18 @@ impl HttpDispatcher {
             Ok(bytes) => bytes,
             Err(error) => return (Err(error), 0),
         };
-        let transaction =
-            TransactionView::try_new_sanitized(Arc::new(bytes), true).map_err(
-                |error| RpcError::invalid_params(format!("{error:?}")),
-            );
+        let transaction = TransactionView::try_new_sanitized(Arc::new(bytes), true)
+            .map_err(|error| RpcError::invalid_params(format!("{error:?}")));
         let transaction = match transaction {
             Ok(transaction) => transaction,
             Err(error) => return (Err(error), 0),
         };
         let signature = transaction.signatures()[0];
         let fetch_origin = match kind {
-            TransactionKind::Send => {
-                AccountFetchEntrypoint::SendTransaction(signature)
-            }
-            TransactionKind::Simulate => {
-                AccountFetchEntrypoint::SimulateTransaction(signature)
-            }
+            TransactionKind::Send => AccountFetchEntrypoint::SendTransaction(signature),
+            TransactionKind::Simulate => AccountFetchEntrypoint::SimulateTransaction(signature),
         };
-        let _timer = ENSURE_ACCOUNTS_TIME
-            .with_label_values(&["transaction"])
-            .start_timer();
+        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["transaction"]).start_timer();
         let outcome = self
             .chainlink
             .ensure_accounts(transaction.static_account_keys(), fetch_origin)
@@ -87,26 +74,16 @@ impl HttpDispatcher {
         }
     }
 
-    pub(crate) async fn send_transaction(
-        &self,
-        request: &JsonRequest,
-    ) -> ClaimedHandlerResult {
+    pub(crate) async fn send_transaction(&self, request: &JsonRequest) -> ClaimedHandlerResult {
         let mut claims = 0;
         let result = async {
             let _timer = TRANSACTION_PROCESSING_TIME.start_timer();
             let transaction_str = request.required::<String>(0)?;
-            let config = request
-                .optional::<RpcSendTransactionConfig>(1)?
-                .unwrap_or_default();
-            let encoding =
-                config.encoding.unwrap_or(UiTransactionEncoding::Base58);
+            let config = request.optional::<RpcSendTransactionConfig>(1)?.unwrap_or_default();
+            let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
             let (transaction, remote_account_claims) = self
-                .prepare_transaction(
-                    &transaction_str,
-                    encoding,
-                    TransactionKind::Send,
-                )
+                .prepare_transaction(&transaction_str, encoding, TransactionKind::Send)
                 .await;
             claims += remote_account_claims;
             let transaction = transaction?;

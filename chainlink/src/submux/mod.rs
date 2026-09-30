@@ -20,8 +20,7 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{
-        ChainPubsubClient, ReconnectableClient,
-        SubscriptionReconciliationSnapshot,
+        ChainPubsubClient, ReconnectableClient, SubscriptionReconciliationSnapshot,
     },
     errors::RemoteAccountProviderResult,
     pubsub_common::SubscriptionUpdate,
@@ -158,8 +157,7 @@ where
     /// Signals reconnect/disconnect events that can create a subscription
     /// freshness gap for accounts with no remaining live coverage.
     reconnect_reconciliation_tx: mpsc::Sender<HashSet<Pubkey>>,
-    reconnect_reconciliation_rx:
-        Arc<Mutex<Option<mpsc::Receiver<HashSet<Pubkey>>>>>,
+    reconnect_reconciliation_rx: Arc<Mutex<Option<mpsc::Receiver<HashSet<Pubkey>>>>>,
     /// Whether take_updates() has started the per-client forwarders.
     forwarders_started: Arc<AtomicBool>,
     /// Token cancelled on drop to stop background tasks
@@ -227,30 +225,20 @@ where
         let (out_tx, out_rx) = mpsc::channel(SUBMUX_OUT_CHANNEL_SIZE);
         let dedup_cache = Arc::new(Mutex::new(HashMap::new()));
         let debounce_states = Arc::new(Mutex::new(HashMap::new()));
-        let (reconnect_reconciliation_tx, reconnect_reconciliation_rx) =
-            mpsc::channel(16);
-        let dedup_window = Duration::from_millis(
-            config.dedupe_window_millis.unwrap_or(DEDUP_WINDOW_MILLIS),
-        );
-        let interval_ms =
-            config.interval_millis.unwrap_or(DEBOUNCE_INTERVAL_MILLIS);
-        let detection_ms = config
-            .detection_window_millis
-            .unwrap_or(interval_ms.saturating_mul(5));
+        let (reconnect_reconciliation_tx, reconnect_reconciliation_rx) = mpsc::channel(16);
+        let dedup_window =
+            Duration::from_millis(config.dedupe_window_millis.unwrap_or(DEDUP_WINDOW_MILLIS));
+        let interval_ms = config.interval_millis.unwrap_or(DEBOUNCE_INTERVAL_MILLIS);
+        let detection_ms = config.detection_window_millis.unwrap_or(interval_ms.saturating_mul(5));
         let debounce_interval = Duration::from_millis(interval_ms);
         let debounce_detection_window = Duration::from_millis(detection_ms);
 
-        let never_debounce: HashSet<Pubkey> =
-            vec![clock::ID].into_iter().collect();
+        let never_debounce: HashSet<Pubkey> = vec![clock::ID].into_iter().collect();
 
         let program_subs: Arc<Mutex<HashSet<Pubkey>>> = Default::default();
-        let connected_client_ids: Arc<Mutex<HashSet<usize>>> =
-            Arc::new(Mutex::new(
-                clients
-                    .iter()
-                    .map(|(client, _)| Self::client_key(client))
-                    .collect(),
-            ));
+        let connected_client_ids: Arc<Mutex<HashSet<usize>>> = Arc::new(Mutex::new(
+            clients.iter().map(|(client, _)| Self::client_key(client)).collect(),
+        ));
 
         // Initialize the tracking of the number of connected clients and their uptime.
         // We assume all clients are connected at startup.
@@ -261,27 +249,18 @@ where
         };
 
         let connected_clients_subscribing_immediately = {
-            let n = clients
-                .iter()
-                .filter(|(client, _)| client.subs_immediately())
-                .count();
+            let n = clients.iter().filter(|(client, _)| client.subs_immediately()).count();
             metrics::set_connected_direct_pubsub_clients_count(n);
             Arc::new(AtomicU16::new(n.try_into().unwrap_or(u16::MAX)))
         };
         for (client, _) in &clients {
             metrics::set_pubsub_client_uptime(client.id(), true);
             if let Some(delay_ms) = client.current_resub_delay_ms() {
-                metrics::set_pubsub_client_resubscribe_delay(
-                    client.id(),
-                    delay_ms,
-                );
+                metrics::set_pubsub_client_resubscribe_delay(client.id(), delay_ms);
             }
         }
 
-        let clients_only = clients
-            .iter()
-            .map(|(client, _)| client.clone())
-            .collect::<Vec<_>>();
+        let clients_only = clients.iter().map(|(client, _)| client.clone()).collect::<Vec<_>>();
         let clients_arc = Arc::new(Mutex::new(clients_only));
 
         Self::spawn_reconnectors(
@@ -294,8 +273,7 @@ where
                 connected_clients: connected_clients.clone(),
                 connected_clients_subscribing_immediately:
                     connected_clients_subscribing_immediately.clone(),
-                reconnect_reconciliation_tx: reconnect_reconciliation_tx
-                    .clone(),
+                reconnect_reconciliation_tx: reconnect_reconciliation_tx.clone(),
             },
         );
 
@@ -315,9 +293,7 @@ where
             connected_clients,
             connected_clients_subscribing_immediately,
             reconnect_reconciliation_tx,
-            reconnect_reconciliation_rx: Arc::new(Mutex::new(Some(
-                reconnect_reconciliation_rx,
-            ))),
+            reconnect_reconciliation_rx: Arc::new(Mutex::new(Some(reconnect_reconciliation_rx))),
             forwarders_started: Arc::new(AtomicBool::new(false)),
             shutdown_token,
             cancel_on_drop: true,
@@ -344,15 +320,13 @@ where
     ) {
         for (client, mut abort_rx) in clients.into_iter() {
             let all_clients = params.all_clients.clone();
-            let subscribed_accounts_tracker =
-                params.subscribed_accounts_tracker.clone();
+            let subscribed_accounts_tracker = params.subscribed_accounts_tracker.clone();
             let program_subs = params.program_subs.clone();
             let connected_client_ids = params.connected_client_ids.clone();
             let connected_clients = params.connected_clients.clone();
             let connected_clients_subscribing_immediately =
                 params.connected_clients_subscribing_immediately.clone();
-            let reconnect_reconciliation_tx =
-                params.reconnect_reconciliation_tx.clone();
+            let reconnect_reconciliation_tx = params.reconnect_reconciliation_tx.clone();
             tokio::spawn(async move {
                 while (abort_rx.recv().await).is_some() {
                     // Drain any duplicate abort signals to coalesce reconnect attempts
@@ -371,13 +345,10 @@ where
                             connected_clients.load(Ordering::SeqCst) as usize,
                         );
                         if client.subs_immediately() {
-                            let previous =
-                                connected_clients_subscribing_immediately
-                                    .fetch_sub(1, Ordering::SeqCst);
+                            let previous = connected_clients_subscribing_immediately
+                                .fetch_sub(1, Ordering::SeqCst);
                             let current = previous.saturating_sub(1);
-                            metrics::set_connected_direct_pubsub_clients_count(
-                                current as usize,
-                            );
+                            metrics::set_connected_direct_pubsub_clients_count(current as usize);
                             debug!(
                                 client_id = %client.id(),
                                 previous,
@@ -433,9 +404,7 @@ where
 
         let mut covered = HashSet::new();
         for client in connected_clients {
-            if let Some(snapshot) =
-                client.subscription_reconciliation_snapshot()
-            {
+            if let Some(snapshot) = client.subscription_reconciliation_snapshot() {
                 covered.extend(snapshot.union);
             }
         }
@@ -482,15 +451,11 @@ where
     fn remove_client(&self, target: &Arc<T>) {
         {
             let mut clients = self.clients_lock();
-            if let Some(pos) =
-                clients.iter().position(|c| Arc::ptr_eq(c, target))
-            {
+            if let Some(pos) = clients.iter().position(|c| Arc::ptr_eq(c, target)) {
                 clients.swap_remove(pos);
             }
         }
-        self.connected_client_ids
-            .lock()
-            .remove(&Self::client_key(target));
+        self.connected_client_ids.lock().remove(&Self::client_key(target));
     }
 
     pub(crate) async fn add_client<U: SubscribedAccountsTracker>(
@@ -504,8 +469,7 @@ where
             clients.push(client.clone());
         }
 
-        let programs =
-            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
+        let programs = self.program_subs_lock().iter().copied().collect::<Vec<_>>();
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 self.remove_client(&client);
@@ -513,8 +477,7 @@ where
             }
         }
 
-        let mut account_subs =
-            subscribed_accounts_tracker.subscribed_accounts();
+        let mut account_subs = subscribed_accounts_tracker.subscribed_accounts();
         account_subs.extend(self.never_debounce.iter().copied());
         if let Err(err) = client.resub_multiple(account_subs).await {
             self.remove_client(&client);
@@ -531,14 +494,9 @@ where
             );
         }
 
-        self.connected_client_ids
-            .lock()
-            .insert(Self::client_key(&client));
+        self.connected_client_ids.lock().insert(Self::client_key(&client));
 
-        let connected = self
-            .connected_clients
-            .fetch_add(1, Ordering::SeqCst)
-            .saturating_add(1);
+        let connected = self.connected_clients.fetch_add(1, Ordering::SeqCst).saturating_add(1);
         metrics::set_connected_pubsub_clients_count(connected as usize);
         metrics::set_pubsub_client_uptime(client.id(), true);
         if let Some(delay_ms) = client.current_resub_delay_ms() {
@@ -549,26 +507,21 @@ where
                 .connected_clients_subscribing_immediately
                 .fetch_add(1, Ordering::SeqCst)
                 .saturating_add(1);
-            metrics::set_connected_direct_pubsub_clients_count(
-                connected as usize,
-            );
+            metrics::set_connected_direct_pubsub_clients_count(connected as usize);
         }
 
         Self::spawn_reconnectors(
             vec![(client.clone(), abort_rx)],
             ReconnectorParams {
                 all_clients: self.clients.clone(),
-                subscribed_accounts_tracker: subscribed_accounts_tracker
-                    .clone(),
+                subscribed_accounts_tracker: subscribed_accounts_tracker.clone(),
                 program_subs: self.program_subs.clone(),
                 connected_client_ids: self.connected_client_ids.clone(),
                 connected_clients: self.connected_clients.clone(),
                 connected_clients_subscribing_immediately: self
                     .connected_clients_subscribing_immediately
                     .clone(),
-                reconnect_reconciliation_tx: self
-                    .reconnect_reconciliation_tx
-                    .clone(),
+                reconnect_reconciliation_tx: self.reconnect_reconciliation_tx.clone(),
             },
         );
 
@@ -581,8 +534,7 @@ where
         // standard machinery: connection-level failures signal the
         // reconnector spawned above, account stragglers are repaired by
         // the reconciler.
-        let programs =
-            self.program_subs_lock().iter().copied().collect::<Vec<_>>();
+        let programs = self.program_subs_lock().iter().copied().collect::<Vec<_>>();
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 warn!(
@@ -593,8 +545,7 @@ where
                 );
             }
         }
-        let mut account_subs =
-            subscribed_accounts_tracker.subscribed_accounts();
+        let mut account_subs = subscribed_accounts_tracker.subscribed_accounts();
         account_subs.extend(self.never_debounce.iter().copied());
         if let Err(err) = client.resub_multiple(account_subs).await {
             warn!(
@@ -649,10 +600,7 @@ where
             attempt += 1;
             // Track the current resubscription delay for this client
             if let Some(delay_ms) = client.current_resub_delay_ms() {
-                metrics::set_pubsub_client_resubscribe_delay(
-                    client.id(),
-                    delay_ms,
-                );
+                metrics::set_pubsub_client_resubscribe_delay(client.id(), delay_ms);
             }
             match Self::reconnect_client(
                 client.clone(),
@@ -666,14 +614,8 @@ where
             {
                 Ok(()) => {
                     // Reset metrics on successful reconnect
-                    metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
-                        client.id(),
-                        0,
-                    );
-                    metrics::set_pubsub_client_failed_reconnect_attempts(
-                        client.id(),
-                        0,
-                    );
+                    metrics::set_pubsub_client_reconnect_backoff_duration_seconds(client.id(), 0);
+                    metrics::set_pubsub_client_failed_reconnect_attempts(client.id(), 0);
                     debug!(
                         client_id = %client.id(),
                         attempt,
@@ -682,22 +624,16 @@ where
                     break;
                 }
                 Err(err) => {
-                    let wait_duration =
-                        Duration::from_secs(fib_with_max_secs(attempt));
+                    let wait_duration = Duration::from_secs(fib_with_max_secs(attempt));
                     // Update backoff duration metric
                     metrics::set_pubsub_client_reconnect_backoff_duration_seconds(
                         client.id(),
                         wait_duration.as_secs(),
                     );
                     // Record current failed attempt count after the failed attempt
-                    metrics::set_pubsub_client_failed_reconnect_attempts(
-                        client.id(),
-                        attempt,
-                    );
+                    metrics::set_pubsub_client_failed_reconnect_attempts(client.id(), attempt);
                     // Log at max once per minute or every WARN_EVERY_ATTEMPTS attempts
-                    if attempt % WARN_EVERY_ATTEMPTS == 0
-                        || wait_duration.as_secs() >= 60
-                    {
+                    if attempt % WARN_EVERY_ATTEMPTS == 0 || wait_duration.as_secs() >= 60 {
                         warn!(
                             client_id = %client.id(),
                             attempt,
@@ -755,13 +691,13 @@ where
         if was_disconnected {
             connected_clients.fetch_add(1, Ordering::SeqCst);
             metrics::set_connected_pubsub_clients_count(
-                connected_clients.load(Ordering::SeqCst) as usize,
+                connected_clients.load(Ordering::SeqCst) as usize
             );
             if client.subs_immediately() {
-                let previous = connected_clients_subscribing_immediately
-                    .fetch_add(1, Ordering::SeqCst);
+                let previous =
+                    connected_clients_subscribing_immediately.fetch_add(1, Ordering::SeqCst);
                 metrics::set_connected_direct_pubsub_clients_count(
-                    previous.saturating_add(1) as usize,
+                    previous.saturating_add(1) as usize
                 );
             }
         }
@@ -778,10 +714,10 @@ where
                     connected_clients.load(Ordering::SeqCst) as usize,
                 );
                 if client.subs_immediately() {
-                    let previous = connected_clients_subscribing_immediately
-                        .fetch_sub(1, Ordering::SeqCst);
+                    let previous =
+                        connected_clients_subscribing_immediately.fetch_sub(1, Ordering::SeqCst);
                     metrics::set_connected_direct_pubsub_clients_count(
-                        previous.saturating_sub(1) as usize,
+                        previous.saturating_sub(1) as usize
                     );
                 }
             }
@@ -789,8 +725,7 @@ where
         };
 
         // Resubscribe all program subscriptions
-        let programs: HashSet<Pubkey> =
-            program_subs.lock().iter().copied().collect();
+        let programs: HashSet<Pubkey> = program_subs.lock().iter().copied().collect();
         for program_id in programs {
             if let Err(err) = client.subscribe_program(program_id).await {
                 debug!(
@@ -942,12 +877,7 @@ where
         while let Some(update) = inner_rx.recv().await {
             let now = Instant::now();
             let key = (update.pubkey, update.slot);
-            if !Self::should_forward_dedup(
-                &params.cache,
-                key,
-                now,
-                params.window,
-            ) {
+            if !Self::should_forward_dedup(&params.cache, key, now, params.window) {
                 continue;
             }
             if never_debounce.contains(&update.pubkey) {
@@ -1000,11 +930,9 @@ where
         let mut maybe_forward_now = None;
         {
             let mut states = debounce_states.lock();
-            let debounce_state = states.entry(pubkey).or_insert_with(|| {
-                DebounceState::Disabled {
-                    pubkey,
-                    arrivals: VecDeque::new(),
-                }
+            let debounce_state = states.entry(pubkey).or_insert_with(|| DebounceState::Disabled {
+                pubkey,
+                arrivals: VecDeque::new(),
             });
 
             // prune and push current
@@ -1054,7 +982,7 @@ where
             } else {
                 debounce_state.maybe_disable()
             };
-            if changed && tracing::enabled!(tracing::Level::TRACE) {
+            if changed && tracing::enabled!(Level::TRACE) {
                 trace!(
                     pubkey = %pubkey,
                     state = %debounce_state.label(),
@@ -1067,9 +995,7 @@ where
                     maybe_forward_now = Some(update);
                 }
                 DebounceState::Enabled {
-                    next_allowed_forward,
-                    pending,
-                    ..
+                    next_allowed_forward, pending, ..
                 } => {
                     if now >= *next_allowed_forward {
                         *next_allowed_forward = now + debounce_interval;
@@ -1087,9 +1013,7 @@ where
     /// Number of clients that must confirm an account subscription for it to be considered active.
     /// 2/3 of connected clients subscribing immediately.
     fn required_account_subscription_confirmations(&self) -> usize {
-        let n = self
-            .connected_clients_subscribing_immediately
-            .load(Ordering::SeqCst) as usize;
+        let n = self.connected_clients_subscribing_immediately.load(Ordering::SeqCst) as usize;
         cmp::max(1, (n * 2) / 3)
     }
 
@@ -1097,15 +1021,12 @@ where
     /// active.
     /// 1/3 of connected clients subscribing immediately.
     fn required_program_subscription_confirmations(&self) -> usize {
-        let n = self
-            .connected_clients_subscribing_immediately
-            .load(Ordering::SeqCst) as usize;
+        let n = self.connected_clients_subscribing_immediately.load(Ordering::SeqCst) as usize;
         cmp::max(1, n / 3)
     }
 
     fn allowed_in_debounce_window_count(&self) -> usize {
-        (self.debounce_detection_window.as_millis()
-            / self.debounce_interval.as_millis()) as usize
+        (self.debounce_detection_window.as_millis() / self.debounce_interval.as_millis()) as usize
     }
 
     #[cfg(test)]
@@ -1136,12 +1057,8 @@ where
             connected_clients_subscribing_immediately: self
                 .connected_clients_subscribing_immediately
                 .clone(),
-            reconnect_reconciliation_tx: self
-                .reconnect_reconciliation_tx
-                .clone(),
-            reconnect_reconciliation_rx: self
-                .reconnect_reconciliation_rx
-                .clone(),
+            reconnect_reconciliation_tx: self.reconnect_reconciliation_tx.clone(),
+            reconnect_reconciliation_rx: self.reconnect_reconciliation_rx.clone(),
             forwarders_started: self.forwarders_started.clone(),
             shutdown_token: self.shutdown_token.clone(),
             cancel_on_drop: false,
@@ -1170,8 +1087,7 @@ where
         pubkey: Pubkey,
         retries: Option<usize>,
     ) -> RemoteAccountProviderResult<()> {
-        let connected_clients =
-            self.connected_clients_snapshot_for_subscription().await;
+        let connected_clients = self.connected_clients_snapshot_for_subscription().await;
         AccountSubscriptionTask::Subscribe(
             pubkey,
             retries,
@@ -1181,10 +1097,7 @@ where
         .await
     }
 
-    async fn subscribe_program(
-        &self,
-        program_id: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()> {
         // Tentatively record the program subscription BEFORE fanning out to
         // connected clients. This closes a race where a client reconnecting
         // concurrently could:
@@ -1206,8 +1119,7 @@ where
             }
         }
 
-        let connected_clients =
-            self.connected_clients_snapshot_for_subscription().await;
+        let connected_clients = self.connected_clients_snapshot_for_subscription().await;
         if let Err(err) = AccountSubscriptionTask::SubscribeProgram(
             program_id,
             self.required_program_subscription_confirmations(),
@@ -1223,19 +1135,14 @@ where
         Ok(())
     }
 
-    async fn unsubscribe(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
         AccountSubscriptionTask::Unsubscribe(pubkey)
             .process(self.connected_clients_snapshot())
             .await
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
-        AccountSubscriptionTask::Shutdown
-            .process(self.clients_snapshot())
-            .await
+        AccountSubscriptionTask::Shutdown.process(self.clients_snapshot()).await
     }
 
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
@@ -1270,17 +1177,13 @@ where
         smallest
             .iter()
             .filter(|pk| {
-                sets.iter()
-                    .filter(|s| !std::ptr::eq(*s, smallest))
-                    .all(|s| s.contains(pk))
+                sets.iter().filter(|s| !std::ptr::eq(*s, smallest)).all(|s| s.contains(pk))
             })
             .copied()
             .collect()
     }
 
-    fn subscription_reconciliation_snapshot(
-        &self,
-    ) -> Option<SubscriptionReconciliationSnapshot> {
+    fn subscription_reconciliation_snapshot(&self) -> Option<SubscriptionReconciliationSnapshot> {
         let connected_clients = self.connected_clients_snapshot();
         if connected_clients.is_empty() {
             return None;
@@ -1311,15 +1214,10 @@ where
             .copied()
             .collect();
 
-        Some(SubscriptionReconciliationSnapshot {
-            union,
-            intersection,
-        })
+        Some(SubscriptionReconciliationSnapshot { union, intersection })
     }
 
-    fn take_reconnect_reconciliation_rx(
-        &self,
-    ) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
         self.reconnect_reconciliation_rx.lock().take()
     }
 
@@ -1341,8 +1239,7 @@ mod tests {
     use super::*;
     use crate::{
         remote_account_provider::{
-            SubscribedAccounts,
-            chain_pubsub_client::mock::ChainPubsubClientMock,
+            SubscribedAccounts, chain_pubsub_client::mock::ChainPubsubClientMock,
             subscription_reconciler::reconcile_subscriptions,
         },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
@@ -1350,10 +1247,7 @@ mod tests {
     };
 
     fn account_with_lamports(lamports: u64) -> Account {
-        Account {
-            lamports,
-            ..Account::default()
-        }
+        Account { lamports, ..Account::default() }
     }
     fn new_submux_client(
         clients: Vec<Arc<ChainPubsubClientMock>>,
@@ -1366,11 +1260,7 @@ mod tests {
                 (c, abort_rx)
             })
             .collect();
-        let tracker = Arc::new(
-            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
-                vec![],
-            ),
-        );
+        let tracker = Arc::new(MockSubscribedAccountsTracker::new(vec![]));
         SubMuxClient::new(client_tuples, tracker, dedupe_window_millis)
     }
 
@@ -1385,11 +1275,7 @@ mod tests {
                 (c, abort_rx)
             })
             .collect();
-        let tracker = Arc::new(
-            subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker::new(
-                vec![],
-            ),
-        );
+        let tracker = Arc::new(MockSubscribedAccountsTracker::new(vec![]));
         SubMuxClient::new_with_debounce(client_tuples, tracker, config)
     }
 
@@ -1414,10 +1300,7 @@ mod tests {
         )
     }
 
-    async fn wait_for_connected_clients(
-        mux: &SubMuxClient<ChainPubsubClientMock>,
-        expected: u16,
-    ) {
+    async fn wait_for_connected_clients(mux: &SubMuxClient<ChainPubsubClientMock>, expected: u16) {
         let deadline = Instant::now() + Duration::from_secs(1);
         loop {
             let connected = mux.connected_clients.load(Ordering::SeqCst);
@@ -1447,15 +1330,12 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
-            vec![client1.clone(), client2.clone()],
-            Some(100),
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], Some(100));
 
         // Both mock clients subscribe immediately, so counter should be initialized to 2
         assert_eq!(
-            mux.connected_clients_subscribing_immediately
-                .load(Ordering::SeqCst),
+            mux.connected_clients_subscribing_immediately.load(Ordering::SeqCst),
             2
         );
         // With 2 clients subscribing immediately:
@@ -1471,33 +1351,22 @@ mod tests {
         mux.subscribe(pk, None).await.unwrap();
 
         // send one update from each client
-        client1
-            .send_account_update(pk, 1, &account_with_lamports(10))
-            .await;
-        client2
-            .send_account_update(pk, 2, &account_with_lamports(20))
-            .await;
+        client1.send_account_update(pk, 1, &account_with_lamports(10)).await;
+        client2.send_account_update(pk, 2, &account_with_lamports(20)).await;
 
         // Expect to receive two updates (naive behavior)
-        let u1 = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("first update expected")
-        .expect("stream open");
-        let u2 = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("second update expected")
-        .expect("stream open");
+        let u1 = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+            .await
+            .expect("first update expected")
+            .expect("stream open");
+        let u2 = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+            .await
+            .expect("second update expected")
+            .expect("stream open");
 
         assert_eq!(u1.pubkey, pk);
         assert_eq!(u2.pubkey, pk);
-        let lamports =
-            |u: &SubscriptionUpdate| u.account.as_ref().unwrap().lamports;
+        let lamports = |u: &SubscriptionUpdate| u.account.as_ref().unwrap().lamports;
         let mut lams = vec![lamports(&u1), lamports(&u2)];
         lams.sort();
         assert_eq!(lams, vec![10, 20]);
@@ -1518,29 +1387,19 @@ mod tests {
         let (_abort_tx2, abort_rx2) = mpsc::channel(1);
         let tracker = Arc::new(MockSubscribedAccountsTracker::new(vec![pk]));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = SubMuxClient::new(
-            vec![(client1, abort_rx1)],
-            tracker.clone(),
-            None,
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            SubMuxClient::new(vec![(client1, abort_rx1)], tracker.clone(), None);
         let mut mux_rx = mux.take_updates();
 
-        mux.add_client(client2.clone(), abort_rx2, tracker)
-            .await
-            .unwrap();
+        mux.add_client(client2.clone(), abort_rx2, tracker).await.unwrap();
 
         assert!(client2.subscriptions_union().contains(&pk));
-        client2
-            .send_account_update(pk, 1, &account_with_lamports(42))
-            .await;
+        client2.send_account_update(pk, 1, &account_with_lamports(42)).await;
 
-        let update = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("update expected")
-        .expect("stream open");
+        let update = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+            .await
+            .expect("update expected")
+            .expect("stream open");
         assert_eq!(update.pubkey, pk);
         assert_eq!(update.account.unwrap().lamports, 42);
 
@@ -1593,36 +1452,22 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
-            vec![client1.clone(), client2.clone()],
-            Some(100),
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], Some(100));
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
 
         mux.subscribe(pk, None).await.unwrap();
 
-        client1
-            .send_account_update(pk, 1, &account_with_lamports(1))
-            .await;
-        let _ = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await;
+        client1.send_account_update(pk, 1, &account_with_lamports(1)).await;
+        let _ = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv()).await;
 
         // Unsubscribe and send again; should not receive within timeout
         mux.unsubscribe(pk).await.unwrap();
-        client2
-            .send_account_update(pk, 2, &account_with_lamports(2))
-            .await;
+        client2.send_account_update(pk, 2, &account_with_lamports(2)).await;
 
-        let recv = tokio::time::timeout(
-            std::time::Duration::from_millis(500),
-            mux_rx.recv(),
-        )
-        .await;
+        let recv = tokio::time::timeout(Duration::from_millis(500), mux_rx.recv()).await;
         assert!(recv.is_err(), "no update after unsubscribe");
 
         mux.shutdown().await.unwrap();
@@ -1640,53 +1485,35 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
-            vec![client1.clone(), client2.clone()],
-            Some(100),
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], Some(100));
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
 
         // Two updates with same pubkey and slot (slot=7) from different clients
-        client1
-            .send_account_update(pk, 7, &account_with_lamports(111))
-            .await;
-        client2
-            .send_account_update(pk, 7, &account_with_lamports(111))
-            .await;
+        client1.send_account_update(pk, 7, &account_with_lamports(111)).await;
+        client2.send_account_update(pk, 7, &account_with_lamports(111)).await;
 
         // Expect exactly one forwarded
-        let first = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("first update expected")
-        .expect("stream open");
+        let first = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+            .await
+            .expect("first update expected")
+            .expect("stream open");
         assert_eq!(first.pubkey, pk);
         assert_eq!(first.slot, 7);
 
         // No second within short timeout (dedup window is 2s)
-        let recv = tokio::time::timeout(
-            std::time::Duration::from_millis(400),
-            mux_rx.recv(),
-        )
-        .await;
+        let recv = tokio::time::timeout(Duration::from_millis(400), mux_rx.recv()).await;
         assert!(recv.is_err(), "duplicate update should be deduped");
 
         // Now send a new slot; should pass through
-        client1
-            .send_account_update(pk, 8, &account_with_lamports(222))
-            .await;
-        let next = tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("next update expected")
-        .expect("stream open");
+        client1.send_account_update(pk, 8, &account_with_lamports(222)).await;
+        let next = tokio::time::timeout(Duration::from_secs(2), mux_rx.recv())
+            .await
+            .expect("next update expected")
+            .expect("stream open");
         assert_eq!(next.slot, 8);
 
         mux.shutdown().await.unwrap();
@@ -1701,53 +1528,34 @@ mod tests {
         let client1 = Arc::new(ChainPubsubClientMock::new(tx1, rx1));
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
-        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
-            vec![client1.clone(), client2.clone()],
-            Some(100),
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], Some(100));
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
 
         // Send updates within 100ms window: u1, u2, u1(again), u3, u2(again)
-        client1
-            .send_account_update(pk, 1, &account_with_lamports(11))
-            .await;
-        client1
-            .send_account_update(pk, 2, &account_with_lamports(22))
-            .await;
-        client2
-            .send_account_update(pk, 1, &account_with_lamports(11))
-            .await;
-        client2
-            .send_account_update(pk, 3, &account_with_lamports(33))
-            .await;
-        client1
-            .send_account_update(pk, 2, &account_with_lamports(22))
-            .await;
+        client1.send_account_update(pk, 1, &account_with_lamports(11)).await;
+        client1.send_account_update(pk, 2, &account_with_lamports(22)).await;
+        client2.send_account_update(pk, 1, &account_with_lamports(11)).await;
+        client2.send_account_update(pk, 3, &account_with_lamports(33)).await;
+        client1.send_account_update(pk, 2, &account_with_lamports(22)).await;
 
         // Expect only three unique slots: 1, 2, 3
         let mut received = Vec::new();
         for _ in 0..3 {
-            let up = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                mux_rx.recv(),
-            )
-            .await
-            .expect("expected update")
-            .expect("stream open");
+            let up = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+                .await
+                .expect("expected update")
+                .expect("stream open");
             received.push(up.slot);
         }
         received.sort_unstable();
         assert_eq!(received, vec![1, 2, 3]);
 
         // No further updates should arrive (duplicates were deduped)
-        let recv_more = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await;
+        let recv_more = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv()).await;
         assert!(recv_more.is_err(), "no extra updates expected");
 
         mux.shutdown().await.unwrap();
@@ -1774,43 +1582,24 @@ mod tests {
         mux.subscribe(pk, None).await.unwrap();
 
         // Within 100ms window
-        client1
-            .send_account_update(pk, 1, &account_with_lamports(1))
-            .await;
-        client1
-            .send_account_update(pk, 2, &account_with_lamports(2))
-            .await;
-        client1
-            .send_account_update(pk, 3, &account_with_lamports(3))
-            .await;
+        client1.send_account_update(pk, 1, &account_with_lamports(1)).await;
+        client1.send_account_update(pk, 2, &account_with_lamports(2)).await;
+        client1.send_account_update(pk, 3, &account_with_lamports(3)).await;
 
-        client2
-            .send_account_update(pk, 2, &account_with_lamports(2))
-            .await;
-        client2
-            .send_account_update(pk, 3, &account_with_lamports(3))
-            .await;
+        client2.send_account_update(pk, 2, &account_with_lamports(2)).await;
+        client2.send_account_update(pk, 3, &account_with_lamports(3)).await;
 
-        client3
-            .send_account_update(pk, 1, &account_with_lamports(1))
-            .await;
-        client3
-            .send_account_update(pk, 2, &account_with_lamports(2))
-            .await;
-        client3
-            .send_account_update(pk, 3, &account_with_lamports(3))
-            .await;
+        client3.send_account_update(pk, 1, &account_with_lamports(1)).await;
+        client3.send_account_update(pk, 2, &account_with_lamports(2)).await;
+        client3.send_account_update(pk, 3, &account_with_lamports(3)).await;
 
         // Expect only 1,2,3 once
         let mut first_batch = Vec::new();
         for _ in 0..3 {
-            let up = tokio::time::timeout(
-                std::time::Duration::from_millis(100),
-                mux_rx.recv(),
-            )
-            .await
-            .expect("expected first-batch update")
-            .expect("stream open");
+            let up = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+                .await
+                .expect("expected first-batch update")
+                .expect("stream open");
             first_batch.push(up.slot);
         }
         first_batch.sort_unstable();
@@ -1818,18 +1607,13 @@ mod tests {
 
         // Sleep just beyond dedupe window, then send update1 again
         sleep_ms(110).await;
-        client2
-            .send_account_update(pk, 1, &account_with_lamports(1))
-            .await;
+        client2.send_account_update(pk, 1, &account_with_lamports(1)).await;
 
         // Expect update1 again
-        let up = tokio::time::timeout(
-            std::time::Duration::from_millis(100),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("expected second-batch update")
-        .expect("stream open");
+        let up = tokio::time::timeout(Duration::from_millis(100), mux_rx.recv())
+            .await
+            .expect("expected second-batch update")
+            .expect("stream open");
         assert_eq!(up.slot, 1);
 
         mux.shutdown().await.unwrap();
@@ -1859,11 +1643,7 @@ mod tests {
                 }
             }
             client
-                .send_account_update(
-                    pk,
-                    *slot,
-                    &account_with_lamports(base_lamports + *slot),
-                )
+                .send_account_update(pk, *slot, &account_with_lamports(base_lamports + *slot))
                 .await;
             // Capture the actual send timestamp for the next iteration
             last_sent_at = Some(Instant::now());
@@ -1875,11 +1655,8 @@ mod tests {
         per_recv_timeout_ms: u64,
     ) -> Vec<u64> {
         let mut slots = Vec::new();
-        while let Ok(Some(update)) = tokio::time::timeout(
-            std::time::Duration::from_millis(per_recv_timeout_ms),
-            rx.recv(),
-        )
-        .await
+        while let Ok(Some(update)) =
+            tokio::time::timeout(Duration::from_millis(per_recv_timeout_ms), rx.recv()).await
         {
             slots.push(update.slot);
         }
@@ -1893,15 +1670,14 @@ mod tests {
         // Debounce interval 200ms, detection window 1000ms
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client_with_debounce(
-                vec![client.clone()],
-                DebounceConfig {
-                    dedupe_window_millis: Some(100),
-                    interval_millis: Some(200),
-                    detection_window_millis: Some(1000),
-                },
-            );
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client_with_debounce(
+            vec![client.clone()],
+            DebounceConfig {
+                dedupe_window_millis: Some(100),
+                interval_millis: Some(200),
+                detection_window_millis: Some(1000),
+            },
+        );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
@@ -1937,10 +1713,7 @@ mod tests {
 
         let state = mux.get_debounce_state(pk).expect("debounce state for pk");
 
-        assert!(
-            state.arrivals_ref().len()
-                <= mux.allowed_in_debounce_window_count()
-        );
+        assert!(state.arrivals_ref().len() <= mux.allowed_in_debounce_window_count());
 
         mux.shutdown().await.unwrap();
     }
@@ -1951,33 +1724,28 @@ mod tests {
 
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client_with_debounce(
-                vec![client.clone()],
-                DebounceConfig {
-                    dedupe_window_millis: Some(100),
-                    interval_millis: Some(200),
-                    detection_window_millis: Some(1000),
-                },
-            );
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client_with_debounce(
+            vec![client.clone()],
+            DebounceConfig {
+                dedupe_window_millis: Some(100),
+                interval_millis: Some(200),
+                detection_window_millis: Some(1000),
+            },
+        );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
 
         // B (scaled): 00:0 | 01:+400 | 02:+400 | 03:+400 (never enters debounce)
         // Never debounced
-        let schedule: Vec<(u64, u64)> =
-            vec![(0, 0), (1, 400), (2, 400), (3, 400)];
+        let schedule: Vec<(u64, u64)> = vec![(0, 0), (1, 400), (2, 400), (3, 400)];
         send_schedule(client.clone(), pk, 2000, &schedule).await;
 
         let received = drain_slots(&mut mux_rx, 800).await;
         assert_eq!(received, vec![0, 1, 2, 3]);
 
         let state = mux.get_debounce_state(pk).expect("debounce state for pk");
-        assert!(
-            state.arrivals_ref().len()
-                <= mux.allowed_in_debounce_window_count()
-        );
+        assert!(state.arrivals_ref().len() <= mux.allowed_in_debounce_window_count());
 
         mux.shutdown().await.unwrap();
     }
@@ -1989,15 +1757,14 @@ mod tests {
         // Debounce interval 200ms, detection window 1000ms
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client_with_debounce(
-                vec![client.clone()],
-                DebounceConfig {
-                    dedupe_window_millis: Some(100),
-                    interval_millis: Some(200),
-                    detection_window_millis: Some(1000),
-                },
-            );
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client_with_debounce(
+            vec![client.clone()],
+            DebounceConfig {
+                dedupe_window_millis: Some(100),
+                interval_millis: Some(200),
+                detection_window_millis: Some(1000),
+            },
+        );
         let mut mux_rx = mux.take_updates();
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
@@ -2034,10 +1801,7 @@ mod tests {
         assert_eq!(received, vec![0, 1, 2, 3, 4, 9, 10, 11, 12, 13]);
 
         let state = mux.get_debounce_state(pk).expect("debounce state for pk");
-        assert!(
-            state.arrivals_ref().len()
-                <= mux.allowed_in_debounce_window_count()
-        );
+        assert!(state.arrivals_ref().len() <= mux.allowed_in_debounce_window_count());
 
         mux.shutdown().await.unwrap();
     }
@@ -2047,15 +1811,14 @@ mod tests {
         init_logger();
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let mux: SubMuxClient<ChainPubsubClientMock> =
-            new_submux_client_with_debounce(
-                vec![client.clone()],
-                DebounceConfig {
-                    dedupe_window_millis: Some(100),
-                    interval_millis: Some(200),
-                    detection_window_millis: Some(1000),
-                },
-            );
+        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client_with_debounce(
+            vec![client.clone()],
+            DebounceConfig {
+                dedupe_window_millis: Some(100),
+                interval_millis: Some(200),
+                detection_window_millis: Some(1000),
+            },
+        );
         let mut mux_rx = mux.take_updates();
 
         // 1. Ensure that for another account's updates are debounced
@@ -2097,29 +1860,19 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
         let pk = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![client1.clone(), client2.clone()],
-            vec![pk],
-            Some(100),
-        );
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client1.clone(), client2.clone()], vec![pk], Some(100));
 
         // Initially both immediately subscribing clients are connected
         macro_rules! assert_all_clients_connected {
             () => {
                 assert_eq!(
-                    mux.connected_clients_subscribing_immediately
-                        .load(Ordering::SeqCst),
+                    mux.connected_clients_subscribing_immediately.load(Ordering::SeqCst),
                     2,
                     "Both clients should be connected initially"
                 );
-                assert_eq!(
-                    mux.required_account_subscription_confirmations(),
-                    1
-                );
-                assert_eq!(
-                    mux.required_program_subscription_confirmations(),
-                    1
-                );
+                assert_eq!(mux.required_account_subscription_confirmations(), 1);
+                assert_eq!(mux.required_program_subscription_confirmations(), 1);
             };
         }
         assert_all_clients_connected!();
@@ -2129,16 +1882,11 @@ mod tests {
         mux.subscribe(pk, None).await.unwrap();
 
         // Baseline: client1 update arrives
-        client1
-            .send_account_update(pk, 1, &account_with_lamports(111))
-            .await;
-        tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("got baseline update")
-        .expect("stream open");
+        client1.send_account_update(pk, 1, &account_with_lamports(111)).await;
+        tokio::time::timeout(Duration::from_millis(200), mux_rx.recv())
+            .await
+            .expect("got baseline update")
+            .expect("stream open");
 
         // Simulate disconnect: client1 loses subscriptions and is "disconnected"
         {
@@ -2147,28 +1895,24 @@ mod tests {
 
             // Trigger reconnect via abort channel and wait for message to be processed
             aborts[0].send(()).await.expect("abort send");
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             // Only one direct sub client should be connected now (client2)
             assert_eq!(
-                mux.connected_clients_subscribing_immediately
-                    .load(Ordering::SeqCst),
+                mux.connected_clients_subscribing_immediately.load(Ordering::SeqCst),
                 1
             );
             client1.enable_reconnect();
 
             // Wait for reconnect and resub to complete
             while !client1.is_connected_and_resubscribed() {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
             let mut max_tries = 20;
-            while mux
-                .connected_clients_subscribing_immediately
-                .load(Ordering::SeqCst)
-                < 2
+            while mux.connected_clients_subscribing_immediately.load(Ordering::SeqCst) < 2
                 && max_tries > 0
             {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
                 max_tries -= 1;
             }
         }
@@ -2177,17 +1921,12 @@ mod tests {
         assert_all_clients_connected!();
 
         // After reconnect + resubscribe, client1's updates should be forwarded again
-        client1
-            .send_account_update(pk, 2, &account_with_lamports(222))
-            .await;
+        client1.send_account_update(pk, 2, &account_with_lamports(222)).await;
 
-        let up = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("expect update after reconnect")
-        .expect("stream open");
+        let up = tokio::time::timeout(Duration::from_secs(1), mux_rx.recv())
+            .await
+            .expect("expect update after reconnect")
+            .expect("stream open");
         assert_eq!(up.pubkey, pk);
         assert_eq!(up.slot, 2);
 
@@ -2204,11 +1943,8 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
         let pk = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![client1.clone(), client2.clone()],
-            vec![pk],
-            Some(100),
-        );
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client1.clone(), client2.clone()], vec![pk], Some(100));
         let mut mux_rx = mux.take_updates();
 
         mux.subscribe(pk, None).await.unwrap();
@@ -2251,9 +1987,7 @@ mod tests {
         }
         assert!(client1.subscribe_attempts() > attempts_before_retry);
 
-        client1
-            .send_account_update(pk, 100, &account_with_lamports(1_100))
-            .await;
+        client1.send_account_update(pk, 100, &account_with_lamports(1_100)).await;
         let up = tokio::time::timeout(Duration::from_secs(1), mux_rx.recv())
             .await
             .expect("expect update after retry reconnect")
@@ -2330,11 +2064,8 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
         let pk = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![client1.clone(), client2.clone()],
-            vec![pk],
-            Some(100),
-        );
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client1.clone(), client2.clone()], vec![pk], Some(100));
 
         mux.subscribe(pk, None).await.unwrap();
 
@@ -2356,15 +2087,8 @@ mod tests {
         subscriptions.add(pk);
         let (removed_tx, mut removed_rx) = mpsc::channel::<Pubkey>(10);
 
-        let count = reconcile_subscriptions(
-            &subscriptions,
-            &mux,
-            &[],
-            &removed_tx,
-            None,
-            None,
-        )
-        .await;
+        let count =
+            reconcile_subscriptions(&subscriptions, &mux, &[], &removed_tx, None, None).await;
 
         assert_eq!(count, 1);
         assert_eq!(client1.subscribe_attempts(), before_client1_attempts);
@@ -2384,11 +2108,8 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
         let pk = Pubkey::new_unique();
-        let (mux, aborts) = new_submux_with_abort(
-            vec![client1.clone(), client2.clone()],
-            vec![pk],
-            Some(100),
-        );
+        let (mux, aborts) =
+            new_submux_with_abort(vec![client1.clone(), client2.clone()], vec![pk], Some(100));
 
         mux.subscribe(pk, None).await.unwrap();
 
@@ -2411,14 +2132,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscribe_waits_for_reconnecting_client_when_snapshot_empty()
-    {
+    async fn test_subscribe_waits_for_reconnecting_client_when_snapshot_empty() {
         init_logger();
 
         let (tx, rx) = mpsc::channel(10_000);
         let client = Arc::new(ChainPubsubClientMock::new(tx, rx));
-        let (mux, aborts) =
-            new_submux_with_abort(vec![client.clone()], vec![], Some(100));
+        let (mux, aborts) = new_submux_with_abort(vec![client.clone()], vec![], Some(100));
 
         client.disable_reconnect();
         client.simulate_disconnect();
@@ -2457,58 +2176,40 @@ mod tests {
         let client2 = Arc::new(ChainPubsubClientMock::new(tx2, rx2));
 
         // Use a short dedup window (100ms) so we can test expiry
-        let mux: SubMuxClient<ChainPubsubClientMock> = new_submux_client(
-            vec![client1.clone(), client2.clone()],
-            Some(100),
-        );
+        let mux: SubMuxClient<ChainPubsubClientMock> =
+            new_submux_client(vec![client1.clone(), client2.clone()], Some(100));
         let mut mux_rx = mux.take_updates();
 
         let pk = Pubkey::new_unique();
         mux.subscribe(pk, None).await.unwrap();
 
         // First delivery of (pk, slot=42) from client1
-        client1
-            .send_account_update(pk, 42, &account_with_lamports(100))
-            .await;
-        let first = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("first update expected")
-        .expect("stream open");
+        client1.send_account_update(pk, 42, &account_with_lamports(100)).await;
+        let first = tokio::time::timeout(Duration::from_millis(200), mux_rx.recv())
+            .await
+            .expect("first update expected")
+            .expect("stream open");
         assert_eq!(first.pubkey, pk);
         assert_eq!(first.slot, 42);
 
         // Second delivery within the dedup window — should be deduped
-        client2
-            .send_account_update(pk, 42, &account_with_lamports(100))
-            .await;
-        let recv = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            mux_rx.recv(),
-        )
-        .await;
+        client2.send_account_update(pk, 42, &account_with_lamports(100)).await;
+        let recv = tokio::time::timeout(Duration::from_millis(200), mux_rx.recv()).await;
         assert!(
             recv.is_err(),
             "same-slot update within dedup window should be suppressed"
         );
 
         // Wait for the dedup window to expire (100ms + margin)
-        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
 
         // Third delivery of the same (pk, slot=42) from client2
         // after the window expired — should be forwarded again
-        client2
-            .send_account_update(pk, 42, &account_with_lamports(100))
-            .await;
-        let after_expiry = tokio::time::timeout(
-            std::time::Duration::from_millis(200),
-            mux_rx.recv(),
-        )
-        .await
-        .expect("update expected after dedup window expiry")
-        .expect("stream open");
+        client2.send_account_update(pk, 42, &account_with_lamports(100)).await;
+        let after_expiry = tokio::time::timeout(Duration::from_millis(200), mux_rx.recv())
+            .await
+            .expect("update expected after dedup window expiry")
+            .expect("stream open");
         assert_eq!(after_expiry.pubkey, pk);
         assert_eq!(after_expiry.slot, 42);
 

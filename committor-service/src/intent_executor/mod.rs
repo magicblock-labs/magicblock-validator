@@ -11,9 +11,7 @@ pub mod utils;
 use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use magicblock_core::traits::{
-    ActionsCallbackScheduler, CallbackScheduleError,
-};
+use magicblock_core::traits::{ActionsCallbackScheduler, CallbackScheduleError};
 use magicblock_metrics::metrics;
 use magicblock_program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
@@ -68,15 +66,11 @@ where
             Box::new(AcceptedIntentExecutor::new(ctx, actions_timeout))
                 as Box<dyn IntentExecutor<T> + 'static>
         }
-        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(
-            sig,
-        )) => {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(sig)) => {
             Box::new(SingleStageIntentExecutor::new(ctx, actions_timeout, sig))
                 as Box<dyn IntentExecutor<T> + 'static>
         }
-        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
-            value,
-        )) => {
+        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(value)) => {
             Box::new(TwoStageIntentExecutor::new(ctx, actions_timeout, value))
                 as Box<dyn IntentExecutor<T> + 'static>
         }
@@ -178,10 +172,7 @@ impl IntentExecutionReport {
         self.junk.push(value);
     }
 
-    pub fn add_patched_error(
-        &mut self,
-        value: TransactionStrategyExecutionError,
-    ) {
+    pub fn add_patched_error(&mut self, value: TransactionStrategyExecutionError) {
         self.patched_errors.push(value);
     }
 
@@ -189,9 +180,7 @@ impl IntentExecutionReport {
         &self.patched_errors
     }
 
-    pub fn callbacks_report(
-        &self,
-    ) -> &[Result<Signature, CallbackScheduleError>] {
+    pub fn callbacks_report(&self) -> &[Result<Signature, CallbackScheduleError>] {
         &self.callbacks_report
     }
 
@@ -207,10 +196,7 @@ impl IntentExecutionReport {
     }
 
     #[cfg(feature = "dev-context-only-utils")]
-    pub fn add_succeeded_transaction_strategy(
-        &mut self,
-        value: TransactionStrategy,
-    ) {
+    pub fn add_succeeded_transaction_strategy(&mut self, value: TransactionStrategy) {
         self.successful_transaction_strategies.push(value);
     }
 }

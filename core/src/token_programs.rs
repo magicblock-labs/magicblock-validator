@@ -1,6 +1,4 @@
-use solana_account::{
-    Account, AccountBuilder, AccountMode, AccountSharedData, ReadableAccount,
-};
+use solana_account::{Account, AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
 use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::{Pubkey, pubkey};
 use spl_token::state::Account as SplAccount;
@@ -12,20 +10,17 @@ use spl_token_2022::{
 // Shared program IDs and helper functions for SPL Token, Associated Token, and eATA programs.
 
 // Token Program ID (Tokenkeg...)
-pub const TOKEN_PROGRAM_ID: Pubkey =
-    pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
+pub const TOKEN_PROGRAM_ID: Pubkey = pubkey!("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA");
 
 // Token-2022 Program ID (Tokenz...)
-pub const TOKEN_2022_PROGRAM_ID: Pubkey =
-    pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
+pub const TOKEN_2022_PROGRAM_ID: Pubkey = pubkey!("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb");
 
 // Associated Token Account Program ID (ATokenG...)
 pub const ASSOCIATED_TOKEN_PROGRAM_ID: Pubkey =
     pubkey!("ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL");
 
 // Enhanced ATA (eATA) Program ID (SPLxh1...)
-pub const EATA_PROGRAM_ID: Pubkey =
-    pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
+pub const EATA_PROGRAM_ID: Pubkey = pubkey!("SPLxh1LVZzEkX99H6rqYizhytLWPZVV296zyYDPagv2");
 
 // Marker written into a Magic ATA's close authority. It is a data
 // marker only, never a signer grant: the sysvar cannot sign, so these
@@ -74,10 +69,9 @@ pub fn normalize_native_token_account_for_local_clone(
     match normalized {
         NativeTokenNormalization::NotNative => Some(account),
         NativeTokenNormalization::Invalid => None,
-        NativeTokenNormalization::Normalized {
-            data,
-            rent_exempt_reserve,
-        } => Some(account.data(data).lamports(rent_exempt_reserve)),
+        NativeTokenNormalization::Normalized { data, rent_exempt_reserve } => {
+            Some(account.data(data).lamports(rent_exempt_reserve))
+        }
     }
 }
 
@@ -97,10 +91,7 @@ pub fn normalize_projected_token_account_for_local_clone(
 
 enum NativeTokenNormalization {
     NotNative,
-    Normalized {
-        data: Vec<u8>,
-        rent_exempt_reserve: u64,
-    },
+    Normalized { data: Vec<u8>, rent_exempt_reserve: u64 },
     Invalid,
 }
 
@@ -124,21 +115,14 @@ fn normalize_legacy_native_token_account(
     if SplAccount::pack(token_account, &mut data).is_err() {
         return NativeTokenNormalization::Invalid;
     }
-    NativeTokenNormalization::Normalized {
-        data,
-        rent_exempt_reserve,
-    }
+    NativeTokenNormalization::Normalized { data, rent_exempt_reserve }
 }
 
-fn normalize_legacy_projected_token_account(
-    account: AccountBuilder,
-) -> Option<AccountBuilder> {
-    let Ok(mut token_account) = SplAccount::unpack(account.read().data())
-    else {
+fn normalize_legacy_projected_token_account(account: AccountBuilder) -> Option<AccountBuilder> {
+    let Ok(mut token_account) = SplAccount::unpack(account.read().data()) else {
         return None;
     };
-    let rent_exempt_reserve = if token_account.mint
-        == spl_token::native_mint::id()
+    let rent_exempt_reserve = if token_account.mint == spl_token::native_mint::id()
         && let COption::Some(rent_exempt_reserve) = token_account.is_native
     {
         token_account.is_native = COption::None;
@@ -160,9 +144,7 @@ fn normalize_token_2022_native_token_account(
     account: &solana_account::OwnedAccount,
 ) -> NativeTokenNormalization {
     let mut data = account.data().to_vec();
-    let Ok(mut state) =
-        StateWithExtensionsMut::<Token2022Account>::unpack(&mut data)
-    else {
+    let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(&mut data) else {
         return NativeTokenNormalization::Invalid;
     };
     if state.base.mint != spl_token_2022::native_mint::id() {
@@ -176,34 +158,26 @@ fn normalize_token_2022_native_token_account(
     state.base.is_native = COption::None;
     state.base.close_authority = COption::Some(Pubkey::default());
     state.pack_base();
-    NativeTokenNormalization::Normalized {
-        data,
-        rent_exempt_reserve,
-    }
+    NativeTokenNormalization::Normalized { data, rent_exempt_reserve }
 }
 
-fn normalize_token_2022_projected_token_account(
-    account: AccountBuilder,
-) -> Option<AccountBuilder> {
+fn normalize_token_2022_projected_token_account(account: AccountBuilder) -> Option<AccountBuilder> {
     let mut data = account.read().data().to_vec();
     let rent_exempt_reserve = {
-        let Ok(mut state) =
-            StateWithExtensionsMut::<Token2022Account>::unpack(&mut data)
-        else {
+        let Ok(mut state) = StateWithExtensionsMut::<Token2022Account>::unpack(&mut data) else {
             return None;
         };
-        let rent_exempt_reserve =
-            if state.base.mint == spl_token_2022::native_mint::id() {
-                match state.base.is_native {
-                    COption::Some(rent_exempt_reserve) => {
-                        state.base.is_native = COption::None;
-                        Some(rent_exempt_reserve)
-                    }
-                    COption::None => None,
+        let rent_exempt_reserve = if state.base.mint == spl_token_2022::native_mint::id() {
+            match state.base.is_native {
+                COption::Some(rent_exempt_reserve) => {
+                    state.base.is_native = COption::None;
+                    Some(rent_exempt_reserve)
                 }
-            } else {
-                None
-            };
+                COption::None => None,
+            }
+        } else {
+            None
+        };
         state.base.close_authority = COption::Some(Pubkey::default());
         state.pack_base();
         rent_exempt_reserve
@@ -247,15 +221,8 @@ pub fn derive_ata_with_token_program(
 ///
 /// # Returns
 /// `Option<(Pubkey, u8)>` — `Some((address, bump))` if derivation succeeds, `None` otherwise.
-pub fn try_derive_ata_address_and_bump(
-    owner: &Pubkey,
-    mint: &Pubkey,
-) -> Option<(Pubkey, u8)> {
-    try_derive_ata_address_and_bump_with_token_program(
-        owner,
-        mint,
-        &TOKEN_PROGRAM_ID,
-    )
+pub fn try_derive_ata_address_and_bump(owner: &Pubkey, mint: &Pubkey) -> Option<(Pubkey, u8)> {
+    try_derive_ata_address_and_bump_with_token_program(owner, mint, &TOKEN_PROGRAM_ID)
 }
 
 pub fn try_derive_ata_address_and_bump_with_token_program(
@@ -281,22 +248,14 @@ impl SupportedAtaPubkeys {
     }
 
     pub fn contains(&self, pubkey: &Pubkey) -> bool {
-        self.legacy.as_ref() == Some(pubkey)
-            || self.token_2022.as_ref() == Some(pubkey)
+        self.legacy.as_ref() == Some(pubkey) || self.token_2022.as_ref() == Some(pubkey)
     }
 }
 
-pub fn try_derive_supported_ata_pubkeys(
-    owner: &Pubkey,
-    mint: &Pubkey,
-) -> SupportedAtaPubkeys {
+pub fn try_derive_supported_ata_pubkeys(owner: &Pubkey, mint: &Pubkey) -> SupportedAtaPubkeys {
     SupportedAtaPubkeys {
-        legacy: try_derive_ata_address_and_bump_with_token_program(
-            owner,
-            mint,
-            &TOKEN_PROGRAM_ID,
-        )
-        .map(|(pubkey, _)| pubkey),
+        legacy: try_derive_ata_address_and_bump_with_token_program(owner, mint, &TOKEN_PROGRAM_ID)
+            .map(|(pubkey, _)| pubkey),
         token_2022: try_derive_ata_address_and_bump_with_token_program(
             owner,
             mint,
@@ -315,11 +274,7 @@ pub fn try_derive_supported_ata_pubkeys(
 /// # Returns
 /// The derived eATA PDA as `Pubkey`.
 pub fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
-    Pubkey::find_program_address(
-        &[owner.as_ref(), mint.as_ref()],
-        &EATA_PROGRAM_ID,
-    )
-    .0
+    Pubkey::find_program_address(&[owner.as_ref(), mint.as_ref()], &EATA_PROGRAM_ID).0
 }
 
 /// Attempts to derive the eATA PDA for the given wallet owner and token mint, returning the address and bump.
@@ -330,14 +285,8 @@ pub fn derive_eata(owner: &Pubkey, mint: &Pubkey) -> Pubkey {
 ///
 /// # Returns
 /// `Option<(Pubkey, u8)>` — `Some((address, bump))` if derivation succeeds, `None` otherwise.
-pub fn try_derive_eata_address_and_bump(
-    owner: &Pubkey,
-    mint: &Pubkey,
-) -> Option<(Pubkey, u8)> {
-    Pubkey::try_find_program_address(
-        &[owner.as_ref(), mint.as_ref()],
-        &EATA_PROGRAM_ID,
-    )
+pub fn try_derive_eata_address_and_bump(owner: &Pubkey, mint: &Pubkey) -> Option<(Pubkey, u8)> {
+    Pubkey::try_find_program_address(&[owner.as_ref(), mint.as_ref()], &EATA_PROGRAM_ID)
 }
 
 // ---------------- ATA inspection helpers ----------------
@@ -383,19 +332,12 @@ pub fn is_ata(
 
     // Seeds per SPL ATA derivation: [wallet_owner, token_program_id, mint]
     let (derived, _bump) = Pubkey::find_program_address(
-        &[
-            wallet_owner.as_ref(),
-            token_program_owner.as_ref(),
-            mint.as_ref(),
-        ],
+        &[wallet_owner.as_ref(), token_program_owner.as_ref(), mint.as_ref()],
         &ASSOCIATED_TOKEN_PROGRAM_ID,
     );
 
     if derived == *account_pubkey {
-        Some(AtaInfo {
-            mint,
-            owner: wallet_owner,
-        })
+        Some(AtaInfo { mint, owner: wallet_owner })
     } else {
         None
     }
@@ -428,12 +370,7 @@ pub fn try_remap_ata_to_eata(
         return None;
     }
 
-    let eata = EphemeralAta {
-        owner,
-        mint,
-        amount,
-        bump,
-    };
+    let eata = EphemeralAta { owner, mint, amount, bump };
 
     Some((eata_pubkey, eata))
 }
@@ -448,25 +385,19 @@ pub fn try_get_magic_ata_info(
     }
 
     let token_program = account.owner();
-    let token_account =
-        parse_token_account_for_magic_ata(token_program, account.data())?;
+    let token_account = parse_token_account_for_magic_ata(token_program, account.data())?;
     if token_account.close_authority != COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         || token_account.is_native.is_some()
     {
         return None;
     }
     // Degenerate default keys never classify as a Magic ATA.
-    if token_account.owner == Pubkey::default()
-        || token_account.mint == Pubkey::default()
-    {
+    if token_account.owner == Pubkey::default() || token_account.mint == Pubkey::default() {
         return None;
     }
 
-    let expected_ata = derive_ata_with_token_program(
-        &token_account.owner,
-        &token_account.mint,
-        token_program,
-    );
+    let expected_ata =
+        derive_ata_with_token_program(&token_account.owner, &token_account.mint, token_program);
     if expected_ata != *pubkey {
         return None;
     }
@@ -481,8 +412,7 @@ pub fn try_get_magic_ata_info(
 }
 
 pub fn is_supported_token_program(token_program: &Pubkey) -> bool {
-    *token_program == TOKEN_PROGRAM_ID
-        || *token_program == TOKEN_2022_PROGRAM_ID
+    *token_program == TOKEN_PROGRAM_ID || *token_program == TOKEN_2022_PROGRAM_ID
 }
 
 fn parse_token_account_for_magic_ata(
@@ -499,9 +429,7 @@ fn parse_token_account_for_magic_ata(
             close_authority: account.close_authority,
         })
     } else if *token_program == TOKEN_2022_PROGRAM_ID {
-        let account = StateWithExtensions::<Token2022Account>::unpack(data)
-            .ok()?
-            .base;
+        let account = StateWithExtensions::<Token2022Account>::unpack(data).ok()?.base;
         Some(TokenAccountCommon {
             mint: account.mint,
             owner: account.owner,
@@ -540,24 +468,14 @@ impl EphemeralAta {
         let amount = u64::from_le_bytes(data.get(64..72)?.try_into().ok()?);
         let bump = match data.len() {
             EPHEMERAL_ATA_LEN => data[72],
-            LEGACY_EPHEMERAL_ATA_LEN => {
-                try_derive_eata_address_and_bump(&owner, &mint)?.1
-            }
+            LEGACY_EPHEMERAL_ATA_LEN => try_derive_eata_address_and_bump(&owner, &mint)?.1,
             _ => return None,
         };
 
-        Some(Self {
-            owner,
-            mint,
-            amount,
-            bump,
-        })
+        Some(Self { owner, mint, amount, bump })
     }
 
-    pub fn project_into_ata_account(
-        &self,
-        ata_account: AccountBuilder,
-    ) -> Option<AccountBuilder> {
+    pub fn project_into_ata_account(&self, ata_account: AccountBuilder) -> Option<AccountBuilder> {
         let token_program_owner = ata_account.read().owner();
         let is_spl_token = token_program_owner == TOKEN_PROGRAM_ID;
         let is_token_2022 = token_program_owner == TOKEN_2022_PROGRAM_ID;
@@ -569,17 +487,13 @@ impl EphemeralAta {
         if data.len() < 72 {
             return None;
         }
-        if &data[0..32] != self.mint.as_ref()
-            || &data[32..64] != self.owner.as_ref()
-        {
+        if &data[0..32] != self.mint.as_ref() || &data[32..64] != self.owner.as_ref() {
             return None;
         }
 
         let mut data = data.to_vec();
         data[64..72].copy_from_slice(&self.amount.to_le_bytes());
-        normalize_projected_token_account_for_local_clone(
-            ata_account.data(data),
-        )
+        normalize_projected_token_account_for_local_clone(ata_account.data(data))
     }
 }
 
@@ -615,8 +529,7 @@ mod tests {
         let mint = Pubkey::new_unique();
         let close_authority = Pubkey::new_unique();
         let amount = 100_000_000;
-        let rent_exempt_reserve =
-            Rent::default().minimum_balance(SplAccount::LEN);
+        let rent_exempt_reserve = Rent::default().minimum_balance(SplAccount::LEN);
         let token_account = SplAccount {
             mint,
             owner: wallet_owner,
@@ -645,14 +558,11 @@ mod tests {
             bump: 0,
         };
 
-        let projected = eata
-            .project_into_ata_account(base_ata)
-            .expect("ATA should project");
+        let projected = eata.project_into_ata_account(base_ata).expect("ATA should project");
         let projected = projected.read();
         assert_eq!(projected.lamports(), rent_exempt_reserve);
 
-        let projected_token =
-            SplAccount::unpack(projected.data()).expect("unpack projected");
+        let projected_token = SplAccount::unpack(projected.data()).expect("unpack projected");
         assert_eq!(projected_token.amount, amount);
         assert_eq!(projected_token.is_native, COption::None);
         assert_eq!(
@@ -666,8 +576,7 @@ mod tests {
         let wallet_owner = Pubkey::new_unique();
         let mint = spl_token::native_mint::id();
         let amount = 100_000_000;
-        let rent_exempt_reserve =
-            Rent::default().minimum_balance(SplAccount::LEN);
+        let rent_exempt_reserve = Rent::default().minimum_balance(SplAccount::LEN);
         let token_account = SplAccount {
             mint,
             owner: wallet_owner,
@@ -696,14 +605,11 @@ mod tests {
             bump: 0,
         };
 
-        let projected = eata
-            .project_into_ata_account(base_ata)
-            .expect("native ATA should project");
+        let projected = eata.project_into_ata_account(base_ata).expect("native ATA should project");
         let projected = projected.read();
         assert_eq!(projected.lamports(), rent_exempt_reserve);
 
-        let projected_token =
-            SplAccount::unpack(projected.data()).expect("unpack projected");
+        let projected_token = SplAccount::unpack(projected.data()).expect("unpack projected");
         assert_eq!(projected_token.amount, amount);
         assert_eq!(projected_token.is_native, COption::None);
         assert_eq!(
@@ -718,8 +624,7 @@ mod tests {
         let mint = Pubkey::new_unique();
         let close_authority = Pubkey::new_unique();
         let amount = 100_000_000;
-        let rent_exempt_reserve =
-            Rent::default().minimum_balance(Token2022Account::LEN);
+        let rent_exempt_reserve = Rent::default().minimum_balance(Token2022Account::LEN);
         let token_account = Token2022Account {
             mint,
             owner: wallet_owner,
@@ -748,16 +653,15 @@ mod tests {
             bump: 0,
         };
 
-        let projected = eata
-            .project_into_ata_account(base_ata)
-            .expect("Token-2022 ATA should project");
+        let projected =
+            eata.project_into_ata_account(base_ata).expect("Token-2022 ATA should project");
         let projected = projected.read();
         assert_eq!(projected.owner(), TOKEN_2022_PROGRAM_ID);
         assert_eq!(projected.lamports(), rent_exempt_reserve);
         assert_eq!(projected.data().len(), Token2022Account::LEN);
 
-        let projected_token = Token2022Account::unpack(projected.data())
-            .expect("unpack projected Token-2022 ATA");
+        let projected_token =
+            Token2022Account::unpack(projected.data()).expect("unpack projected Token-2022 ATA");
         assert_eq!(projected_token.amount, amount);
         assert_eq!(projected_token.is_native, COption::None);
         assert_eq!(
@@ -791,12 +695,9 @@ mod tests {
             executable: false,
             ..Default::default()
         });
-        let account = AccountBuilder::from(account)
-            .mode(AccountMode::Magic)
-            .build();
+        let account = AccountBuilder::from(account).mode(AccountMode::Magic).build();
 
-        let info = try_get_magic_ata_info(&ata, &account)
-            .expect("Magic ATA should be detected");
+        let info = try_get_magic_ata_info(&ata, &account).expect("Magic ATA should be detected");
         assert_eq!(info.ata_pubkey, ata);
         assert_eq!(info.token_program, TOKEN_PROGRAM_ID);
         assert_eq!(info.wallet_owner, wallet_owner);
@@ -804,14 +705,10 @@ mod tests {
         assert_eq!(info.amount, 9);
 
         let mut default_close_authority = account.clone();
-        let mut token =
-            SplAccount::unpack(default_close_authority.data()).unwrap();
+        let mut token = SplAccount::unpack(default_close_authority.data()).unwrap();
         token.close_authority = COption::Some(Pubkey::default());
-        SplAccount::pack(token, default_close_authority.data_as_mut_slice())
-            .unwrap();
-        assert!(
-            try_get_magic_ata_info(&ata, &default_close_authority).is_none()
-        );
+        SplAccount::pack(token, default_close_authority.data_as_mut_slice()).unwrap();
+        assert!(try_get_magic_ata_info(&ata, &default_close_authority).is_none());
 
         for mode in [
             AccountMode::Uninit,
@@ -821,8 +718,7 @@ mod tests {
             AccountMode::Transient,
             AccountMode::Closed,
         ] {
-            let other_mode =
-                AccountBuilder::from(account.clone()).mode(mode).build();
+            let other_mode = AccountBuilder::from(account.clone()).mode(mode).build();
             assert!(try_get_magic_ata_info(&ata, &other_mode).is_none());
         }
 
@@ -863,9 +759,7 @@ mod tests {
                 executable: false,
                 ..Default::default()
             });
-            let account = AccountBuilder::from(account)
-                .mode(AccountMode::Magic)
-                .build();
+            let account = AccountBuilder::from(account).mode(AccountMode::Magic).build();
 
             assert!(try_get_magic_ata_info(&ata, &account).is_none());
         }

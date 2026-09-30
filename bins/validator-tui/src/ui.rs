@@ -8,8 +8,8 @@ use ratatui::{
 use tracing::Level;
 
 use crate::state::{
-    MAX_DETAIL_ACCOUNTS, Tab, TransactionAccount, TransactionDetail,
-    TransactionSource, TuiState, ViewMode,
+    MAX_DETAIL_ACCOUNTS, Tab, TransactionAccount, TransactionDetail, TransactionSource, TuiState,
+    ViewMode,
 };
 
 const CYAN: Color = Color::Cyan;
@@ -27,7 +27,7 @@ pub(crate) struct DetailPopupViewport {
     pub max_scroll: usize,
 }
 
-pub fn render(frame: &mut Frame, state: &TuiState) {
+pub(crate) fn render(frame: &mut Frame<'_>, state: &TuiState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -48,7 +48,7 @@ pub fn render(frame: &mut Frame, state: &TuiState) {
     }
 }
 
-fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_header(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(CYAN))
@@ -65,11 +65,7 @@ fn render_header(frame: &mut Frame, area: Rect, state: &TuiState) {
         .split(inner);
 
     let tick_count = (chunks[0].width.saturating_sub(2)) as usize;
-    let filled_ticks = if tick_count > 0 {
-        (state.slot as usize) % tick_count
-    } else {
-        0
-    };
+    let filled_ticks = if tick_count > 0 { (state.slot as usize) % tick_count } else { 0 };
     let tick_bar = render_tick_bar(filled_ticks, tick_count);
     let progress = Paragraph::new(tick_bar);
     frame.render_widget(progress, chunks[0]);
@@ -100,14 +96,10 @@ fn render_tick_bar(filled: usize, total: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_tabs(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     let local_tx_count = state.transaction_count(TransactionSource::Local);
-    let local_filtered_tx_count =
-        state.filtered_transactions_len_for(TransactionSource::Local);
-    let tx_title = if state
-        .tx_filter_query_for(TransactionSource::Local)
-        .is_empty()
-    {
+    let local_filtered_tx_count = state.filtered_transactions_len_for(TransactionSource::Local);
+    let tx_title = if state.tx_filter_query_for(TransactionSource::Local).is_empty() {
         format!("Transactions ({})", local_tx_count)
     } else {
         format!(
@@ -116,14 +108,10 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
         )
     };
     let remote_tx_title = if state.has_remote_transactions() {
-        let remote_tx_count =
-            state.transaction_count(TransactionSource::Remote);
+        let remote_tx_count = state.transaction_count(TransactionSource::Remote);
         let remote_filtered_tx_count =
             state.filtered_transactions_len_for(TransactionSource::Remote);
-        if state
-            .tx_filter_query_for(TransactionSource::Remote)
-            .is_empty()
-        {
+        if state.tx_filter_query_for(TransactionSource::Remote).is_empty() {
             format!("Remote Transactions ({})", remote_tx_count)
         } else {
             format!(
@@ -155,26 +143,22 @@ fn render_tabs(frame: &mut Frame, area: Rect, state: &TuiState) {
         .block(Block::default().borders(Borders::BOTTOM))
         .select(selected)
         .style(Style::default().fg(DARK_GRAY))
-        .highlight_style(
-            Style::default().fg(WHITE).add_modifier(Modifier::BOLD),
-        )
+        .highlight_style(Style::default().fg(WHITE).add_modifier(Modifier::BOLD))
         .divider("│");
 
     frame.render_widget(tabs, area);
 }
 
-fn render_content(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_content(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     match state.active_tab {
         Tab::Logs => render_logs(frame, area, state),
-        Tab::Transactions | Tab::RemoteTransactions => {
-            render_transactions(frame, area, state)
-        }
+        Tab::Transactions | Tab::RemoteTransactions => render_transactions(frame, area, state),
         Tab::Config => render_config(frame, area, state),
     }
 }
 
-fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
-    let lines: Vec<Line> = state
+fn render_logs(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
+    let lines: Vec<Line<'_>> = state
         .logs
         .iter()
         .map(|log| {
@@ -188,16 +172,10 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
             };
 
             Line::from(vec![
-                Span::styled(
-                    format!("{} ", timestamp),
-                    Style::default().fg(DARK_GRAY),
-                ),
+                Span::styled(format!("{} ", timestamp), Style::default().fg(DARK_GRAY)),
                 Span::styled("●", Style::default().fg(level_color)),
                 Span::raw(" "),
-                Span::styled(
-                    format!("{}: ", log.target),
-                    Style::default().fg(DARK_GRAY),
-                ),
+                Span::styled(format!("{}: ", log.target), Style::default().fg(DARK_GRAY)),
                 Span::raw(&log.message),
             ])
         })
@@ -210,7 +188,7 @@ fn render_logs(frame: &mut Frame, area: Rect, state: &TuiState) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_transactions(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     let tx_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Length(1), Constraint::Min(0)])
@@ -221,11 +199,7 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
     } else {
         state.tx_filter_query()
     };
-    let filter_color = if state.tx_filter_query().is_empty() {
-        DARK_GRAY
-    } else {
-        CYAN
-    };
+    let filter_color = if state.tx_filter_query().is_empty() { DARK_GRAY } else { CYAN };
     let filter_line = Line::from(vec![
         Span::styled("Filter: ", Style::default().fg(DARK_GRAY)),
         Span::styled(filter_text, Style::default().fg(filter_color)),
@@ -235,7 +209,7 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
     let visible_count = tx_chunks[1].height.saturating_sub(1) as usize;
     let filtered_transactions = state.filtered_transactions();
 
-    let items: Vec<ListItem> = if filtered_transactions.is_empty() {
+    let items: Vec<ListItem<'_>> = if filtered_transactions.is_empty() {
         vec![ListItem::new(Line::from(Span::styled(
             "No transactions match the current filter",
             Style::default().fg(DARK_GRAY),
@@ -248,8 +222,7 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
             .take(visible_count)
             .map(|(idx, tx)| {
                 let timestamp = tx.timestamp.format("%H:%M:%S%.3f");
-                let status_color =
-                    if tx.success { Color::Green } else { Color::Red };
+                let status_color = if tx.success { Color::Green } else { Color::Red };
                 let status_char = if tx.success { "✓" } else { "✗" };
                 let is_selected = idx == state.active_transaction_selected();
 
@@ -260,32 +233,17 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
                     ),
                     Span::styled(
                         format!("{} ", timestamp),
-                        Style::default().fg(if is_selected {
-                            WHITE
-                        } else {
-                            DARK_GRAY
-                        }),
+                        Style::default().fg(if is_selected { WHITE } else { DARK_GRAY }),
                     ),
-                    Span::styled(
-                        status_char,
-                        Style::default().fg(status_color),
-                    ),
+                    Span::styled(status_char, Style::default().fg(status_color)),
                     Span::raw(" "),
                     Span::styled(
                         format!("Slot {} ", tx.slot),
-                        Style::default().fg(if is_selected {
-                            WHITE
-                        } else {
-                            DARK_GRAY
-                        }),
+                        Style::default().fg(if is_selected { WHITE } else { DARK_GRAY }),
                     ),
                     Span::styled(
                         &tx.signature,
-                        Style::default().fg(if is_selected {
-                            CYAN
-                        } else {
-                            WHITE
-                        }),
+                        Style::default().fg(if is_selected { CYAN } else { WHITE }),
                     ),
                 ]);
 
@@ -304,7 +262,7 @@ fn render_transactions(frame: &mut Frame, area: Rect, state: &TuiState) {
     frame.render_widget(list, tx_chunks[1]);
 }
 
-fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_config(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     let config = &state.config;
 
     let config_lines = vec![
@@ -332,10 +290,7 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
         Line::from(""),
         Line::from(vec![
             Span::styled("Validator ID:      ", Style::default().fg(DARK_GRAY)),
-            Span::styled(
-                &config.validator_identity,
-                Style::default().fg(WHITE),
-            ),
+            Span::styled(&config.validator_identity, Style::default().fg(WHITE)),
         ]),
         Line::from(vec![
             Span::styled("Ledger Path:       ", Style::default().fg(DARK_GRAY)),
@@ -348,12 +303,11 @@ fn render_config(frame: &mut Frame, area: Rect, state: &TuiState) {
         ]),
     ];
 
-    let paragraph = Paragraph::new(config_lines)
-        .block(Block::default().borders(Borders::NONE));
+    let paragraph = Paragraph::new(config_lines).block(Block::default().borders(Borders::NONE));
     frame.render_widget(paragraph, area);
 }
 
-fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
+fn render_footer(frame: &mut Frame<'_>, area: Rect, state: &TuiState) {
     let chunks = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
@@ -405,7 +359,7 @@ fn render_footer(frame: &mut Frame, area: Rect, state: &TuiState) {
     frame.render_widget(help, chunks[1]);
 }
 
-fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
+fn render_tx_detail_popup(frame: &mut Frame<'_>, state: &TuiState) {
     let Some(detail) = &state.tx_detail else {
         return;
     };
@@ -425,17 +379,13 @@ fn render_tx_detail_popup(frame: &mut Frame, state: &TuiState) {
         .border_style(Style::default().fg(CYAN))
         .style(Style::default().bg(Color::Rgb(20, 20, 30)));
 
-    let paragraph =
-        Paragraph::new(build_tx_detail_lines(detail, viewport.inner_width))
-            .block(block)
-            .wrap(Wrap { trim: false })
-            .scroll((
-                detail
-                    .detail_scroll
-                    .min(viewport.max_scroll)
-                    .min(u16::MAX as usize) as u16,
-                0,
-            ));
+    let paragraph = Paragraph::new(build_tx_detail_lines(detail, viewport.inner_width))
+        .block(block)
+        .wrap(Wrap { trim: false })
+        .scroll((
+            detail.detail_scroll.min(viewport.max_scroll).min(u16::MAX as usize) as u16,
+            0,
+        ));
     frame.render_widget(paragraph, viewport.popup_area);
 }
 
@@ -444,28 +394,16 @@ pub(crate) fn detail_popup_viewport_for_terminal(
     terminal_width: u16,
     terminal_height: u16,
 ) -> Option<DetailPopupViewport> {
-    detail_popup_viewport(
-        detail,
-        Rect::new(0, 0, terminal_width, terminal_height),
-    )
+    detail_popup_viewport(detail, Rect::new(0, 0, terminal_width, terminal_height))
 }
 
-fn detail_popup_viewport(
-    detail: &TransactionDetail,
-    area: Rect,
-) -> Option<DetailPopupViewport> {
-    if area.width < MIN_DETAIL_POPUP_WIDTH
-        || area.height < MIN_DETAIL_POPUP_HEIGHT
-    {
+fn detail_popup_viewport(detail: &TransactionDetail, area: Rect) -> Option<DetailPopupViewport> {
+    if area.width < MIN_DETAIL_POPUP_WIDTH || area.height < MIN_DETAIL_POPUP_HEIGHT {
         return None;
     }
 
-    let popup_width = ((area.width * 80) / 100)
-        .max(MIN_DETAIL_POPUP_WIDTH)
-        .min(area.width);
-    let popup_height = ((area.height * 80) / 100)
-        .max(MIN_DETAIL_POPUP_HEIGHT)
-        .min(area.height);
+    let popup_width = ((area.width * 80) / 100).max(MIN_DETAIL_POPUP_WIDTH).min(area.width);
+    let popup_height = ((area.height * 80) / 100).max(MIN_DETAIL_POPUP_HEIGHT).min(area.height);
     let popup_x = area.width.saturating_sub(popup_width) / 2;
     let popup_y = area.height.saturating_sub(popup_height) / 2;
     let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
@@ -482,24 +420,13 @@ fn detail_popup_viewport(
     })
 }
 
-fn build_tx_detail_lines(
-    detail: &TransactionDetail,
-    inner_width: usize,
-) -> Vec<Line<'static>> {
-    let status_color = if detail.success {
-        Color::Green
-    } else {
-        Color::Red
-    };
+fn build_tx_detail_lines(detail: &TransactionDetail, inner_width: usize) -> Vec<Line<'static>> {
+    let status_color = if detail.success { Color::Green } else { Color::Red };
     let status_text = if detail.success { "Success" } else { "Failed" };
     let label_style = Style::default().fg(DARK_GRAY);
 
     let mut lines = vec![
-        detail_field_line(
-            "Signature: ",
-            &detail.signature,
-            Style::default().fg(CYAN),
-        ),
+        detail_field_line("Signature: ", &detail.signature, Style::default().fg(CYAN)),
         Line::from(""),
         detail_field_line(
             "Slot:      ",
@@ -529,24 +456,16 @@ fn build_tx_detail_lines(
     lines.push(Line::from(""));
     let explorer_selected = detail.selected_account.is_none();
     let explorer_style = if explorer_selected {
-        Style::default()
-            .fg(CYAN)
-            .add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
+        Style::default().fg(CYAN).add_modifier(Modifier::BOLD | Modifier::UNDERLINED)
     } else {
-        Style::default()
-            .fg(Color::Blue)
-            .add_modifier(Modifier::UNDERLINED)
+        Style::default().fg(Color::Blue).add_modifier(Modifier::UNDERLINED)
     };
-    let explorer_prefix =
-        if explorer_selected { "▶ " } else { "  " }.to_string();
+    let explorer_prefix = if explorer_selected { "▶ " } else { "  " }.to_string();
     let explorer_label = "Explorer:  ".to_string();
     lines.push(Line::from(vec![
         Span::styled(explorer_prefix, Style::default().fg(CYAN)),
         Span::styled(explorer_label, label_style),
-        Span::styled(
-            compact_explorer_url(&detail.explorer_url),
-            explorer_style,
-        ),
+        Span::styled(compact_explorer_url(&detail.explorer_url), explorer_style),
     ]));
 
     if let Some(err) = &detail.error {
@@ -564,9 +483,7 @@ fn build_tx_detail_lines(
             "Accounts:",
             Style::default().fg(DARK_GRAY).add_modifier(Modifier::BOLD),
         )));
-        for (i, acc) in
-            detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate()
-        {
+        for (i, acc) in detail.accounts.iter().take(MAX_DETAIL_ACCOUNTS).enumerate() {
             lines.push(detail_account_line(
                 i,
                 acc,
@@ -602,27 +519,16 @@ fn build_tx_detail_lines(
     lines
 }
 
-fn detail_scroll_max(
-    lines: &[Line<'_>],
-    inner_width: usize,
-    inner_height: usize,
-) -> usize {
+fn detail_scroll_max(lines: &[Line<'_>], inner_width: usize, inner_height: usize) -> usize {
     total_wrapped_height(lines, inner_width).saturating_sub(inner_height.max(1))
 }
 
 fn total_wrapped_height(lines: &[Line<'_>], inner_width: usize) -> usize {
-    lines
-        .iter()
-        .map(|line| wrapped_line_height(line, inner_width))
-        .sum()
+    lines.iter().map(|line| wrapped_line_height(line, inner_width)).sum()
 }
 
 fn wrapped_line_height(line: &Line<'_>, inner_width: usize) -> usize {
-    let text = line
-        .spans
-        .iter()
-        .map(|span| span.content.as_ref())
-        .collect::<String>();
+    let text = line.spans.iter().map(|span| span.content.as_ref()).collect::<String>();
     wrapped_text_height(&text, inner_width)
 }
 
@@ -636,11 +542,7 @@ fn wrapped_text_height(text: &str, inner_width: usize) -> usize {
         .sum()
 }
 
-fn detail_field_line(
-    label: &str,
-    value: &str,
-    value_style: Style,
-) -> Line<'static> {
+fn detail_field_line(label: &str, value: &str, value_style: Style) -> Line<'static> {
     Line::from(vec![
         Span::styled(label.to_string(), Style::default().fg(DARK_GRAY)),
         Span::styled(sanitize_inline(value), value_style),
@@ -688,10 +590,7 @@ fn detail_account_line(
         Span::styled(prefix, prefix_style),
         Span::styled(pubkey, pubkey_style),
         Span::raw("  "),
-        Span::styled(
-            if account.is_signer { "S" } else { " " },
-            active_flag_style,
-        ),
+        Span::styled(if account.is_signer { "S" } else { " " }, active_flag_style),
         Span::raw(" "),
         Span::styled(
             if account.is_writable { "W" } else { " " },
@@ -718,10 +617,7 @@ fn sanitize_inline(value: &str) -> String {
 
 fn compact_explorer_url(url: &str) -> String {
     let sanitized = sanitize_inline(url);
-    let visible = sanitized
-        .split_once('?')
-        .map(|(base, _)| base)
-        .unwrap_or(&sanitized);
+    let visible = sanitized.split_once('?').map(|(base, _)| base).unwrap_or(&sanitized);
 
     match visible.rsplit_once('/') {
         Some((prefix, tail)) if tail.chars().count() > 16 => format!(
@@ -769,8 +665,8 @@ fn truncate_with_ellipsis(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        compact_explorer_url, detail_account_line,
-        detail_popup_viewport_for_terminal, truncate_with_ellipsis,
+        compact_explorer_url, detail_account_line, detail_popup_viewport_for_terminal,
+        truncate_with_ellipsis,
     };
     use crate::state::{TransactionAccount, TransactionDetail};
 
@@ -809,11 +705,7 @@ mod tests {
     #[test]
     fn detail_account_line_aligns_signer_and_writable_markers() {
         let short = TransactionAccount::new("short", true, true);
-        let long = TransactionAccount::new(
-            "11111111111111111111111111111111",
-            true,
-            true,
-        );
+        let long = TransactionAccount::new("11111111111111111111111111111111", true, true);
 
         let short_line: String = detail_account_line(0, &short, false, 48)
             .spans
@@ -847,8 +739,7 @@ mod tests {
             detail_scroll: 0,
         };
 
-        let viewport =
-            detail_popup_viewport_for_terminal(&detail, 120, 19).unwrap();
+        let viewport = detail_popup_viewport_for_terminal(&detail, 120, 19).unwrap();
 
         assert!(viewport.max_scroll > 0);
     }

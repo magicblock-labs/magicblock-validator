@@ -7,7 +7,7 @@ use std::{
 use hyper::{
     Response, StatusCode,
     body::{Body, Bytes, Frame, SizeHint},
-    header::CONTENT_TYPE,
+    header::{CONTENT_TYPE, HeaderValue},
 };
 use json::{Serialize, Value};
 use magicblock_core::Slot;
@@ -37,9 +37,7 @@ impl Body for JsonBody {
         if self.0.is_empty() {
             Poll::Ready(None)
         } else {
-            Poll::Ready(Some(Ok(Frame::data(
-                std::mem::take(&mut self.0).into(),
-            ))))
+            Poll::Ready(Some(Ok(Frame::data(std::mem::take(&mut self.0).into()))))
         }
     }
 }
@@ -104,15 +102,8 @@ impl<T: Serialize> NotificationPayload<PayloadResult<T>> {
     ) -> Option<Bytes> {
         let context = PayloadContext { slot };
         let result = PayloadResult { value, context };
-        let params = NotificationParams {
-            result,
-            subscription,
-        };
-        let notification = Self {
-            jsonrpc: "2.0",
-            method,
-            params,
-        };
+        let params = NotificationParams { result, subscription };
+        let notification = Self { jsonrpc: "2.0", method, params };
         json::to_vec(&notification).ok().map(Bytes::from)
     }
 }
@@ -125,31 +116,17 @@ impl<T: Serialize> NotificationPayload<T> {
         method: &'static str,
         subscription: SubscriptionID,
     ) -> Option<Bytes> {
-        let params = NotificationParams {
-            result,
-            subscription,
-        };
-        let notification = Self {
-            jsonrpc: "2.0",
-            method,
-            params,
-        };
+        let params = NotificationParams { result, subscription };
+        let notification = Self { jsonrpc: "2.0", method, params };
         json::to_vec(&notification).ok().map(Bytes::from)
     }
 }
 
 impl<'id> ResponseErrorPayload<'id> {
     /// Constructs an HTTP response for a JSON-RPC error.
-    pub(crate) fn encode(
-        id: Option<&'id Value>,
-        error: RpcError,
-    ) -> Response<JsonBody> {
+    pub(crate) fn encode(id: Option<&'id Value>, error: RpcError) -> Response<JsonBody> {
         let http_status = error.http_status();
-        let payload = Self {
-            jsonrpc: "2.0",
-            error,
-            id,
-        };
+        let payload = Self { jsonrpc: "2.0", error, id };
         let mut response = build_json_response(payload);
         if http_status != 200
             && let Ok(status) = StatusCode::from_u16(http_status)
@@ -162,52 +139,33 @@ impl<'id> ResponseErrorPayload<'id> {
 
 impl<'id, T: Serialize> ResponsePayload<'id, PayloadResult<T>> {
     /// Constructs an HTTP response for a successful result with a `context` object.
-    pub(crate) fn encode(
-        id: &'id Value,
-        value: T,
-        slot: Slot,
-    ) -> Response<JsonBody> {
+    pub(crate) fn encode(id: &'id Value, value: T, slot: Slot) -> Response<JsonBody> {
         let context = PayloadContext { slot };
         let result = PayloadResult { value, context };
-        let payload = Self {
-            jsonrpc: "2.0",
-            id,
-            result,
-        };
+        let payload = Self { jsonrpc: "2.0", id, result };
         build_json_response(payload)
     }
 }
 
 impl<'id, T: Serialize> ResponsePayload<'id, T> {
     /// Constructs an HTTP response for a successful result without a `context` object.
-    pub(crate) fn encode_no_context(
-        id: &'id Value,
-        result: T,
-    ) -> Response<JsonBody> {
-        let payload = Self {
-            jsonrpc: "2.0",
-            id,
-            result,
-        };
+    pub(crate) fn encode_no_context(id: &'id Value, result: T) -> Response<JsonBody> {
+        let payload = Self { jsonrpc: "2.0", id, result };
         build_json_response(payload)
     }
 
     /// Serializes a payload into a `JsonBody` without the HTTP wrapper.
     pub(crate) fn encode_no_context_raw(id: &'id Value, result: T) -> JsonBody {
-        let payload = Self {
-            jsonrpc: "2.0",
-            id,
-            result,
-        };
+        let payload = Self { jsonrpc: "2.0", id, result };
         JsonBody::from(payload)
     }
 }
 
 /// Builds a standard `200 OK` JSON HTTP response with appropriate headers.
 fn build_json_response<T: Serialize>(payload: T) -> Response<JsonBody> {
-    Response::builder()
-        .header(CONTENT_TYPE, "application/json")
-        .body(JsonBody::from(payload))
-        // SAFETY: Safe with static values
-        .expect("Building JSON response failed")
+    let mut response = Response::new(JsonBody::from(payload));
+    response
+        .headers_mut()
+        .insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    response
 }

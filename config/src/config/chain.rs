@@ -53,9 +53,7 @@ impl Default for ChainLinkConfig {
     fn default() -> Self {
         Self {
             allowed_programs: None,
-            resubscription_delay: Duration::from_millis(
-                consts::DEFAULT_RESUBSCRIPTION_DELAY_MS,
-            ),
+            resubscription_delay: Duration::from_millis(consts::DEFAULT_RESUBSCRIPTION_DELAY_MS),
             undelegation_request_poll_interval: Duration::from_secs(
                 consts::DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS,
             ),
@@ -67,9 +65,7 @@ impl Default for ChainLinkConfig {
 
 /// Strategy for deciding which post-delegation action signers get AML/risk
 /// checked.
-#[derive(
-    Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default,
-)]
+#[derive(Deserialize, Serialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum AmlCheckStrategy {
     /// Check every signer of every post-delegation action, regardless of which
@@ -106,9 +102,7 @@ impl Default for RiskConfig {
         Self {
             enabled: false,
             risk_server_url: consts::DEFAULT_RISK_SERVER_URL.to_string(),
-            request_timeout: Duration::from_secs(
-                consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC,
-            ),
+            request_timeout: Duration::from_secs(consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC),
             check_strategy: AmlCheckStrategy::default(),
         }
     }

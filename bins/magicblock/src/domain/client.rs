@@ -26,11 +26,7 @@ impl Client {
         ))
     }
 
-    pub(super) async fn register(
-        &self,
-        payer: &Keypair,
-        record: ErRecord,
-    ) -> Result<()> {
+    pub(super) async fn register(&self, payer: &Keypair, record: ErRecord) -> Result<()> {
         self.send(
             payer,
             record.pda().0,
@@ -40,11 +36,7 @@ impl Client {
         .context("failed to register domain record")
     }
 
-    pub(super) async fn sync(
-        &self,
-        payer: &Keypair,
-        record: &ErRecord,
-    ) -> Result<()> {
+    pub(super) async fn sync(&self, payer: &Keypair, record: &ErRecord) -> Result<()> {
         let update = SyncRecordV0 {
             identity: *record.identity(),
             status: Some(record.status()),
@@ -92,8 +84,7 @@ impl Client {
         response
             .value
             .map(|account| {
-                ErRecord::deserialize(&mut account.data())
-                    .context("failed to decode domain record")
+                ErRecord::deserialize(&mut account.data()).context("failed to decode domain record")
             })
             .transpose()
     }
@@ -109,13 +100,9 @@ impl Client {
             AccountMeta::new(pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ];
-        let instruction =
-            Instruction::new_with_borsh(ID, &instruction, accounts);
-        let blockhash = self
-            .0
-            .get_latest_blockhash()
-            .await
-            .context("failed to get latest blockhash")?;
+        let instruction = Instruction::new_with_borsh(ID, &instruction, accounts);
+        let blockhash =
+            self.0.get_latest_blockhash().await.context("failed to get latest blockhash")?;
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
             Some(&payer.pubkey()),

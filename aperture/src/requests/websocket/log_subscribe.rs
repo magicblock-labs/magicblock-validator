@@ -13,10 +13,7 @@ struct LogsValue {
 }
 
 impl WsDispatcher {
-    pub(crate) async fn logs_subscribe(
-        &mut self,
-        request: &JsonRequest,
-    ) -> RpcResult<SubResult> {
+    pub(crate) async fn logs_subscribe(&mut self, request: &JsonRequest) -> RpcResult<SubResult> {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]
         enum LogFilter {
@@ -48,12 +45,8 @@ impl WsDispatcher {
                     err: logs.result.as_ref().err().cloned(),
                     logs: logs.logs.as_ref().clone(),
                 };
-                let Some(bytes) = NotificationPayload::encode(
-                    value,
-                    slot,
-                    "logsNotification",
-                    id,
-                ) else {
+                let Some(bytes) = NotificationPayload::encode(value, slot, "logsNotification", id)
+                else {
                     continue;
                 };
                 if tx.send(bytes).await.is_err() {

@@ -14,23 +14,18 @@ use crate::{
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
-        MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits,
-        check_magic_context_id, get_clock, get_parent_program_id,
-        try_get_fee_vault,
+        MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits, check_magic_context_id, get_clock,
+        get_parent_program_id, try_get_fee_vault,
     },
     utils::{
-        account_actions::{
-            charge_delegated_payer, mark_account_as_undelegated,
-        },
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
+        account_actions::{charge_delegated_payer, mark_account_as_undelegated},
+        accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     },
 };
 
 pub(crate) fn process_schedule_intent_bundle(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     args: MagicIntentBundleArgs,
     secure: bool,
 ) -> Result<(), InstructionError> {
@@ -51,8 +46,7 @@ pub(crate) fn process_schedule_intent_bundle(
             return Err(InstructionError::UnsupportedProgramId);
         }
 
-        let payer_pubkey =
-            *get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+        let payer_pubkey = *get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
         if !signers.contains(&payer_pubkey) {
             ic_msg!(
                 invoke_context,
@@ -62,12 +56,8 @@ pub(crate) fn process_schedule_intent_bundle(
             return Err(InstructionError::MissingRequiredSignature);
         }
 
-        let context_acc = get_instruction_account_with_idx(
-            transaction_context,
-            MAGIC_CONTEXT_IDX,
-        )?;
-        let context = MagicContext::deserialize(context_acc.borrow()?.data())
-            .map_err(|err| {
+        let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
+        let context = MagicContext::deserialize(context_acc.borrow()?.data()).map_err(|err| {
             ic_msg!(
                 invoke_context,
                 "Failed to deserialize MagicContext: {}",
@@ -84,12 +74,8 @@ pub(crate) fn process_schedule_intent_bundle(
 
     // Determine id and slot
     let (undelegated_pubkeys, scheduled_intent) = {
-        let mut construction_context = ConstructionContext::new(
-            parent_program_id,
-            &signers,
-            invoke_context,
-            secure,
-        );
+        let mut construction_context =
+            ConstructionContext::new(parent_program_id, &signers, invoke_context, secure);
 
         // Collect all undelegated account indices.
         let undelegated_account_indices: Vec<u8> = [
@@ -114,18 +100,12 @@ pub(crate) fn process_schedule_intent_bundle(
         // Change owner to dlp and set undelegating flag.
         // Once account is undelegated we need to make it immutable in our validator.
         let transaction_context = construction_context.transaction_context();
-        let undelegated_accounts_ref = extract_commit_accounts(
-            &undelegated_account_indices,
-            transaction_context,
-        )?;
-        let mut undelegated_pubkeys =
-            Vec::with_capacity(undelegated_accounts_ref.len());
+        let undelegated_accounts_ref =
+            extract_commit_accounts(&undelegated_account_indices, transaction_context)?;
+        let mut undelegated_pubkeys = Vec::with_capacity(undelegated_accounts_ref.len());
         for (pubkey, account_ref) in undelegated_accounts_ref.iter() {
             undelegated_pubkeys.push(pubkey.to_string());
-            mark_account_as_undelegated(
-                construction_context.invoke_context,
-                account_ref,
-            )?;
+            mark_account_as_undelegated(construction_context.invoke_context, account_ref)?;
         }
 
         (undelegated_pubkeys, scheduled_intent)
@@ -139,8 +119,7 @@ pub(crate) fn process_schedule_intent_bundle(
     }
 
     let transaction_context = &*invoke_context.transaction_context;
-    let payer_account =
-        get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+    let payer_account = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
     let magic_fee_vault = try_get_fee_vault(
         transaction_context,
         invoke_context,
@@ -153,19 +132,14 @@ pub(crate) fn process_schedule_intent_bundle(
         let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
         let fee = scheduled_intent.calculate_fee(&nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
-    } else if let Some(commit_accounts) =
-        scheduled_intent.get_commit_intent_accounts()
-    {
+    } else if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts() {
         check_commit_limits(commit_accounts, invoke_context)?;
     }
 
     let sent_signature = scheduled_intent.sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
+    let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);

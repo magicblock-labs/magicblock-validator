@@ -16,11 +16,7 @@ pub(crate) enum BlockRange {
 }
 
 impl HttpDispatcher {
-    pub(crate) fn get_blocks(
-        &self,
-        request: &JsonRequest,
-        range: BlockRange,
-    ) -> HandlerResult {
+    pub(crate) fn get_blocks(&self, request: &JsonRequest, range: BlockRange) -> HandlerResult {
         let start = request.required::<Slot>(0)?;
         let latest = self.engine.blocks().latest().slot;
         let slots: Vec<Slot> = match range {
@@ -39,8 +35,7 @@ impl HttpDispatcher {
             }
             BlockRange::Limit => {
                 let limit = request.required::<Slot>(1)?.min(MAX_BLOCKS);
-                let end =
-                    start.saturating_add(limit).min(latest.saturating_add(1));
+                let end = start.saturating_add(limit).min(latest.saturating_add(1));
                 (start..end).collect()
             }
         };

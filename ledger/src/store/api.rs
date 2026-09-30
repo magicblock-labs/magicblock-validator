@@ -18,9 +18,8 @@ use solana_signature::Signature;
 use solana_storage_proto::convert::generated;
 use solana_transaction::versioned::VersionedTransaction;
 use solana_transaction_status::{
-    ConfirmedTransactionStatusWithSignature,
-    ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
-    TransactionWithStatusMeta, VersionedConfirmedBlock,
+    ConfirmedTransactionStatusWithSignature, ConfirmedTransactionWithStatusMeta,
+    TransactionStatusMeta, TransactionWithStatusMeta, VersionedConfirmedBlock,
     VersionedTransactionWithStatusMeta,
 };
 use tracing::*;
@@ -100,17 +99,10 @@ impl Ledger {
         Self::do_open(ledger_path, options)
     }
 
-    fn do_open(
-        ledger_path: &Path,
-        options: LedgerOptions,
-    ) -> Result<Self, LedgerError> {
+    fn do_open(ledger_path: &Path, options: LedgerOptions) -> Result<Self, LedgerError> {
         fs::create_dir_all(ledger_path)?;
-        let ledger_path = ledger_path.join(
-            options
-                .column_options
-                .shred_storage_type
-                .blockstore_directory(),
-        );
+        let ledger_path =
+            ledger_path.join(options.column_options.shred_storage_type.blockstore_directory());
         adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
 
         // Open the database
@@ -174,11 +166,7 @@ impl Ledger {
 
     /// Returns lowest slot in the ledger if there's any
     pub fn get_lowest_slot(&self) -> Result<Option<Slot>, LedgerError> {
-        Ok(self
-            .blockhash_cf
-            .iter(IteratorMode::Start)?
-            .next()
-            .map(|(slot, _)| slot))
+        Ok(self.blockhash_cf.iter(IteratorMode::Start)?.next().map(|(slot, _)| slot))
     }
 
     /// Initializes lowest slot to cleanup from
@@ -200,10 +188,7 @@ impl Ledger {
     // Block time
     // -----------------
 
-    pub fn get_block_time(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Option<UnixTimestamp>> {
+    pub fn get_block_time(&self, slot: Slot) -> LedgerResult<Option<UnixTimestamp>> {
         self.blocktime_cf.get(slot)
     }
 
@@ -225,8 +210,7 @@ impl Ledger {
 
     pub fn get_max_blockhash(&self) -> LedgerResult<(Slot, Hash)> {
         let mut iter = self.blockhash_cf.iter(IteratorMode::End)?;
-        let (slot, hash_vec) =
-            iter.next().unwrap_or((0, Box::new([0; HASH_BYTES])));
+        let (slot, hash_vec) = iter.next().unwrap_or((0, Box::new([0; HASH_BYTES])));
         let hash = <[u8; HASH_BYTES]>::try_from(hash_vec.as_ref())
             .map(Hash::new_from_array)
             .expect("failed to construct hash from slice");
@@ -239,19 +223,14 @@ impl Ledger {
     /// (highest) index in O(1) time.
     ///
     /// Returns `None` if no transactions exist in the slot.
-    pub fn get_highest_transaction_index_for_slot(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Option<u32>> {
+    pub fn get_highest_transaction_index_for_slot(&self, slot: Slot) -> LedgerResult<Option<u32>> {
         let mut iter = self.slot_signatures_cf.iter(IteratorMode::From(
             (slot, u32::MAX),
             IteratorDirection::Reverse,
         ))?;
 
         match iter.next() {
-            Some(((tx_slot, tx_index), _)) if tx_slot == slot => {
-                Ok(Some(tx_index))
-            }
+            Some(((tx_slot, tx_index), _)) if tx_slot == slot => Ok(Some(tx_index)),
             _ => Ok(None),
         }
     }
@@ -260,15 +239,11 @@ impl Ledger {
     ///
     /// This is useful for resuming replication from the last known position.
     /// Returns `None` if no transactions exist in the ledger.
-    pub fn get_latest_transaction_position(
-        &self,
-    ) -> LedgerResult<Option<(Slot, u32)>> {
+    pub fn get_latest_transaction_position(&self) -> LedgerResult<Option<(Slot, u32)>> {
         let (latest_slot, _) = self.get_max_blockhash()?;
 
         // Try to find the highest index in the latest slot
-        if let Some(index) =
-            self.get_highest_transaction_index_for_slot(latest_slot)?
-        {
+        if let Some(index) = self.get_highest_transaction_index_for_slot(latest_slot)? {
             return Ok(Some((latest_slot, index)));
         }
 
@@ -293,9 +268,7 @@ impl Ledger {
     /// last transaction of an in-progress (not-yet-finalized) slot.
     ///
     /// Returns `None` if no transactions exist in the ledger.
-    pub fn get_last_persisted_transaction_position(
-        &self,
-    ) -> LedgerResult<Option<(Slot, u32)>> {
+    pub fn get_last_persisted_transaction_position(&self) -> LedgerResult<Option<(Slot, u32)>> {
         let mut iter = self.slot_signatures_cf.iter(IteratorMode::End)?;
         Ok(iter.next().map(|((slot, index), _)| (slot, index)))
     }
@@ -307,10 +280,7 @@ impl Ledger {
     /// Works for in-progress slots that have no finalized block header yet,
     /// unlike [`Self::get_block`]. Used to rebuild the streaming-blockhash
     /// accumulator after a mid-slot replica restart.
-    pub fn get_transaction_signatures_for_slot(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Vec<Signature>> {
+    pub fn get_transaction_signatures_for_slot(&self, slot: Slot) -> LedgerResult<Vec<Signature>> {
         let iter = self
             .slot_signatures_cf
             .iter(IteratorMode::From((slot, 0), IteratorDirection::Forward))?;
@@ -332,10 +302,7 @@ impl Ledger {
     // NOTE: we kept the term block time even tough we don't produce blocks.
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
-    pub fn get_block(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Option<VersionedConfirmedBlock>> {
+    pub fn get_block(&self, slot: Slot) -> LedgerResult<Option<VersionedConfirmedBlock>> {
         let blockhash = self.get_block_hash(slot)?;
         let block_time = self.get_block_time(slot)?;
 
@@ -347,10 +314,9 @@ impl Ledger {
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
         let transactions = {
-            let index_iterator =
-                self.slot_signatures_cf.iter_current_index_filtered(
-                    IteratorMode::From((slot, 0), IteratorDirection::Forward),
-                );
+            let index_iterator = self.slot_signatures_cf.iter_current_index_filtered(
+                IteratorMode::From((slot, 0), IteratorDirection::Forward),
+            );
 
             let mut signatures = vec![];
             for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
@@ -370,27 +336,20 @@ impl Ledger {
                         .transaction_status_cf
                         .get_protobuf((tx_signature, slot))?
                         .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
-                    let meta = TransactionStatusMeta::try_from(meta).map_err(
-                        |e| {
-                            LedgerError::TransactionConversionError(format!(
-                                "failed to convert transaction status meta at slot {}: {}",
-                                slot, e
-                            ))
-                        },
-                    )?;
-                    Ok(VersionedTransactionWithStatusMeta {
-                        transaction,
-                        meta,
-                    })
+                    let meta = TransactionStatusMeta::try_from(meta).map_err(|e| {
+                        LedgerError::TransactionConversionError(format!(
+                            "failed to convert transaction status meta at slot {}: {}",
+                            slot, e
+                        ))
+                    })?;
+                    Ok(VersionedTransactionWithStatusMeta { transaction, meta })
                 })
                 .collect::<LedgerResult<Vec<_>>>()
         }?;
 
         let block_height = Some(slot);
         let block = VersionedConfirmedBlock {
-            previous_blockhash: previous_blockhash
-                .unwrap_or_default()
-                .to_string(),
+            previous_blockhash: previous_blockhash.unwrap_or_default().to_string(),
             blockhash: blockhash.unwrap_or_default().to_string(),
 
             parent_slot: previous_slot,
@@ -478,50 +437,48 @@ impl Ledger {
         // newest_slot: the slot where we should start searching downwards from inclusive
         // upper_slot: is the slot from which we should include transactions with lower
         //             tx_index than the upper_limit_signature
-        let (found_upper, include_upper, newest_slot, upper_slot) =
-            match upper_limit_signature {
-                Some(sig) => {
-                    let res = self.get_transaction_status(sig, u64::MAX)?;
-                    match res {
-                        Some((slot, _meta)) => {
-                            // Ignore all transactions that happened at the same, or higher slot as the signature
-                            let start = slot.saturating_sub(1);
-                            // 1. Upper limit slot > highest slot -> don't include it
-                            // 2. Upper limit slot <= highest slot  -> include it
-                            let include_slot = slot <= highest_slot;
+        let (found_upper, include_upper, newest_slot, upper_slot) = match upper_limit_signature {
+            Some(sig) => {
+                let res = self.get_transaction_status(sig, u64::MAX)?;
+                match res {
+                    Some((slot, _meta)) => {
+                        // Ignore all transactions that happened at the same, or higher slot as the signature
+                        let start = slot.saturating_sub(1);
+                        // 1. Upper limit slot > highest slot -> don't include it
+                        // 2. Upper limit slot <= highest slot  -> include it
+                        let include_slot = slot <= highest_slot;
 
-                            // Ensure we respect the highest_slot start limit as well
-                            let start = start.min(highest_slot);
-                            (true, include_slot, start, slot)
-                        }
-                        None => (false, false, highest_slot, 0),
+                        // Ensure we respect the highest_slot start limit as well
+                        let start = start.min(highest_slot);
+                        (true, include_slot, start, slot)
                     }
+                    None => (false, false, highest_slot, 0),
                 }
-                None => (false, false, highest_slot, 0),
-            };
+            }
+            None => (false, false, highest_slot, 0),
+        };
 
         // 2. Determine lower limits
         //
         // oldest_slot: the slot where we should stop searching downwards inclusive
         // lower_slot: is the slot from which we should include transactions with higher
         //             tx_index than the lower_limit_signature
-        let (found_lower, include_lower, lower_slot) =
-            match lower_limit_signature {
-                Some(sig) => {
-                    let res = self.get_transaction_status(sig, u64::MAX)?;
-                    // let res = self.get_transaction_status(sig, highest_slot)?;
-                    match res {
-                        Some((slot, _meta)) => {
-                            // 1. Lower limit slot > highest slot -> don't include it
-                            // 2. Lower limit slot <= highest slot  -> include it
-                            let include_slot = slot <= highest_slot;
-                            (true, include_slot, slot)
-                        }
-                        None => (false, false, 0),
+        let (found_lower, include_lower, lower_slot) = match lower_limit_signature {
+            Some(sig) => {
+                let res = self.get_transaction_status(sig, u64::MAX)?;
+                // let res = self.get_transaction_status(sig, highest_slot)?;
+                match res {
+                    Some((slot, _meta)) => {
+                        // 1. Lower limit slot > highest slot -> don't include it
+                        // 2. Lower limit slot <= highest slot  -> include it
+                        let include_slot = slot <= highest_slot;
+                        (true, include_slot, slot)
                     }
+                    None => (false, false, 0),
                 }
-                None => (false, false, 0),
-            };
+            }
+            None => (false, false, 0),
+        };
         #[cfg(test)]
         debug!(
             "lower: {:?}, upper: {:?} (found, include, (newest slot), slot)",
@@ -532,25 +489,18 @@ impl Ledger {
         // 3. Find all matching (slot, signature) pairs sorted newest to oldest
         let matching = {
             let mut matching = Vec::new();
-            let lowest_available_slot =
-                self.get_lowest_slot()?.unwrap_or_default();
+            let lowest_available_slot = self.get_lowest_slot()?.unwrap_or_default();
             // The newest signatures are inside the slot that contains the upper
             // limit signature if it was provided.
             // We include the ones with lower tx_index than that signature
             // (if any for that account).
-            if found_upper
-                && include_upper
-                && upper_slot >= lowest_available_slot
-            {
+            if found_upper && include_upper && upper_slot >= lowest_available_slot {
                 // SAFETY: found_upper cannot be true if this is None
                 let upper_signature = upper_limit_signature.unwrap();
 
-                let index_iterator = self
-                    .slot_signatures_cf
-                    .iter_current_index_filtered(IteratorMode::From(
-                        (upper_slot, u32::MAX),
-                        IteratorDirection::Reverse,
-                    ));
+                let index_iterator = self.slot_signatures_cf.iter_current_index_filtered(
+                    IteratorMode::From((upper_slot, u32::MAX), IteratorDirection::Reverse),
+                );
                 let mut transaction_index = None;
                 for ((tx_slot, tx_idx), tx_signature) in index_iterator {
                     if tx_slot != upper_slot {
@@ -564,17 +514,14 @@ impl Ledger {
                     }
                 }
                 if let Some(index) = transaction_index {
-                    let index_iterator = self
-                        .address_signatures_cf
-                        .iter_current_index_filtered(IteratorMode::From(
+                    let index_iterator =
+                        self.address_signatures_cf.iter_current_index_filtered(IteratorMode::From(
                             // The reverse range is not inclusive of the start_slot itself it seems
                             (pubkey, upper_slot, index, upper_signature),
                             IteratorDirection::Reverse,
                         ));
 
-                    for ((address, tx_slot, _tx_idx, signature), _) in
-                        index_iterator
-                    {
+                    for ((address, tx_slot, _tx_idx, signature), _) in index_iterator {
                         if signature == upper_signature {
                             continue;
                         }
@@ -607,21 +554,15 @@ impl Ledger {
             // Don't run this if the upper/lower limits already cover all slots
             if newest_slot > lower_slot {
                 #[cfg(test)]
-                debug!(
-                    "Reverse searching ({}, {} -> {})",
-                    pubkey, newest_slot, 0,
-                );
-                let index_iterator = self
-                    .address_signatures_cf
-                    .iter_current_index_filtered(IteratorMode::From(
+                debug!("Reverse searching ({}, {} -> {})", pubkey, newest_slot, 0,);
+                let index_iterator =
+                    self.address_signatures_cf.iter_current_index_filtered(IteratorMode::From(
                         // The reverse range is not inclusive of the start_slot itself it seems
                         (pubkey, newest_slot, u32::MAX, Signature::default()),
                         IteratorDirection::Reverse,
                     ));
 
-                for ((address, tx_slot, _tx_idx, signature), _) in
-                    index_iterator
-                {
+                for ((address, tx_slot, _tx_idx, signature), _) in index_iterator {
                     if tx_slot < lowest_available_slot {
                         break;
                     }
@@ -667,19 +608,13 @@ impl Ledger {
 
             // The oldest signatures are inside the slot that contains the lower
             // limit signature if it was provided
-            if found_lower
-                && include_lower
-                && lower_slot >= lowest_available_slot
-            {
+            if found_lower && include_lower && lower_slot >= lowest_available_slot {
                 // SAFETY: found_lower cannot be true if this is None
                 let lower_signature = lower_limit_signature.unwrap();
 
-                let index_iterator = self
-                    .slot_signatures_cf
-                    .iter_current_index_filtered(IteratorMode::From(
-                        (lower_slot, u32::MAX),
-                        IteratorDirection::Reverse,
-                    ));
+                let index_iterator = self.slot_signatures_cf.iter_current_index_filtered(
+                    IteratorMode::From((lower_slot, u32::MAX), IteratorDirection::Reverse),
+                );
                 let mut transaction_index = None;
                 for ((tx_slot, tx_idx), tx_signature) in index_iterator {
                     if tx_slot != lower_slot {
@@ -693,20 +628,12 @@ impl Ledger {
                     }
                 }
                 if let Some(index) = transaction_index {
-                    let index_iterator = self
-                        .address_signatures_cf
-                        .iter_current_index_filtered(IteratorMode::From(
-                            (
-                                pubkey,
-                                lower_slot,
-                                u32::MAX,
-                                Signature::default(),
-                            ),
+                    let index_iterator =
+                        self.address_signatures_cf.iter_current_index_filtered(IteratorMode::From(
+                            (pubkey, lower_slot, u32::MAX, Signature::default()),
                             IteratorDirection::Reverse,
                         ));
-                    for ((address, tx_slot, tx_idx, signature), _) in
-                        index_iterator
-                    {
+                    for ((address, tx_slot, tx_idx, signature), _) in index_iterator {
                         if tx_slot < lowest_available_slot {
                             break;
                         }
@@ -748,9 +675,8 @@ impl Ledger {
         // 5. Build proper Status Infos from and return them
         let mut infos = Vec::<ConfirmedTransactionStatusWithSignature>::new();
         for (slot, signature) in matching {
-            let status = self
-                .read_transaction_status((signature, slot))?
-                .and_then(|x| x.status.err());
+            let status =
+                self.read_transaction_status((signature, slot))?.and_then(|x| x.status.err());
             let memo = self.read_transaction_memos(signature, slot)?;
             let block_time = blocktimes.get(&slot).cloned();
             let info = ConfirmedTransactionStatusWithSignature {
@@ -764,11 +690,7 @@ impl Ledger {
             infos.push(info)
         }
 
-        Ok(SignatureInfosForAddress {
-            infos,
-            found_upper,
-            found_lower,
-        })
+        Ok(SignatureInfosForAddress { infos, found_upper, found_lower })
     }
 
     pub fn count_address_signatures(&self) -> LedgerResult<i64> {
@@ -783,36 +705,29 @@ impl Ledger {
         signature: Signature,
         highest_confirmed_slot: Slot,
     ) -> LedgerResult<Option<ConfirmedTransactionWithStatusMeta>> {
-        match self
-            .get_confirmed_transaction(signature, highest_confirmed_slot)?
-        {
+        match self.get_confirmed_transaction(signature, highest_confirmed_slot)? {
             Some((slot, transaction, meta)) => {
                 let block_time = self.get_block_time(slot)?;
-                let tx_with_meta = match (transaction, meta) {
-                    (Some(transaction), Some(meta)) => {
-                        TransactionWithStatusMeta::Complete(
-                            VersionedTransactionWithStatusMeta {
-                                transaction,
-                                meta,
-                            },
-                        )
-                    }
-                    (Some(transaction), None) => {
-                        let legacy_tx = transaction
-                            .into_legacy_transaction()
-                            .ok_or_else(|| {
-                                LedgerError::TransactionConversionError(
-                                    "failed to convert versioned transaction to legacy: \
+                let tx_with_meta =
+                    match (transaction, meta) {
+                        (Some(transaction), Some(meta)) => TransactionWithStatusMeta::Complete(
+                            VersionedTransactionWithStatusMeta { transaction, meta },
+                        ),
+                        (Some(transaction), None) => {
+                            let legacy_tx =
+                                transaction.into_legacy_transaction().ok_or_else(|| {
+                                    LedgerError::TransactionConversionError(
+                                        "failed to convert versioned transaction to legacy: \
                                      transaction is v0 (requires metadata)"
-                                        .to_string(),
-                                )
-                            })?;
-                        TransactionWithStatusMeta::MissingMetadata(legacy_tx)
-                    }
-                    (None, Some(_)) | (None, None) => {
-                        return Ok(None);
-                    }
-                };
+                                            .to_string(),
+                                    )
+                                })?;
+                            TransactionWithStatusMeta::MissingMetadata(legacy_tx)
+                        }
+                        (None, Some(_)) | (None, None) => {
+                            return Ok(None);
+                        }
+                    };
                 Ok(Some(ConfirmedTransactionWithStatusMeta {
                     slot,
                     block_time,
@@ -841,8 +756,7 @@ impl Ledger {
             .num_get_complete_transaction
             .fetch_add(1, Ordering::Relaxed);
 
-        let slot_and_meta =
-            self.get_transaction_status(signature, highest_confirmed_slot)?;
+        let slot_and_meta = self.get_transaction_status(signature, highest_confirmed_slot)?;
 
         let (slot, transaction, meta) = match slot_and_meta {
             Some((slot, meta)) => {
@@ -853,19 +767,16 @@ impl Ledger {
                 }
             }
             None => {
-                let mut iterator = self
-                    .transaction_cf
-                    .iter_current_index_filtered(IteratorMode::From(
+                let mut iterator =
+                    self.transaction_cf.iter_current_index_filtered(IteratorMode::From(
                         (signature, highest_confirmed_slot),
                         IteratorDirection::Forward,
                     ));
                 match iterator.next() {
                     Some(((tx_signature, slot), _data))
-                        if slot <= highest_confirmed_slot
-                            && tx_signature == signature =>
+                        if slot <= highest_confirmed_slot && tx_signature == signature =>
                     {
-                        let transaction =
-                            self.read_transaction((tx_signature, slot))?;
+                        let transaction = self.read_transaction((tx_signature, slot))?;
                         match transaction {
                             Some(tx) => (slot, Some(tx), None),
                             None => return Ok(None),
@@ -954,15 +865,11 @@ impl Ledger {
         min_slot: Slot,
     ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
         let result = {
-            let lowest_available_slot =
-                self.get_lowest_slot()?.unwrap_or_default();
-            self.rpc_api_metrics
-                .num_get_transaction_status
-                .fetch_add(1, Ordering::Relaxed);
+            let lowest_available_slot = self.get_lowest_slot()?.unwrap_or_default();
+            self.rpc_api_metrics.num_get_transaction_status.fetch_add(1, Ordering::Relaxed);
 
-            let iterator = self
-                .transaction_status_cf
-                .iter_current_index_filtered(IteratorMode::From(
+            let iterator =
+                self.transaction_status_cf.iter_current_index_filtered(IteratorMode::From(
                     (signature, lowest_available_slot),
                     IteratorDirection::Forward,
                 ));
@@ -970,10 +877,8 @@ impl Ledger {
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
                 if stat_signature == signature && slot <= min_slot {
-                    result = self
-                        .transaction_status_cf
-                        .get_protobuf((signature, slot))?
-                        .map(|status| {
+                    result =
+                        self.transaction_status_cf.get_protobuf((signature, slot))?.map(|status| {
                             let status = status.try_into().unwrap();
                             (slot, status)
                         });
@@ -1010,44 +915,26 @@ impl Ledger {
         &self,
         iterator_mode: Option<IteratorMode<(Signature, Slot)>>,
         success: bool,
-    ) -> impl Iterator<
-        Item = LedgerResult<(
-            Slot,
-            Signature,
-            generated::TransactionStatusMeta,
-        )>,
-    > + '_ {
+    ) -> impl Iterator<Item = LedgerResult<(Slot, Signature, generated::TransactionStatusMeta)>> + '_
+    {
         let iterator_mode = iterator_mode.unwrap_or(IteratorMode::Start);
-        self.transaction_status_cf
-            .iter_protobuf(iterator_mode)
-            .filter_map(move |res| {
-                let ((signature, slot), status) = match res {
-                    Ok(((signature, slot), status)) => {
-                        ((signature, slot), status)
-                    }
-                    Err(err) => return Some(Err(err)),
-                };
-                let include = status.err.is_none() == success;
-                if include {
-                    Some(Ok((slot, signature, status)))
-                } else {
-                    None
-                }
-            })
+        self.transaction_status_cf.iter_protobuf(iterator_mode).filter_map(move |res| {
+            let ((signature, slot), status) = match res {
+                Ok(((signature, slot), status)) => ((signature, slot), status),
+                Err(err) => return Some(Err(err)),
+            };
+            let include = status.err.is_none() == success;
+            if include { Some(Ok((slot, signature, status))) } else { None }
+        })
     }
 
     pub fn count_transaction_status(&self) -> LedgerResult<i64> {
         self.transaction_status_cf.count_column_using_cache()
     }
 
-    fn count_outcome_transaction_status(
-        &self,
-        success: bool,
-    ) -> LedgerResult<i64> {
+    fn count_outcome_transaction_status(&self, success: bool) -> LedgerResult<i64> {
         let mut count = 0;
-        for res in
-            self.iter_transaction_statuses(Some(IteratorMode::Start), success)
-        {
+        for res in self.iter_transaction_statuses(Some(IteratorMode::Start), success) {
             match res {
                 Ok(_) => count += 1,
                 Err(err) => return Err(err),
@@ -1057,30 +944,19 @@ impl Ledger {
     }
 
     pub fn count_transaction_successful_status(&self) -> LedgerResult<i64> {
-        if self
-            .transaction_status_cf
-            .entry_counter
-            .load(Ordering::Relaxed)
-            == DIRTY_COUNT
-        {
+        if self.transaction_status_cf.entry_counter.load(Ordering::Relaxed) == DIRTY_COUNT {
             let count = self.count_outcome_transaction_status(true)?;
-            self.transaction_successful_status_count
-                .store(count, Ordering::Relaxed);
+            self.transaction_successful_status_count.store(count, Ordering::Relaxed);
             Ok(count)
         } else {
-            Ok(self
-                .transaction_successful_status_count
-                .load(Ordering::Relaxed))
+            Ok(self.transaction_successful_status_count.load(Ordering::Relaxed))
         }
     }
 
     pub fn count_transaction_failed_status(&self) -> LedgerResult<i64> {
-        if self.transaction_failed_status_count.load(Ordering::Relaxed)
-            == DIRTY_COUNT
-        {
+        if self.transaction_failed_status_count.load(Ordering::Relaxed) == DIRTY_COUNT {
             let count = self.count_outcome_transaction_status(false)?;
-            self.transaction_failed_status_count
-                .store(count, Ordering::Relaxed);
+            self.transaction_failed_status_count.store(count, Ordering::Relaxed);
             Ok(count)
         } else {
             Ok(self.transaction_failed_status_count.load(Ordering::Relaxed))
@@ -1090,19 +966,16 @@ impl Ledger {
     // -----------------
     // Perf
     // -----------------
-    pub fn get_recent_perf_samples(
-        &self,
-        num: usize,
-    ) -> LedgerResult<Vec<(Slot, PerfSample)>> {
-        let samples = self
-            .db
-            .iter::<cf::PerfSamples>(IteratorMode::End)?
-            .take(num)
-            .map(|(slot, data)| {
-                deserialize::<PerfSample>(&data)
-                    .map(|sample| (slot, sample))
-                    .map_err(Into::into)
-            });
+    pub fn get_recent_perf_samples(&self, num: usize) -> LedgerResult<Vec<(Slot, PerfSample)>> {
+        let samples =
+            self.db
+                .iter::<cf::PerfSamples>(IteratorMode::End)?
+                .take(num)
+                .map(|(slot, data)| {
+                    deserialize::<PerfSample>(&data)
+                        .map(|sample| (slot, sample))
+                        .map_err(Into::into)
+                });
 
         samples.collect()
     }
@@ -1111,10 +984,7 @@ impl Ledger {
         self.perf_samples_cf.count_column_using_cache()
     }
 
-    pub fn read_slot_signature(
-        &self,
-        index: (Slot, u32),
-    ) -> LedgerResult<Option<Signature>> {
+    pub fn read_slot_signature(&self, index: (Slot, u32)) -> LedgerResult<Option<Signature>> {
         self.slot_signatures_cf.get(index)
     }
 }

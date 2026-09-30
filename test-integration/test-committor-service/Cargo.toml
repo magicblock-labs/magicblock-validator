@@ -4,6 +4,7 @@ name = "schedulecommit-committor-service"
 version.workspace = true
 
 [dev-dependencies]
+parking_lot = { workspace = true }
 async-trait = { workspace = true }
 borsh = { workspace = true }
 futures = { workspace = true }
@@ -32,3 +33,6 @@ tracing = { workspace = true }
 
 [features]
 test_table_close = []
+
+[lints]
+workspace = true

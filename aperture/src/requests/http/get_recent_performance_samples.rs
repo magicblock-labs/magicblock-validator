@@ -28,8 +28,7 @@ const MAX_PERF_SAMPLES: usize = 720;
 /// logic never accidentally prunes valid history
 const ESTIMATED_SLOTS_PER_SAMPLE: u64 = 1500;
 
-static PERF_SAMPLES: OnceLock<TreeIndex<Reverse<Slot>, Sample>> =
-    OnceLock::new();
+static PERF_SAMPLES: OnceLock<TreeIndex<Reverse<Slot>, Sample>> = OnceLock::new();
 
 #[derive(Clone, Copy)]
 struct Sample {
@@ -38,10 +37,7 @@ struct Sample {
 }
 
 impl HttpDispatcher {
-    pub(crate) fn get_recent_performance_samples(
-        &self,
-        request: &JsonRequest,
-    ) -> HandlerResult {
+    pub(crate) fn get_recent_performance_samples(&self, request: &JsonRequest) -> HandlerResult {
         let mut count = request.required::<usize>(0)?;
 
         // Cap request at max history size (12h)
@@ -64,10 +60,7 @@ impl HttpDispatcher {
         Ok(ResponsePayload::encode_no_context(&request.id, samples))
     }
 
-    pub(crate) async fn run_perf_samples_collector(
-        self: Arc<Self>,
-        cancel: CancellationToken,
-    ) {
+    pub(crate) async fn run_perf_samples_collector(self: Arc<Self>, cancel: CancellationToken) {
         let mut interval = time::interval(Duration::from_secs(PERIOD_SECS));
 
         let mut last_slot = self.engine.blocks().latest().slot;

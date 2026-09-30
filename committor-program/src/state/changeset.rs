@@ -47,12 +47,7 @@ pub struct ChangedAccountMeta {
 impl From<(&Pubkey, &ChangedAccount)> for ChangedAccountMeta {
     fn from((pubkey, changed_account): (&Pubkey, &ChangedAccount)) -> Self {
         match changed_account {
-            ChangedAccount::Full {
-                lamports,
-                owner,
-                bundle_id,
-                ..
-            } => Self {
+            ChangedAccount::Full { lamports, owner, bundle_id, .. } => Self {
                 pubkey: *pubkey,
                 lamports: *lamports,
                 owner: *owner,
@@ -92,12 +87,7 @@ impl ChangedAccount {
     pub(crate) fn into_inner(self) -> (u64, Pubkey, Vec<u8>, u64) {
         use ChangedAccount::*;
         match self {
-            Full {
-                lamports,
-                owner,
-                data,
-                bundle_id,
-            } => (lamports, owner, data, bundle_id),
+            Full { lamports, owner, data, bundle_id } => (lamports, owner, data, bundle_id),
             Diff => unreachable!("We don't yet support account diffs"),
         }
     }
@@ -174,8 +164,7 @@ impl ChangesetMeta {
         self.accounts
             .into_iter()
             .map(|account| {
-                let undelegate =
-                    self.accounts_to_undelegate.contains(&account.pubkey);
+                let undelegate = self.accounts_to_undelegate.contains(&account.pubkey);
                 (account, self.slot, undelegate)
             })
             .collect()
@@ -184,11 +173,7 @@ impl ChangesetMeta {
 
 impl From<&Changeset> for ChangesetMeta {
     fn from(changeset: &Changeset) -> Self {
-        let accounts = changeset
-            .accounts
-            .iter()
-            .map(ChangedAccountMeta::from)
-            .collect();
+        let accounts = changeset.accounts.iter().map(ChangedAccountMeta::from).collect();
         Self {
             accounts,
             slot: changeset.slot,
@@ -217,11 +202,7 @@ impl Changeset {
     /// - **account** account to add
     ///
     /// *returns* true if the account was already present and was replaced
-    pub fn add<T: Into<ChangedAccount>>(
-        &mut self,
-        pubkey: Pubkey,
-        account: T,
-    ) -> bool {
+    pub fn add<T: Into<ChangedAccount>>(&mut self, pubkey: Pubkey, account: T) -> bool {
         self.accounts.insert(pubkey, account.into()).is_some()
     }
 
@@ -277,10 +258,7 @@ impl Changeset {
         let accounts_to_undelegate = self.accounts_to_undelegate;
         let slot = self.slot;
         for (pubkey, account) in self.accounts.into_iter() {
-            bundles
-                .entry(account.bundle_id())
-                .or_default()
-                .push((pubkey, account));
+            bundles.entry(account.bundle_id()).or_default().push((pubkey, account));
         }
         let bundles = bundles.into_values().collect::<Vec<_>>();
 
@@ -369,11 +347,7 @@ impl CommitableAccount {
             1
         } else {
             let count = len / chunk_size as usize;
-            if len % chunk_size as usize != 0 {
-                count + 1
-            } else {
-                count
-            }
+            if len % chunk_size as usize != 0 { count + 1 } else { count }
         };
         Self {
             pubkey,
@@ -397,8 +371,7 @@ impl CommitableAccount {
     /// Iterates all chunks of data that have not been committed yet.
     /// Use this to discover chunks that failed to commit.
     pub fn iter_missing(&self) -> ChangesetChunksIter<'_> {
-        ChangesetChunks::new(&self.chunks, self.chunk_size)
-            .iter_missing(&self.data)
+        ChangesetChunks::new(&self.chunks, self.chunk_size).iter_missing(&self.data)
     }
 
     /// When all chunks were committed we query the chain to see which commits
@@ -454,8 +427,7 @@ mod test {
 
         // 1. Try to commit all chunks into a buffer simulating that some fail
         let mut tgt_buf = vec![0u8; commitable.size()];
-        let mut chunks =
-            Chunks::new(commitable.chunk_count(), commitable.chunk_size());
+        let mut chunks = Chunks::new(commitable.chunk_count(), commitable.chunk_size());
 
         for chunk in commitable.iter_all() {
             let idx = chunk.chunk_idx();
@@ -480,9 +452,7 @@ mod test {
 
         // 3. Retry the missing chunks
         for chunk in commitable.iter_missing() {
-            chunks
-                .set_chunk_delivered(chunk.chunk_idx() as usize)
-                .unwrap();
+            chunks.set_chunk_delivered(chunk.chunk_idx() as usize).unwrap();
 
             let start = chunk.offset;
             for (i, d) in chunk.data_chunk.into_iter().enumerate() {

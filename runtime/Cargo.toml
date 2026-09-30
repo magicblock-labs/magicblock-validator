@@ -23,3 +23,6 @@ solana-sdk-ids = { workspace = true }
 spl-token = { workspace = true }
 thiserror = { workspace = true }
 v42-calculator-interface = { workspace = true }
+
+[lints]
+workspace = true

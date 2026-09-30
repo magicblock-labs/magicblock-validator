@@ -13,7 +13,7 @@ use solana_system_interface::instruction as system_instruction;
 // -----------------
 // Asserts
 // -----------------
-pub fn assert_keys_equal<F: FnOnce() -> String>(
+pub(crate) fn assert_keys_equal<F: FnOnce() -> String>(
     provided_key: &Pubkey,
     expected_key: &Pubkey,
     get_msg: F,
@@ -27,10 +27,7 @@ pub fn assert_keys_equal<F: FnOnce() -> String>(
     }
 }
 
-pub fn assert_is_signer(
-    account: &AccountInfo,
-    account_label: &str,
-) -> ProgramResult {
+pub(crate) fn assert_is_signer(account: &AccountInfo<'_>, account_label: &str) -> ProgramResult {
     if !account.is_signer {
         msg!(
             "Err: account '{}' ({}) should be signer",
@@ -46,7 +43,7 @@ pub fn assert_is_signer(
 // -----------------
 // Account Operations
 // -----------------
-pub struct AllocateAndAssignAccountArgs<'a, 'b> {
+pub(crate) struct AllocateAndAssignAccountArgs<'a, 'b> {
     pub payer_info: &'a AccountInfo<'a>,
     pub account_info: &'a AccountInfo<'a>,
     pub owner: &'a Pubkey,
@@ -55,8 +52,8 @@ pub struct AllocateAndAssignAccountArgs<'a, 'b> {
 }
 
 #[inline(always)]
-pub fn allocate_account_and_assign_owner(
-    args: AllocateAndAssignAccountArgs,
+pub(crate) fn allocate_account_and_assign_owner(
+    args: AllocateAndAssignAccountArgs<'_, '_>,
 ) -> Result<(), ProgramError> {
     let rent = Rent::get()?;
     let AllocateAndAssignAccountArgs {
@@ -67,10 +64,8 @@ pub fn allocate_account_and_assign_owner(
         signer_seeds,
     } = args;
 
-    let required_lamports = rent
-        .minimum_balance(size)
-        .max(1)
-        .saturating_sub(account_info.lamports());
+    let required_lamports =
+        rent.minimum_balance(size).max(1).saturating_sub(account_info.lamports());
 
     msg!(
         "required_lamports: {}, payer has {}",
@@ -87,10 +82,7 @@ pub fn allocate_account_and_assign_owner(
     //    At this point the account is still owned by the system program
     msg!("  create_account() allocate space");
     invoke_signed(
-        &system_instruction::allocate(
-            account_info.key,
-            size.try_into().unwrap(),
-        ),
+        &system_instruction::allocate(account_info.key, size.try_into().unwrap()),
         // 0. `[WRITE, SIGNER]` New account
         std::slice::from_ref(account_info),
         &[signer_seeds],
@@ -109,7 +101,7 @@ pub fn allocate_account_and_assign_owner(
 }
 
 #[inline(always)]
-pub fn transfer_lamports<'a>(
+pub(crate) fn transfer_lamports<'a>(
     payer_info: &AccountInfo<'a>,
     to_account_info: &AccountInfo<'a>,
     lamports: u64,
@@ -125,11 +117,7 @@ pub fn transfer_lamports<'a>(
         return Err(ProgramError::InsufficientFunds);
     }
     invoke(
-        &system_instruction::transfer(
-            payer_info.key,
-            to_account_info.key,
-            lamports,
-        ),
+        &system_instruction::transfer(payer_info.key, to_account_info.key, lamports),
         &[payer_info.clone(), to_account_info.clone()],
     )
 }

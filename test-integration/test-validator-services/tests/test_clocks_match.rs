@@ -1,9 +1,7 @@
 use std::time::Duration;
 
 use integration_test_tools::{init_logger, IntegrationTestContext};
-use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use solana_system_interface::instruction as system_instruction;
 use tracing::*;
 
@@ -20,14 +18,9 @@ fn test_clocks_match() {
     let to_keypair = Keypair::new();
 
     let ctx = IntegrationTestContext::try_new().unwrap();
-    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL)
+    ctx.airdrop_chain(&chain_payer.pubkey(), 10 * LAMPORTS_PER_SOL).unwrap();
+    ctx.airdrop_chain_and_delegate(&chain_payer, &from_keypair, LAMPORTS_PER_SOL)
         .unwrap();
-    ctx.airdrop_chain_and_delegate(
-        &chain_payer,
-        &from_keypair,
-        LAMPORTS_PER_SOL,
-    )
-    .unwrap();
     ctx.airdrop_chain_and_delegate(&chain_payer, &to_keypair, LAMPORTS_PER_SOL)
         .unwrap();
 

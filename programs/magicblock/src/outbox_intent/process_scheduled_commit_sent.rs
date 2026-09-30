@@ -1,10 +1,8 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::RwLock,
-};
+use std::collections::{HashMap, HashSet};
 
 use lazy_static::lazy_static;
 use magicblock_core::intent::outbox::verify_outbox_intent_pda;
+use parking_lot::RwLock;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_clock::Slot;
 use solana_hash::Hash;
@@ -20,9 +18,7 @@ use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
+        accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     },
     validator::authority,
 };
@@ -71,11 +67,7 @@ impl From<SentCommit> for SentCommitPrintable {
             slot: commit.slot,
             blockhash: commit.blockhash.to_string(),
             payer: commit.payer.to_string(),
-            chain_signatures: commit
-                .chain_signatures
-                .iter()
-                .map(|x| x.to_string())
-                .collect(),
+            chain_signatures: commit.chain_signatures.iter().map(|x| x.to_string()).collect(),
             included_pubkeys: commit
                 .included_pubkeys
                 .iter()
@@ -107,20 +99,17 @@ lazy_static! {
 
 pub fn register_scheduled_commit_sent(commit: SentCommit) {
     let id = commit.message_id;
-    SENT_COMMITS
-        .write()
-        .expect("SENT_COMMITS lock poisoned")
-        .insert(id, commit.into());
+    SENT_COMMITS.write().insert(id, commit.into());
 }
 
 #[cfg(test)]
 fn get_scheduled_commit(id: u64) -> Option<SentCommitPrintable> {
-    SENT_COMMITS.read().unwrap().get(&id).cloned()
+    SENT_COMMITS.read().get(&id).cloned()
 }
 
-pub fn process_scheduled_commit_sent(
+pub(crate) fn process_scheduled_commit_sent(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     // No replica gating here: on a replica this will fail (the commit was
@@ -132,28 +121,16 @@ pub fn process_scheduled_commit_sent(
     // Only after we passed all checks do we remove the commit from the global hashmap
     // Otherwise a malicious actor could remove a commit from the hashmap without
     // signing as the validator
-    let commit = match SENT_COMMITS.write() {
-        Ok(mut commits) => match commits.remove(&intent_id) {
-            Some(commit) => commit,
-            None => {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommitSent ERR: commit with id {} not found",
-                    intent_id
-                );
-                return Err(InstructionError::Custom(
-                    custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
-                ));
-            }
-        },
-        Err(err) => {
+    let commit = match SENT_COMMITS.write().remove(&intent_id) {
+        Some(commit) => commit,
+        None => {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommitSent ERR: failed to lock SENT_COMMITS: {}",
-                err
+                "ScheduleCommitSent ERR: commit with id {} not found",
+                intent_id
             );
             return Err(InstructionError::Custom(
-                custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
+                custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
             ));
         }
     };
@@ -165,16 +142,14 @@ pub fn process_scheduled_commit_sent(
 
 fn validate(
     signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     let transaction_context = &invoke_context.transaction_context;
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Assert outbox intent program
-    if ix_ctx.get_program_key()?
-        != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID
-    {
+    if ix_ctx.get_program_key()? != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: outbox intent program account not found"
@@ -183,8 +158,7 @@ fn validate(
     }
 
     // Assert validator identity matches
-    let validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
+    let validator_pubkey = get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
     let validator_authority_id = authority();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
@@ -207,12 +181,8 @@ fn validate(
 
     // Deserialize first so the PDA can be validated cheaply against its
     // own stored bump, instead of re-deriving via find_program_address.
-    let intent_acc =
-        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let bundle = OutboxIntentBundle::try_from_bytes(
-        intent_acc.borrow()?.data(),
-    )
-    .map_err(|_| {
+    let intent_acc = get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data()).map_err(|_| {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: failed to deserialize outbox intent {}",
@@ -222,8 +192,7 @@ fn validate(
     })?;
 
     // Validate outbox intent PDA
-    let provided_pda =
-        get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let provided_pda = get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
     if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
@@ -239,11 +208,10 @@ fn validate(
 }
 
 fn close_outbox_ephemeral_account(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
-    let pda =
-        get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
+    let pda = get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
 
     let mut acc = pda.borrow_mut()?;
     acc.set_lamports(0);
@@ -254,10 +222,7 @@ fn close_outbox_ephemeral_account(
     Ok(())
 }
 
-fn log_sent_commit(
-    invoke_context: &InvokeContext,
-    commit: &SentCommitPrintable,
-) {
+fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPrintable) {
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent id: {}, slot: {}, blockhash: {}",
@@ -299,8 +264,7 @@ fn log_sent_commit(
             error
         );
     }
-    for (idx, report) in commit.callbacks_scheduling_results.iter().enumerate()
-    {
+    for (idx, report) in commit.callbacks_scheduling_results.iter().enumerate() {
         ic_msg!(
             invoke_context,
             "ScheduledCommitSent callback[{}]: {}",
@@ -319,12 +283,8 @@ fn log_sent_commit(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::{
-        MagicIntentBundle, outbox::outbox_intent_pda_with_bump,
-    };
-    use magicblock_magic_program_api::{
-        EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
-    };
+    use magicblock_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
+    use magicblock_magic_program_api::{EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID};
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;
@@ -336,9 +296,7 @@ mod tests {
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{
-            ensure_started_validator, process_outbox_intent_instruction,
-        },
+        test_utils::{ensure_started_validator, process_outbox_intent_instruction},
     };
 
     fn single_acc_commit(intent_id: u64) -> SentCommit {
@@ -368,9 +326,7 @@ mod tests {
         ix.accounts
             .iter()
             .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
+                account_data.remove(&acc.pubkey).map(|shared_data| (acc.pubkey, shared_data))
             })
             .collect()
     }
@@ -390,13 +346,10 @@ mod tests {
 
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
-            commit.message_id,
-        );
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
         ix.accounts[0].is_signer = false;
 
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -425,12 +378,9 @@ mod tests {
         };
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
-            commit.message_id,
-        );
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
         ix.accounts[0].pubkey = fake_validator.pubkey();
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,
@@ -473,13 +423,9 @@ mod tests {
         let mut account_data = {
             let mut map = HashMap::new();
             // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
-            let vault = AccountBuilder::from(AccountSharedData::new(
-                10_000,
-                0,
-                &crate::id(),
-            ))
-            .mode(AccountMode::Magic)
-            .build::<AccountSharedData>();
+            let vault = AccountBuilder::from(AccountSharedData::new(10_000, 0, &crate::id()))
+                .mode(AccountMode::Magic)
+                .build::<AccountSharedData>();
             map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
             // Add outbox PDA as existing ephemeral account (created by accept)
             map.insert(pda, pda_account);
@@ -488,12 +434,9 @@ mod tests {
 
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::scheduled_commit_sent_instruction(
-            commit.message_id,
-        );
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
 
-        let transaction_accounts =
-            transaction_accounts_from_map(&ix, &mut account_data);
+        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
             transaction_accounts,

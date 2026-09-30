@@ -1,3 +1,3 @@
 mod asserts;
 #[allow(unused)]
-pub use asserts::*;
+pub(crate) use asserts::*;

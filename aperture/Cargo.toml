@@ -64,6 +64,7 @@ tracing = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+parking_lot = { workspace = true }
 # Enable the engine's black-box test harness (`engine::testkit::TestEngine`)
 # only for aperture's own tests; downstream lib builds never see this feature.
 engine = { workspace = true, features = ["testkit"] }
@@ -76,3 +77,6 @@ solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-signer = { workspace = true }
 v42-calculator-interface = { workspace = true }
+
+[lints]
+workspace = true

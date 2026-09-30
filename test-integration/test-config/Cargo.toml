@@ -16,3 +16,6 @@ solana-system-interface = { workspace = true }
 tempfile = { workspace = true }
 tracing = { workspace = true }
 v42-calculator-interface = { workspace = true }
+
+[lints]
+workspace = true

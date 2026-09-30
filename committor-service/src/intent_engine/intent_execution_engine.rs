@@ -1,7 +1,7 @@
 use std::{
     marker::PhantomData,
     ops::Deref,
-    sync::{Arc, Mutex},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -9,6 +9,7 @@ use futures_util::stream::FuturesUnordered;
 use magicblock_core::traits::CallbackScheduleError;
 use magicblock_metrics::metrics;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
+use parking_lot::Mutex;
 use solana_signature::Signature;
 use tokio::{
     sync::{OwnedSemaphorePermit, Semaphore, broadcast},
@@ -23,9 +24,7 @@ use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
     error::IntentScheduleError,
     intent_engine::{
-        db::BacklogDB,
-        intent_scheduler::{IntentScheduler, POISONED_SCHEDULER_MSG},
-        intent_stream::IntentStream,
+        db::BacklogDB, intent_scheduler::IntentScheduler, intent_stream::IntentStream,
     },
     intent_executor::{
         ExecutionOutput, IntentExecutionResult,
@@ -54,7 +53,7 @@ struct ExecutionLimits {
     retries: Arc<Semaphore>,
 }
 
-pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
+pub(super) type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 
 #[derive(Clone, Debug)]
 pub struct BroadcastedIntentExecutionResult {
@@ -82,8 +81,7 @@ impl BroadcastedIntentExecutionResult {
             inner,
             callbacks_report,
             #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: execution_result
-                .successful_transaction_strategies,
+            successful_transaction_strategies: execution_result.successful_transaction_strategies,
         }
     }
 
@@ -124,14 +122,12 @@ where
     T: TransactionPreparator,
     F: IntentExecutorBuilder<T> + Send + Sync + 'static,
 {
-    pub fn new(intent_stream: IntentStream<D>, executor_builder: F) -> Self {
+    pub(crate) fn new(intent_stream: IntentStream<D>, executor_builder: F) -> Self {
         Self {
             intent_stream,
             executor_builder: Arc::new(executor_builder),
             running_executors: FuturesUnordered::new(),
-            executors_semaphore: Arc::new(Semaphore::new(
-                MAX_EXECUTORS as usize,
-            )),
+            executors_semaphore: Arc::new(Semaphore::new(MAX_EXECUTORS as usize)),
             retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
             scheduler: Arc::new(Mutex::new(IntentScheduler::new())),
             _phantom_data: PhantomData,
@@ -139,7 +135,7 @@ where
     }
 
     /// Spawns `main_loop` and returns a sender that can create result subscriptions.
-    pub fn spawn(self) -> broadcast::Sender<BroadcastedIntentExecutionResult> {
+    pub(crate) fn spawn(self) -> broadcast::Sender<BroadcastedIntentExecutionResult> {
         let (result_sender, _) = broadcast::channel(100);
         tokio::spawn(self.main_loop(result_sender.clone()));
 
@@ -177,12 +173,10 @@ where
             };
 
             // Waiting until there's available executor
-            let permit = self
-                .executors_semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect(SEMAPHORE_CLOSED_MSG);
+            let Ok(permit) = self.executors_semaphore.clone().acquire_owned().await else {
+                error!(SEMAPHORE_CLOSED_MSG);
+                break;
+            };
 
             // Spawn executor
             let executor_factory = self.executor_builder.clone();
@@ -202,9 +196,7 @@ where
             ));
 
             self.running_executors.push(handle);
-            metrics::set_committor_executors_busy_count(
-                self.running_executors.len() as i64,
-            );
+            metrics::set_committor_executors_busy_count(self.running_executors.len() as i64);
         }
     }
 
@@ -217,11 +209,7 @@ where
         const SCHEDULER_CAPACITY: usize = 1000;
 
         let can_receive = || {
-            let num_blocked_intents = self
-                .scheduler
-                .lock()
-                .expect(POISONED_SCHEDULER_MSG)
-                .intents_blocked();
+            let num_blocked_intents = self.scheduler.lock().intents_blocked();
             if num_blocked_intents < SCHEDULER_CAPACITY {
                 true
             } else {
@@ -240,11 +228,11 @@ where
                     error!(error = ?err, "Executor failed");
                 };
                 trace!("Worker executed intent bundle, fetching new available one");
-                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).pop_next_scheduled_intent()
+                self.scheduler.lock().pop_next_scheduled_intent()
             },
             result = Self::get_new_intent(intent_stream), if can_receive() => {
                 let intent = result?;
-                self.scheduler.lock().expect(POISONED_SCHEDULER_MSG).schedule(intent)
+                self.scheduler.lock().schedule(intent)
             },
             else => {
                 // Shouldn't be possible:
@@ -293,35 +281,30 @@ where
     ) {
         let instant = Instant::now();
 
-        let (result, execution_permit) = Self::execute_with_retries(
-            executor_factory,
-            &intent,
-            limits,
-            execution_permit,
-        )
-        .await;
+        let (mut result, execution_permit) =
+            Self::execute_with_retries(executor_factory, &intent, limits, execution_permit).await;
 
         // Report
         let is_err = result.inner.as_ref().inspect_err(|err| {
             error!(intent_id = intent.intent_id, error = ?err, "Failed to execute intent bundle");
         }).is_err();
         Self::execution_metrics(instant.elapsed(), &intent, &result.inner);
-        let mut scheduler = scheduler.lock().expect(POISONED_SCHEDULER_MSG);
+        let mut scheduler = scheduler.lock();
         if is_err {
             // Poison this intent's pubkeys and evict any successor that's
             // reachable from them, so a terminal failure can't leave the
             // scheduler permanently stuck on dead accounts.
             let pubkeys = intent.get_all_committed_pubkeys();
             warn!(pubkeys = ?pubkeys, "Intents for following pubkeys are now permanently poisoned for the life of this process.");
-            // SAFETY: Self::execute is called ONLY after IntentScheduler
-            // successfully is able to schedule execution of some Intent
-            // that means that the same Intent is SAFE to mark as failed
-            let poisoned_intents = scheduler
-                .failed(&intent)
-                .expect("Valid completion of previously scheduled message");
-            metrics::set_committor_poisoned_keys_count(
-                scheduler.poisoned_keys_count() as i64,
-            );
+            let poisoned_intents = match scheduler.failed(&intent) {
+                Ok(intents) => intents,
+                Err(err) => {
+                    error!(intent_id = intent.intent_id, error = ?err, "Intent scheduler state is inconsistent");
+                    result.inner = Err(err.into());
+                    Vec::new()
+                }
+            };
+            metrics::set_committor_poisoned_keys_count(scheduler.poisoned_keys_count() as i64);
             drop(scheduler);
             Self::broadcast_result(
                 BroadcastedIntentExecutionResult::new(intent.intent_id, result),
@@ -330,12 +313,10 @@ where
             Self::report_poisoned_intents(poisoned_intents, &result_sender);
         } else {
             // Remove executed task from Scheduler to unblock other intents
-            // SAFETY: Self::execute is called ONLY after IntentScheduler
-            // successfully is able to schedule execution of some Intent
-            // that means that the same Intent is SAFE to complete
-            scheduler
-                .complete(&intent)
-                .expect("Valid completion of previously scheduled message");
+            if let Err(err) = scheduler.complete(&intent) {
+                error!(intent_id = intent.intent_id, error = ?err, "Intent scheduler state is inconsistent");
+                result.inner = Err(err.into());
+            }
             drop(scheduler);
             Self::broadcast_result(
                 BroadcastedIntentExecutionResult::new(intent.intent_id, result),
@@ -362,9 +343,7 @@ where
         poisoned_intents: Vec<OutboxIntentBundle>,
         result_sender: &broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
-        metrics::inc_committor_cascade_voided_intents_count_by(
-            poisoned_intents.len() as u64,
-        );
+        metrics::inc_committor_cascade_voided_intents_count_by(poisoned_intents.len() as u64);
         for intent in poisoned_intents {
             warn!(poisoned_intent = ?intent.intent_id, "Intent poisoned");
             Self::broadcast_result(
@@ -395,14 +374,11 @@ where
         let result = loop {
             attempt += 1;
             if attempt > 1 {
-                current_intent =
-                    executor_factory.reconcile_intent(&current_intent).await;
+                current_intent = executor_factory.reconcile_intent(&current_intent).await;
             }
 
-            let executor = executor_factory
-                .create_instance(current_intent.status().clone());
-            let (result, cleanup_handle) =
-                executor.execute(current_intent.inner.clone()).await;
+            let executor = executor_factory.create_instance(current_intent.status().clone());
+            let (result, cleanup_handle) = executor.execute(current_intent.inner.clone()).await;
 
             tokio::spawn(async move {
                 if let Err(err) = cleanup_handle.clean().await {
@@ -411,16 +387,13 @@ where
             });
 
             // break early if we can't retry anymore
-            if attempt >= MAX_INTENT_ATTEMPTS
-                || !result.is_retriable(has_dedup_guard)
-            {
+            if attempt >= MAX_INTENT_ATTEMPTS || !result.is_retriable(has_dedup_guard) {
                 break result;
             }
 
             // Sleeping retries release their executor slot but must stay
             // bounded; without a free retry slot the failure is terminal
-            let Ok(retry_permit) = limits.retries.clone().try_acquire_owned()
-            else {
+            let Ok(retry_permit) = limits.retries.clone().try_acquire_owned() else {
                 warn!(intent_id = intent.intent_id, "Retry capacity exhausted");
                 break result;
             };
@@ -436,14 +409,13 @@ where
             let jitter = Duration::from_millis((intent.intent_id % 8) * 125);
             drop(execution_permit.take());
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
-            execution_permit =
-                match limits.executors.clone().acquire_owned().await {
-                    Ok(permit) => Some(permit),
-                    Err(_) => {
-                        error!(SEMAPHORE_CLOSED_MSG);
-                        break result;
-                    }
-                };
+            execution_permit = match limits.executors.clone().acquire_owned().await {
+                Ok(permit) => Some(permit),
+                Err(_) => {
+                    error!(SEMAPHORE_CLOSED_MSG);
+                    break result;
+                }
+            };
             drop(retry_permit);
         };
 
@@ -466,10 +438,7 @@ where
             result,
         );
         if let Err(err) = &result {
-            metrics::inc_committor_failed_intents_count(
-                &INTENT_BUNDLE_LABEL,
-                err,
-            );
+            metrics::inc_committor_failed_intents_count(&INTENT_BUNDLE_LABEL, err);
         }
 
         // Loki alerts
@@ -528,9 +497,7 @@ mod tests {
         test_utils,
         transaction_preparator::{
             TransactionPreparator,
-            delivery_preparator::{
-                BufferExecutionError, DeliveryPreparatorResult,
-            },
+            delivery_preparator::{BufferExecutionError, DeliveryPreparatorResult},
             error::PreparatorResult,
         },
     };
@@ -544,7 +511,7 @@ mod tests {
             _authority: &Keypair,
             _transaction_strategy: &mut TransactionStrategy,
         ) -> PreparatorResult<VersionedMessage> {
-            unimplemented!()
+            panic!("mock transaction preparator should not prepare a strategy")
         }
 
         async fn cleanup_for_strategy(
@@ -557,11 +524,8 @@ mod tests {
         }
     }
 
-    type MockIntentExecutionEngine = IntentExecutionEngine<
-        DummyDB,
-        MockIntentExecutorFactory,
-        MockTransactionPreparator,
-    >;
+    type MockIntentExecutionEngine =
+        IntentExecutionEngine<DummyDB, MockIntentExecutorFactory, MockTransactionPreparator>;
     fn setup_engine(
         should_fail: bool,
     ) -> (
@@ -589,8 +553,7 @@ mod tests {
         let db = Arc::new(Mutex::new(DummyDB::new()));
         let (handle, receiver) = mpsc::channel(1000);
         let intent_stream = IntentStream::new(db.clone(), receiver);
-        let worker =
-            IntentExecutionEngine::new(intent_stream, executor_factory);
+        let worker = IntentExecutionEngine::new(intent_stream, executor_factory);
 
         (handle, worker, db)
     }
@@ -704,7 +667,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             &[],
         );
-        db.lock().unwrap().store_intent_bundle(msg.clone()).unwrap();
+        db.lock().store_intent_bundle(msg.clone()).unwrap();
 
         // Start worker
         let result_subscriber = worker.spawn();
@@ -784,15 +747,10 @@ mod tests {
 
         let mut results = Vec::with_capacity(NUM_FAILURES);
         for _ in 0..NUM_FAILURES {
-            let result = timeout(
-                Duration::from_secs(5),
-                result_receiver.recv(),
-            )
-            .await
-            .expect(
-                "must not hang waiting for poisoned successors to be reported",
-            )
-            .unwrap();
+            let result = timeout(Duration::from_secs(5), result_receiver.recv())
+                .await
+                .expect("must not hang waiting for poisoned successors to be reported")
+                .unwrap();
             results.push(result);
         }
 
@@ -832,8 +790,7 @@ mod tests {
         let result_subscriber = worker.spawn();
         let mut result_receiver = result_subscriber.subscribe();
 
-        let poisoned_pubkey =
-            pubkey!("1111111111111111111111111111111111111111111");
+        let poisoned_pubkey = pubkey!("1111111111111111111111111111111111111111111");
         let head = create_test_intent_bundle(0, &[poisoned_pubkey], &[]);
         let successor = create_test_intent_bundle(1, &[poisoned_pubkey], &[]);
         sender.try_send(head).unwrap();
@@ -841,11 +798,10 @@ mod tests {
 
         // Head fails for real, successor is voided by the cascade.
         for _ in 0..2 {
-            let result =
-                timeout(Duration::from_secs(5), result_receiver.recv())
-                    .await
-                    .expect("must not hang")
-                    .unwrap();
+            let result = timeout(Duration::from_secs(5), result_receiver.recv())
+                .await
+                .expect("must not hang")
+                .unwrap();
             assert!(result.is_err());
         }
 
@@ -854,8 +810,7 @@ mod tests {
         // it ever arrives.
         let rejected = create_test_intent_bundle(2, &[poisoned_pubkey], &[]);
         sender.try_send(rejected).unwrap();
-        let silence =
-            timeout(Duration::from_millis(300), result_receiver.recv()).await;
+        let silence = timeout(Duration::from_millis(300), result_receiver.recv()).await;
         assert!(
             silence.is_err(),
             "poisoned pubkey must not produce a broadcast for a rejected intent"
@@ -863,8 +818,7 @@ mod tests {
 
         // An intent on an unrelated pubkey is unaffected by the poisoning
         // and still executes (and fails for real, not as poisoned).
-        let unrelated_pubkey =
-            pubkey!("21111111111111111111111111111111111111111111");
+        let unrelated_pubkey = pubkey!("21111111111111111111111111111111111111111111");
         let unrelated = create_test_intent_bundle(3, &[unrelated_pubkey], &[]);
         sender.try_send(unrelated).unwrap();
         let result = timeout(Duration::from_secs(5), result_receiver.recv())
@@ -1044,16 +998,11 @@ mod tests {
         let mut result_receiver = result_subscriber.subscribe();
 
         // Shared key for blocking messages
-        let blocking_key =
-            pubkey!("1111111111111111111111111111111111111111111");
+        let blocking_key = pubkey!("1111111111111111111111111111111111111111111");
         // Send mixed messages
         for i in 0..NUM_MESSAGES {
             let is_blocking = rand::random::<f32>() < BLOCKING_RATIO;
-            let pubkeys = if is_blocking {
-                vec![blocking_key]
-            } else {
-                vec![Pubkey::new_unique()]
-            };
+            let pubkeys = if is_blocking { vec![blocking_key] } else { vec![Pubkey::new_unique()] };
 
             let msg = create_test_intent_bundle(i as u64, &pubkeys, &[]);
             sender.try_send(msg).unwrap();
@@ -1086,7 +1035,7 @@ mod tests {
         Transient(Arc<AtomicUsize>),
     }
 
-    pub struct MockIntentExecutorFactory {
+    pub(super) struct MockIntentExecutorFactory {
         failure_mode: MockFailureMode,
         report_callbacks_on_failure: bool,
         created_instances: Arc<AtomicUsize>,
@@ -1105,21 +1054,21 @@ mod tests {
             }
         }
 
-        pub fn new() -> Self {
+        pub(super) fn new() -> Self {
             Self::with_mode(MockFailureMode::None)
         }
 
-        pub fn new_failing() -> Self {
+        pub(super) fn new_failing() -> Self {
             Self::with_mode(MockFailureMode::Persistent)
         }
 
-        pub fn new_transient(failures: usize) -> Self {
-            Self::with_mode(MockFailureMode::Transient(Arc::new(
-                AtomicUsize::new(failures),
-            )))
+        pub(super) fn new_transient(failures: usize) -> Self {
+            Self::with_mode(MockFailureMode::Transient(Arc::new(AtomicUsize::new(
+                failures,
+            ))))
         }
 
-        pub fn with_concurrency_tracking(
+        pub(super) fn with_concurrency_tracking(
             &mut self,
             active_tasks: &Arc<AtomicUsize>,
             max_concurrent: &Arc<AtomicUsize>,
@@ -1129,9 +1078,7 @@ mod tests {
         }
     }
 
-    impl IntentExecutorBuilder<MockTransactionPreparator>
-        for MockIntentExecutorFactory
-    {
+    impl IntentExecutorBuilder<MockTransactionPreparator> for MockIntentExecutorFactory {
         fn create_instance(
             &self,
             _status: magicblock_program::outbox_intent_bundles::OutboxIntentBundleStatus,
@@ -1146,7 +1093,7 @@ mod tests {
         }
     }
 
-    pub struct MockIntentExecutor {
+    pub(super) struct MockIntentExecutor {
         failure_mode: MockFailureMode,
         report_callbacks_on_failure: bool,
         active_tasks: Option<Arc<AtomicUsize>>,
@@ -1155,9 +1102,7 @@ mod tests {
 
     impl MockIntentExecutor {
         fn on_task_started(&self) {
-            if let (Some(active), Some(max)) =
-                (&self.active_tasks, &self.max_concurrent)
-            {
+            if let (Some(active), Some(max)) = (&self.active_tasks, &self.max_concurrent) {
                 // Increment active task count
                 let current = active.fetch_add(1, Ordering::SeqCst) + 1;
 
@@ -1213,37 +1158,30 @@ mod tests {
                 MockFailureMode::Persistent => IntentExecutionResult {
                     inner: Err(ExecutorError::FailedToCommitError {
                         err: TransactionStrategyExecutionError::InternalError(
-                            InternalError::SignerError(SignerError::Custom(
-                                "oops".to_string(),
-                            )),
+                            InternalError::SignerError(SignerError::Custom("oops".to_string())),
                         ),
                         signature: None,
                     }),
-                    patched_errors: vec![
-                        TransactionStrategyExecutionError::ActionsError(
-                            TransactionError::AccountNotFound,
-                            None,
-                        ),
-                    ],
+                    patched_errors: vec![TransactionStrategyExecutionError::ActionsError(
+                        TransactionError::AccountNotFound,
+                        None,
+                    )],
                     callbacks_report: vec![],
                     #[cfg(feature = "dev-context-only-utils")]
                     successful_transaction_strategies: vec![],
                 },
                 MockFailureMode::Transient(remaining) => {
                     let should_fail = remaining
-                        .fetch_update(
-                            Ordering::SeqCst,
-                            Ordering::SeqCst,
-                            |value| value.checked_sub(1),
-                        )
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |value| {
+                            value.checked_sub(1)
+                        })
                         .is_ok();
                     if should_fail {
-                        let callbacks_report =
-                            if self.report_callbacks_on_failure {
-                                vec![Ok(Signature::default())]
-                            } else {
-                                vec![]
-                            };
+                        let callbacks_report = if self.report_callbacks_on_failure {
+                            vec![Ok(Signature::default())]
+                        } else {
+                            vec![]
+                        };
                         IntentExecutionResult {
                             inner: Err(ExecutorError::FailedToCommitError {
                                 err: TransactionStrategyExecutionError::InternalError(
@@ -1269,12 +1207,8 @@ mod tests {
 
             self.on_task_finished();
 
-            let cleanup = CleanupHandle::new(
-                Keypair::new(),
-                vec![],
-                false,
-                MockTransactionPreparator,
-            );
+            let cleanup =
+                CleanupHandle::new(Keypair::new(), vec![], false, MockTransactionPreparator);
             (result, cleanup)
         }
     }

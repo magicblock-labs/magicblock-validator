@@ -2,18 +2,15 @@ use std::{
     collections::{HashMap, HashSet},
     fmt,
     ops::Deref,
-    sync::{
-        Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
-        atomic::{AtomicBool, AtomicUsize, Ordering},
-    },
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     time::Instant,
 };
 
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
-    MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
+use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use solana_address_lookup_table_interface::{
     self as alt,
     state::{LOOKUP_TABLE_MAX_ADDRESSES, LookupTableMeta},
@@ -140,29 +137,20 @@ impl RefcountedPubkeys {
 
     /// Returns `true` if any of the pubkeys is still in use
     fn has_reservations(&self) -> bool {
-        self.pubkeys
-            .values()
-            .any(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
+        self.pubkeys.values().any(|entry| entry.refcount.load(Ordering::SeqCst) > 0)
     }
 
     /// Returns the refcount of a pubkey if it exists in this table
     /// - *pubkey* to query refcount for
     /// - *returns* `Some(refcount)` if the pubkey exists, `None` otherwise
     fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
-        self.pubkeys
-            .get(pubkey)
-            .map(|entry| entry.refcount.load(Ordering::Relaxed))
+        self.pubkeys.get(pubkey).map(|entry| entry.refcount.load(Ordering::Relaxed))
     }
 
-    fn latest_update_sent_at_for(
-        &self,
-        pubkeys: &HashSet<Pubkey>,
-    ) -> Option<Instant> {
+    fn latest_update_sent_at_for(&self, pubkeys: &HashSet<Pubkey>) -> Option<Instant> {
         pubkeys
             .iter()
-            .filter_map(|pubkey| {
-                self.pubkeys.get(pubkey).map(|entry| entry.update_sent_at)
-            })
+            .filter_map(|pubkey| self.pubkeys.get(pubkey).map(|entry| entry.update_sent_at))
             .max()
     }
 }
@@ -218,16 +206,10 @@ impl fmt::Display for LookupTableRc {
                 extend_signatures,
                 ..
             } => {
-                let comma_separated_pubkeys = pubkeys
-                    .read()
-                    .expect("pubkeys rwlock poisoned")
-                    .keys()
-                    .map(|key| key.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let comma_separated_pubkeys =
+                    pubkeys.read().keys().map(|key| key.to_string()).collect::<Vec<_>>().join(", ");
                 let comma_separated_sigs = extend_signatures
                     .lock()
-                    .expect("extend_signatures mutex poisoned")
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
@@ -281,14 +263,7 @@ impl LookupTableRc {
 
     pub fn extend_signatures(&self) -> Option<Vec<Signature>> {
         match self {
-            Self::Active {
-                extend_signatures, ..
-            } => Some(
-                extend_signatures
-                    .lock()
-                    .expect("extend_signatures mutex poisoned")
-                    .clone(),
-            ),
+            Self::Active { extend_signatures, .. } => Some(extend_signatures.lock().clone()),
             Self::Deactivated { .. } => None,
         }
     }
@@ -296,10 +271,7 @@ impl LookupTableRc {
     pub fn deactivate_signature(&self) -> Option<Signature> {
         match self {
             Self::Active { .. } => None,
-            Self::Deactivated {
-                deactivate_signature,
-                ..
-            } => Some(*deactivate_signature),
+            Self::Deactivated { deactivate_signature, .. } => Some(*deactivate_signature),
         }
     }
 
@@ -319,20 +291,14 @@ impl LookupTableRc {
 
     pub fn pubkeys(&self) -> Option<RwLockReadGuard<'_, RefcountedPubkeys>> {
         match self {
-            Self::Active { pubkeys, .. } => {
-                Some(pubkeys.read().expect("pubkeys rwlock poisoned"))
-            }
+            Self::Active { pubkeys, .. } => Some(pubkeys.read()),
             Self::Deactivated { .. } => None,
         }
     }
 
-    pub fn pubkeys_mut(
-        &self,
-    ) -> Option<RwLockWriteGuard<'_, RefcountedPubkeys>> {
+    pub fn pubkeys_mut(&self) -> Option<RwLockWriteGuard<'_, RefcountedPubkeys>> {
         match self {
-            Self::Active { pubkeys, .. } => {
-                Some(pubkeys.write().expect("pubkeys rwlock poisoned"))
-            }
+            Self::Active { pubkeys, .. } => Some(pubkeys.write()),
             Self::Deactivated { .. } => None,
         }
     }
@@ -347,14 +313,9 @@ impl LookupTableRc {
     /// Returns `true` if the table has more capacity to add pubkeys
     pub fn has_more_capacity(&self) -> bool {
         match self {
-            Self::Active {
-                pubkeys,
-                extendable,
-                ..
-            } => {
+            Self::Active { pubkeys, extendable, .. } => {
                 extendable.load(Ordering::Relaxed)
-                    && pubkeys.read().expect("pubkeys rwlock poisoned").len()
-                        < LOOKUP_TABLE_MAX_ADDRESSES
+                    && pubkeys.read().len() < LOOKUP_TABLE_MAX_ADDRESSES
             }
             Self::Deactivated { .. } => false,
         }
@@ -371,15 +332,13 @@ impl LookupTableRc {
     }
 
     pub fn contains_key(&self, pubkey: &Pubkey) -> bool {
-        self.pubkeys()
-            .is_some_and(|pubkeys| pubkeys.contains_key(pubkey))
+        self.pubkeys().is_some_and(|pubkeys| pubkeys.contains_key(pubkey))
     }
 
     /// Returns `true` if the table is active and  any of the its pubkeys
     /// is still in use
     pub fn has_reservations(&self) -> bool {
-        self.pubkeys()
-            .is_some_and(|pubkeys| pubkeys.has_reservations())
+        self.pubkeys().is_some_and(|pubkeys| pubkeys.has_reservations())
     }
 
     pub fn provides(&self, pubkey: &Pubkey) -> bool {
@@ -411,8 +370,7 @@ impl LookupTableRc {
             ));
         }
 
-        let Some(chain_pubkeys) = self.get_chain_pubkeys(rpc_client).await?
-        else {
+        let Some(chain_pubkeys) = self.get_chain_pubkeys(rpc_client).await? else {
             debug!(
                 table_address = %self.table_address(),
                 "Skipping lookup table reconciliation; remote table missing"
@@ -452,11 +410,7 @@ impl LookupTableRc {
         matches!(self, Active { .. })
     }
 
-    pub fn derive_keypair(
-        authority: &Keypair,
-        slot: Slot,
-        sub_slot: Slot,
-    ) -> Keypair {
+    pub fn derive_keypair(authority: &Keypair, slot: Slot, sub_slot: Slot) -> Keypair {
         derive_keypair::derive_keypair(authority, slot, sub_slot)
     }
 
@@ -464,8 +418,7 @@ impl LookupTableRc {
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
     pub fn reserve_pubkey(&self, pubkey: &Pubkey) -> bool {
-        self.pubkeys()
-            .is_some_and(|pubkeys| pubkeys.reserve(pubkey))
+        self.pubkeys().is_some_and(|pubkeys| pubkeys.reserve(pubkey))
     }
 
     /// Releases one reservation for the given pubkey if it is part of this table
@@ -473,17 +426,13 @@ impl LookupTableRc {
     /// - *pubkey* to release
     /// - *returns* `true` if the pubkey was released
     pub fn release_pubkey(&self, pubkey: &Pubkey) -> bool {
-        self.pubkeys()
-            .is_some_and(|pubkeys| pubkeys.release(pubkey))
+        self.pubkeys().is_some_and(|pubkeys| pubkeys.release(pubkey))
     }
 
     /// Matches pubkeys from the given set against the pubkeys it has reserved.
     /// NOTE: the caller is responsible to hold a reservation to each pubkey it
     ///       is requesting to match against
-    pub fn match_pubkeys(
-        &self,
-        requested_pubkeys: &HashSet<Pubkey>,
-    ) -> HashSet<Pubkey> {
+    pub fn match_pubkeys(&self, requested_pubkeys: &HashSet<Pubkey>) -> HashSet<Pubkey> {
         match self.pubkeys() {
             Some(pubkeys) => requested_pubkeys
                 .iter()
@@ -494,13 +443,9 @@ impl LookupTableRc {
         }
     }
 
-    pub fn latest_update_sent_at_for(
-        &self,
-        pubkeys: &HashSet<Pubkey>,
-    ) -> Option<Instant> {
-        self.pubkeys().and_then(|table_pubkeys| {
-            table_pubkeys.latest_update_sent_at_for(pubkeys)
-        })
+    pub fn latest_update_sent_at_for(&self, pubkeys: &HashSet<Pubkey>) -> Option<Instant> {
+        self.pubkeys()
+            .and_then(|table_pubkeys| table_pubkeys.latest_update_sent_at_for(pubkeys))
     }
 
     /// Initializes an address lookup table deriving its authority from the provided
@@ -519,7 +464,7 @@ impl LookupTableRc {
     /// - **pubkeys**: to extend the lookup table respecting respecting
     ///   [solana_address_lookup_table_interface::LOOKUP_TABLE_MAX_ADDRESSES]
     ///   after it is initialized
-    #[instrument(skip(rpc_client, authority, compute_budget), fields(table_address = tracing::field::Empty))]
+    #[instrument(skip(rpc_client, authority, compute_budget), fields(table_address = field::Empty))]
     pub async fn init(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
@@ -530,16 +475,14 @@ impl LookupTableRc {
     ) -> TableManiaResult<Self> {
         check_max_pubkeys(pubkeys)?;
 
-        let derived_auth =
-            Self::derive_keypair(authority, latest_slot, sub_slot);
+        let derived_auth = Self::derive_keypair(authority, latest_slot, sub_slot);
 
         let (create_ix, table_address) = alt::instruction::create_lookup_table(
             derived_auth.pubkey(),
             authority.pubkey(),
             latest_slot,
         );
-        tracing::Span::current()
-            .record("table_address", table_address.to_string());
+        Span::current().record("table_address", table_address.to_string());
         trace!("Initializing lookup table");
 
         let end = pubkeys.len().min(LOOKUP_TABLE_MAX_ADDRESSES);
@@ -550,14 +493,8 @@ impl LookupTableRc {
             pubkeys[..end].to_vec(),
         );
 
-        let (compute_budget_ix, compute_unit_price_ix) =
-            compute_budget.instructions();
-        let ixs = vec![
-            compute_budget_ix,
-            compute_unit_price_ix,
-            create_ix,
-            extend_ix,
-        ];
+        let (compute_budget_ix, compute_unit_price_ix) = compute_budget.instructions();
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, create_ix, extend_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -568,28 +505,20 @@ impl LookupTableRc {
 
         let update_sent_at = Instant::now();
         let outcome = rpc_client
-            .send_transaction(
-                &tx,
-                &Self::get_send_transaction_config(rpc_client),
-            )
+            .send_transaction(&tx, &Self::get_send_transaction_config(rpc_client))
             .await?;
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
             error!(error = ?error, signature = %signature, "Failed to initialize lookup table");
-            return Err(MagicBlockRpcClientError::SentTransactionError(
-                error.clone(),
-                signature,
-            )
-            .into());
+            return Err(
+                MagicBlockRpcClientError::SentTransactionError(error.clone(), signature).into(),
+            );
         }
 
         Ok(Self::Active {
             derived_auth,
             table_address,
-            pubkeys: RwLock::new(RefcountedPubkeys::new(
-                pubkeys,
-                update_sent_at,
-            )),
+            pubkeys: RwLock::new(RefcountedPubkeys::new(pubkeys, update_sent_at)),
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
@@ -624,19 +553,14 @@ impl LookupTableRc {
         check_max_pubkeys(extra_pubkeys)?;
 
         let (pubkeys, extend_signatures) = match self {
-            Active {
-                pubkeys,
-                extend_signatures,
-                ..
-            } => (pubkeys, extend_signatures),
+            Active { pubkeys, extend_signatures, .. } => (pubkeys, extend_signatures),
             Deactivated { .. } => {
                 return Err(TableManiaError::CannotExtendDeactivatedTable(
                     *self.table_address(),
                 ));
             }
         };
-        let (compute_budget_ix, compute_unit_price_ix) =
-            compute_budget.instructions();
+        let (compute_budget_ix, compute_unit_price_ix) = compute_budget.instructions();
         let extend_ix = alt::instruction::extend_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
@@ -655,28 +579,17 @@ impl LookupTableRc {
 
         let update_sent_at = Instant::now();
         let outcome = rpc_client
-            .send_transaction(
-                &tx,
-                &Self::get_send_transaction_config(rpc_client),
-            )
+            .send_transaction(&tx, &Self::get_send_transaction_config(rpc_client))
             .await?;
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
             error!(error = ?error, signature = %signature, "Failed to extend table");
-            return Err(MagicBlockRpcClientError::SentTransactionError(
-                error.clone(),
-                signature,
-            )
-            .into());
+            return Err(
+                MagicBlockRpcClientError::SentTransactionError(error.clone(), signature).into(),
+            );
         } else {
-            pubkeys
-                .write()
-                .expect("pubkeys rwlock poisoned")
-                .insert_many(extra_pubkeys, update_sent_at);
-            extend_signatures
-                .lock()
-                .expect("extend_signatures mutex poisoned")
-                .push(signature);
+            pubkeys.write().insert_many(extra_pubkeys, update_sent_at);
+            extend_signatures.lock().push(signature);
         }
 
         Ok(())
@@ -716,9 +629,7 @@ impl LookupTableRc {
             pubkeys
         };
 
-        let res = self
-            .extend(rpc_client, authority, storing, compute_budget)
-            .await;
+        let res = self.extend(rpc_client, authority, storing, compute_budget).await;
         res.map(|_| storing.to_vec())
     }
 
@@ -741,8 +652,7 @@ impl LookupTableRc {
             self.derived_auth().pubkey(),
         );
 
-        let (compute_budget_ix, compute_unit_price_ix) =
-            compute_budget.instructions();
+        let (compute_budget_ix, compute_unit_price_ix) = compute_budget.instructions();
         let ixs = vec![compute_budget_ix, compute_unit_price_ix, deactivate_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
@@ -753,10 +663,7 @@ impl LookupTableRc {
         );
 
         let outcome = rpc_client
-            .send_transaction(
-                &tx,
-                &Self::get_send_transaction_config(rpc_client),
-            )
+            .send_transaction(&tx, &Self::get_send_transaction_config(rpc_client))
             .await?;
         let (signature, error) = outcome.into_signature_and_error();
         if let Some(error) = &error {
@@ -765,11 +672,9 @@ impl LookupTableRc {
                 signature = %signature,
                 "Failed to deactivate table"
             );
-            return Err(MagicBlockRpcClientError::SentTransactionError(
-                error.clone(),
-                signature,
-            )
-            .into());
+            return Err(
+                MagicBlockRpcClientError::SentTransactionError(error.clone(), signature).into(),
+            );
         }
 
         let slot = rpc_client.get_slot().await?;
@@ -799,9 +704,9 @@ impl LookupTableRc {
         skip(self, rpc_client),
         fields(
             table_address = %self.table_address(),
-            deactivation_slot = tracing::field::Empty,
-            current_slot = tracing::field::Empty,
-            slots_remaining = tracing::field::Empty,
+            deactivation_slot = field::Empty,
+            current_slot = field::Empty,
+            slots_remaining = field::Empty,
         )
     )]
     pub async fn is_deactivated_on_chain(
@@ -809,10 +714,7 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         current_slot: Option<Slot>,
     ) -> bool {
-        let Self::Deactivated {
-            deactivation_slot, ..
-        } = self
-        else {
+        let Self::Deactivated { deactivation_slot, .. } = self else {
             return false;
         };
         let slot = {
@@ -830,18 +732,15 @@ impl LookupTableRc {
         //       I tried to shorten the wait here but found that this is the minimum time needed
         //       for the table to be considered fully _deactivated_
         let deactivated_slot = deactivation_slot + MAX_ENTRIES as u64;
-        tracing::Span::current().record("current_slot", slot);
-        tracing::Span::current().record("deactivation_slot", deactivation_slot);
+        Span::current().record("current_slot", slot);
+        Span::current().record("deactivation_slot", deactivation_slot);
         let slots_remaining = deactivated_slot.saturating_sub(slot);
-        tracing::Span::current().record("slots_remaining", slots_remaining);
+        Span::current().record("slots_remaining", slots_remaining);
         trace!("Table deactivation in progress");
         deactivated_slot <= slot
     }
 
-    pub async fn is_closed(
-        &self,
-        rpc_client: &MagicblockRpcClient,
-    ) -> TableManiaResult<bool> {
+    pub async fn is_closed(&self, rpc_client: &MagicblockRpcClient) -> TableManiaResult<bool> {
         metrics::inc_table_mania_close_a_count();
         let acc = rpc_client.get_account(self.table_address()).await?;
         Ok(acc.is_none())
@@ -855,7 +754,7 @@ impl LookupTableRc {
     /// - **current_slot**: the current slot to use for checking deactivation
     #[instrument(
         skip(self, rpc_client, authority, compute_budget),
-        fields(table_address = %self.table_address(), deactivation_slot = tracing::field::Empty, current_slot = tracing::field::Empty)
+        fields(table_address = %self.table_address(), deactivation_slot = field::Empty, current_slot = field::Empty)
     )]
     pub async fn close(
         &self,
@@ -874,8 +773,7 @@ impl LookupTableRc {
             authority.pubkey(),
         );
 
-        let (compute_budget_ix, compute_unit_price_ix) =
-            compute_budget.instructions();
+        let (compute_budget_ix, compute_unit_price_ix) = compute_budget.instructions();
         let ixs = vec![compute_budget_ix, compute_unit_price_ix, close_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
@@ -886,10 +784,7 @@ impl LookupTableRc {
         );
 
         let send_result = rpc_client
-            .send_transaction(
-                &tx,
-                &Self::get_send_transaction_config(rpc_client),
-            )
+            .send_transaction(&tx, &Self::get_send_transaction_config(rpc_client))
             .await;
 
         let signature = match send_result {
@@ -926,9 +821,7 @@ impl LookupTableRc {
         &self,
         rpc_client: &MagicblockRpcClient,
     ) -> TableManiaResult<Option<LookupTableMeta>> {
-        Ok(rpc_client
-            .get_lookup_table_meta(self.table_address())
-            .await?)
+        Ok(rpc_client.get_lookup_table_meta(self.table_address()).await?)
     }
 
     pub async fn get_chain_pubkeys(
@@ -952,8 +845,7 @@ impl LookupTableRc {
         match rpc_client.commitment_level() {
             Processed => MagicBlockSendTransactionConfig::ensure_processed(),
             Confirmed | Finalized => {
-                MagicBlockSendTransactionConfig::ensure_processed_and_committed(
-                )
+                MagicBlockSendTransactionConfig::ensure_processed_and_committed()
             }
         }
     }

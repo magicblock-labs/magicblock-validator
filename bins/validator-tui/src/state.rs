@@ -6,7 +6,7 @@ use tracing::Level;
 use crate::utils::{is_localhost_http_url, url_encode};
 
 #[derive(Clone)]
-pub struct TuiConfig {
+pub(crate) struct TuiConfig {
     pub rpc_url: String,
     pub ws_url: String,
     pub remote_rpc_url: String,
@@ -19,7 +19,7 @@ pub struct TuiConfig {
 }
 
 #[derive(Clone, Default)]
-pub struct ValidatorConfig {
+pub(crate) struct ValidatorConfig {
     pub version: String,
     pub rpc_endpoint: String,
     pub ws_endpoint: String,
@@ -34,10 +34,7 @@ impl From<&TuiConfig> for ValidatorConfig {
         let rpc_endpoint = config.rpc_url.replace("0.0.0.0", "localhost");
         let ws_endpoint = config.ws_url.replace("0.0.0.0", "localhost");
         Self {
-            version: format!(
-                "{} (Git: {})",
-                config.version, config.git_version
-            ),
+            version: format!("{} (Git: {})", config.version, config.git_version),
             rpc_endpoint,
             ws_endpoint,
             remote_rpc: config.remote_rpc_url.replace("0.0.0.0", "localhost"),
@@ -49,7 +46,7 @@ impl From<&TuiConfig> for ValidatorConfig {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum Tab {
+pub(crate) enum Tab {
     #[default]
     Transactions,
     RemoteTransactions,
@@ -58,11 +55,9 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub fn next(self, has_remote_transactions: bool) -> Self {
+    pub(crate) fn next(self, has_remote_transactions: bool) -> Self {
         match self {
-            Tab::Transactions if has_remote_transactions => {
-                Tab::RemoteTransactions
-            }
+            Tab::Transactions if has_remote_transactions => Tab::RemoteTransactions,
             Tab::Transactions => Tab::Logs,
             Tab::RemoteTransactions => Tab::Logs,
             Tab::Logs => Tab::Config,
@@ -70,7 +65,7 @@ impl Tab {
         }
     }
 
-    pub fn prev(self, has_remote_transactions: bool) -> Self {
+    pub(crate) fn prev(self, has_remote_transactions: bool) -> Self {
         match self {
             Tab::Transactions => Tab::Config,
             Tab::RemoteTransactions => Tab::Transactions,
@@ -80,19 +75,19 @@ impl Tab {
         }
     }
 
-    pub fn is_transaction_tab(self) -> bool {
+    pub(crate) fn is_transaction_tab(self) -> bool {
         matches!(self, Tab::Transactions | Tab::RemoteTransactions)
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TransactionSource {
+pub(crate) enum TransactionSource {
     Local,
     Remote,
 }
 
 #[derive(Clone, Debug)]
-pub struct LogEntry {
+pub(crate) struct LogEntry {
     pub timestamp: DateTime<Utc>,
     pub level: Level,
     pub target: String,
@@ -100,7 +95,7 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    pub fn new(level: Level, target: String, message: String) -> Self {
+    pub(crate) fn new(level: Level, target: String, message: String) -> Self {
         Self {
             timestamp: Utc::now(),
             level,
@@ -120,7 +115,7 @@ impl LogEntry {
 }
 
 #[derive(Clone, Debug)]
-pub struct TransactionEntry {
+pub(crate) struct TransactionEntry {
     pub signature: String,
     pub slot: u64,
     pub success: bool,
@@ -129,18 +124,14 @@ pub struct TransactionEntry {
 }
 
 #[derive(Clone, Debug)]
-pub struct TransactionAccount {
+pub(crate) struct TransactionAccount {
     pub pubkey: String,
     pub is_signer: bool,
     pub is_writable: bool,
 }
 
 impl TransactionAccount {
-    pub fn new(
-        pubkey: impl Into<String>,
-        is_signer: bool,
-        is_writable: bool,
-    ) -> Self {
+    pub(crate) fn new(pubkey: impl Into<String>, is_signer: bool, is_writable: bool) -> Self {
         Self {
             pubkey: pubkey.into(),
             is_signer,
@@ -150,7 +141,7 @@ impl TransactionAccount {
 }
 
 #[derive(Clone, Debug)]
-pub struct TransactionDetail {
+pub(crate) struct TransactionDetail {
     pub signature: String,
     pub slot: u64,
     pub success: bool,
@@ -165,7 +156,7 @@ pub struct TransactionDetail {
     pub detail_scroll: usize,
 }
 
-pub const MAX_DETAIL_ACCOUNTS: usize = 10;
+pub(crate) const MAX_DETAIL_ACCOUNTS: usize = 10;
 
 impl TransactionDetail {
     fn selectable_accounts_len(&self) -> usize {
@@ -179,7 +170,7 @@ impl TransactionDetail {
         }
     }
 
-    pub fn move_selection_up(&mut self) {
+    pub(crate) fn move_selection_up(&mut self) {
         self.clamp_selection();
         let selectable = self.selectable_accounts_len();
         self.selected_account = match self.selected_account {
@@ -190,7 +181,7 @@ impl TransactionDetail {
         };
     }
 
-    pub fn move_selection_down(&mut self) {
+    pub(crate) fn move_selection_down(&mut self) {
         self.clamp_selection();
         let selectable = self.selectable_accounts_len();
         self.selected_account = match self.selected_account {
@@ -201,45 +192,37 @@ impl TransactionDetail {
         };
     }
 
-    pub fn selected_account_address(&self) -> Option<&str> {
+    pub(crate) fn selected_account_address(&self) -> Option<&str> {
         self.selected_account
             .and_then(|idx| self.accounts.get(idx))
             .map(|account| account.pubkey.as_str())
     }
 
-    pub fn scroll_content_page_up(&mut self, page_size: usize) {
-        self.detail_scroll =
-            self.detail_scroll.saturating_sub(page_size.max(1));
+    pub(crate) fn scroll_content_page_up(&mut self, page_size: usize) {
+        self.detail_scroll = self.detail_scroll.saturating_sub(page_size.max(1));
     }
 
-    pub fn scroll_content_page_down(
-        &mut self,
-        page_size: usize,
-        max_scroll: usize,
-    ) {
-        self.detail_scroll = self
-            .detail_scroll
-            .saturating_add(page_size.max(1))
-            .min(max_scroll);
+    pub(crate) fn scroll_content_page_down(&mut self, page_size: usize, max_scroll: usize) {
+        self.detail_scroll = self.detail_scroll.saturating_add(page_size.max(1)).min(max_scroll);
     }
 
-    pub fn scroll_content_home(&mut self) {
+    pub(crate) fn scroll_content_home(&mut self) {
         self.detail_scroll = 0;
     }
 
-    pub fn scroll_content_end(&mut self, max_scroll: usize) {
+    pub(crate) fn scroll_content_end(&mut self, max_scroll: usize) {
         self.detail_scroll = max_scroll;
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub enum ViewMode {
+pub(crate) enum ViewMode {
     #[default]
     List,
     Detail,
 }
 
-pub struct TransactionPaneState {
+pub(crate) struct TransactionPaneState {
     transactions: VecDeque<TransactionEntry>,
     max_transactions: usize,
     tx_scroll: usize,
@@ -265,15 +248,12 @@ impl TransactionPaneState {
     fn push_transaction(&mut self, entry: TransactionEntry) {
         let had_transactions = self.filtered_transactions_len() > 0;
         let anchored_to_latest = self.selected_tx == 0 && self.tx_scroll == 0;
-        let selected_signature_before =
-            self.selected_transaction().map(|tx| tx.signature.clone());
+        let selected_signature_before = self.selected_transaction().map(|tx| tx.signature.clone());
         let selected_tx_before = self.selected_tx;
         let tx_scroll_before = self.tx_scroll;
 
-        if let Some(existing_idx) = self
-            .transactions
-            .iter()
-            .position(|tx| tx.signature == entry.signature)
+        if let Some(existing_idx) =
+            self.transactions.iter().position(|tx| tx.signature == entry.signature)
         {
             self.transactions.remove(existing_idx);
         }
@@ -285,21 +265,18 @@ impl TransactionPaneState {
             && let Some(selected_signature) = selected_signature_before
         {
             let filtered_indices = self.filtered_transaction_indices();
-            if let Some(new_selected) = self
-                .find_filtered_position_by_signature(
-                    &filtered_indices,
-                    &selected_signature,
-                )
+            if let Some(new_selected) =
+                self.find_filtered_position_by_signature(&filtered_indices, &selected_signature)
             {
                 self.selected_tx = new_selected;
 
                 if tx_scroll_before > 0 {
                     if new_selected >= selected_tx_before {
-                        self.tx_scroll = tx_scroll_before
-                            .saturating_add(new_selected - selected_tx_before);
+                        self.tx_scroll =
+                            tx_scroll_before.saturating_add(new_selected - selected_tx_before);
                     } else {
-                        self.tx_scroll = tx_scroll_before
-                            .saturating_sub(selected_tx_before - new_selected);
+                        self.tx_scroll =
+                            tx_scroll_before.saturating_sub(selected_tx_before - new_selected);
                     }
                 }
             }
@@ -344,8 +321,7 @@ impl TransactionPaneState {
     }
 
     fn selected_transaction(&self) -> Option<&TransactionEntry> {
-        let tx_idx =
-            *self.filtered_transaction_indices().get(self.selected_tx)?;
+        let tx_idx = *self.filtered_transaction_indices().get(self.selected_tx)?;
         self.transactions.get(tx_idx)
     }
 
@@ -368,15 +344,13 @@ impl TransactionPaneState {
     }
 
     fn append_tx_filter_char(&mut self, ch: char) {
-        let selected_signature =
-            self.selected_transaction().map(|tx| tx.signature.clone());
+        let selected_signature = self.selected_transaction().map(|tx| tx.signature.clone());
         self.tx_filter_query.push(ch);
         self.reconcile_selection(selected_signature.as_deref());
     }
 
     fn pop_tx_filter_char(&mut self) {
-        let selected_signature =
-            self.selected_transaction().map(|tx| tx.signature.clone());
+        let selected_signature = self.selected_transaction().map(|tx| tx.signature.clone());
         if self.tx_filter_query.pop().is_none() {
             return;
         }
@@ -387,8 +361,7 @@ impl TransactionPaneState {
         if self.tx_filter_query.is_empty() {
             return;
         }
-        let selected_signature =
-            self.selected_transaction().map(|tx| tx.signature.clone());
+        let selected_signature = self.selected_transaction().map(|tx| tx.signature.clone());
         self.tx_filter_query.clear();
         self.reconcile_selection(selected_signature.as_deref());
     }
@@ -399,10 +372,7 @@ impl TransactionPaneState {
         }
 
         contains_ignore_ascii_case(&tx.signature, filter)
-            || tx
-                .accounts
-                .iter()
-                .any(|account| contains_ignore_ascii_case(account, filter))
+            || tx.accounts.iter().any(|account| contains_ignore_ascii_case(account, filter))
     }
 
     fn filtered_transaction_indices(&self) -> Vec<usize> {
@@ -410,8 +380,7 @@ impl TransactionPaneState {
             .iter()
             .enumerate()
             .filter_map(|(idx, tx)| {
-                Self::tx_matches_filter(tx, &self.tx_filter_query)
-                    .then_some(idx)
+                Self::tx_matches_filter(tx, &self.tx_filter_query).then_some(idx)
             })
             .collect()
     }
@@ -438,11 +407,8 @@ impl TransactionPaneState {
         }
 
         if let Some(selected_signature) = selected_signature
-            && let Some(new_selected) = self
-                .find_filtered_position_by_signature(
-                    &filtered_indices,
-                    selected_signature,
-                )
+            && let Some(new_selected) =
+                self.find_filtered_position_by_signature(&filtered_indices, selected_signature)
         {
             self.selected_tx = new_selected;
         }
@@ -471,7 +437,7 @@ impl TransactionPaneState {
     }
 }
 
-pub struct TuiState {
+pub(crate) struct TuiState {
     pub slot: u64,
     pub epoch: u64,
     pub slots_per_epoch: u64,
@@ -493,16 +459,14 @@ pub struct TuiState {
 }
 
 impl TuiState {
-    pub fn new(config: TuiConfig) -> Self {
+    pub(crate) fn new(config: TuiConfig) -> Self {
         let rpc_for_explorer = config.rpc_url.replace("0.0.0.0", "localhost");
-        let remote_rpc_for_explorer =
-            config.remote_rpc_url.replace("0.0.0.0", "localhost");
+        let remote_rpc_for_explorer = config.remote_rpc_url.replace("0.0.0.0", "localhost");
         let encoded_rpc = url_encode(&rpc_for_explorer);
-        let explorer_url = format!(
-            "https://explorer.solana.com/?cluster=custom&customUrl={encoded_rpc}"
-        );
-        let remote_rpc_url = is_localhost_http_url(&remote_rpc_for_explorer)
-            .then_some(remote_rpc_for_explorer);
+        let explorer_url =
+            format!("https://explorer.solana.com/?cluster=custom&customUrl={encoded_rpc}");
+        let remote_rpc_url =
+            is_localhost_http_url(&remote_rpc_for_explorer).then_some(remote_rpc_for_explorer);
         let max_transactions = 500;
 
         Self {
@@ -528,36 +492,36 @@ impl TuiState {
         }
     }
 
-    pub fn update_slot(&mut self, slot: u64) {
+    pub(crate) fn update_slot(&mut self, slot: u64) {
         self.slot = slot;
         self.epoch = slot / self.slots_per_epoch;
         self.epoch_start_slot = self.epoch * self.slots_per_epoch;
     }
 
-    pub fn push_log(&mut self, entry: LogEntry) {
+    pub(crate) fn push_log(&mut self, entry: LogEntry) {
         self.logs.push_front(entry);
         while self.logs.len() > self.max_logs {
             self.logs.pop_back();
         }
     }
 
-    pub fn has_remote_transactions(&self) -> bool {
+    pub(crate) fn has_remote_transactions(&self) -> bool {
         self.remote_transactions.is_some()
     }
 
-    pub fn is_transaction_tab(&self) -> bool {
+    pub(crate) fn is_transaction_tab(&self) -> bool {
         self.active_tab.is_transaction_tab()
     }
 
-    pub fn next_tab(&mut self) {
+    pub(crate) fn next_tab(&mut self) {
         self.active_tab = self.active_tab.next(self.has_remote_transactions());
     }
 
-    pub fn prev_tab(&mut self) {
+    pub(crate) fn prev_tab(&mut self) {
         self.active_tab = self.active_tab.prev(self.has_remote_transactions());
     }
 
-    pub fn select_tab_by_shortcut(&mut self, index: u8) {
+    pub(crate) fn select_tab_by_shortcut(&mut self, index: u8) {
         self.active_tab = match (index, self.has_remote_transactions()) {
             (1, _) => Tab::Transactions,
             (2, true) => Tab::RemoteTransactions,
@@ -569,28 +533,23 @@ impl TuiState {
         };
     }
 
-    pub fn transaction_count(&self, source: TransactionSource) -> usize {
-        self.transaction_pane(source)
-            .map(TransactionPaneState::len)
-            .unwrap_or(0)
+    pub(crate) fn transaction_count(&self, source: TransactionSource) -> usize {
+        self.transaction_pane(source).map(TransactionPaneState::len).unwrap_or(0)
     }
 
-    pub fn filtered_transactions_len_for(
-        &self,
-        source: TransactionSource,
-    ) -> usize {
+    pub(crate) fn filtered_transactions_len_for(&self, source: TransactionSource) -> usize {
         self.transaction_pane(source)
             .map(TransactionPaneState::filtered_transactions_len)
             .unwrap_or(0)
     }
 
-    pub fn tx_filter_query_for(&self, source: TransactionSource) -> &str {
+    pub(crate) fn tx_filter_query_for(&self, source: TransactionSource) -> &str {
         self.transaction_pane(source)
             .map(TransactionPaneState::tx_filter_query)
             .unwrap_or("")
     }
 
-    pub fn active_transaction_rpc_url(&self) -> Option<&str> {
+    pub(crate) fn active_transaction_rpc_url(&self) -> Option<&str> {
         match self.active_tab {
             Tab::Transactions => Some(&self.rpc_url),
             Tab::RemoteTransactions => self.remote_rpc_url.as_deref(),
@@ -598,67 +557,59 @@ impl TuiState {
         }
     }
 
-    pub fn push_transaction(
-        &mut self,
-        source: TransactionSource,
-        entry: TransactionEntry,
-    ) {
+    pub(crate) fn push_transaction(&mut self, source: TransactionSource, entry: TransactionEntry) {
         if let Some(pane) = self.transaction_pane_mut(source) {
             pane.push_transaction(entry);
         }
     }
 
-    pub fn scroll_up(&mut self) {
+    pub(crate) fn scroll_up(&mut self) {
         match self.active_tab {
             Tab::Logs => {
                 self.log_scroll = self.log_scroll.saturating_sub(1);
             }
-            Tab::Transactions | Tab::RemoteTransactions => self
-                .active_transaction_pane_mut()
-                .expect("transaction tab should have a pane")
-                .scroll_up(),
+            Tab::Transactions | Tab::RemoteTransactions => {
+                if let Some(pane) = self.active_transaction_pane_mut() {
+                    pane.scroll_up();
+                }
+            }
             Tab::Config => {}
         }
     }
 
-    pub fn scroll_down(&mut self, visible_height: usize) {
+    pub(crate) fn scroll_down(&mut self, visible_height: usize) {
         match self.active_tab {
             Tab::Logs => {
                 let max = self.logs.len().saturating_sub(visible_height);
                 self.log_scroll = (self.log_scroll + 1).min(max);
             }
-            Tab::Transactions | Tab::RemoteTransactions => self
-                .active_transaction_pane_mut()
-                .expect("transaction tab should have a pane")
-                .scroll_down(visible_height),
+            Tab::Transactions | Tab::RemoteTransactions => {
+                if let Some(pane) = self.active_transaction_pane_mut() {
+                    pane.scroll_down(visible_height);
+                }
+            }
             Tab::Config => {}
         }
     }
 
-    pub fn scroll_logs_down_for_terminal(
+    pub(crate) fn scroll_logs_down_for_terminal(
         &mut self,
         terminal_width: u16,
         terminal_height: u16,
     ) {
-        let max =
-            self.log_scroll_max_for_terminal(terminal_width, terminal_height);
+        let max = self.log_scroll_max_for_terminal(terminal_width, terminal_height);
         self.log_scroll = (self.log_scroll + 1).min(max);
     }
 
-    pub fn scroll_logs_end_for_terminal(
+    pub(crate) fn scroll_logs_end_for_terminal(
         &mut self,
         terminal_width: u16,
         terminal_height: u16,
     ) {
-        self.log_scroll =
-            self.log_scroll_max_for_terminal(terminal_width, terminal_height);
+        self.log_scroll = self.log_scroll_max_for_terminal(terminal_width, terminal_height);
     }
 
-    fn log_scroll_max_for_terminal(
-        &self,
-        terminal_width: u16,
-        terminal_height: u16,
-    ) -> usize {
+    fn log_scroll_max_for_terminal(&self, terminal_width: u16, terminal_height: u16) -> usize {
         let content_width = terminal_width.max(1) as usize;
         let content_height = terminal_height.saturating_sub(7).max(1) as usize;
         let total_wrapped_height = self
@@ -670,73 +621,69 @@ impl TuiState {
         total_wrapped_height.saturating_sub(content_height)
     }
 
-    pub fn scroll_transactions_home(&mut self) {
+    pub(crate) fn scroll_transactions_home(&mut self) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.scroll_home();
         }
     }
 
-    pub fn scroll_transactions_end(&mut self, visible_height: usize) {
+    pub(crate) fn scroll_transactions_end(&mut self, visible_height: usize) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.scroll_end(visible_height);
         }
     }
 
-    pub fn active_transaction_scroll(&self) -> usize {
-        self.active_transaction_pane()
-            .map(|pane| pane.tx_scroll)
-            .unwrap_or(0)
+    pub(crate) fn active_transaction_scroll(&self) -> usize {
+        self.active_transaction_pane().map(|pane| pane.tx_scroll).unwrap_or(0)
     }
 
-    pub fn active_transaction_selected(&self) -> usize {
-        self.active_transaction_pane()
-            .map(|pane| pane.selected_tx)
-            .unwrap_or(0)
+    pub(crate) fn active_transaction_selected(&self) -> usize {
+        self.active_transaction_pane().map(|pane| pane.selected_tx).unwrap_or(0)
     }
 
-    pub fn selected_transaction(&self) -> Option<&TransactionEntry> {
+    pub(crate) fn selected_transaction(&self) -> Option<&TransactionEntry> {
         self.active_transaction_pane()
             .and_then(TransactionPaneState::selected_transaction)
     }
 
-    pub fn filtered_transactions(&self) -> Vec<&TransactionEntry> {
+    pub(crate) fn filtered_transactions(&self) -> Vec<&TransactionEntry> {
         self.active_transaction_pane()
             .map(TransactionPaneState::filtered_transactions)
             .unwrap_or_default()
     }
 
-    pub fn tx_filter_query(&self) -> &str {
+    pub(crate) fn tx_filter_query(&self) -> &str {
         self.active_transaction_pane()
             .map(TransactionPaneState::tx_filter_query)
             .unwrap_or("")
     }
 
-    pub fn append_tx_filter_char(&mut self, ch: char) {
+    pub(crate) fn append_tx_filter_char(&mut self, ch: char) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.append_tx_filter_char(ch);
         }
     }
 
-    pub fn pop_tx_filter_char(&mut self) {
+    pub(crate) fn pop_tx_filter_char(&mut self) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.pop_tx_filter_char();
         }
     }
 
-    pub fn clear_tx_filter(&mut self) {
+    pub(crate) fn clear_tx_filter(&mut self) {
         if let Some(pane) = self.active_transaction_pane_mut() {
             pane.clear_tx_filter();
         }
     }
 
-    pub fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
+    pub(crate) fn show_tx_detail(&mut self, mut detail: TransactionDetail) {
         detail.clamp_selection();
         detail.detail_scroll = 0;
         self.tx_detail = Some(detail);
         self.view_mode = ViewMode::Detail;
     }
 
-    pub fn close_tx_detail(&mut self) {
+    pub(crate) fn close_tx_detail(&mut self) {
         self.tx_detail = None;
         self.view_mode = ViewMode::List;
     }
@@ -749,9 +696,7 @@ impl TuiState {
         }
     }
 
-    fn active_transaction_pane_mut(
-        &mut self,
-    ) -> Option<&mut TransactionPaneState> {
+    fn active_transaction_pane_mut(&mut self) -> Option<&mut TransactionPaneState> {
         match self.active_tab {
             Tab::Transactions => Some(&mut self.local_transactions),
             Tab::RemoteTransactions => self.remote_transactions.as_mut(),
@@ -759,10 +704,7 @@ impl TuiState {
         }
     }
 
-    fn transaction_pane(
-        &self,
-        source: TransactionSource,
-    ) -> Option<&TransactionPaneState> {
+    fn transaction_pane(&self, source: TransactionSource) -> Option<&TransactionPaneState> {
         match source {
             TransactionSource::Local => Some(&self.local_transactions),
             TransactionSource::Remote => self.remote_transactions.as_ref(),
@@ -816,9 +758,7 @@ fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
 mod tests {
     use chrono::Local;
 
-    use super::{
-        Tab, TransactionEntry, TransactionSource, TuiConfig, TuiState,
-    };
+    use super::{Tab, TransactionEntry, TransactionSource, TuiConfig, TuiState};
 
     fn config() -> TuiConfig {
         TuiConfig {
@@ -852,10 +792,7 @@ mod tests {
         tx_with_accounts(signature, vec![])
     }
 
-    fn tx_with_accounts(
-        signature: &str,
-        accounts: Vec<&str>,
-    ) -> TransactionEntry {
+    fn tx_with_accounts(signature: &str, accounts: Vec<&str>) -> TransactionEntry {
         TransactionEntry {
             signature: signature.to_string(),
             slot: 1,
@@ -965,16 +902,11 @@ mod tests {
         state.push_transaction(TransactionSource::Local, tx("sig-aaa"));
         state.push_transaction(
             TransactionSource::Local,
-            tx_with_accounts(
-                "sig-aaa",
-                vec!["Updated1111111111111111111111111111111111"],
-            ),
+            tx_with_accounts("sig-aaa", vec!["Updated1111111111111111111111111111111111"]),
         );
 
         assert_eq!(state.transaction_count(TransactionSource::Local), 1);
-        let selected = state
-            .selected_transaction()
-            .expect("selected transaction should exist");
+        let selected = state.selected_transaction().expect("selected transaction should exist");
         assert_eq!(selected.signature, "sig-aaa");
         assert_eq!(
             selected.accounts,

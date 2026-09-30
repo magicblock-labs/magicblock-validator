@@ -1,18 +1,17 @@
 use std::{
     pin::Pin,
-    sync::{Arc, Mutex},
+    sync::Arc,
     task::{Context, Poll},
 };
 
 use futures_util::ready;
 use magicblock_program::outbox_intent_bundles::OutboxIntentBundle;
+use parking_lot::Mutex;
 use pin_project::pin_project;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::{Stream, wrappers::ReceiverStream};
 
 use crate::intent_engine::{db, db::BacklogDB};
-
-const POISONED_MSG: &str = "intent backlog mutex poisoned";
 
 /// Stream of intents from the live channel and persisted backlog.
 ///
@@ -27,10 +26,7 @@ pub struct IntentStream<D> {
 }
 
 impl<D: BacklogDB> IntentStream<D> {
-    pub fn new(
-        backlog: Arc<Mutex<D>>,
-        receiver: Receiver<OutboxIntentBundle>,
-    ) -> Self {
+    pub fn new(backlog: Arc<Mutex<D>>, receiver: Receiver<OutboxIntentBundle>) -> Self {
         Self {
             backlog,
             stream: ReceiverStream::new(receiver),
@@ -41,12 +37,9 @@ impl<D: BacklogDB> IntentStream<D> {
 impl<D: BacklogDB> Stream for IntentStream<D> {
     type Item = Result<OutboxIntentBundle, db::Error>;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
-        let backlog = this.backlog.lock().expect(POISONED_MSG);
+        let backlog = this.backlog.lock();
         if backlog.is_empty() {
             let item = ready!(this.stream.poll_next(cx));
             Poll::Ready(item.map(Ok))

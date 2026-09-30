@@ -11,16 +11,12 @@ use solana_pubkey::{Pubkey, pubkey};
 use solana_rent::Rent;
 use tracing::*;
 
-use crate::remote_account_provider::{
-    RemoteAccountProviderError, RemoteAccountProviderResult,
-};
+use crate::remote_account_provider::{RemoteAccountProviderError, RemoteAccountProviderResult};
 
 // -----------------
 // PDA derivation methods
 // -----------------
-pub fn get_loaderv3_get_program_data_address(
-    program_address: &Pubkey,
-) -> Pubkey {
+pub fn get_loaderv3_get_program_data_address(program_address: &Pubkey) -> Pubkey {
     get_program_data_v3_address(program_address)
 }
 
@@ -61,14 +57,10 @@ pub enum RemoteProgramLoader {
     V4,
 }
 
-pub const LOADER_V1: Pubkey =
-    pubkey!("BPFLoader1111111111111111111111111111111111");
-pub const LOADER_V2: Pubkey =
-    pubkey!("BPFLoader2111111111111111111111111111111111");
-pub const LOADER_V3: Pubkey =
-    pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
-pub const LOADER_V4: Pubkey =
-    pubkey!("LoaderV411111111111111111111111111111111111");
+pub const LOADER_V1: Pubkey = pubkey!("BPFLoader1111111111111111111111111111111111");
+pub const LOADER_V2: Pubkey = pubkey!("BPFLoader2111111111111111111111111111111111");
+pub const LOADER_V3: Pubkey = pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
+pub const LOADER_V4: Pubkey = pubkey!("LoaderV411111111111111111111111111111111111");
 
 impl TryFrom<&Pubkey> for RemoteProgramLoader {
     type Error = RemoteAccountProviderError;
@@ -196,24 +188,16 @@ impl ProgramAccountResolver {
         match (loader, program_account, program_data_account) {
             // Invalid cases
             (V1, None, _) => {
-                Err(RemoteAccountProviderError::LoaderV1StateMissingProgramAccount(
-                    *program_id,
-                ))
+                Err(RemoteAccountProviderError::LoaderV1StateMissingProgramAccount(*program_id))
             }
             (V2, None, _) => {
-                Err(RemoteAccountProviderError::LoaderV2StateMissingProgramAccount(
-                    *program_id,
-                ))
+                Err(RemoteAccountProviderError::LoaderV2StateMissingProgramAccount(*program_id))
             }
-            (V3, _, None) => Err(
-                RemoteAccountProviderError::LoaderV3StateMissingProgramDataAccount(
-                    *program_id,
-                ),
-            ),
+            (V3, _, None) => {
+                Err(RemoteAccountProviderError::LoaderV3StateMissingProgramDataAccount(*program_id))
+            }
             (V4, None, _) => {
-                Err(RemoteAccountProviderError::LoaderV4StateMissingProgramAccount(
-                    *program_id,
-                ))
+                Err(RemoteAccountProviderError::LoaderV4StateMissingProgramAccount(*program_id))
             }
             // Valid cases
             (V1, Some(program_account), _) | (V2, Some(program_account), _) => {
@@ -287,29 +271,20 @@ fn get_state_v3(
             program_id,
             program_data_account.len(),
         ))?;
-    let state =
-        bincode::deserialize::<LoaderV3State>(meta_data).map_err(|err| {
-            RemoteAccountProviderError::LoaderV4StateDeserializationFailed(
-                program_id,
-                err.to_string(),
-            )
-        })?;
+    let state = bincode::deserialize::<LoaderV3State>(meta_data).map_err(|err| {
+        RemoteAccountProviderError::LoaderV4StateDeserializationFailed(program_id, err.to_string())
+    })?;
     let program_data_with_authority = match state {
-        LoaderV3State::ProgramData {
-            upgrade_authority_address,
-            ..
-        } => {
+        LoaderV3State::ProgramData { upgrade_authority_address, .. } => {
             let authority = upgrade_authority_address
                 .map(|address| Pubkey::new_from_array(address.to_bytes()))
                 .unwrap_or(program_id);
             let data = program_data_account
                 .get(LoaderV3State::size_of_programdata_metadata()..)
-                .ok_or(
-                    RemoteAccountProviderError::LoaderV4StateInvalidLength(
-                        program_id,
-                        program_data_account.len(),
-                    ),
-                )?;
+                .ok_or(RemoteAccountProviderError::LoaderV4StateInvalidLength(
+                    program_id,
+                    program_data_account.len(),
+                ))?;
             ProgramDataWithAuthority {
                 authority,
                 program_data: data.to_vec(),
@@ -318,8 +293,7 @@ fn get_state_v3(
         }
         _ => {
             return Err(RemoteAccountProviderError::UnsupportedProgramLoader(
-                "LoaderV3 program data account is not in ProgramData state"
-                    .to_string(),
+                "LoaderV3 program data account is not in ProgramData state".to_string(),
             ));
         }
     };
@@ -340,12 +314,14 @@ fn get_state_v4(
             program_account.len(),
         ))?
         .try_into()
-        .unwrap();
+        .map_err(|_| {
+            RemoteAccountProviderError::LoaderV4StateInvalidLength(
+                program_id,
+                program_account.len(),
+            )
+        })?;
     let state = unsafe {
-        std::mem::transmute::<
-            &[u8; LoaderV4State::program_data_offset()],
-            &LoaderV4State,
-        >(data)
+        std::mem::transmute::<&[u8; LoaderV4State::program_data_offset()], &LoaderV4State>(data)
     };
     let program_data = program_account
         .get(LoaderV4State::program_data_offset()..)
@@ -355,9 +331,7 @@ fn get_state_v4(
         ))?
         .to_vec();
     Ok(ProgramDataWithAuthority {
-        authority: Pubkey::new_from_array(
-            state.authority_address_or_next_version.to_bytes(),
-        ),
+        authority: Pubkey::new_from_array(state.authority_address_or_next_version.to_bytes()),
         program_data,
         loader_status: state.status,
     })

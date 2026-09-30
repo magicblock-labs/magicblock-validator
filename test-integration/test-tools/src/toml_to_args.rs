@@ -28,8 +28,7 @@ struct Program {
 }
 
 fn parse_config(config_path: &PathBuf) -> Config {
-    let config_toml =
-        fs::read_to_string(config_path).expect("Failed to read config file");
+    let config_toml = fs::read_to_string(config_path).expect("Failed to read config file");
     toml::from_str(&config_toml).expect("Failed to parse config file")
 }
 
@@ -44,18 +43,11 @@ fn extract_port_from_listen(listen: &str) -> &str {
     listen.split(':').nth(1).unwrap_or("8899")
 }
 
-pub fn config_to_args(
-    config_path: &PathBuf,
-    program_loader: Option<ProgramLoader>,
-) -> Vec<String> {
+pub fn config_to_args(config_path: &PathBuf, program_loader: Option<ProgramLoader>) -> Vec<String> {
     let config = parse_config(config_path);
     let program_loader = program_loader.unwrap_or_default();
 
-    let listen = config
-        .aperture
-        .as_ref()
-        .map(|a| a.listen.as_str())
-        .unwrap_or("127.0.0.1:8899");
+    let listen = config.aperture.as_ref().map(|a| a.listen.as_str()).unwrap_or("127.0.0.1:8899");
     let port = extract_port_from_listen(listen);
 
     let mut args = vec![
@@ -80,8 +72,7 @@ pub fn config_to_args(
 
         args.push(program.id);
 
-        let resolved_full_config_path =
-            config_dir.join(&program.path).canonicalize().unwrap();
+        let resolved_full_config_path = config_dir.join(&program.path).canonicalize().unwrap();
         args.push(resolved_full_config_path.to_str().unwrap().to_string());
         if program_loader == ProgramLoader::UpgradeableProgram {
             if let Some(auth) = program.auth {
@@ -93,9 +84,7 @@ pub fn config_to_args(
     }
 
     // Add the first HTTP/HTTPS remote URL if available
-    if let Some(http_remote) =
-        config.remotes.iter().find(|r| r.starts_with("http"))
-    {
+    if let Some(http_remote) = config.remotes.iter().find(|r| r.starts_with("http")) {
         args.push("--url".into());
         args.push(http_remote.clone());
     }
@@ -113,10 +102,6 @@ pub fn program_ids_from_config(config_path: &PathBuf) -> Vec<String> {
 
 pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
     let config = parse_config(config_path);
-    let listen = config
-        .aperture
-        .as_ref()
-        .map(|a| a.listen.as_str())
-        .unwrap_or("127.0.0.1:8899");
+    let listen = config.aperture.as_ref().map(|a| a.listen.as_str()).unwrap_or("127.0.0.1:8899");
     extract_port_from_listen(listen).parse().unwrap_or(8899)
 }

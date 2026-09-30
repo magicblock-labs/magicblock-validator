@@ -36,9 +36,7 @@ const VAULT_IDX: u16 = 2;
 const MAX_DATA_LEN: u32 = 10 * 1024 * 1024;
 
 /// Returns the data length of an ephemeral account as a `u32`.
-fn get_ephemeral_data_len(
-    ephemeral: &InstructionAccount<'_, '_>,
-) -> Result<u32, InstructionError> {
+fn get_ephemeral_data_len(ephemeral: &InstructionAccount<'_, '_>) -> Result<u32, InstructionError> {
     ephemeral
         .borrow()?
         .data()
@@ -51,10 +49,7 @@ fn get_ephemeral_data_len(
 ///
 /// Positive `amount` moves lamports from sponsor to vault (creation / growth).
 /// Negative `amount` moves lamports from vault to sponsor (close / shrink).
-fn transfer_rent(
-    tc: &TransactionContext,
-    amount: i64,
-) -> Result<(), InstructionError> {
+fn transfer_rent(tc: &TransactionContext<'_>, amount: i64) -> Result<(), InstructionError> {
     if amount > 0 {
         let abs = amount as u64;
         accounts::debit_instruction_account_at_index(tc, SPONSOR_IDX, abs)?;

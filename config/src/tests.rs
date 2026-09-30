@@ -6,17 +6,14 @@ use tempfile::TempDir;
 use crate::{LeaderParams, consts};
 
 fn run_cli(args: &[&str]) -> LeaderParams {
-    let args = std::iter::once("validator")
-        .chain(args.iter().copied())
-        .map(OsString::from);
+    let args = std::iter::once("validator").chain(args.iter().copied()).map(OsString::from);
     LeaderParams::try_new(args).expect("configuration should parse")
 }
 
 fn create_temp_config(content: &str) -> (TempDir, PathBuf) {
     let dir = TempDir::new().expect("temporary directory should be created");
     let path = dir.path().join("magicblock.toml");
-    let mut file =
-        File::create(&path).expect("configuration should be created");
+    let mut file = File::create(&path).expect("configuration should be created");
     writeln!(file, "{content}").expect("configuration should be written");
     (dir, path)
 }
@@ -144,9 +141,7 @@ fn follower_authority_is_rejected_by_parent_config() {
         .expect_err("leader parent config should reject remote authority");
 
     assert!(
-        error
-            .to_string()
-            .contains("reserved for follower validators"),
+        error.to_string().contains("reserved for follower validators"),
         "unexpected error: {error}",
     );
 }
@@ -180,8 +175,8 @@ fn invalid_aperture_port_is_rejected() {
         .chain([path.to_str().expect("UTF-8 path")])
         .map(OsString::from);
 
-    let error = LeaderParams::try_new(args)
-        .expect_err("port without a websocket successor should fail");
+    let error =
+        LeaderParams::try_new(args).expect_err("port without a websocket successor should fail");
 
     assert!(error.to_string().contains("port 65535 is invalid"));
 }
@@ -189,8 +184,7 @@ fn invalid_aperture_port_is_rejected() {
 #[test]
 #[parallel]
 fn example_configuration_parses() {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../config.validator.example.toml");
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../config.validator.example.toml");
 
     let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
 

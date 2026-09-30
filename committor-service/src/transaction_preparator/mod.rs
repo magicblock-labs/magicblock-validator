@@ -8,13 +8,11 @@ use solana_message::VersionedMessage;
 use crate::{
     ComputeBudgetConfig,
     tasks::{
-        BaseTaskImpl, commit_stage_task::CleanupTask,
-        task_strategist::TransactionStrategy, utils::TransactionUtils,
+        BaseTaskImpl, commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
+        utils::TransactionUtils,
     },
     transaction_preparator::{
-        delivery_preparator::{
-            BufferExecutionError, DeliveryPreparator, DeliveryPreparatorResult,
-        },
+        delivery_preparator::{BufferExecutionError, DeliveryPreparator, DeliveryPreparatorResult},
         error::PreparatorResult,
     },
 };
@@ -79,9 +77,8 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
         {
-            let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
-                &tx_strategy.lookup_tables_keys,
-            );
+            let dummy_lookup_tables =
+                TransactionUtils::dummy_lookup_table(&tx_strategy.lookup_tables_keys);
             let _ = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
@@ -92,22 +89,18 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         }
 
         // Pre tx preparations. Create buffer accs + lookup tables
-        let lookup_tables = self
-            .delivery_preparator
-            .prepare_for_delivery(authority, tx_strategy)
-            .await?;
+        let lookup_tables =
+            self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
-        let message =
-            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-                authority,
-                &tx_strategy.optimized_tasks,
-                self.compute_budget_config.compute_unit_price,
-                &lookup_tables,
-                tx_strategy.uniqueness_nonce,
-            )
-            .expect("Possibility to assemble checked above")
-            .message;
+        let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+            authority,
+            &tx_strategy.optimized_tasks,
+            self.compute_budget_config.compute_unit_price,
+            &lookup_tables,
+            tx_strategy.uniqueness_nonce,
+        )?
+        .message;
 
         Ok(message)
     }
@@ -122,9 +115,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .optimized_tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::Commit(commit_task) => {
-                    CleanupTask::from_commit(commit_task)
-                }
+                BaseTaskImpl::Commit(commit_task) => CleanupTask::from_commit(commit_task),
                 BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                     CleanupTask::from_commit_finalize(commit_finalize_task)
                 }

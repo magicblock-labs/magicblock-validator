@@ -7,19 +7,18 @@ use std::{
     str::FromStr,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
-        Arc, RwLock,
+        Arc,
     },
     thread::{self, sleep},
     time::Duration,
 };
 
+use parking_lot::RwLock;
+
 use integration_test_tools::{
     expect,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
-    validator::{
-        cleanup, resolve_programs,
-        start_magicblock_validator_with_config_struct,
-    },
+    validator::{cleanup, resolve_programs, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
 };
 use magicblock_config::{
@@ -28,8 +27,8 @@ use magicblock_config::{
     LeaderParams,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 
@@ -69,8 +68,7 @@ impl MockRangeServer {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
                         let _ = stream.set_nonblocking(false);
-                        let _ = stream
-                            .set_read_timeout(Some(Duration::from_secs(5)));
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
                         let mut buffer = [0u8; 4096];
                         let read = stream.read(&mut buffer).unwrap_or(0);
                         let request = String::from_utf8_lossy(&buffer[..read]);
@@ -85,16 +83,8 @@ impl MockRangeServer {
                                 .split(['&', ' '])
                                 .next()
                                 .unwrap();
-                            worker_requested_addresses
-                                .write()
-                                .unwrap()
-                                .push(pubkey.to_string());
-                            let risk_score = worker_risks
-                                .read()
-                                .unwrap()
-                                .get(pubkey)
-                                .copied()
-                                .unwrap_or(0);
+                            worker_requested_addresses.write().push(pubkey.to_string());
+                            let risk_score = worker_risks.read().get(pubkey).copied().unwrap_or(0);
                             worker_request_count.fetch_add(1, Ordering::SeqCst);
                             let is_risky = risk_score > MOCK_RISK_THRESHOLD;
                             format!(
@@ -116,7 +106,7 @@ impl MockRangeServer {
                         let _ = stream.write_all(response.as_bytes());
                     }
                     Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                        thread::sleep(Duration::from_millis(25));
+                        sleep(Duration::from_millis(25));
                     }
                     Err(_) => break,
                 }
@@ -141,10 +131,7 @@ impl MockRangeServer {
     }
 
     pub fn set_risk(&self, address: &str, risk_score: u64) {
-        self.risks
-            .write()
-            .unwrap()
-            .insert(address.to_string(), risk_score);
+        self.risks.write().insert(address.to_string(), risk_score);
     }
 
     pub fn base_url(&self) -> &str {
@@ -156,7 +143,7 @@ impl MockRangeServer {
     }
 
     pub fn requested_addresses(&self) -> Vec<String> {
-        self.requested_addresses.read().unwrap().clone()
+        self.requested_addresses.read().clone()
     }
 }
 
@@ -201,8 +188,7 @@ pub fn setup_validator_with_local_remote(
     let _ = (reset_ledger, skip_keypair_match_check);
     // Fund validator on chain
     {
-        let chain_only_ctx =
-            IntegrationTestContext::try_new_chain_only().unwrap();
+        let chain_only_ctx = IntegrationTestContext::try_new_chain_only().unwrap();
 
         chain_only_ctx
             .airdrop_chain(
@@ -237,21 +223,16 @@ pub fn setup_validator_with_local_remote(
 }
 
 /// Init validator fees vault for proper validator setup
-pub fn init_validator_fees_vault(
-    chain_ctx: &IntegrationTestContext,
-    validator_identity: &Keypair,
-) {
-    let vault_pda = dlp_api::pda::validator_fees_vault_pda_from_validator(
-        &validator_identity.pubkey(),
-    );
+pub fn init_validator_fees_vault(chain_ctx: &IntegrationTestContext, validator_identity: &Keypair) {
+    let vault_pda =
+        dlp_api::pda::validator_fees_vault_pda_from_validator(&validator_identity.pubkey());
     if chain_ctx.fetch_chain_account(vault_pda).is_ok() {
         // Account exists
         return;
     }
 
     // DLP authority in integration tests
-    let dlp_authority =
-        Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
+    let dlp_authority = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
 
     let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
     let ix = dlp_api::instruction_builder::init_validator_fees_vault(
@@ -267,29 +248,16 @@ pub fn init_validator_fees_vault(
     );
 
     chain_ctx
-        .send_and_confirm_transaction_chain(
-            &mut tx,
-            &[validator_identity, &dlp_authority],
-        )
+        .send_and_confirm_transaction_chain(&mut tx, &[validator_identity, &dlp_authority])
         .unwrap();
 }
 
-pub fn token_balance_chain(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> u64 {
-    let balance = ctx
-        .try_chain_client()
-        .unwrap()
-        .get_token_account_balance(account)
-        .unwrap();
+pub fn token_balance_chain(ctx: &IntegrationTestContext, account: &Pubkey) -> u64 {
+    let balance = ctx.try_chain_client().unwrap().get_token_account_balance(account).unwrap();
     balance.amount.parse::<u64>().unwrap()
 }
 
-pub fn token_balance_ephem(
-    ctx: &IntegrationTestContext,
-    account: &Pubkey,
-) -> Option<u64> {
+pub fn token_balance_ephem(ctx: &IntegrationTestContext, account: &Pubkey) -> Option<u64> {
     ctx.try_ephem_client()
         .unwrap()
         .get_token_account_balance(account)
@@ -318,14 +286,9 @@ pub fn cleanup_both(validator: &mut Child, server: &mut MockRangeServer) {
     server.stop();
 }
 
-pub fn delegation_record_exists(
-    ctx: &IntegrationTestContext,
-    delegated_account: &Pubkey,
-) -> bool {
+pub fn delegation_record_exists(ctx: &IntegrationTestContext, delegated_account: &Pubkey) -> bool {
     let record_pubkey =
-        dlp_api::pda::delegation_record_pda_from_delegated_account(
-            delegated_account,
-        );
+        dlp_api::pda::delegation_record_pda_from_delegated_account(delegated_account);
     ctx.fetch_chain_account(record_pubkey).is_ok()
 }
 

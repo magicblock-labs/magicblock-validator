@@ -47,9 +47,8 @@ struct ConfigArgs {
 
 impl ConfigArgs {
     fn load(self) -> Result<LeaderParams> {
-        LeaderParams::load(&self.config).with_context(|| {
-            format!("failed to load leader config {}", self.config.display())
-        })
+        LeaderParams::load(&self.config)
+            .with_context(|| format!("failed to load leader config {}", self.config.display()))
     }
 }
 
@@ -60,8 +59,7 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_writer(io::stderr)

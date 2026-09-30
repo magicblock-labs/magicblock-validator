@@ -1,12 +1,13 @@
+#![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
+
 // Implements the following flow:
 //
 // ## Redelegate an Account that was delegated to us to us - Separate Slots
 // Materialization rules: ../README.md#materialization-and-ordering
 
 use magicblock_chainlink::{
-    assert_cloned_as_delegated, assert_cloned_as_undelegated,
-    assert_not_subscribed, assert_remain_undelegating,
-    assert_subscribed_without_delegation_record,
+    assert_cloned_as_delegated, assert_cloned_as_undelegated, assert_not_subscribed,
+    assert_remain_undelegating, assert_subscribed_without_delegation_record,
     testing::{
         accounts::account_shared_with_owner_and_slot, context::TestContext,
         deleg::add_delegation_record_for,
@@ -21,12 +22,7 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
     let mut slot: u64 = 11;
 
     let ctx = TestContext::init(slot).await;
-    let TestContext {
-        chainlink,
-        bank,
-        rpc_client,
-        ..
-    } = ctx.clone();
+    let TestContext { chainlink, bank, rpc_client, .. } = ctx.clone();
 
     let pubkey = Pubkey::new_unique();
     let program_pubkey = Pubkey::new_unique();
@@ -41,16 +37,11 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
         info!("1. Account delegated to us");
 
         slot = rpc_client.set_slot(slot + 11);
-        let delegated_acc =
-            account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
+        let delegated_acc = account_shared_with_owner_and_slot(&acc, dlp_api::id(), slot);
 
         rpc_client.add_account(pubkey, delegated_acc.into());
-        let delegation_record = add_delegation_record_for(
-            &rpc_client,
-            pubkey,
-            ctx.validator_pubkey,
-            program_pubkey,
-        );
+        let delegation_record =
+            add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, program_pubkey);
 
         // Fetch account - see it's owned by DP, fetch delegation record, clone account as delegated
         ctx.ensure_account(&pubkey).await.unwrap();
@@ -75,9 +66,7 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
         slot = rpc_client.set_slot(slot + 11);
 
         info!("2.3. Account is undelegated on chain");
-        ctx.commit_and_undelegate(&pubkey, &program_pubkey)
-            .await
-            .unwrap();
+        ctx.commit_and_undelegate(&pubkey, &program_pubkey).await.unwrap();
 
         // Account should be cloned as undelegated
         info!("2.4. Write would be refused (undelegated on chain)");
@@ -91,13 +80,9 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
         info!("3.1. Account redelegated to us - Delegate account back to us");
         slot = rpc_client.set_slot(slot + 11);
 
-        ctx.delegate_existing_account_to(
-            &pubkey,
-            &ctx.validator_pubkey,
-            &program_pubkey,
-        )
-        .await
-        .unwrap();
+        ctx.delegate_existing_account_to(&pubkey, &ctx.validator_pubkey, &program_pubkey)
+            .await
+            .unwrap();
 
         // Account should be cloned as delegated back to us
         info!("3.2. Would allow write (delegated to us again)");

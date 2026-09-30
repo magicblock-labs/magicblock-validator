@@ -1,8 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
 use program_schedulecommit::{
-    api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
-    ProcessSchedulecommitCpiArgs, ScheduleCommitType,
+    api::schedule_commit_cpi_instruction, process_schedulecommit_cpi, ProcessSchedulecommitCpiArgs,
+    ScheduleCommitType,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -66,16 +66,13 @@ pub fn process_instruction<'a>(
     instruction_data: &[u8],
 ) -> ProgramResult {
     let ix =
-        ScheduleCommitSecurityInstruction::try_from_slice(instruction_data)
-            .map_err(|err| {
-                msg!("ERROR: failed to parse instruction data {:?}", err);
-                ProgramError::InvalidArgument
-            })?;
+        ScheduleCommitSecurityInstruction::try_from_slice(instruction_data).map_err(|err| {
+            msg!("ERROR: failed to parse instruction data {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
     use ScheduleCommitSecurityInstruction::*;
     match ix {
-        SiblingScheduleCommitCpis(players) => {
-            process_sibling_schedule_cpis(accounts, &players)
-        }
+        SiblingScheduleCommitCpis(players) => process_sibling_schedule_cpis(accounts, &players),
         NonCpi => process_non_cpi(accounts),
         DirectScheduleCommitCpi(players) => process_schedulecommit_cpi(
             accounts,
@@ -90,10 +87,7 @@ pub fn process_instruction<'a>(
     }
 }
 
-fn process_sibling_schedule_cpis(
-    accounts: &[AccountInfo],
-    players: &[Pubkey],
-) -> ProgramResult {
+fn process_sibling_schedule_cpis(accounts: &[AccountInfo], players: &[Pubkey]) -> ProgramResult {
     msg!("Processing sibling_cpis instruction");
 
     let accounts_iter = &mut accounts.iter();
@@ -128,11 +122,7 @@ fn process_sibling_schedule_cpis(
             &pdas,
             ScheduleCommitType::CommitFinalize,
         );
-        let mut account_infos = account_infos
-            .clone()
-            .into_iter()
-            .cloned()
-            .collect::<Vec<_>>();
+        let mut account_infos = account_infos.clone().into_iter().cloned().collect::<Vec<_>>();
         account_infos.extend(pda_infos.clone());
         invoke(&indirect_ix, &account_infos)?;
     }
@@ -149,8 +139,7 @@ fn process_sibling_schedule_cpis(
             false,
         );
 
-        let mut account_infos =
-            account_infos.clone().into_iter().collect::<Vec<_>>();
+        let mut account_infos = account_infos.clone().into_iter().collect::<Vec<_>>();
         account_infos.extend(pda_infos.iter());
         invoke(
             &direct_ix,

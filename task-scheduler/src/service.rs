@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
 use engine::Engine;
-use hydra_api::{
-    ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral,
-};
-use magicblock_program::args::{
-    CancelTaskRequest, ScheduleTaskRequest, TaskRequest,
-};
+use hydra_api::{ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral};
+use magicblock_program::args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest};
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
@@ -18,9 +14,7 @@ use tokio::{select, sync::mpsc};
 use tracing::*;
 
 use crate::{
-    crank::{
-        build_create_ix, crank_pubkey, interval_slots, is_valid_task_interval,
-    },
+    crank::{build_create_ix, crank_pubkey, interval_slots, is_valid_task_interval},
     errors::TaskSchedulerResult,
 };
 
@@ -60,9 +54,7 @@ impl TaskSchedulerService {
         slot_interval: tokio::time::Duration,
     ) -> TaskSchedulerResult<Self> {
         Ok(Self {
-            service_messages: engine
-                .transactions()
-                .subscribe_service_messages()?,
+            service_messages: engine.transactions().subscribe_service_messages()?,
             processor: Processor {
                 engine,
                 rpc_client: Arc::new(RpcClient::new(self_rpc_url)),
@@ -83,10 +75,7 @@ impl TaskSchedulerService {
     }
 
     /// Main loop: serves runtime schedule/cancel requests until cancelled.
-    async fn run_loop(
-        &mut self,
-        shutdown: &ShutdownHandle,
-    ) -> TaskSchedulerResult<()> {
+    async fn run_loop(&mut self, shutdown: &ShutdownHandle) -> TaskSchedulerResult<()> {
         loop {
             select! {
                 message = self.service_messages.recv() => {
@@ -138,16 +127,12 @@ impl Processor {
     }
 
     /// Schedules a task: creates and funds its hydra crank.
-    async fn process_schedule_request(
-        &self,
-        task: ScheduleTaskRequest,
-    ) -> TaskSchedulerResult<()> {
+    async fn process_schedule_request(&self, task: ScheduleTaskRequest) -> TaskSchedulerResult<()> {
         if !is_valid_task_interval(task.execution_interval_millis) {
             // Too large or zero: ignore.
             return Ok(());
         }
-        let interval_millis =
-            task.execution_interval_millis.clamp(1, u32::MAX as i64);
+        let interval_millis = task.execution_interval_millis.clamp(1, u32::MAX as i64);
 
         self.schedule_crank(
             &task.authority,
@@ -166,8 +151,7 @@ impl Processor {
         &self,
         cancel_request: &CancelTaskRequest,
     ) -> TaskSchedulerResult<()> {
-        let crank =
-            crank_pubkey(&cancel_request.authority, cancel_request.task_id);
+        let crank = crank_pubkey(&cancel_request.authority, cancel_request.task_id);
 
         // Does not check if the crank exists, so it will fail if it does not exist
         self.send_cancel(crank).await?;
@@ -227,17 +211,12 @@ impl Processor {
 
         let start_slot = self.engine.blocks().current_slot();
 
-        let interval_slots =
-            interval_slots(interval_millis, self.slot_interval);
+        let interval_slots = interval_slots(interval_millis, self.slot_interval);
         // `i64::MAX` iterations is how the magic API spells "run forever". Hydra
         // has its own sentinel for that — wire-level `0`, which `Create` stores
         // as `REMAINING_INFINITE` — and passing the raw count instead produces a
         // *finite* crank of ~9.2e18 executions.
-        let iterations = if iterations == i64::MAX {
-            0
-        } else {
-            iterations as u64
-        };
+        let iterations = if iterations == i64::MAX { 0 } else { iterations as u64 };
 
         let sponsor = self.engine.signer().pubkey();
         let create_ix = build_create_ix(
@@ -272,10 +251,7 @@ impl Processor {
     /// Signs `instructions` with the validator identity — the crank sponsor —
     /// and submits them. Send and forget since the write lock on the identity
     /// account prevents races.
-    async fn submit(
-        &self,
-        instructions: &[Instruction],
-    ) -> TaskSchedulerResult<()> {
+    async fn submit(&self, instructions: &[Instruction]) -> TaskSchedulerResult<()> {
         let validator = self.engine.signer();
         let transaction = Transaction::new_signed_with_payer(
             instructions,
@@ -300,15 +276,10 @@ mod tests {
     async fn test_service() -> (TestEngine, TaskSchedulerService) {
         let engine = TestEngine::new().await;
         let service = TaskSchedulerService {
-            service_messages: engine
-                .transactions()
-                .subscribe_service_messages()
-                .unwrap(),
+            service_messages: engine.transactions().subscribe_service_messages().unwrap(),
             processor: Processor {
                 engine: engine.clone(),
-                rpc_client: Arc::new(RpcClient::new(
-                    "http://localhost:8899".to_string(),
-                )),
+                rpc_client: Arc::new(RpcClient::new("http://localhost:8899".to_string())),
                 slot_interval: tokio::time::Duration::from_millis(1000),
             },
         };
@@ -321,8 +292,7 @@ mod tests {
 
         let (_engine, service) = test_service().await;
         let mut shutdown = ShutdownManager::default();
-        let handle =
-            tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
+        let handle = tokio::spawn(service.run(shutdown.handle(Service::TaskScheduler)));
 
         let _ = shutdown.terminate().await;
         tokio::time::timeout(tokio::time::Duration::from_secs(2), handle)

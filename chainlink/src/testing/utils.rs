@@ -87,18 +87,14 @@ pub fn get_remote_account_update_sources<'a>(
         .collect::<Vec<_>>()
 }
 
-pub fn dump_remote_account_update_source(
-    accs: &[(&Pubkey, Option<RemoteAccountUpdateSource>)],
-) {
+pub fn dump_remote_account_update_source(accs: &[(&Pubkey, Option<RemoteAccountUpdateSource>)]) {
     for (pk, source) in accs.iter() {
         tracing::info!(pubkey = %pk, source = ?source, "Account update source");
     }
 }
 
-pub fn create_test_subscribed_accounts()
--> (Arc<SubscribedAccounts>, RemoteAccountProviderConfig) {
-    let config =
-        RemoteAccountProviderConfig::default().with_subscription_metrics(false);
+pub fn create_test_subscribed_accounts() -> (Arc<SubscribedAccounts>, RemoteAccountProviderConfig) {
+    let config = RemoteAccountProviderConfig::default().with_subscription_metrics(false);
     (create_test_subscribed_accounts_with_config(&config), config)
 }
 

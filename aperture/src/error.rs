@@ -56,11 +56,7 @@ impl From<TransactionError> for RpcError {
         // closed during shutdown. Surface it as HTTP 503 so the upstream
         // retry buffer can absorb the brief restart gap.
         let http_status =
-            if matches!(value, TransactionError::ClusterMaintenance) {
-                503
-            } else {
-                200
-            };
+            if matches!(value, TransactionError::ClusterMaintenance) { 503 } else { 200 };
         Self {
             http_status,
             ..Self::transaction_verification(value)
@@ -79,10 +75,9 @@ impl From<engine::EngineError> for RpcError {
         use engine::EngineError::*;
         match value {
             // Failures attributable to the submitted transaction itself.
-            SignatureVerification
-            | Sanitization(_)
-            | Signature(_)
-            | TransactionExecution(_) => Self::transaction_verification(value),
+            SignatureVerification | Sanitization(_) | Signature(_) | TransactionExecution(_) => {
+                Self::transaction_verification(value)
+            }
             // Transient shutdown: surface as HTTP 503 so retry-aware proxies
             // can absorb the brief validator restart gap.
             ServiceUnavailable(_) => Self {
@@ -121,15 +116,9 @@ impl RpcError {
     /// proxies can absorb the validator restart gap. Mirrors the behavior of
     /// `From<TransactionError> for RpcError`, which routes scheduler errors
     /// from `send_transaction` / `execute` through HTTP 503 the same way.
-    pub(crate) fn transaction_simulation_from_scheduler(
-        error: TransactionError,
-    ) -> Self {
+    pub(crate) fn transaction_simulation_from_scheduler(error: TransactionError) -> Self {
         let http_status =
-            if matches!(error, TransactionError::ClusterMaintenance) {
-                503
-            } else {
-                200
-            };
+            if matches!(error, TransactionError::ClusterMaintenance) { 503 } else { 200 };
         Self {
             http_status,
             ..Self::transaction_simulation(error)

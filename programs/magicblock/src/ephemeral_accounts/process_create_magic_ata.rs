@@ -10,23 +10,18 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 use solana_transaction_context::transaction::TransactionContext;
-use spl_token::state::{
-    Account as SplAccount, AccountState as SplAccountState, Mint as SplMint,
-};
+use spl_token::state::{Account as SplAccount, AccountState as SplAccountState, Mint as SplMint};
 use spl_token_2022::{
     extension::{
-        BaseStateWithExtensions, BaseStateWithExtensionsMut, ExtensionType,
-        StateWithExtensions, StateWithExtensionsMut,
-        default_account_state::DefaultAccountState,
+        BaseStateWithExtensions, BaseStateWithExtensionsMut, ExtensionType, StateWithExtensions,
+        StateWithExtensionsMut, default_account_state::DefaultAccountState,
     },
     state::{Account as Token2022Account, AccountState, Mint as Token2022Mint},
 };
 
 use crate::utils::{
     account_actions::set_account_mode,
-    accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
+    accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
 };
 
 const PAYER_IDX: u16 = 0;
@@ -41,8 +36,8 @@ struct TokenAccountShape {
 }
 
 pub(crate) fn process_create_magic_ata(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &InvokeContext<'_, '_>,
+    transaction_context: &TransactionContext<'_>,
     wallet_owner: Pubkey,
 ) -> Result<(), InstructionError> {
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -50,13 +45,9 @@ pub(crate) fn process_create_magic_ata(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let ata_pubkey =
-        *get_instruction_pubkey_with_idx(transaction_context, ATA_IDX)?;
+    let ata_pubkey = *get_instruction_pubkey_with_idx(transaction_context, ATA_IDX)?;
     let mint = *get_instruction_pubkey_with_idx(transaction_context, MINT_IDX)?;
-    let token_program = *get_instruction_pubkey_with_idx(
-        transaction_context,
-        TOKEN_PROGRAM_IDX,
-    )?;
+    let token_program = *get_instruction_pubkey_with_idx(transaction_context, TOKEN_PROGRAM_IDX)?;
 
     // Default owner is reserved as the MagicContext legacy-decode sentinel.
     if wallet_owner == Pubkey::default() {
@@ -68,8 +59,7 @@ pub(crate) fn process_create_magic_ata(
     if is_native_mint(&mint) {
         return Err(InstructionError::InvalidArgument);
     }
-    let expected_ata =
-        derive_ata_with_token_program(&wallet_owner, &mint, &token_program);
+    let expected_ata = derive_ata_with_token_program(&wallet_owner, &mint, &token_program);
     if ata_pubkey != expected_ata {
         return Err(InstructionError::InvalidSeeds);
     }
@@ -92,8 +82,7 @@ pub(crate) fn process_create_magic_ata(
         }
     }
 
-    let mint_acc =
-        get_instruction_account_with_idx(transaction_context, MINT_IDX)?;
+    let mint_acc = get_instruction_account_with_idx(transaction_context, MINT_IDX)?;
     let token_account_shape = {
         let mint_acc = mint_acc.borrow()?;
         if mint_acc.owner() != &token_program {
@@ -126,17 +115,12 @@ pub(crate) fn process_create_magic_ata(
     Ok(())
 }
 
-fn is_empty_system_account(
-    account: &solana_account::AccountSharedData,
-) -> bool {
-    account.lamports() == 0
-        && account.owner() == &system_program::ID
-        && account.data().is_empty()
+fn is_empty_system_account(account: &solana_account::AccountSharedData) -> bool {
+    account.lamports() == 0 && account.owner() == &system_program::ID && account.data().is_empty()
 }
 
 fn is_native_mint(mint: &Pubkey) -> bool {
-    *mint == spl_token::native_mint::id()
-        || *mint == spl_token_2022::native_mint::id()
+    *mint == spl_token::native_mint::id() || *mint == spl_token_2022::native_mint::id()
 }
 
 fn token_account_shape(
@@ -144,8 +128,7 @@ fn token_account_shape(
     token_program: &Pubkey,
 ) -> Result<TokenAccountShape, InstructionError> {
     if *token_program == TOKEN_PROGRAM_ID {
-        SplMint::unpack(mint_data)
-            .map_err(|_| InstructionError::InvalidAccountData)?;
+        SplMint::unpack(mint_data).map_err(|_| InstructionError::InvalidAccountData)?;
         Ok(TokenAccountShape {
             len: SplAccount::LEN,
             required_extensions: Vec::new(),
@@ -154,35 +137,31 @@ fn token_account_shape(
     } else {
         let mint = StateWithExtensions::<Token2022Mint>::unpack(mint_data)
             .map_err(|_| InstructionError::InvalidAccountData)?;
-        let mint_extensions = mint
-            .get_extension_types()
-            .map_err(|_| InstructionError::InvalidAccountData)?;
-        let initial_state =
-            if mint_extensions.contains(&ExtensionType::DefaultAccountState) {
-                let default_state = mint
-                    .get_extension::<DefaultAccountState>()
-                    .map_err(|_| InstructionError::InvalidAccountData)?;
-                AccountState::try_from(default_state.state)
-                    .map_err(|_| InstructionError::InvalidAccountData)?
-            } else {
-                AccountState::Initialized
-            };
+        let mint_extensions =
+            mint.get_extension_types().map_err(|_| InstructionError::InvalidAccountData)?;
+        let initial_state = if mint_extensions.contains(&ExtensionType::DefaultAccountState) {
+            let default_state = mint
+                .get_extension::<DefaultAccountState>()
+                .map_err(|_| InstructionError::InvalidAccountData)?;
+            AccountState::try_from(default_state.state)
+                .map_err(|_| InstructionError::InvalidAccountData)?
+        } else {
+            AccountState::Initialized
+        };
         let mut required_extensions =
-            ExtensionType::get_required_init_account_extensions(
-                &mint_extensions,
-            );
-        if required_extensions.iter().any(|extension| {
-            !is_supported_magic_ata_account_extension(*extension)
-        }) {
+            ExtensionType::get_required_init_account_extensions(&mint_extensions);
+        if required_extensions
+            .iter()
+            .any(|extension| !is_supported_magic_ata_account_extension(*extension))
+        {
             return Err(InstructionError::InvalidAccountData);
         }
         if !required_extensions.contains(&ExtensionType::ImmutableOwner) {
             required_extensions.push(ExtensionType::ImmutableOwner);
         }
-        let len = ExtensionType::try_calculate_account_len::<Token2022Account>(
-            &required_extensions,
-        )
-        .map_err(|_| InstructionError::InvalidAccountData)?;
+        let len =
+            ExtensionType::try_calculate_account_len::<Token2022Account>(&required_extensions)
+                .map_err(|_| InstructionError::InvalidAccountData)?;
         Ok(TokenAccountShape {
             len,
             required_extensions,
@@ -223,13 +202,9 @@ fn initialize_token_data(
             delegated_amount: 0,
             close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
-        SplAccount::pack(account, data)
-            .map_err(|_| InstructionError::InvalidAccountData)
+        SplAccount::pack(account, data).map_err(|_| InstructionError::InvalidAccountData)
     } else {
-        let mut state =
-            StateWithExtensionsMut::<Token2022Account>::unpack_uninitialized(
-                data,
-            )
+        let mut state = StateWithExtensionsMut::<Token2022Account>::unpack_uninitialized(data)
             .map_err(|_| InstructionError::InvalidAccountData)?;
         for extension in required_extensions {
             state
@@ -247,9 +222,7 @@ fn initialize_token_data(
             close_authority: COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
         };
         state.pack_base();
-        state
-            .init_account_type()
-            .map_err(|_| InstructionError::InvalidAccountData)
+        state.init_account_type().map_err(|_| InstructionError::InvalidAccountData)
     }
 }
 
@@ -266,8 +239,7 @@ fn matches_existing_ata(
     try_get_magic_ata_info(ata_pubkey, account)
         .map(|info| (info.wallet_owner, info.mint))
         .or_else(|| {
-            try_remap_ata_to_eata(ata_pubkey, account)
-                .map(|(_, eata)| (eata.owner, eata.mint))
+            try_remap_ata_to_eata(ata_pubkey, account).map(|(_, eata)| (eata.owner, eata.mint))
         })
         .is_some_and(|identity| identity == (*wallet_owner, *mint))
 }
@@ -296,32 +268,23 @@ mod tests {
             is_initialized: true,
             freeze_authority: COption::None,
         };
-        let mut account =
-            AccountSharedData::new(1_000_000, SplMint::LEN, &TOKEN_PROGRAM_ID);
+        let mut account = AccountSharedData::new(1_000_000, SplMint::LEN, &TOKEN_PROGRAM_ID);
         SplMint::pack(mint_state, account.data_as_mut_slice()).unwrap();
         account
     }
 
-    fn token_2022_mint_account(
-        extension_types: &[ExtensionType],
-    ) -> AccountSharedData {
-        let len = ExtensionType::try_calculate_account_len::<Token2022Mint>(
-            extension_types,
+    fn token_2022_mint_account(extension_types: &[ExtensionType]) -> AccountSharedData {
+        let len =
+            ExtensionType::try_calculate_account_len::<Token2022Mint>(extension_types).unwrap();
+        let mut account = AccountSharedData::new(1_000_000, len, &TOKEN_2022_PROGRAM_ID);
+        let mut state = StateWithExtensionsMut::<Token2022Mint>::unpack_uninitialized(
+            account.data_as_mut_slice(),
         )
         .unwrap();
-        let mut account =
-            AccountSharedData::new(1_000_000, len, &TOKEN_2022_PROGRAM_ID);
-        let mut state =
-            StateWithExtensionsMut::<Token2022Mint>::unpack_uninitialized(
-                account.data_as_mut_slice(),
-            )
-            .unwrap();
         for extension_type in extension_types {
             match extension_type {
                 ExtensionType::DefaultAccountState => {
-                    let extension = state
-                        .init_extension::<DefaultAccountState>(false)
-                        .unwrap();
+                    let extension = state.init_extension::<DefaultAccountState>(false).unwrap();
                     extension.state = AccountState::Frozen.into();
                 }
                 ExtensionType::NonTransferable => {
@@ -350,11 +313,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ata = derive_ata_with_token_program(
-            &wallet_owner,
-            &mint,
-            &TOKEN_PROGRAM_ID,
-        );
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_PROGRAM_ID);
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
@@ -408,11 +367,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ata = derive_ata_with_token_program(
-            &wallet_owner,
-            &mint,
-            &TOKEN_2022_PROGRAM_ID,
-        );
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_2022_PROGRAM_ID);
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
@@ -444,14 +399,13 @@ mod tests {
 
         let ata_after = &accounts[1];
         assert_eq!(ata_after.owner(), &TOKEN_2022_PROGRAM_ID);
-        let expected_len = ExtensionType::try_calculate_account_len::<
-            Token2022Account,
-        >(&[ExtensionType::ImmutableOwner])
+        let expected_len = ExtensionType::try_calculate_account_len::<Token2022Account>(&[
+            ExtensionType::ImmutableOwner,
+        ])
         .unwrap();
         assert_eq!(ata_after.data().len(), expected_len);
         let token_account =
-            StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
-                .unwrap();
+            StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
         assert_eq!(token_account.base.mint, mint);
         assert_eq!(token_account.base.owner, wallet_owner);
         assert_eq!(token_account.base.amount, 0);
@@ -472,11 +426,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ata = derive_ata_with_token_program(
-            &wallet_owner,
-            &mint,
-            &TOKEN_2022_PROGRAM_ID,
-        );
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_2022_PROGRAM_ID);
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
@@ -509,24 +459,16 @@ mod tests {
             Ok(()),
         );
 
-        let expected_extensions = [
-            ExtensionType::NonTransferableAccount,
-            ExtensionType::ImmutableOwner,
-        ];
-        let expected_len = ExtensionType::try_calculate_account_len::<
-            Token2022Account,
-        >(&expected_extensions)
-        .unwrap();
+        let expected_extensions =
+            [ExtensionType::NonTransferableAccount, ExtensionType::ImmutableOwner];
+        let expected_len =
+            ExtensionType::try_calculate_account_len::<Token2022Account>(&expected_extensions)
+                .unwrap();
         let ata_after = &accounts[1];
         assert_eq!(ata_after.data().len(), expected_len);
         let token_account =
-            StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
-                .unwrap();
-        assert!(
-            token_account
-                .get_extension::<NonTransferableAccount>()
-                .is_ok()
-        );
+            StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
+        assert!(token_account.get_extension::<NonTransferableAccount>().is_ok());
         assert!(token_account.get_extension::<ImmutableOwner>().is_ok());
         assert_eq!(
             token_account.base.close_authority,
@@ -540,11 +482,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ata = derive_ata_with_token_program(
-            &wallet_owner,
-            &mint,
-            &TOKEN_2022_PROGRAM_ID,
-        );
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_2022_PROGRAM_ID);
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
@@ -567,9 +505,7 @@ mod tests {
                 (ata, AccountSharedData::new(0, 0, &system_program::id())),
                 (
                     mint,
-                    token_2022_mint_account(&[
-                        ExtensionType::TransferFeeConfig,
-                    ]),
+                    token_2022_mint_account(&[ExtensionType::TransferFeeConfig]),
                 ),
                 (
                     TOKEN_2022_PROGRAM_ID,
@@ -586,11 +522,7 @@ mod tests {
         let payer = Pubkey::new_unique();
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
-        let ata = derive_ata_with_token_program(
-            &wallet_owner,
-            &mint,
-            &TOKEN_2022_PROGRAM_ID,
-        );
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_2022_PROGRAM_ID);
 
         let ix = Instruction::new_with_bincode(
             crate::id(),
@@ -612,9 +544,7 @@ mod tests {
                 (ata, AccountSharedData::new(0, 0, &system_program::id())),
                 (
                     mint,
-                    token_2022_mint_account(&[
-                        ExtensionType::DefaultAccountState,
-                    ]),
+                    token_2022_mint_account(&[ExtensionType::DefaultAccountState]),
                 ),
                 (
                     TOKEN_2022_PROGRAM_ID,
@@ -627,8 +557,7 @@ mod tests {
 
         let ata_after = &accounts[1];
         let token_account =
-            StateWithExtensions::<Token2022Account>::unpack(ata_after.data())
-                .unwrap();
+            StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
         assert_eq!(token_account.base.state, AccountState::Frozen);
         assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
     }

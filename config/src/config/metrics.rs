@@ -14,13 +14,13 @@ pub struct MetricsConfig {
     pub collect_frequency: Duration,
 }
 
+// The default bind address is a fixed, validated constant.
+#[allow(clippy::unwrap_used)]
 impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             address: consts::DEFAULT_METRICS_ADDR.parse().unwrap(),
-            collect_frequency: Duration::from_secs(
-                consts::DEFAULT_METRICS_COLLECT_FREQUENCY_SEC,
-            ),
+            collect_frequency: Duration::from_secs(consts::DEFAULT_METRICS_COLLECT_FREQUENCY_SEC),
         }
     }
 }

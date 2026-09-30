@@ -12,26 +12,21 @@ pub use compat::{Pubkey, declare_id, pubkey};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 
-pub const CRANK_PROGRAM_ID: Pubkey =
-    pubkey!("Crank11111111111111111111111111111111111111");
+pub const CRANK_PROGRAM_ID: Pubkey = pubkey!("Crank11111111111111111111111111111111111111");
 
-pub const CALLBACK_PROGRAM_ID: Pubkey =
-    pubkey!("CaLLback11111111111111111111111111111111111");
+pub const CALLBACK_PROGRAM_ID: Pubkey = pubkey!("CaLLback11111111111111111111111111111111111");
 
 /// Program ID for the ephemeral system builtin-program.
 pub const EPHEMERAL_SYSTEM_PROGRAM_ID: Pubkey =
     pubkey!("EphSystem1111111111111111111111111111111111");
 
 /// Program ID for the outbox intent builtin-program.
-pub const OUTBOX_INTENT_PROGRAM_ID: Pubkey =
-    pubkey!("outboxintent1111111111111111111111111111111");
+pub const OUTBOX_INTENT_PROGRAM_ID: Pubkey = pubkey!("outboxintent1111111111111111111111111111111");
 
-pub const MAGIC_CONTEXT_PUBKEY: Pubkey =
-    pubkey!("MagicContext1111111111111111111111111111111");
+pub const MAGIC_CONTEXT_PUBKEY: Pubkey = pubkey!("MagicContext1111111111111111111111111111111");
 
 /// Vault account that collects rent for ephemeral accounts.
-pub const EPHEMERAL_VAULT_PUBKEY: Pubkey =
-    pubkey!("MagicVau1t999999999999999999999999999999999");
+pub const EPHEMERAL_VAULT_PUBKEY: Pubkey = pubkey!("MagicVau1t999999999999999999999999999999999");
 
 /// We believe 5MB should be enough to store all scheduled commits within a
 /// slot. Once we store more data in the magic context we need to reconsicer

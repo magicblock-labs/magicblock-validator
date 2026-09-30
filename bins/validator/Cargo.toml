@@ -50,3 +50,6 @@ console-subscriber = { workspace = true, optional = true }
 [features]
 default = []
 tokio-console = ["console-subscriber", "magicblock-core/tokio-console", "tokio/tracing"]
+
+[lints]
+workspace = true

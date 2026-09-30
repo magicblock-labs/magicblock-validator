@@ -2,7 +2,7 @@ use rocksdb::Options;
 
 use super::options::AccessType;
 
-pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
+pub(super) fn get_rocksdb_options(access_type: &AccessType) -> Options {
     let mut options = Options::default();
 
     // Create missing items to support a clean start
@@ -70,7 +70,7 @@ pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
 
 // Returns whether automatic compactions should be disabled for the entire
 // database based upon the given access type.
-pub fn should_disable_auto_compactions(access_type: &AccessType) -> bool {
+pub(super) fn should_disable_auto_compactions(access_type: &AccessType) -> bool {
     // Leave automatic compactions enabled (do not disable) in Primary mode;
     // disable in all other modes to prevent accidental cleaning
     !matches!(access_type, AccessType::Primary)

@@ -1,7 +1,5 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::cpi::{
-    delegate_account, DelegateAccounts, DelegateConfig,
-};
+use ephemeral_rollups_sdk::cpi::{delegate_account, DelegateAccounts, DelegateConfig};
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,
@@ -10,8 +8,8 @@ use solana_system_interface::instruction::transfer;
 
 use crate::state::FlexiCounter;
 
-pub fn process_commit_action_handler(
-    accounts: &[AccountInfo],
+pub(super) fn process_commit_action_handler(
+    accounts: &[AccountInfo<'_>],
     amount: u64,
 ) -> ProgramResult {
     msg!("CommitActionHandler");
@@ -42,16 +40,12 @@ pub fn process_commit_action_handler(
     // Transfer from escrow to destination.
     invoke(
         &transfer(escrow_account.key, destination_account.key, amount),
-        &[
-            escrow_account.clone(),
-            destination_account.clone(),
-            system_program.clone(),
-        ],
+        &[escrow_account.clone(), destination_account.clone(), system_program.clone()],
     )
 }
 
-pub fn process_undelegate_action_handler(
-    accounts: &[AccountInfo],
+pub(super) fn process_undelegate_action_handler(
+    accounts: &[AccountInfo<'_>],
     amount: u64,
     counter_diff: i64,
 ) -> ProgramResult {
@@ -92,27 +86,20 @@ pub fn process_undelegate_action_handler(
         counter.updates += 1;
 
         let counter_data = to_vec(&counter)?;
-        undelegated_counter.data.borrow_mut()[..counter_data.len()]
-            .copy_from_slice(&counter_data);
+        undelegated_counter.data.borrow_mut()[..counter_data.len()].copy_from_slice(&counter_data);
     }
 
     // Transfer from escrow to destination.
     invoke(
         &transfer(escrow_account.key, destination_account.key, amount),
-        &[
-            escrow_account.clone(),
-            destination_account.clone(),
-            system_program.clone(),
-        ],
+        &[escrow_account.clone(), destination_account.clone(), system_program.clone()],
     )
 }
 
 // NOTE: due to prohibited reentrancy in solana this isn't possible for now
 // Issue: dlp calls User program, User program calls delegate in dlp
 #[allow(dead_code)]
-fn process_redelegation_call_handler<'a, 'b>(
-    accounts: &[AccountInfo],
-) -> ProgramResult
+fn process_redelegation_call_handler<'a, 'b>(accounts: &[AccountInfo<'_>]) -> ProgramResult
 where
     'a: 'b,
 {

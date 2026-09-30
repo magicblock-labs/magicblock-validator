@@ -27,10 +27,7 @@ pub enum ExecutionStage {
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum TwoStageProgress {
     Committing(PendingTransaction),
-    Finalizing {
-        commit: Signature,
-        finalize: PendingTransaction,
-    },
+    Finalizing { commit: Signature, finalize: PendingTransaction },
 }
 
 impl ExecutionStage {
@@ -53,10 +50,7 @@ impl ExecutionStage {
                 *this = val;
             }
             // Only transition to TwoStageProgress::Committing is valid from SingleStage
-            (
-                Self::SingleStage(_),
-                Self::TwoStage(TwoStageProgress::Finalizing { .. }),
-            ) => {
+            (Self::SingleStage(_), Self::TwoStage(TwoStageProgress::Finalizing { .. })) => {
                 return Err(StageTransitionError::SingleStageToFinalizingError);
             }
             // Transitions within TwoStage states
@@ -87,43 +81,29 @@ impl TwoStageProgress {
     ) -> Result<(), StageTransitionError> {
         let new_state = match (&self, stage) {
             // Current sig didn't succeed on Base, we replace it with new attempt
-            (Self::Committing(_), Self::Committing(new_sig)) => {
-                Self::Committing(new_sig)
-            }
+            (Self::Committing(_), Self::Committing(new_sig)) => Self::Committing(new_sig),
             // Commit was successfully executed and now we move on to Finalizing
-            (
-                Self::Committing(this_pending),
-                Self::Finalizing { commit, finalize },
-            ) => {
+            (Self::Committing(this_pending), Self::Finalizing { commit, finalize }) => {
                 if this_pending.signature != commit {
-                    return Err(
-                        StageTransitionError::CommitSignatureMismatchError,
-                    );
+                    return Err(StageTransitionError::CommitSignatureMismatchError);
                 }
 
                 Self::Finalizing { commit, finalize }
             }
             // Current finalize sig wasn't confirmed, we replace it with new attempt
             (
-                Self::Finalizing {
-                    commit: this_commit,
-                    ..
-                },
+                Self::Finalizing { commit: this_commit, .. },
                 Self::Finalizing { commit, finalize },
             ) => {
                 if this_commit != &commit {
-                    return Err(
-                        StageTransitionError::CommitSignatureReplacementError,
-                    );
+                    return Err(StageTransitionError::CommitSignatureReplacementError);
                 }
 
                 Self::Finalizing { commit, finalize }
             }
             // Incorrect state transition
             (Self::Finalizing { .. }, Self::Committing(_)) => {
-                return Err(
-                    StageTransitionError::FinalizingToCommittingDowngradeError,
-                );
+                return Err(StageTransitionError::FinalizingToCommittingDowngradeError);
             }
         };
 

@@ -1,7 +1,6 @@
 use integration_test_tools::{init_logger, IntegrationTestContext};
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 use tracing::*;
 
@@ -58,15 +57,8 @@ fn test_get_account_info_escrowed() {
 
     // 1. Create account with 4 SOL + escrow 2 SOL
     let kp = Keypair::new();
-    let (
-        airdrop_sig,
-        escrow_sig,
-        ephemeral_balance_pda,
-        _deleg_record,
-        escrow_lamports,
-    ) = ctx
-        .airdrop_chain_escrowed(&kp, 4 * LAMPORTS_PER_SOL)
-        .unwrap();
+    let (airdrop_sig, escrow_sig, ephemeral_balance_pda, _deleg_record, escrow_lamports) =
+        ctx.airdrop_chain_escrowed(&kp, 4 * LAMPORTS_PER_SOL).unwrap();
     debug!("Airdrop + escrow tx: {airdrop_sig}, {escrow_sig}");
 
     // 2. It should now contain the account itself and the escrow

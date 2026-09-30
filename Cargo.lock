@@ -4001,6 +4001,7 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-version",
  "num_cpus",
+ "parking_lot",
  "reqwest",
  "scc",
  "serde",
@@ -4129,6 +4130,7 @@ dependencies = [
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
+ "parking_lot",
  "pin-project",
  "rand 0.9.5",
  "rusqlite",
@@ -4529,6 +4531,7 @@ dependencies = [
  "async-trait",
  "futures-util",
  "magicblock-metrics",
+ "parking_lot",
  "serde_json",
  "solana-account 4.3.1",
  "solana-account-decoder-client-types",
@@ -4604,9 +4607,9 @@ dependencies = [
 name = "magicblock-table-mania"
 version = "0.15.4"
 dependencies = [
- "ed25519-dalek 1.0.1",
  "magicblock-metrics",
  "magicblock-rpc-client",
+ "parking_lot",
  "rand 0.9.5",
  "sha3",
  "solana-address-lookup-table-interface 3.1.0",

@@ -33,23 +33,15 @@ pub struct TestProgramPaths {
 }
 
 impl TestProgramPaths {
-    pub fn new(
-        program_crate: &str,
-        program_dir: &str,
-        program_id: &str,
-    ) -> Self {
-        let program_path = path_relative_to_workspace(&format!(
-            "target/deploy/{}.so",
-            program_crate
-        ));
+    pub fn new(program_crate: &str, program_dir: &str, program_id: &str) -> Self {
+        let program_path =
+            path_relative_to_workspace(&format!("target/deploy/{}.so", program_crate));
         let program_keypair_path = path_relative_to_workspace(&format!(
             "programs/{}/keys/{}.json",
             program_dir, program_id
         ));
-        let authority_keypair_path = path_relative_to_workspace(&format!(
-            "target/deploy/{}-keypair.json",
-            program_crate
-        ));
+        let authority_keypair_path =
+            path_relative_to_workspace(&format!("target/deploy/{}-keypair.json", program_crate));
         Self {
             program_path,
             program_keypair_path,

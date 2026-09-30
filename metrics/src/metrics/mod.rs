@@ -1,17 +1,19 @@
+// Fixed metric definitions are checked when initialized; registration cannot
+// recover from an invalid name or label set.
+#![allow(clippy::unwrap_used, clippy::panic)]
+
 use std::sync::Once;
 
 use prometheus::{
-    Histogram, HistogramOpts, HistogramTimer, HistogramVec, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Opts, Registry,
+    Histogram, HistogramOpts, HistogramTimer, HistogramVec, IntCounter, IntCounterVec, IntGauge,
+    IntGaugeVec, Opts, Registry,
 };
 pub use types::{
-    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason,
-    ChainlinkCloneIntent, ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
-    ChainlinkCompanionFetchKind, ChainlinkCompanionFetchOutcome,
-    ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
-    ChainlinkPendingFetchOutcome, LabelValue, Outcome,
-    SubscriptionCleanupOutcome, SubscriptionCleanupSource,
-    SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
+    AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason, ChainlinkCloneIntent,
+    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
+    ChainlinkCompanionFetchOutcome, ChainlinkEmptyPlaceholderStage, ChainlinkPendingFetchLayer,
+    ChainlinkPendingFetchOutcome, LabelValue, Outcome, SubscriptionCleanupOutcome,
+    SubscriptionCleanupSource, SubscriptionReasonLabel, SubscriptionRegistrationOrigin,
     SubscriptionRegistrationOutcome, SubscriptionReleaseOutcome,
 };
 
@@ -22,18 +24,12 @@ mod types;
 // -----------------
 // Prometheus collects durations in seconds
 const MICROS_10_90: [f64; 9] = [
-    0.000_01, 0.000_02, 0.000_03, 0.000_04, 0.000_05, 0.000_06, 0.000_07,
-    0.000_08, 0.000_09,
+    0.000_01, 0.000_02, 0.000_03, 0.000_04, 0.000_05, 0.000_06, 0.000_07, 0.000_08, 0.000_09,
 ];
-const MICROS_100_900: [f64; 9] = [
-    0.000_1, 0.000_2, 0.000_3, 0.000_4, 0.000_5, 0.000_6, 0.000_7, 0.000_8,
-    0.000_9,
-];
-const MILLIS_1_9: [f64; 9] = [
-    0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009,
-];
-const MILLIS_10_90: [f64; 9] =
-    [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09];
+const MICROS_100_900: [f64; 9] =
+    [0.000_1, 0.000_2, 0.000_3, 0.000_4, 0.000_5, 0.000_6, 0.000_7, 0.000_8, 0.000_9];
+const MILLIS_1_9: [f64; 9] = [0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009];
+const MILLIS_10_90: [f64; 9] = [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09];
 const MILLIS_100_900: [f64; 9] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
@@ -748,10 +744,7 @@ pub fn chainlink_subscription_cleanup_accounts_value(
     outcome: SubscriptionCleanupOutcome,
 ) -> u64 {
     CHAINLINK_SUBSCRIPTION_CLEANUP_ACCOUNTS_TOTAL
-        .get_metric_with_label_values(&[
-            cleanup_source.value(),
-            outcome.value(),
-        ])
+        .get_metric_with_label_values(&[cleanup_source.value(), outcome.value()])
         .map(|m| m.get())
         .unwrap_or(0)
 }
@@ -803,9 +796,7 @@ pub fn set_commmittor_intent_cu_usage(value: i64) {
     COMMITTOR_INTENT_CU_USAGE.set(value)
 }
 
-pub fn observe_committor_intent_task_preparation_time<
-    L: LabelValue + ?Sized,
->(
+pub fn observe_committor_intent_task_preparation_time<L: LabelValue + ?Sized>(
     task_type: &L,
 ) -> HistogramTimer {
     COMMITTOR_INTENT_TASK_PREPARATION_TIME
@@ -833,27 +824,15 @@ pub fn inc_account_fetches_failed(count: u64) {
     ACCOUNT_FETCHES_FAILED_COUNT.inc_by(count);
 }
 
-pub fn inc_account_fetches_found_with_context(
-    context: AccountFetchContext,
-    count: u64,
-) {
+pub fn inc_account_fetches_found_with_context(context: AccountFetchContext, count: u64) {
     ACCOUNT_FETCHES_FOUND_COUNT
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-        ])
+        .with_label_values(&[context.entrypoint().value(), context.reason().value()])
         .inc_by(count);
 }
 
-pub fn inc_account_fetches_not_found_with_context(
-    context: AccountFetchContext,
-    count: u64,
-) {
+pub fn inc_account_fetches_not_found_with_context(context: AccountFetchContext, count: u64) {
     ACCOUNT_FETCHES_NOT_FOUND_COUNT
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-        ])
+        .with_label_values(&[context.entrypoint().value(), context.reason().value()])
         .inc_by(count);
 }
 
@@ -889,17 +868,13 @@ pub fn inc_chainlink_empty_placeholder_accounts_total_with_context(
         .inc();
 }
 
-pub fn inc_program_subscription_account_updates_count(
-    client_id: &impl LabelValue,
-) {
+pub fn inc_program_subscription_account_updates_count(client_id: &impl LabelValue) {
     PROGRAM_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
 }
 
-pub fn inc_account_subscription_account_updates_count(
-    client_id: &impl LabelValue,
-) {
+pub fn inc_account_subscription_account_updates_count(client_id: &impl LabelValue) {
     ACCOUNT_SUBSCRIPTION_ACCOUNT_UPDATES_COUNT
         .with_label_values(&[client_id.value()])
         .inc();
@@ -927,28 +902,16 @@ pub fn inc_chainlink_pending_fetch_waiters_with_context(
     count: u64,
 ) {
     CHAINLINK_PENDING_FETCH_WAITERS_TOTAL
-        .with_label_values(&[
-            context.entrypoint().value(),
-            context.reason().value(),
-            layer.value(),
-        ])
+        .with_label_values(&[context.entrypoint().value(), context.reason().value(), layer.value()])
         .inc_by(count);
 }
 
-pub fn inc_chainlink_pending_fetch_waiters_gauge(
-    layer: ChainlinkPendingFetchLayer,
-) {
-    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
-        .with_label_values(&[layer.value()])
-        .inc();
+pub fn inc_chainlink_pending_fetch_waiters_gauge(layer: ChainlinkPendingFetchLayer) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE.with_label_values(&[layer.value()]).inc();
 }
 
-pub fn dec_chainlink_pending_fetch_waiters_gauge(
-    layer: ChainlinkPendingFetchLayer,
-) {
-    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
-        .with_label_values(&[layer.value()])
-        .dec();
+pub fn dec_chainlink_pending_fetch_waiters_gauge(layer: ChainlinkPendingFetchLayer) {
+    CHAINLINK_PENDING_FETCH_WAITERS_GAUGE.with_label_values(&[layer.value()]).dec();
 }
 
 pub fn observe_chainlink_pending_fetch_owner_duration_seconds_with_context(
@@ -1034,19 +997,14 @@ pub fn chainlink_pending_fetch_waiters_value(
 }
 
 #[cfg(any(test, feature = "dev-context"))]
-pub fn chainlink_pending_fetch_waiters_gauge_value(
-    layer: ChainlinkPendingFetchLayer,
-) -> i64 {
+pub fn chainlink_pending_fetch_waiters_gauge_value(layer: ChainlinkPendingFetchLayer) -> i64 {
     CHAINLINK_PENDING_FETCH_WAITERS_GAUGE
         .get_metric_with_label_values(&[layer.value()])
         .map(|m| m.get())
         .unwrap_or(0)
 }
 
-pub fn inc_per_program_account_updates_count(
-    client_id: &str,
-    program_id: &str,
-) {
+pub fn inc_per_program_account_updates_count(client_id: &str, program_id: &str) {
     PER_PROGRAM_ACCOUNT_UPDATES_COUNT
         .with_label_values(&[client_id, program_id])
         .inc()
@@ -1122,19 +1080,13 @@ pub fn set_pubsub_client_uptime(client_id: &str, connected: bool) {
         .set(if connected { 1 } else { 0 });
 }
 
-pub fn set_pubsub_client_reconnect_backoff_duration_seconds(
-    client_id: &str,
-    duration_secs: u64,
-) {
+pub fn set_pubsub_client_reconnect_backoff_duration_seconds(client_id: &str, duration_secs: u64) {
     PUBSUB_CLIENT_RECONNECT_BACKOFF_DURATION_SECONDS_GAUGE
         .with_label_values(&[client_id])
         .set(duration_secs as i64);
 }
 
-pub fn set_pubsub_client_failed_reconnect_attempts(
-    client_id: &str,
-    attempts: u64,
-) {
+pub fn set_pubsub_client_failed_reconnect_attempts(client_id: &str, attempts: u64) {
     PUBSUB_CLIENT_FAILED_RECONNECT_ATTEMPTS_GAUGE
         .with_label_values(&[client_id])
         .set(attempts as i64);
@@ -1159,9 +1111,7 @@ pub fn set_pubsub_client_connections_count(client_id: &str, count: usize) {
 }
 
 pub fn inc_pubsub_unsubscribe_timeout_count(client_id: &str, scope: &str) {
-    PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT
-        .with_label_values(&[client_id, scope])
-        .inc();
+    PUBSUB_UNSUBSCRIBE_TIMEOUT_COUNT.with_label_values(&[client_id, scope]).inc();
 }
 
 pub fn inc_pubsub_idle_connections_pruned_count(client_id: &str, count: u64) {
@@ -1171,21 +1121,15 @@ pub fn inc_pubsub_idle_connections_pruned_count(client_id: &str, count: u64) {
 }
 
 pub fn set_grpc_optimized_streams_gauge(client_id: &str, count: usize) {
-    GRPC_OPTIMIZED_STREAMS_GAUGE
-        .with_label_values(&[client_id])
-        .set(count as i64);
+    GRPC_OPTIMIZED_STREAMS_GAUGE.with_label_values(&[client_id]).set(count as i64);
 }
 
 pub fn set_grpc_unoptimized_streams_gauge(client_id: &str, count: usize) {
-    GRPC_UNOPTIMIZED_STREAMS_GAUGE
-        .with_label_values(&[client_id])
-        .set(count as i64);
+    GRPC_UNOPTIMIZED_STREAMS_GAUGE.with_label_values(&[client_id]).set(count as i64);
 }
 
 pub fn set_grpc_total_streams_gauge(client_id: &str, count: usize) {
-    GRPC_TOTAL_STREAMS_GAUGE
-        .with_label_values(&[client_id])
-        .set(count as i64);
+    GRPC_TOTAL_STREAMS_GAUGE.with_label_values(&[client_id]).set(count as i64);
 }
 
 #[cfg(test)]
@@ -1193,30 +1137,23 @@ mod fetch_context_metric_tests {
     use super::*;
 
     fn counter_value(counter: &IntCounterVec, labels: &[&str]) -> u64 {
-        counter
-            .get_metric_with_label_values(labels)
-            .map(|m| m.get())
-            .unwrap_or(0)
+        counter.get_metric_with_label_values(labels).map(|m| m.get()).unwrap_or(0)
     }
 
     #[test]
     fn fetch_context_metrics_keep_entrypoint_and_reason_separate() {
         let action_context = AccountFetchContext::rpc_get_account()
             .with_reason(AccountFetchReason::ActionDependencyMissing);
-        let sub_context = AccountFetchContext::subscription_update(
-            AccountFetchReason::SubscriptionUpdateClone,
-        );
-        let record_context = AccountFetchContext::subscription_update(
-            AccountFetchReason::DelegationRecord,
-        );
-        let program_context = AccountFetchContext::subscription_update(
-            AccountFetchReason::ProgramData,
-        );
+        let sub_context =
+            AccountFetchContext::subscription_update(AccountFetchReason::SubscriptionUpdateClone);
+        let record_context =
+            AccountFetchContext::subscription_update(AccountFetchReason::DelegationRecord);
+        let program_context =
+            AccountFetchContext::subscription_update(AccountFetchReason::ProgramData);
         let undelegating_context = AccountFetchContext::rpc_get_account()
             .with_reason(AccountFetchReason::UndelegatingRefresh);
-        let simulation_context = AccountFetchContext::simulate_transaction(
-            solana_signature::Signature::from([1u8; 64]),
-        );
+        let simulation_context =
+            AccountFetchContext::simulate_transaction(solana_signature::Signature::from([1u8; 64]));
 
         let action_labels = &[
             "rpc_get_account",
@@ -1224,10 +1161,7 @@ mod fetch_context_metric_tests {
             "remote_account_provider",
             "owned",
         ];
-        let before_action = counter_value(
-            &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
-            action_labels,
-        );
+        let before_action = counter_value(&CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL, action_labels);
         inc_chainlink_pending_fetch_accounts_with_context(
             action_context,
             ChainlinkPendingFetchLayer::RemoteAccountProvider,
@@ -1235,10 +1169,7 @@ mod fetch_context_metric_tests {
             1,
         );
         assert_eq!(
-            counter_value(
-                &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
-                action_labels
-            ),
+            counter_value(&CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL, action_labels),
             before_action + 1
         );
 
@@ -1249,8 +1180,7 @@ mod fetch_context_metric_tests {
             "normal_account",
             "clone_succeeded",
         ];
-        let before_sub =
-            counter_value(&CHAINLINK_CLONE_ACCOUNTS_TOTAL, sub_labels);
+        let before_sub = counter_value(&CHAINLINK_CLONE_ACCOUNTS_TOTAL, sub_labels);
         inc_chainlink_clone_accounts_total_with_context(
             sub_context,
             ChainlinkCloneRemoteResult::Found,
@@ -1262,12 +1192,8 @@ mod fetch_context_metric_tests {
             before_sub + 1
         );
 
-        let record_labels = &[
-            "subscription_update",
-            "delegation_record",
-            "direct_account",
-            "added",
-        ];
+        let record_labels =
+            &["subscription_update", "delegation_record", "direct_account", "added"];
         let before_record = counter_value(
             &CHAINLINK_SUBSCRIPTION_REGISTRATION_ACCOUNTS_TOTAL,
             record_labels,
@@ -1286,8 +1212,7 @@ mod fetch_context_metric_tests {
         );
 
         let program_labels = &["subscription_update", "program_data"];
-        let before_program =
-            counter_value(&ACCOUNT_FETCHES_FOUND_COUNT, program_labels);
+        let before_program = counter_value(&ACCOUNT_FETCHES_FOUND_COUNT, program_labels);
         inc_account_fetches_found_with_context(program_context, 1);
         assert_eq!(
             counter_value(&ACCOUNT_FETCHES_FOUND_COUNT, program_labels),
@@ -1295,29 +1220,18 @@ mod fetch_context_metric_tests {
         );
 
         let undelegating_labels = &["rpc_get_account", "undelegating_refresh"];
-        let before_undelegating = counter_value(
-            &ACCOUNT_FETCHES_NOT_FOUND_COUNT,
-            undelegating_labels,
-        );
+        let before_undelegating =
+            counter_value(&ACCOUNT_FETCHES_NOT_FOUND_COUNT, undelegating_labels);
         inc_account_fetches_not_found_with_context(undelegating_context, 1);
         assert_eq!(
-            counter_value(
-                &ACCOUNT_FETCHES_NOT_FOUND_COUNT,
-                undelegating_labels
-            ),
+            counter_value(&ACCOUNT_FETCHES_NOT_FOUND_COUNT, undelegating_labels),
             before_undelegating + 1
         );
 
-        let simulation_labels = &[
-            "simulate_transaction",
-            "requested_account",
-            "remote_account_provider",
-            "owned",
-        ];
-        let before_simulation = counter_value(
-            &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
-            simulation_labels,
-        );
+        let simulation_labels =
+            &["simulate_transaction", "requested_account", "remote_account_provider", "owned"];
+        let before_simulation =
+            counter_value(&CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL, simulation_labels);
         inc_chainlink_pending_fetch_accounts_with_context(
             simulation_context,
             ChainlinkPendingFetchLayer::RemoteAccountProvider,
@@ -1325,10 +1239,7 @@ mod fetch_context_metric_tests {
             1,
         );
         assert_eq!(
-            counter_value(
-                &CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL,
-                simulation_labels,
-            ),
+            counter_value(&CHAINLINK_PENDING_FETCH_ACCOUNTS_TOTAL, simulation_labels,),
             before_simulation + 1
         );
     }

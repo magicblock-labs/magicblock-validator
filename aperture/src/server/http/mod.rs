@@ -32,9 +32,7 @@ impl HttpServer {
 
     pub(crate) async fn run(self) {
         let dispatcher = self.dispatcher.clone();
-        tokio::spawn(
-            dispatcher.run_perf_samples_collector(self.cancel.clone()),
-        );
+        tokio::spawn(dispatcher.run_perf_samples_collector(self.cancel.clone()));
         loop {
             tokio::select! {
                 biased;
@@ -48,8 +46,7 @@ impl HttpServer {
         let cancel = self.cancel.child_token();
         let io = TokioIo::new(stream);
         let dispatcher = self.dispatcher.clone();
-        let handler =
-            service_fn(move |request| dispatcher.clone().dispatch(request));
+        let handler = service_fn(move |request| dispatcher.clone().dispatch(request));
 
         tokio::spawn(async move {
             let builder = conn::auto::Builder::new(TokioExecutor::new());

@@ -1,11 +1,8 @@
-use std::{
-    collections::HashSet,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use magicblock_config::config::GrpcConfig;
+use parking_lot::Mutex;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::{Pubkey, pubkey};
 use solana_sdk_ids::sysvar::clock;
@@ -41,8 +38,7 @@ use crate::remote_account_provider::{
 ///
 /// The value used is a reserved, non-functional pubkey that never carries real account
 /// data. It exists purely for accounting purposes.
-static SLOT_SUBSCRIPTION_DUMMY: Pubkey =
-    pubkey!("FAKESUB111111111111111111111111111111111111");
+static SLOT_SUBSCRIPTION_DUMMY: Pubkey = pubkey!("FAKESUB111111111111111111111111111111111111");
 
 /// Upper bound on any round-trip to the actor. Normally these complete in
 /// milliseconds; if the actor is wedged (e.g. on a dead gRPC connection) this
@@ -88,17 +84,16 @@ impl ChainLaserClientImpl {
         rpc_client: ChainRpcClientImpl,
         grpc_config: &GrpcConfig,
     ) -> Self {
-        let (actor, messages, updates, subscriptions) =
-            ChainLaserActor::new_from_url(
-                pubsub_url,
-                &client_id,
-                api_key,
-                commitment,
-                abort_sender,
-                slots,
-                rpc_client,
-                grpc_config,
-            );
+        let (actor, messages, updates, subscriptions) = ChainLaserActor::new_from_url(
+            pubsub_url,
+            &client_id,
+            api_key,
+            commitment,
+            abort_sender,
+            slots,
+            rpc_client,
+            grpc_config,
+        );
         let client = Self {
             updates: Arc::new(Mutex::new(Some(updates))),
             messages,
@@ -119,13 +114,11 @@ impl ChainLaserClientImpl {
         // clock account subscription.
         let pubkeys: HashSet<Pubkey> = pubkeys
             .into_iter()
-            .map(|pk| {
-                if pk == clock::ID {
-                    SLOT_SUBSCRIPTION_DUMMY
-                } else {
-                    pk
-                }
-            })
+            .map(
+                |pk| {
+                    if pk == clock::ID { SLOT_SUBSCRIPTION_DUMMY } else { pk }
+                },
+            )
             .collect();
 
         let (tx, rx) = oneshot::channel();
@@ -140,18 +133,10 @@ impl ChainLaserClientImpl {
     }
 
     #[instrument(skip(self, msg), fields(client_id = %self.client_id))]
-    async fn send_msg(
-        &self,
-        msg: ChainPubsubActorMessage,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn send_msg(&self, msg: ChainPubsubActorMessage) -> RemoteAccountProviderResult<()> {
         // The message channel only backs up when the actor stopped draining
         // it; bound the send so callers fail instead of hanging with it.
-        match tokio::time::timeout(
-            ACTOR_RESPONSE_TIMEOUT,
-            self.messages.send(msg),
-        )
-        .await
-        {
+        match tokio::time::timeout(ACTOR_RESPONSE_TIMEOUT, self.messages.send(msg)).await {
             Ok(sent) => sent.map_err(|err| {
                 RemoteAccountProviderError::ChainLaserActorSendError(
                     err.to_string(),
@@ -180,11 +165,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         // same as the websocket clock sub.
         // Otherwise we'd have to handle the inconsistency of account subscription counts of websocket vs
         // GRPC clients in multiple places.
-        let effective_pubkey = if pubkey == clock::ID {
-            SLOT_SUBSCRIPTION_DUMMY
-        } else {
-            pubkey
-        };
+        let effective_pubkey = if pubkey == clock::ID { SLOT_SUBSCRIPTION_DUMMY } else { pubkey };
 
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::AccountSubscribe {
@@ -197,10 +178,7 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         await_actor_response(rx, "subscribe").await
     }
 
-    async fn subscribe_program(
-        &self,
-        program_id: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn subscribe_program(&self, program_id: Pubkey) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
         self.send_msg(ChainPubsubActorMessage::ProgramSubscribe {
             pubkey: program_id,
@@ -211,30 +189,25 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         await_actor_response(rx, "subscribe_program").await
     }
 
-    async fn unsubscribe(
-        &self,
-        pubkey: Pubkey,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn unsubscribe(&self, pubkey: Pubkey) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.send_msg(ChainPubsubActorMessage::AccountUnsubscribe {
-            pubkey,
-            response: tx,
-        })
-        .await?;
+        self.send_msg(ChainPubsubActorMessage::AccountUnsubscribe { pubkey, response: tx })
+            .await?;
 
         await_actor_response(rx, "unsubscribe").await
     }
 
     async fn shutdown(&self) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
-            .await?;
+        self.send_msg(ChainPubsubActorMessage::Shutdown { response: tx }).await?;
 
         await_actor_response(rx, "shutdown").await
     }
 
+    // The trait transfers this receiver exactly once and cannot report a second take.
+    #[allow(clippy::expect_used)]
     fn take_updates(&self) -> mpsc::Receiver<SubscriptionUpdate> {
-        let mut updates_lock = self.updates.lock().unwrap();
+        let mut updates_lock = self.updates.lock();
         updates_lock
             .take()
             .expect("ChainLaserClientImpl::take_updates called more than once")
@@ -248,13 +221,11 @@ impl ChainPubsubClient for ChainLaserClientImpl {
         self.subscriptions
             .read()
             .iter()
-            .map(|pk| {
-                if *pk == SLOT_SUBSCRIPTION_DUMMY {
-                    clock::ID
-                } else {
-                    *pk
-                }
-            })
+            .map(
+                |pk| {
+                    if *pk == SLOT_SUBSCRIPTION_DUMMY { clock::ID } else { *pk }
+                },
+            )
             .collect()
     }
 
@@ -273,20 +244,14 @@ impl ChainPubsubClient for ChainLaserClientImpl {
 impl ReconnectableClient for ChainLaserClientImpl {
     async fn try_reconnect(&self) -> RemoteAccountProviderResult<()> {
         let (tx, rx) = oneshot::channel();
-        self.send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
-            .await?;
+        self.send_msg(ChainPubsubActorMessage::Reconnect { response: tx }).await?;
 
-        await_actor_response(rx, "reconnect")
-            .await
-            .inspect_err(|err| {
-                warn!(error = ?err, "Error while awaiting reconnect response");
-            })
+        await_actor_response(rx, "reconnect").await.inspect_err(|err| {
+            warn!(error = ?err, "Error while awaiting reconnect response");
+        })
     }
 
-    async fn resub_multiple(
-        &self,
-        pubkeys: HashSet<Pubkey>,
-    ) -> RemoteAccountProviderResult<()> {
+    async fn resub_multiple(&self, pubkeys: HashSet<Pubkey>) -> RemoteAccountProviderResult<()> {
         self.subscribe_multiple(pubkeys, None).await?;
         Ok(())
     }

@@ -27,3 +27,6 @@ solana-signature-compat = { package = "solana-signature", version = ">=2.0, <3",
 # message queue, so the types they are built from need a wincode schema.
 solana-instruction = { workspace = true, features = ["wincode"] }
 wincode = { workspace = true }
+
+[lints]
+workspace = true

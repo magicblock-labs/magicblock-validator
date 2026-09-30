@@ -6,14 +6,10 @@ mod transfer_intent;
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
     consts::{EXTERNAL_UNDELEGATE_DISCRIMINATOR, MAGIC_PROGRAM_ID},
-    cpi::{
-        delegate_account, undelegate_account, DelegateAccounts, DelegateConfig,
-    },
+    cpi::{delegate_account, undelegate_account, DelegateAccounts, DelegateConfig},
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
-use magicblock_magic_program_api::{
-    args::ScheduleTaskArgs, instruction::MagicBlockInstruction,
-};
+use magicblock_magic_program_api::{args::ScheduleTaskArgs, instruction::MagicBlockInstruction};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
@@ -29,14 +25,11 @@ use solana_system_interface::instruction as system_instruction;
 
 use crate::{
     instruction::{
-        create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs,
-        DelegateArgs, FlexiCounterInstruction, ScheduleArgs,
-        MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+        create_add_error_ix, create_add_ix, create_add_unsigned_ix, CancelArgs, DelegateArgs,
+        FlexiCounterInstruction, ScheduleArgs, MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
     },
     processor::{
-        call_handler::{
-            process_commit_action_handler, process_undelegate_action_handler,
-        },
+        call_handler::{process_commit_action_handler, process_undelegate_action_handler},
         callback::{
             process_transfer_action_handler, process_transfer_callback,
             TRANSFER_CALLBACK_DISCRIMINATOR,
@@ -53,12 +46,11 @@ use crate::{
 
 pub fn process(
     program_id: &Pubkey,
-    accounts: &[AccountInfo],
+    accounts: &[AccountInfo<'_>],
     instruction_data: &[u8],
 ) -> ProgramResult {
     if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
-        let (disc, data) =
-            instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
+        let (disc, data) = instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
 
         if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
             return process_undelegate_request(accounts, data);
@@ -74,10 +66,7 @@ pub fn process(
     use FlexiCounterInstruction::*;
     match ix {
         Init { label, bump } => process_init(program_id, accounts, label, bump),
-        Realloc {
-            bytes,
-            invocation_count,
-        } => process_realloc(accounts, bytes, invocation_count),
+        Realloc { bytes, invocation_count } => process_realloc(accounts, bytes, invocation_count),
         Add { count } => process_add(accounts, count),
         AddUnsigned { count } => process_add_unsigned(accounts, count),
         AddError { count } => process_add_error(accounts, count),
@@ -87,12 +76,7 @@ pub fn process(
             count,
             undelegate,
             has_magic_vault,
-        } => process_add_and_schedule_commit(
-            accounts,
-            count,
-            undelegate,
-            has_magic_vault,
-        ),
+        } => process_add_and_schedule_commit(accounts, count, undelegate, has_magic_vault),
         AddCounter => process_add_counter(accounts),
         CreateIntent {
             num_committees,
@@ -106,13 +90,10 @@ pub fn process(
             is_undelegate,
             compute_units,
         ),
-        CommitActionHandler { amount } => {
-            process_commit_action_handler(accounts, amount)
+        CommitActionHandler { amount } => process_commit_action_handler(accounts, amount),
+        UndelegateActionHandler { amount, counter_diff } => {
+            process_undelegate_action_handler(accounts, amount, counter_diff)
         }
-        UndelegateActionHandler {
-            amount,
-            counter_diff,
-        } => process_undelegate_action_handler(accounts, amount, counter_diff),
         Schedule(args) => process_schedule_task(accounts, args),
         Cancel(args) => process_cancel_task(accounts, args),
         CreateIntentBundle {
@@ -127,24 +108,16 @@ pub fn process(
             counter_diffs,
             compute_units,
         ),
-        CreateIntentBundleCommitAndFinalize {
-            num_commit,
-            num_commit_finalize,
-        } => process_create_intent_bundle_commit_and_finalize(
-            accounts,
-            num_commit,
-            num_commit_finalize,
-        ),
-        CreateTransferIntent {
-            amount,
-            fail,
-            compute_units,
-        } => process_create_transfer_intent(
-            accounts,
-            amount,
-            fail,
-            compute_units,
-        ),
+        CreateIntentBundleCommitAndFinalize { num_commit, num_commit_finalize } => {
+            process_create_intent_bundle_commit_and_finalize(
+                accounts,
+                num_commit,
+                num_commit_finalize,
+            )
+        }
+        CreateTransferIntent { amount, fail, compute_units } => {
+            process_create_transfer_intent(accounts, amount, fail, compute_units)
+        }
         TransferActionHandler { amount, fail } => {
             process_transfer_action_handler(accounts, amount, fail)
         }
@@ -154,7 +127,7 @@ pub fn process(
 
 fn process_init(
     program_id: &Pubkey,
-    accounts: &[AccountInfo],
+    accounts: &[AccountInfo<'_>],
     label: String,
     bump: u8,
 ) -> ProgramResult {
@@ -198,7 +171,7 @@ fn process_init(
 }
 
 fn process_realloc(
-    accounts: &[AccountInfo],
+    accounts: &[AccountInfo<'_>],
     bytes: u64,
     invocation_count: u16,
 ) -> ProgramResult {
@@ -241,7 +214,7 @@ fn process_realloc(
     Ok(())
 }
 
-fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+fn process_add(accounts: &[AccountInfo<'_>], count: u8) -> ProgramResult {
     msg!("Add {}", count);
 
     let account_info_iter = &mut accounts.iter();
@@ -251,14 +224,13 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     add(payer_info, counter_pda_info, count)
 }
 
-fn process_add_unsigned(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+fn process_add_unsigned(accounts: &[AccountInfo<'_>], count: u8) -> ProgramResult {
     msg!("Add {}", count);
 
     let account_info_iter = &mut accounts.iter();
     let counter_pda_info = next_account_info(account_info_iter)?;
 
-    let mut counter =
-        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+    let mut counter = FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
 
     counter.count += count as u64;
     counter.updates += 1;
@@ -270,13 +242,13 @@ fn process_add_unsigned(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     Ok(())
 }
 
-fn process_add_error(_accounts: &[AccountInfo], _count: u8) -> ProgramResult {
+fn process_add_error(_accounts: &[AccountInfo<'_>], _count: u8) -> ProgramResult {
     Err(ProgramError::Custom(0))
 }
 
 fn add(
-    payer_info: &AccountInfo,
-    counter_pda_info: &AccountInfo,
+    payer_info: &AccountInfo<'_>,
+    counter_pda_info: &AccountInfo<'_>,
     count: u8,
 ) -> ProgramResult {
     let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
@@ -287,8 +259,7 @@ fn add(
         )
     })?;
 
-    let mut counter =
-        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+    let mut counter = FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
 
     counter.count += count as u64;
     counter.updates += 1;
@@ -300,7 +271,7 @@ fn add(
     Ok(())
 }
 
-fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
+fn process_mul(accounts: &[AccountInfo<'_>], multiplier: u8) -> ProgramResult {
     msg!("Mul {}", multiplier);
 
     let account_info_iter = &mut accounts.iter();
@@ -315,8 +286,7 @@ fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
         )
     })?;
 
-    let mut counter =
-        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+    let mut counter = FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
 
     counter.count *= multiplier as u64;
     counter.updates += 1;
@@ -328,10 +298,7 @@ fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
     Ok(())
 }
 
-fn process_delegate(
-    accounts: &[AccountInfo],
-    args: &DelegateArgs,
-) -> ProgramResult {
+fn process_delegate(accounts: &[AccountInfo<'_>], args: &DelegateArgs) -> ProgramResult {
     msg!("Delegate");
     let [payer, delegate_account_pda, owner_program, buffer, delegation_record, delegation_metadata, delegation_program, system_program] =
         accounts
@@ -363,7 +330,7 @@ fn process_delegate(
 }
 
 fn process_add_and_schedule_commit(
-    accounts: &[AccountInfo],
+    accounts: &[AccountInfo<'_>],
     count: u8,
     undelegate: bool,
     has_magic_vault: bool,
@@ -379,11 +346,8 @@ fn process_add_and_schedule_commit(
     let counter_pda_info = next_account_info(account_info_iter)?;
     let magic_context_info = next_account_info(account_info_iter)?;
     let magic_program_info = next_account_info(account_info_iter)?;
-    let magic_fee_vault = if has_magic_vault {
-        Some(next_account_info(account_info_iter)?)
-    } else {
-        None
-    };
+    let magic_fee_vault =
+        if has_magic_vault { Some(next_account_info(account_info_iter)?) } else { None };
 
     // Perform the add operation
     add(payer_info, counter_pda_info, count)?;
@@ -409,7 +373,7 @@ fn process_add_and_schedule_commit(
     Ok(())
 }
 
-fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
+fn process_add_counter(accounts: &[AccountInfo<'_>]) -> ProgramResult {
     msg!("AddCounter");
 
     let account_info_iter = &mut accounts.iter();
@@ -426,28 +390,23 @@ fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
         )
     })?;
 
-    let source_counter =
-        FlexiCounter::try_from_slice(&source_pda_info.data.borrow())?;
+    let source_counter = FlexiCounter::try_from_slice(&source_pda_info.data.borrow())?;
     let count = source_counter.count as u8;
 
     add(payer_info, target_pda_info, count)
 }
 
-fn process_undelegate_request(
-    accounts: &[AccountInfo],
-    seeds_data: &[u8],
-) -> ProgramResult {
+fn process_undelegate_request(accounts: &[AccountInfo<'_>], seeds_data: &[u8]) -> ProgramResult {
     msg!("Undelegate");
     let accounts_iter = &mut accounts.iter();
     let delegated_account = next_account_info(accounts_iter)?;
     let buffer = next_account_info(accounts_iter)?;
     let payer = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
-    let account_seeds =
-        <Vec<Vec<u8>>>::try_from_slice(seeds_data).map_err(|err| {
-            msg!("ERROR: failed to parse account seeds {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
+    let account_seeds = <Vec<Vec<u8>>>::try_from_slice(seeds_data).map_err(|err| {
+        msg!("ERROR: failed to parse account seeds {:?}", err);
+        ProgramError::InvalidArgument
+    })?;
 
     undelegate_account(
         delegated_account,
@@ -470,10 +429,7 @@ fn process_undelegate_request(
     Ok(())
 }
 
-fn process_schedule_task(
-    accounts: &[AccountInfo],
-    args: ScheduleArgs,
-) -> ProgramResult {
+fn process_schedule_task(accounts: &[AccountInfo<'_>], args: ScheduleArgs) -> ProgramResult {
     msg!("ScheduleTask");
 
     let account_info_iter = &mut accounts.iter();
@@ -492,18 +448,16 @@ fn process_schedule_task(
     }
     let bump = &[bump];
     let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
-    let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(
-        ScheduleTaskArgs {
-            task_id: args.task_id,
-            execution_interval_millis: args.execution_interval_millis,
-            iterations: args.iterations,
-            instructions: vec![match (args.error, args.signer) {
-                (true, false) => create_add_error_ix(*payer_info.key, 1),
-                (false, true) => create_add_ix(*payer_info.key, 1),
-                _ => create_add_unsigned_ix(*payer_info.key, 1),
-            }],
-        },
-    ))
+    let ix_data = bincode::serialize(&MagicBlockInstruction::ScheduleTask(ScheduleTaskArgs {
+        task_id: args.task_id,
+        execution_interval_millis: args.execution_interval_millis,
+        iterations: args.iterations,
+        instructions: vec![match (args.error, args.signer) {
+            (true, false) => create_add_error_ix(*payer_info.key, 1),
+            (false, true) => create_add_ix(*payer_info.key, 1),
+            _ => create_add_unsigned_ix(*payer_info.key, 1),
+        }],
+    }))
     .map_err(|err| {
         msg!("ERROR: failed to serialize args {:?}", err);
         ProgramError::InvalidArgument
@@ -527,23 +481,18 @@ fn process_schedule_task(
     Ok(())
 }
 
-fn process_cancel_task(
-    accounts: &[AccountInfo],
-    args: CancelArgs,
-) -> ProgramResult {
+fn process_cancel_task(accounts: &[AccountInfo<'_>], args: CancelArgs) -> ProgramResult {
     msg!("CancelTask");
 
     let account_info_iter = &mut accounts.iter();
     let _magic_program_info = next_account_info(account_info_iter)?;
     let payer_info = next_account_info(account_info_iter)?;
 
-    let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask {
-        task_id: args.task_id,
-    })
-    .map_err(|err| {
-        msg!("ERROR: failed to serialize args {:?}", err);
-        ProgramError::InvalidArgument
-    })?;
+    let ix_data = bincode::serialize(&MagicBlockInstruction::CancelTask { task_id: args.task_id })
+        .map_err(|err| {
+            msg!("ERROR: failed to serialize args {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
 
     let ix = Instruction::new_with_bytes(
         MAGIC_PROGRAM_ID,

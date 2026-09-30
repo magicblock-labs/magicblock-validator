@@ -5,8 +5,8 @@ use integration_test_tools::{
 };
 use program_schedulecommit::{
     api::{
-        delegate_account_cpi_instruction, init_account_instruction,
-        pda_and_bump, schedule_commit_cpi_instruction, UserSeeds,
+        delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
+        schedule_commit_cpi_instruction, UserSeeds,
     },
     ScheduleCommitCpiArgs, ScheduleCommitInstruction, ScheduleCommitType,
 };
@@ -23,10 +23,8 @@ use solana_sdk::{
 };
 use tracing::*;
 use utils::{
-    assert_one_committee_synchronized_count,
-    assert_one_committee_was_committed,
-    assert_two_committees_synchronized_count,
-    assert_two_committees_were_committed,
+    assert_one_committee_synchronized_count, assert_one_committee_was_committed,
+    assert_two_committees_synchronized_count, assert_two_committees_were_committed,
     get_context_with_delegated_committees,
 };
 
@@ -46,10 +44,7 @@ mod utils;
 #[test]
 fn test_committing_one_account() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(
-            1,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_context_with_delegated_committees(1, UserSeeds::MagicScheduleCommit);
 
         let ScheduleCommitTestContextFields {
             payer_chain: payer,
@@ -66,12 +61,9 @@ fn test_committing_one_account() {
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
-            program_schedulecommit::ScheduleCommitType::CommitFinalize,
+            ScheduleCommitType::CommitFinalize,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -84,15 +76,14 @@ fn test_committing_one_account() {
 
         let sig = tx.get_signature();
         debug!("Submitting tx to commit committee {sig}",);
-        let res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
+        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
         info!("{} '{:?}'", sig, res);
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
@@ -104,10 +95,7 @@ fn test_committing_one_account() {
 #[test]
 fn test_committing_two_accounts() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(
-            2,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_context_with_delegated_committees(2, UserSeeds::MagicScheduleCommit);
 
         let ScheduleCommitTestContextFields {
             payer_chain: payer,
@@ -122,12 +110,9 @@ fn test_committing_two_accounts() {
             magicblock_magic_program_api::id(),
             magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
-            &committees
-                .iter()
-                .map(|(player, _)| player.pubkey())
-                .collect::<Vec<_>>(),
+            &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
-            program_schedulecommit::ScheduleCommitType::CommitFinalize,
+            ScheduleCommitType::CommitFinalize,
         );
 
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
@@ -139,15 +124,14 @@ fn test_committing_two_accounts() {
         );
 
         let sig = tx.get_signature();
-        let res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
+        let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
         info!("{} '{:?}'", sig, res);
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
@@ -163,20 +147,15 @@ fn test_committing_account_delegated_to_another_validator() {
 
         // Init other validator
         let other_validator = Keypair::new();
-        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL)
-            .unwrap();
+        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL).unwrap();
 
         // Init payer
         let payer = Keypair::new();
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
-            .unwrap();
+        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
 
         // Init + delegate player to other validator
-        let (player, player_pda) = init_and_delegate_player(
-            &ctx,
-            &payer,
-            Some(other_validator.pubkey()),
-        );
+        let (player, player_pda) =
+            init_and_delegate_player(&ctx, &payer, Some(other_validator.pubkey()));
 
         // Schedule commit of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, false);
@@ -185,10 +164,7 @@ fn test_committing_account_delegated_to_another_validator() {
         let (_, tx_err) = extract_transaction_error(res);
         assert_eq!(
             tx_err.unwrap(),
-            TransactionError::InstructionError(
-                0,
-                InstructionError::IllegalOwner
-            )
+            TransactionError::InstructionError(0, InstructionError::IllegalOwner)
         )
     });
 }
@@ -200,20 +176,15 @@ fn test_undelegating_account_delegated_to_another_validator() {
 
         // Init other validator
         let other_validator = Keypair::new();
-        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL)
-            .unwrap();
+        ctx.airdrop_chain(&other_validator.pubkey(), LAMPORTS_PER_SOL).unwrap();
 
         // Init payer
         let payer = Keypair::new();
-        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
-            .unwrap();
+        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
 
         // Init + delegate player to other validator
-        let (player, player_pda) = init_and_delegate_player(
-            &ctx,
-            &payer,
-            Some(other_validator.pubkey()),
-        );
+        let (player, player_pda) =
+            init_and_delegate_player(&ctx, &payer, Some(other_validator.pubkey()));
 
         // Schedule undelegation of account delegated to another validator
         let res = schedule_commit_tx(&ctx, &payer, &player, player_pda, true);
@@ -222,10 +193,7 @@ fn test_undelegating_account_delegated_to_another_validator() {
         let (_, tx_err) = extract_transaction_error(res);
         assert_eq!(
             tx_err.unwrap(),
-            TransactionError::InstructionError(
-                0,
-                InstructionError::ReadonlyDataModified
-            )
+            TransactionError::InstructionError(0, InstructionError::ReadonlyDataModified)
         );
     });
 }
@@ -240,8 +208,7 @@ fn init_and_delegate_player(
     let (player_pda, _) = pda_and_bump(&player.pubkey());
 
     // Build init + delegate instructions
-    let init_ix =
-        init_account_instruction(payer.pubkey(), player.pubkey(), player_pda);
+    let init_ix = init_account_instruction(payer.pubkey(), player.pubkey(), player_pda);
     let delegate_ix = delegate_account_cpi_instruction(
         payer.pubkey(),
         validator,
@@ -256,9 +223,7 @@ fn init_and_delegate_player(
         &[payer, &player],
         Default::default(),
     );
-    let signature = ctx
-        .send_transaction_chain(&mut tx, &[payer, &player])
-        .unwrap();
+    let signature = ctx.send_transaction_chain(&mut tx, &[payer, &player]).unwrap();
     debug!("init+delegate player tx signature: {}", signature);
 
     (player, player_pda)
@@ -284,22 +249,16 @@ fn schedule_commit_tx(
 
     // Build and send transaction
     let blockhash = ephem_client.get_latest_blockhash().unwrap();
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&payer.pubkey()),
-        &[payer],
-        blockhash,
-    );
+    let tx = Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], blockhash);
 
-    let res = ephem_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            ephem_client.commitment(),
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let res = ephem_client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        ephem_client.commitment(),
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     debug!("schedule commit tx signature: {}", tx.get_signature());
 
     res

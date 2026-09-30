@@ -1,11 +1,9 @@
 use solana_account_info::AccountInfo;
-use solana_program::{
-    entrypoint::ProgramResult, msg, program_error::ProgramError,
-};
+use solana_program::{entrypoint::ProgramResult, msg, program_error::ProgramError};
 
-pub fn close_and_refund_authority(
-    authority: &AccountInfo,
-    account: &AccountInfo,
+pub(crate) fn close_and_refund_authority(
+    authority: &AccountInfo<'_>,
+    account: &AccountInfo<'_>,
 ) -> ProgramResult {
     // Realloc the account data to len 0 to avoid refunding attacks, i.e. keeping
     // the account around in an instruction that is appended as part of this
@@ -14,10 +12,8 @@ pub fn close_and_refund_authority(
     account.resize(0)?;
 
     // Transfer all lamports to authority
-    **authority.lamports.borrow_mut() = authority
-        .lamports()
-        .checked_add(account.lamports())
-        .ok_or_else(|| {
+    **authority.lamports.borrow_mut() =
+        authority.lamports().checked_add(account.lamports()).ok_or_else(|| {
             msg!("Overflow when refunding authority");
             ProgramError::ArithmeticOverflow
         })?;

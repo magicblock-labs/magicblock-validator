@@ -51,10 +51,7 @@ pub(crate) fn account_still_undelegating_on_chain(
         // B) or D)
         // Since the account was found to be delegated we must have
         // found a delegation record and thus have the delegation slot.
-        let delegation_slot = deleg_record
-            .as_ref()
-            .map(|d| d.delegation_slot)
-            .unwrap_or_default();
+        let delegation_slot = deleg_record.as_ref().map(|d| d.delegation_slot).unwrap_or_default();
         if delegation_slot <= remote_slot_in_bank {
             // The last update of the account was after the last delegation
             // Therefore the account was not redelegated which indicates

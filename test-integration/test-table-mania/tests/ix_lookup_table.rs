@@ -1,18 +1,14 @@
 use integration_test_tools::init_logger;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
-    find_open_tables, LookupTableRc, TableManiaComputeBudgets,
-    CREATE_AND_EXTEND_TABLE_CUS, DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS,
-    MAX_ENTRIES_AS_PART_OF_EXTEND,
+    find_open_tables, LookupTableRc, TableManiaComputeBudgets, CREATE_AND_EXTEND_TABLE_CUS,
+    DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS, MAX_ENTRIES_AS_PART_OF_EXTEND,
 };
 use solana_address_lookup_table_interface::state::LookupTableMeta;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    clock::Slot, native_token::LAMPORTS_PER_SOL, signature::Keypair,
-    signer::Signer,
-};
+use solana_sdk::{clock::Slot, native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
 use tracing::*;
 
 mod utils;
@@ -29,12 +25,7 @@ pub async fn setup_lookup_table(
         );
         MagicblockRpcClient::from(client)
     };
-    utils::airdrop_and_wait(
-        &rpc_client,
-        validator_auth,
-        777 * LAMPORTS_PER_SOL,
-    )
-    .await;
+    utils::airdrop_and_wait(&rpc_client, validator_auth, 777 * LAMPORTS_PER_SOL).await;
 
     let latest_slot = rpc_client.get_slot().await.unwrap();
     let sub_slot = 0;
@@ -51,19 +42,9 @@ pub async fn setup_lookup_table(
         Ok(tbl) => tbl,
         Err(err) => {
             if let Some(sig) = err.signature() {
-                let logs = rpc_client
-                    .get_transaction_logs(&sig, None)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                let cus = rpc_client
-                    .get_transaction_cus(&sig, None)
-                    .await
-                    .unwrap()
-                    .unwrap();
-                panic!(
-                    "Failed to init lookup table: {err:?} with logs: {logs:#?} used {cus} CUs"
-                );
+                let logs = rpc_client.get_transaction_logs(&sig, None).await.unwrap().unwrap();
+                let cus = rpc_client.get_transaction_cus(&sig, None).await.unwrap().unwrap();
+                panic!("Failed to init lookup table: {err:?} with logs: {logs:#?} used {cus} CUs");
             }
             panic!("Failed to init lookup table: {err:?}");
         }
@@ -81,11 +62,7 @@ async fn get_table_meta(
     rpc_client: &MagicblockRpcClient,
     lookup_table: &LookupTableRc,
 ) -> LookupTableMeta {
-    lookup_table
-        .get_meta(rpc_client)
-        .await
-        .unwrap()
-        .expect("Table not found")
+    lookup_table.get_meta(rpc_client).await.unwrap().expect("Table not found")
 }
 
 async fn get_table_addresses(
@@ -118,10 +95,7 @@ async fn test_create_fetch_and_close_lookup_table() {
     init_logger!();
 
     let validator_auth = Keypair::new();
-    let mut pubkeys = vec![0; 10]
-        .into_iter()
-        .map(|_| Pubkey::new_unique())
-        .collect::<Vec<_>>();
+    let mut pubkeys = vec![0; 10].into_iter().map(|_| Pubkey::new_unique()).collect::<Vec<_>>();
     pubkeys.sort();
 
     let budgets = TableManiaComputeBudgets::default();
@@ -134,12 +108,7 @@ async fn test_create_fetch_and_close_lookup_table() {
 
     assert_eq!(meta.authority, Some(lookup_table.derived_auth().pubkey()));
     assert_eq!(meta.deactivation_slot, u64::MAX);
-    let mut keys = lookup_table
-        .pubkeys()
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut keys = lookup_table.pubkeys().unwrap().keys().cloned().collect::<Vec<_>>();
     keys.sort();
     assert_eq!(keys, pubkeys[0..5]);
     assert_eq!(
@@ -159,12 +128,7 @@ async fn test_create_fetch_and_close_lookup_table() {
         )
         .await
         .unwrap();
-    let mut keys = lookup_table
-        .pubkeys()
-        .unwrap()
-        .keys()
-        .cloned()
-        .collect::<Vec<_>>();
+    let mut keys = lookup_table.pubkeys().unwrap().keys().cloned().collect::<Vec<_>>();
     keys.sort();
     assert_eq!(keys, pubkeys[0..10]);
     assert_eq!(
@@ -182,16 +146,10 @@ async fn test_create_fetch_and_close_lookup_table() {
     let meta = get_table_meta(&rpc_client, &lookup_table).await;
     assert_eq!(meta.authority, Some(lookup_table.derived_auth().pubkey()));
     assert_ne!(meta.deactivation_slot, u64::MAX);
-    assert!(
-        !lookup_table
-            .is_deactivated_on_chain(&rpc_client, None)
-            .await
-    );
+    assert!(!lookup_table.is_deactivated_on_chain(&rpc_client, None).await);
 
     assert_eq!(
-        get_open_tables(&rpc_client, &validator_auth, creation_slot)
-            .await
-            .len(),
+        get_open_tables(&rpc_client, &validator_auth, creation_slot).await.len(),
         1
     );
 
@@ -205,10 +163,7 @@ async fn test_create_fetch_and_close_lookup_table() {
         debug!("{}", lookup_table);
 
         eprintln!("Waiting for table to deactivate for about 2.5 min ...");
-        while !lookup_table
-            .is_deactivated_on_chain(&rpc_client, None)
-            .await
-        {
+        while !lookup_table.is_deactivated_on_chain(&rpc_client, None).await {
             utils::sleep_millis(5_000).await;
         }
         lookup_table
@@ -223,9 +178,7 @@ async fn test_create_fetch_and_close_lookup_table() {
         assert!(lookup_table.is_closed(&rpc_client).await.unwrap());
 
         assert_eq!(
-            get_open_tables(&rpc_client, &validator_auth, creation_slot)
-                .await
-                .len(),
+            get_open_tables(&rpc_client, &validator_auth, creation_slot).await.len(),
             0
         );
     }
@@ -243,16 +196,13 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
         .map(|_| Pubkey::new_unique())
         .collect::<Vec<_>>();
 
-    let extend_pubkeys = vec![0; 10_000]
-        .into_iter()
-        .map(|_| Pubkey::new_unique())
-        .collect::<Vec<_>>();
+    let extend_pubkeys =
+        vec![0; 10_000].into_iter().map(|_| Pubkey::new_unique()).collect::<Vec<_>>();
 
     let mut extend_idx = 0;
     for i in 1..init_pubkeys.len() {
         let (rpc_client, mut lookup_table) =
-            setup_lookup_table(&validator_auth, &init_pubkeys[0..=i], &budgets)
-                .await;
+            setup_lookup_table(&validator_auth, &init_pubkeys[0..=i], &budgets).await;
 
         let init_sig = lookup_table.init_signature().unwrap();
         let cus = get_tx_cus(&rpc_client, &init_sig).await;
@@ -271,8 +221,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
             .unwrap();
         extend_idx += i;
 
-        let extend_sig =
-            *lookup_table.extend_signatures().unwrap().last().unwrap();
+        let extend_sig = *lookup_table.extend_signatures().unwrap().last().unwrap();
         let cus = get_tx_cus(&rpc_client, &extend_sig).await;
         debug!("Extend for {i:03} CUs  {cus:04}CUs");
         assert!(cus <= EXTEND_TABLE_CUS as u64);
@@ -282,11 +231,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
             .await
             .unwrap();
 
-        let cus = get_tx_cus(
-            &rpc_client,
-            &lookup_table.deactivate_signature().unwrap(),
-        )
-        .await;
+        let cus = get_tx_cus(&rpc_client, &lookup_table.deactivate_signature().unwrap()).await;
         debug!("Deactivate table {cus:03}CUs");
         assert!(cus <= DEACTIVATE_TABLE_CUS as u64);
 
@@ -297,13 +242,8 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
             // Testing close takes a long time and is always the same instruction,
             // thus we only perform this test once
             if i == 1 {
-                eprintln!(
-                    "Waiting for table to deactivate for about 2.5 min ..."
-                );
-                while !lookup_table
-                    .is_deactivated_on_chain(&rpc_client, None)
-                    .await
-                {
+                eprintln!("Waiting for table to deactivate for about 2.5 min ...");
+                while !lookup_table.is_deactivated_on_chain(&rpc_client, None).await {
                     utils::sleep_millis(5_000).await;
                 }
                 let (is_closed, close_sig) = lookup_table
@@ -324,11 +264,5 @@ async fn get_tx_cus(
     sig: &solana_sdk::signature::Signature,
 ) -> u64 {
     let tx = rpc_client.get_transaction(sig, None).await.unwrap();
-    tx.transaction
-        .meta
-        .as_ref()
-        .unwrap()
-        .compute_units_consumed
-        .clone()
-        .unwrap()
+    tx.transaction.meta.as_ref().unwrap().compute_units_consumed.clone().unwrap()
 }

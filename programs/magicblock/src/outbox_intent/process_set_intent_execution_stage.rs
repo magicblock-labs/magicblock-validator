@@ -10,25 +10,22 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
+    utils::accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     validator::authority,
 };
 
 const VALIDATOR_AUTHORITY_IDX: u16 = 0;
 const INTENT_PDA_IDX: u16 = 1;
 
-pub fn process_set_intent_execution_stage(
+pub(crate) fn process_set_intent_execution_stage(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     intent_id: u64,
     stage: ExecutionStage,
     recovery_commit_nonces: Vec<(Pubkey, u64)>,
 ) -> Result<(), InstructionError> {
     let validator_auth = authority();
-    let bundle =
-        validate(&signers, invoke_context, &validator_auth, intent_id)?;
+    let bundle = validate(&signers, invoke_context, &validator_auth, intent_id)?;
 
     set_new_execution_stage(
         invoke_context,
@@ -41,17 +38,15 @@ pub fn process_set_intent_execution_stage(
 
 fn validate(
     signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     validator_auth: &Pubkey,
     intent_id: u64,
 ) -> Result<OutboxIntentBundle, InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
 
     // Check that validator authority signed the tx
-    let provided_validator_auth = get_instruction_pubkey_with_idx(
-        transaction_context,
-        VALIDATOR_AUTHORITY_IDX,
-    )?;
+    let provided_validator_auth =
+        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_AUTHORITY_IDX)?;
     if provided_validator_auth != validator_auth {
         ic_msg!(
             invoke_context,
@@ -72,21 +67,18 @@ fn validate(
 
     // Deserialize first so the PDA can be validated cheaply against its
     // own stored bump, instead of re-deriving via find_program_address.
-    let intent_acc =
-        get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
-    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data())
-        .map_err(|_| {
-            ic_msg!(
-                invoke_context,
-                "SetIntentExecutionStage ERR: failed to deserialize outbox intent {}",
-                intent_id
-            );
-            InstructionError::InvalidAccountData
-        })?;
+    let intent_acc = get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
+    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data()).map_err(|_| {
+        ic_msg!(
+            invoke_context,
+            "SetIntentExecutionStage ERR: failed to deserialize outbox intent {}",
+            intent_id
+        );
+        InstructionError::InvalidAccountData
+    })?;
 
     // Validate pda we about to apply transition to
-    let provided_pda =
-        get_instruction_pubkey_with_idx(transaction_context, INTENT_PDA_IDX)?;
+    let provided_pda = get_instruction_pubkey_with_idx(transaction_context, INTENT_PDA_IDX)?;
     if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
         ic_msg!(
             invoke_context,
@@ -102,27 +94,24 @@ fn validate(
 }
 
 fn set_new_execution_stage(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     intent_id: u64,
     stage: ExecutionStage,
     recovery_commit_nonces: Vec<(Pubkey, u64)>,
     mut bundle: OutboxIntentBundle,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
-    let intent_acc =
-        get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
+    let intent_acc = get_instruction_account_with_idx(transaction_context, INTENT_PDA_IDX)?;
 
-    bundle
-        .apply_stage_transition(stage, recovery_commit_nonces)
-        .map_err(|reason| {
-            ic_msg!(
-                invoke_context,
-                "SetIntentExecutionStage ERR: intent {}: invalid transition: {}",
-                intent_id,
-                reason
-            );
-            InstructionError::InvalidArgument
-        })?;
+    bundle.apply_stage_transition(stage, recovery_commit_nonces).map_err(|reason| {
+        ic_msg!(
+            invoke_context,
+            "SetIntentExecutionStage ERR: intent {}: invalid transition: {}",
+            intent_id,
+            reason
+        );
+        InstructionError::InvalidArgument
+    })?;
 
     let data = bundle.try_to_bytes().map_err(|_| {
         ic_msg!(
@@ -132,10 +121,7 @@ fn set_new_execution_stage(
         );
         InstructionError::InvalidAccountData
     })?;
-    intent_acc
-        .borrow_mut()?
-        .data_as_mut_slice()
-        .copy_from_slice(&data);
+    intent_acc.borrow_mut()?.data_as_mut_slice().copy_from_slice(&data);
 
     Ok(())
 }

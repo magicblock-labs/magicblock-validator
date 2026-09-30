@@ -22,3 +22,6 @@ custom-heap = []
 custom-panic = []
 default = []
 no-entrypoint = []
+
+[lints]
+workspace = true

@@ -1,9 +1,7 @@
 use std::{thread::sleep, time::Duration};
 
 use dlp_api::instruction_builder::validator_claim_fees;
-use integration_test_tools::{
-    loaded_accounts::LoadedAccounts, IntegrationTestContext,
-};
+use integration_test_tools::{loaded_accounts::LoadedAccounts, IntegrationTestContext};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
@@ -20,21 +18,16 @@ const CONFIRMATION_WAIT_MS: u64 = 500;
 const SETUP_WAIT_MS: u64 = 1000;
 
 fn validator_keypair() -> Keypair {
-    let loaded_accounts =
-        LoadedAccounts::with_delegation_program_test_authority();
-    loaded_accounts
-        .validator_authority_keypair()
-        .insecure_clone()
+    let loaded_accounts = LoadedAccounts::with_delegation_program_test_authority();
+    loaded_accounts.validator_authority_keypair().insecure_clone()
 }
 
 fn validator_pubkey() -> Pubkey {
-    LoadedAccounts::with_delegation_program_test_authority()
-        .validator_authority()
+    LoadedAccounts::with_delegation_program_test_authority().validator_authority()
 }
 
 fn validator_fees_vault() -> Pubkey {
-    LoadedAccounts::with_delegation_program_test_authority()
-        .validator_fees_vault()
+    LoadedAccounts::with_delegation_program_test_authority().validator_fees_vault()
 }
 
 /// Test that claim fees instruction
@@ -62,18 +55,13 @@ fn test_claim_fees_instruction() {
 fn test_add_fees_to_vault() {
     println!("Adding test fees to vault...");
 
-    let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
-        CommitmentConfig::confirmed(),
-    );
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_URL, CommitmentConfig::confirmed());
 
     let validator_fees_vault = validator_fees_vault();
 
     println!("  Target vault: {}", validator_fees_vault);
 
-    rpc_client
-        .request_airdrop(&validator_fees_vault, TEST_FEE_AMOUNT)
-        .unwrap();
+    rpc_client.request_airdrop(&validator_fees_vault, TEST_FEE_AMOUNT).unwrap();
     sleep(Duration::from_millis(SETUP_WAIT_MS));
 
     let balance = rpc_client.get_balance(&validator_fees_vault).unwrap();
@@ -88,10 +76,7 @@ fn test_add_fees_to_vault() {
 fn test_claim_fees_transaction() {
     println!("Testing actual claim fees transaction...");
 
-    let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
-        CommitmentConfig::confirmed(),
-    );
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_URL, CommitmentConfig::confirmed());
 
     let validator_keypair = validator_keypair();
     let validator_pubkey = validator_keypair.pubkey();
@@ -111,9 +96,7 @@ fn test_claim_fees_transaction() {
         blockhash,
     );
 
-    rpc_client
-        .send_and_confirm_transaction(&transaction)
-        .unwrap();
+    rpc_client.send_and_confirm_transaction(&transaction).unwrap();
     sleep(Duration::from_millis(CONFIRMATION_WAIT_MS));
 
     let balance_after = rpc_client.get_balance(&validator_fees_vault).unwrap();
@@ -130,10 +113,7 @@ fn test_claim_fees_transaction() {
 fn test_claim_fees_rpc_connection() {
     println!("Testing RPC connection...");
 
-    let rpc_client = RpcClient::new_with_commitment(
-        DEVNET_URL,
-        CommitmentConfig::confirmed(),
-    );
+    let rpc_client = RpcClient::new_with_commitment(DEVNET_URL, CommitmentConfig::confirmed());
 
     rpc_client.get_latest_blockhash().unwrap();
     println!("✓ RPC connection successful");
@@ -145,10 +125,7 @@ fn test_validator_claim_fees() {
     println!("Starting Validator Fee Claiming Integration Test\n");
 
     // Fund the validator for transaction fees
-    let client = RpcClient::new_with_commitment(
-        DEVNET_URL,
-        CommitmentConfig::confirmed(),
-    );
+    let client = RpcClient::new_with_commitment(DEVNET_URL, CommitmentConfig::confirmed());
     IntegrationTestContext::airdrop(
         &client,
         &validator_pubkey(),

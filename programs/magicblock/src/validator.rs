@@ -37,9 +37,7 @@ pub fn set_authority(pubkey: Pubkey) {
 /// Ensures a non-default authority is set on the current thread, generating a
 /// fresh one if needed, and returns it. Test/dev harness helper.
 pub fn generate_validator_authority_if_needed() -> Pubkey {
-    let authority = VALIDATOR_AUTHORITY
-        .get_or_init(|| Arc::new(Keypair::new()))
-        .pubkey();
+    let authority = VALIDATOR_AUTHORITY.get_or_init(|| Arc::new(Keypair::new())).pubkey();
     let current = nucleus::tls::AUTHORITY.get();
     if current == Pubkey::default() {
         nucleus::tls::AUTHORITY.set(authority);

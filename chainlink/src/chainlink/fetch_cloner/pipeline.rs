@@ -6,9 +6,8 @@ use std::{
 use dlp_api::pda::delegation_record_pda_from_delegated_account;
 use magicblock_core::token_programs::is_ata;
 use magicblock_metrics::metrics::{
-    self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult,
-    ChainlinkCompanionFetchKind,
+    self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent, ChainlinkCloneOutcome,
+    ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
 };
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
 use solana_pubkey::Pubkey;
@@ -19,19 +18,17 @@ use super::{
     FetchCloner, delegation,
     subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound,
-        ResolvedDelegatedAccounts, ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound, ResolvedDelegatedAccounts,
+        ResolvedPrograms,
     },
 };
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount,
-        SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount, SubscriptionReason,
         program_account::{
-            LOADER_V3, ProgramAccountResolver,
-            get_loaderv3_get_program_data_address,
+            LOADER_V3, ProgramAccountResolver, get_loaderv3_get_program_data_address,
         },
         pubsub_common::is_internal_dlp_account_data,
     },
@@ -136,13 +133,9 @@ pub(crate) fn partition_not_found(
             not_found,
         };
     };
-    let (clone_as_empty, not_found) = not_found
-        .into_iter()
-        .partition(|(pubkey, _)| mark_empty.contains(pubkey));
-    PartitionedNotFound {
-        clone_as_empty,
-        not_found,
-    }
+    let (clone_as_empty, not_found) =
+        not_found.into_iter().partition(|(pubkey, _)| mark_empty.contains(pubkey));
+    PartitionedNotFound { clone_as_empty, not_found }
 }
 
 /// Resolves delegated accounts by fetching their delegation records
@@ -160,9 +153,7 @@ where
 {
     let record_subs = owned_by_deleg
         .iter()
-        .map(|(pubkey, _, _)| {
-            delegation_record_pda_from_delegated_account(pubkey)
-        })
+        .map(|(pubkey, _, _)| delegation_record_pda_from_delegated_account(pubkey))
         .collect::<Vec<_>>();
     acquire_subs(
         &this.remote_account_provider,
@@ -179,32 +170,26 @@ where
         } else {
             *account_slot
         };
-        fetch_with_delegation_record_join_set.spawn(
-            this.task_to_fetch_with_delegation_record(
-                *pubkey,
-                effective_slot,
-                fetch_context.clone(),
-            ),
-        );
+        fetch_with_delegation_record_join_set.spawn(this.task_to_fetch_with_delegation_record(
+            *pubkey,
+            effective_slot,
+            fetch_context.clone(),
+        ));
     }
 
     let mut missing_delegation_record = vec![];
 
     let accounts_to_clone = {
         let joined = fetch_with_delegation_record_join_set.join_all().await;
-        let (errors, accounts_fully_resolved) = joined.into_iter().fold(
-            (vec![], vec![]),
-            |(mut errors, mut successes), res| {
+        let (errors, accounts_fully_resolved) =
+            joined.into_iter().fold((vec![], vec![]), |(mut errors, mut successes), res| {
                 match res {
-                    Ok(Ok(account_with_deleg)) => {
-                        successes.push(account_with_deleg)
-                    }
+                    Ok(Ok(account_with_deleg)) => successes.push(account_with_deleg),
                     Ok(Err(err)) => errors.push(err),
                     Err(err) => errors.push(err.into()),
                 }
                 (errors, successes)
-            },
-        );
+            });
 
         // If we encounter any error while fetching delegated accounts then
         // we have to abort as we cannot resume without the ability to sync
@@ -218,20 +203,16 @@ where
                     pubkey,
                     reason: SubscriptionReason::DirectAccount,
                 })
-                .chain(record_subs.iter().copied().map(|pubkey| {
-                    SubscriptionRelease::Pubkey {
+                .chain(
+                    record_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
                         pubkey,
                         reason: SubscriptionReason::DelegationRecord,
-                    }
-                }))
+                    }),
+                )
                 .collect::<Vec<_>>();
             release_subs(&this.remote_account_provider, releases).await;
             return Err(ChainlinkError::DelegatedAccountResolutionsFailed(
-                errors
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", "),
+                errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "),
             ));
         }
 
@@ -250,109 +231,85 @@ where
         {
             let source_slots = CloneSourceSlots::single(account.read().slot());
             // If the account is delegated we set the owner and delegation state
-            let (delegated_to_other, delegation_actions) =
-                if let Some(record_data) = delegation_record {
-                    // NOTE: failing here is fine when resolving all accounts for a transaction
-                    // since if something is off we better not run it anyways
-                    // However we may consider a different behavior when user is getting
-                    // multiple accounts.
-                    let (delegation_record, delegation_actions) = match this
-                        .parse_delegation_record(
-                            record_data.read().data(),
-                            delegation_record_pubkey,
-                        ) {
-                        Ok(x) => x,
-                        Err(err) => {
-                            let releases = owned_by_deleg
-                                .iter()
-                                .map(|(pubkey, _, _)| *pubkey)
-                                .chain(record_subs.iter().copied())
-                                .map(|pubkey| SubscriptionRelease::Pubkey {
+            let (delegated_to_other, delegation_actions) = if let Some(record_data) =
+                delegation_record
+            {
+                // NOTE: failing here is fine when resolving all accounts for a transaction
+                // since if something is off we better not run it anyways
+                // However we may consider a different behavior when user is getting
+                // multiple accounts.
+                let (delegation_record, delegation_actions) = match this
+                    .parse_delegation_record(record_data.read().data(), delegation_record_pubkey)
+                {
+                    Ok(x) => x,
+                    Err(err) => {
+                        let releases = owned_by_deleg
+                            .iter()
+                            .map(|(pubkey, _, _)| *pubkey)
+                            .chain(record_subs.iter().copied())
+                            .map(|pubkey| SubscriptionRelease::Pubkey {
+                                pubkey,
+                                reason: SubscriptionReason::DirectAccount,
+                            })
+                            .chain(record_subs.iter().copied().map(|pubkey| {
+                                SubscriptionRelease::Pubkey {
                                     pubkey,
-                                    reason: SubscriptionReason::DirectAccount,
-                                })
-                                .chain(
-                                    record_subs.iter().copied().map(|pubkey| {
-                                        SubscriptionRelease::Pubkey {
-                                    pubkey,
-                                    reason:
-                                        SubscriptionReason::DelegationRecord,
+                                    reason: SubscriptionReason::DelegationRecord,
                                 }
-                                    }),
-                                )
-                                .collect::<Vec<_>>();
-                            release_subs(
-                                &this.remote_account_provider,
-                                releases,
-                            )
-                            .await;
-                            return Err(err);
-                        }
-                    };
-
-                    trace!(pubkey = %pubkey, "Delegation record found");
-
-                    let delegated_to_other = delegation::delegated_to_other(
-                        &this.validator_pubkey,
-                        &delegation_record,
-                    );
-
-                    account = delegation::apply_record(
-                        &this.validator_pubkey,
-                        pubkey,
-                        account,
-                        &delegation_record,
-                    );
-
-                    // Skip high-cardinality owner programs such as SPL Token.
-                    if account.read().is(AccountMode::Delegated)
-                        && !this.program_subscription_is_too_broad(
-                            &delegation_record.owner,
-                        )
-                    {
-                        owner_programs_to_subscribe
-                            .insert(delegation_record.owner);
+                            }))
+                            .collect::<Vec<_>>();
+                        release_subs(&this.remote_account_provider, releases).await;
+                        return Err(err);
                     }
-
-                    let delegation_actions =
-                        if account.read().is(AccountMode::Delegated) {
-                            delegation_actions
-                        } else {
-                            None
-                        };
-
-                    (delegated_to_other, delegation_actions)
-                } else {
-                    if !is_internal_dlp_account_data(account.read().data()) {
-                        missing_delegation_record
-                            .push((pubkey, account.read().slot()));
-                    }
-                    (None, None)
                 };
-            let cleanup_delegated_subscription =
-                account.read().is(AccountMode::Delegated);
+
+                trace!(pubkey = %pubkey, "Delegation record found");
+
+                let delegated_to_other =
+                    delegation::delegated_to_other(&this.validator_pubkey, &delegation_record);
+
+                account = delegation::apply_record(
+                    &this.validator_pubkey,
+                    pubkey,
+                    account,
+                    &delegation_record,
+                );
+
+                // Skip high-cardinality owner programs such as SPL Token.
+                if account.read().is(AccountMode::Delegated)
+                    && !this.program_subscription_is_too_broad(&delegation_record.owner)
+                {
+                    owner_programs_to_subscribe.insert(delegation_record.owner);
+                }
+
+                let delegation_actions = if account.read().is(AccountMode::Delegated) {
+                    delegation_actions
+                } else {
+                    None
+                };
+
+                (delegated_to_other, delegation_actions)
+            } else {
+                if !is_internal_dlp_account_data(account.read().data()) {
+                    missing_delegation_record.push((pubkey, account.read().slot()));
+                }
+                (None, None)
+            };
+            let cleanup_delegated_subscription = account.read().is(AccountMode::Delegated);
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
-                && this
-                    .account_mode(&pubkey)
-                    .is_some_and(|mode| mode != AccountMode::Delegated);
+                && this.account_mode(&pubkey).is_some_and(|mode| mode != AccountMode::Delegated);
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account,
-                post_delegation_mode: ClonePostDelegationMode::from(
-                    delegation_actions,
-                ),
+                post_delegation_mode: ClonePostDelegationMode::from(delegation_actions),
                 delegated_to_other,
                 source_slots: Some(source_slots),
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {
-                    this.cleanup_undelegation_tracking_for_completed_account(
-                        pubkey,
-                    )
-                    .await;
+                    this.cleanup_undelegation_tracking_for_completed_account(pubkey).await;
                 }
-                this.cleanup_direct_subscription_for_delegated_account(pubkey)
-                    .await;
+                this.cleanup_direct_subscription_for_delegated_account(pubkey).await;
             }
         }
 
@@ -372,17 +329,14 @@ where
         if !owner_programs_to_subscribe.is_empty() {
             let remote_account_provider = this.remote_account_provider.clone();
             tokio::spawn(async move {
-                let subscribe_futures =
-                    owner_programs_to_subscribe.into_iter().map(|owner| {
-                        let provider = remote_account_provider.clone();
-                        async move {
-                            let result =
-                                provider.subscribe_program(owner).await;
-                            (owner, result)
-                        }
-                    });
-                let results =
-                    futures_util::future::join_all(subscribe_futures).await;
+                let subscribe_futures = owner_programs_to_subscribe.into_iter().map(|owner| {
+                    let provider = remote_account_provider.clone();
+                    async move {
+                        let result = provider.subscribe_program(owner).await;
+                        (owner, result)
+                    }
+                });
+                let results = futures_util::future::join_all(subscribe_futures).await;
                 for (owner, result) in results {
                     if let Err(err) = result {
                         warn!(program_id = %owner, error = %err, "Failed to subscribe to owner program");
@@ -415,9 +369,7 @@ where
 {
     // For LoaderV3 accounts we fetch the program data account
     let (loaderv3_programs, single_account_programs): (Vec<_>, Vec<_>) =
-        programs
-            .into_iter()
-            .partition(|(_, acc, _)| acc.read().owner() == LOADER_V3);
+        programs.into_iter().partition(|(_, acc, _)| acc.read().owner() == LOADER_V3);
 
     let mut pubkeys_to_fetch = Vec::with_capacity(loaderv3_programs.len() * 2);
     let mut batch_min_context_slot = min_context_slot;
@@ -428,8 +380,7 @@ where
         } else {
             *account_slot
         };
-        batch_min_context_slot =
-            Some(batch_min_context_slot.unwrap_or(0).max(effective_slot));
+        batch_min_context_slot = Some(batch_min_context_slot.unwrap_or(0).max(effective_slot));
 
         // We intentionally take the global max effective slot for the batch (not per-program)
         // to enforce a consistent minimum slot across all LoaderV3 programs.
@@ -450,16 +401,13 @@ where
     .await?;
 
     let fetch_result = if !pubkeys_to_fetch.is_empty() {
-        this.fetch_count
-            .fetch_add(pubkeys_to_fetch.len() as u64, Ordering::Relaxed);
+        this.fetch_count.fetch_add(pubkeys_to_fetch.len() as u64, Ordering::Relaxed);
         this.remote_account_provider
             .try_get_multi_until_slots_match(
                 &pubkeys_to_fetch,
                 Some(MatchSlotsConfig {
                     min_context_slot: batch_min_context_slot,
-                    ..MatchSlotsConfig::new(
-                        ChainlinkCompanionFetchKind::ProgramData,
-                    )
+                    ..MatchSlotsConfig::new(ChainlinkCompanionFetchKind::ProgramData)
                 }),
                 fetch_context.with_reason(AccountFetchReason::ProgramData),
             )
@@ -472,30 +420,26 @@ where
         Ok(remote_accounts) => {
             if remote_accounts.len() != pubkeys_to_fetch.len() {
                 (
-                    vec![ChainlinkError::ProgramAccountResolutionsFailed(
-                        format!(
-                            "LoaderV3 fetch: expected {} accounts, got {}",
-                            pubkeys_to_fetch.len(),
-                            remote_accounts.len()
-                        ),
-                    )],
+                    vec![ChainlinkError::ProgramAccountResolutionsFailed(format!(
+                        "LoaderV3 fetch: expected {} accounts, got {}",
+                        pubkeys_to_fetch.len(),
+                        remote_accounts.len()
+                    ))],
                     vec![],
                 )
             } else {
                 let mut successes = Vec::new();
                 let mut errors = Vec::new();
 
-                for (program_info, (pubkey_pair, account_pair)) in
-                    loaderv3_programs.into_iter().zip(
-                        pubkeys_to_fetch
-                            .chunks(2)
-                            .zip(remote_accounts.chunks(2)),
-                    )
+                for (program_info, (pubkey_pair, account_pair)) in loaderv3_programs
+                    .into_iter()
+                    .zip(pubkeys_to_fetch.chunks(2).zip(remote_accounts.chunks(2)))
                 {
                     if account_pair.len() != 2 {
-                        errors.push(ChainlinkError::ProgramAccountResolutionsFailed(
-                            format!("LoaderV3 fetch: expected 2 accounts (program + data) per pair, got {}", account_pair.len())
-                        ));
+                        errors.push(ChainlinkError::ProgramAccountResolutionsFailed(format!(
+                            "LoaderV3 fetch: expected 2 accounts (program + data) per pair, got {}",
+                            account_pair.len()
+                        )));
                         continue;
                     }
                     let (pubkey, _, _) = program_info;
@@ -503,13 +447,12 @@ where
 
                     let account_program = account_pair[0].clone();
                     let account_data = account_pair[1].clone();
-                    let result =
-                        FetchCloner::<T, U>::resolve_account_with_companion(
-                            pubkey,
-                            program_data_pubkey,
-                            account_program,
-                            account_data,
-                        );
+                    let result = FetchCloner::<T, U>::resolve_account_with_companion(
+                        pubkey,
+                        program_data_pubkey,
+                        account_program,
+                        account_data,
+                    );
                     match result {
                         Ok(res) => successes.push(res),
                         Err(err) => errors.push(err),
@@ -550,13 +493,9 @@ where
     }
     for (program_id, program_account, _) in single_account_programs {
         let owner = program_account.read().owner();
-        let loaded_program = ProgramAccountResolver::try_new(
-            program_id,
-            owner,
-            Some(program_account),
-            None,
-        )?
-        .into_loaded_program();
+        let loaded_program =
+            ProgramAccountResolver::try_new(program_id, owner, Some(program_account), None)?
+                .into_loaded_program();
         loaded_programs.push(loaded_program);
     }
 
@@ -568,20 +507,16 @@ where
                 pubkey,
                 reason: SubscriptionReason::DirectAccount,
             })
-            .chain(program_data_subs.iter().copied().map(|pubkey| {
-                SubscriptionRelease::Pubkey {
+            .chain(
+                program_data_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
                     pubkey,
                     reason: SubscriptionReason::ProgramData,
-                }
-            }))
+                }),
+            )
             .collect::<Vec<_>>();
         release_subs(&this.remote_account_provider, releases).await;
         return Err(ChainlinkError::ProgramAccountResolutionsFailed(
-            errors
-                .iter()
-                .map(|e| e.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
+            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "),
         ));
     }
 
@@ -608,17 +543,14 @@ pub(crate) fn compute_subscription_releases<'a>(
             )
         })
         .collect::<HashMap<_, _>>();
-    let loaded_program_ids = loaded_programs
-        .iter()
-        .map(|program| program.program_id)
-        .collect::<HashSet<_>>();
+    let loaded_program_ids =
+        loaded_programs.iter().map(|program| program.program_id).collect::<HashSet<_>>();
 
     let mut direct_releases = all_requested_pubkeys
         .iter()
         .copied()
         .filter(|pubkey| {
-            !cloned_accounts.contains_key(pubkey)
-                && !loaded_program_ids.contains(pubkey)
+            !cloned_accounts.contains_key(pubkey) && !loaded_program_ids.contains(pubkey)
         })
         .collect::<HashSet<_>>();
     direct_releases.extend(
@@ -636,18 +568,18 @@ pub(crate) fn compute_subscription_releases<'a>(
             reason: SubscriptionReason::DirectAccount,
         })
         .collect::<Vec<_>>();
-    releases.extend(record_subs.into_iter().map(|pubkey| {
-        SubscriptionRelease::Pubkey {
+    releases.extend(
+        record_subs.into_iter().map(|pubkey| SubscriptionRelease::Pubkey {
             pubkey,
             reason: SubscriptionReason::DelegationRecord,
-        }
-    }));
-    releases.extend(program_data_subs.iter().copied().map(|pubkey| {
-        SubscriptionRelease::Pubkey {
+        }),
+    );
+    releases.extend(
+        program_data_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
             pubkey,
             reason: SubscriptionReason::ProgramData,
-        }
-    }));
+        }),
+    );
     releases
 }
 
@@ -662,7 +594,7 @@ where
 {
     let mut pending = JoinSet::new();
     for request in requests {
-        if tracing::enabled!(tracing::Level::TRACE) {
+        if tracing::enabled!(Level::TRACE) {
             let account = request.account.read();
             trace!(
                 pubkey = %request.pubkey,
@@ -674,15 +606,9 @@ where
         }
         let this = this.clone();
         let fetch_context = fetch_context.clone();
-        pending.spawn(async move {
-            this.clone_account(request, fetch_context).await
-        });
+        pending.spawn(async move { this.clone_account(request, fetch_context).await });
     }
-    pending
-        .join_all()
-        .await
-        .into_iter()
-        .collect::<ChainlinkResult<Vec<_>>>()?;
+    pending.join_all().await.into_iter().collect::<ChainlinkResult<Vec<_>>>()?;
     Ok(())
 }
 
@@ -691,9 +617,7 @@ where
 pub(crate) async fn clone_accounts_and_programs<T, U>(
     this: &FetchCloner<T, U>,
     accounts_to_clone: Vec<AccountCloneRequest>,
-    loaded_programs: Vec<
-        crate::remote_account_provider::program_account::LoadedProgram,
-    >,
+    loaded_programs: Vec<crate::remote_account_provider::program_account::LoadedProgram>,
     fetch_context: AccountFetchContext,
 ) -> ChainlinkResult<()>
 where
@@ -716,9 +640,7 @@ where
         }
         let this_clone = this.clone();
         let fetch_context = fetch_context.clone();
-        program_join_set.spawn(async move {
-            this_clone.clone_program(acc, fetch_context).await
-        });
+        program_join_set.spawn(async move { this_clone.clone_program(acc, fetch_context).await });
     }
     program_join_set
         .join_all()
@@ -728,13 +650,11 @@ where
 
     // 2) Clone accounts without post-delegation actions first so common action
     // dependencies are materialized before action-bearing clone instructions.
-    let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) =
-        accounts_to_clone
-            .into_iter()
-            .partition(|request| request.post_delegation_mode.has_actions());
+    let (accounts_with_actions, accounts_without_actions): (Vec<_>, Vec<_>) = accounts_to_clone
+        .into_iter()
+        .partition(|request| request.post_delegation_mode.has_actions());
 
-    materialize_accounts(this, accounts_without_actions, &fetch_context)
-        .await?;
+    materialize_accounts(this, accounts_without_actions, &fetch_context).await?;
 
     // 3) Finally clone accounts that carry embedded post-delegation actions.
     materialize_accounts(this, accounts_with_actions, &fetch_context).await?;

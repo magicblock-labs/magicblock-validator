@@ -15,9 +15,7 @@ use crate::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     schedule_transactions,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
+    utils::accounts::{get_instruction_account_with_idx, get_instruction_pubkey_with_idx},
     validator::authority,
 };
 
@@ -26,9 +24,9 @@ const OUTBOX_PROGRAM_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
 const MAGIC_CONTEXT_IDX: u16 = OUTBOX_PROGRAM_IDX + 1;
 const INTENT_PDAS_OFFSET: u16 = MAGIC_CONTEXT_IDX + 1;
 
-pub fn process_accept_scheduled_commits(
+pub(crate) fn process_accept_scheduled_commits(
     signers: HashSet<Pubkey>,
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     // Common conditions verification
     let validator_auth = authority();
@@ -48,8 +46,7 @@ pub fn process_accept_scheduled_commits(
 
     for (i, intent) in intents.into_iter().enumerate() {
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
-        let (pda, bump) =
-            verify_intent_pda(invoke_context, intent.intent_id, pda_idx)?;
+        let (pda, bump) = verify_intent_pda(invoke_context, intent.intent_id, pda_idx)?;
 
         // Create outbox ephemeral account
         create_outbox_intent_cpi(
@@ -65,22 +62,17 @@ pub fn process_accept_scheduled_commits(
 
 fn validate(
     signers: &HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     validator_auth: &Pubkey,
 ) -> Result<(), InstructionError> {
     // Check magic context
-    schedule_transactions::check_magic_context_id(
-        invoke_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
+    schedule_transactions::check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &*invoke_context.transaction_context;
 
     // Assert outbox intent program account (CPI target)
-    let outbox_program_pubkey = get_instruction_pubkey_with_idx(
-        transaction_context,
-        OUTBOX_PROGRAM_IDX,
-    )?;
+    let outbox_program_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, OUTBOX_PROGRAM_IDX)?;
     if *outbox_program_pubkey != OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
@@ -93,10 +85,8 @@ fn validate(
     }
 
     // Assert validator authority
-    let provided_validator_auth = get_instruction_pubkey_with_idx(
-        transaction_context,
-        VALIDATOR_AUTHORITY_IDX,
-    )?;
+    let provided_validator_auth =
+        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_AUTHORITY_IDX)?;
     if provided_validator_auth != validator_auth {
         ic_msg!(
             invoke_context,
@@ -121,13 +111,12 @@ fn validate(
 }
 
 fn verify_intent_pda(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     intent_id: u64,
     pda_idx: u16,
 ) -> Result<(Pubkey, u8), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
-    let provided =
-        get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
+    let provided = get_instruction_pubkey_with_idx(transaction_context, pda_idx)?;
     let (expected, bump) = outbox_intent_pda_with_bump(intent_id);
     if *provided != expected {
         ic_msg!(
@@ -144,18 +133,15 @@ fn verify_intent_pda(
 }
 
 fn pop_scheduled_intents(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<Vec<ScheduledIntentBundle>, InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
     let num_ix_accounts = transaction_context
         .get_current_instruction_context()?
-        .get_number_of_instruction_accounts()
-        as usize;
+        .get_number_of_instruction_accounts() as usize;
 
     // Assert enough accounts
-    let num_accept_intents = match num_ix_accounts
-        .checked_sub(INTENT_PDAS_OFFSET as usize)
-    {
+    let num_accept_intents = match num_ix_accounts.checked_sub(INTENT_PDAS_OFFSET as usize) {
         Some(0) => {
             // No outbox intent PDAs provided - nothing to accept
             return Ok(vec![]);
@@ -171,24 +157,19 @@ fn pop_scheduled_intents(
         }
     };
 
-    let magic_context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    let mut magic_context = MagicContext::deserialize(
-        magic_context_acc.borrow()?.data(),
-    )
-    .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "Failed to deserialize MagicContext: {}",
-            err
-        );
-        InstructionError::InvalidAccountData
-    })?;
+    let magic_context_acc =
+        get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
+    let mut magic_context =
+        MagicContext::deserialize(magic_context_acc.borrow()?.data()).map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to deserialize MagicContext: {}",
+                err
+            );
+            InstructionError::InvalidAccountData
+        })?;
 
-    let intents =
-        magic_context.take_front_scheduled_commits(num_accept_intents);
+    let intents = magic_context.take_front_scheduled_commits(num_accept_intents);
     if intents.len() != num_accept_intents {
         ic_msg!(
             invoke_context,
@@ -201,14 +182,13 @@ fn pop_scheduled_intents(
     }
 
     // Write updated account data
-    magic_context
-        .write_to(magic_context_acc.borrow_mut()?.data_as_mut_slice())?;
+    magic_context.write_to(magic_context_acc.borrow_mut()?.data_as_mut_slice())?;
 
     Ok(intents)
 }
 
 fn create_outbox_intent_cpi(
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
     validator_auth: Pubkey,
     pda: Pubkey,
     outbox_account: OutboxIntentBundle,

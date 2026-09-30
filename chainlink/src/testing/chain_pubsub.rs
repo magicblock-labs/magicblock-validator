@@ -40,23 +40,16 @@ pub async fn subscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
         })
         .await
         .expect("failed to send AccountSubscribe message");
-    rx.await
-        .expect("subscribe ack channel dropped")
-        .expect("subscribe failed");
+    rx.await.expect("subscribe ack channel dropped").expect("subscribe failed");
 }
 
 pub async fn unsubscribe(actor: &ChainPubsubActor, pubkey: Pubkey) {
     let (tx, rx) = oneshot::channel();
     actor
-        .send_msg(ChainPubsubActorMessage::AccountUnsubscribe {
-            pubkey,
-            response: tx,
-        })
+        .send_msg(ChainPubsubActorMessage::AccountUnsubscribe { pubkey, response: tx })
         .await
         .expect("failed to send AccountUnsubscribe message");
-    rx.await
-        .expect("unsubscribe ack channel dropped")
-        .expect("unsubscribe failed");
+    rx.await.expect("unsubscribe ack channel dropped").expect("unsubscribe failed");
 }
 
 pub async fn reconnect(actor: &ChainPubsubActor) {
@@ -65,9 +58,7 @@ pub async fn reconnect(actor: &ChainPubsubActor) {
         .send_msg(ChainPubsubActorMessage::Reconnect { response: tx })
         .await
         .expect("failed to send Reconnect message");
-    rx.await
-        .expect("reconnect ack channel dropped")
-        .expect("reconnect failed");
+    rx.await.expect("reconnect ack channel dropped").expect("reconnect failed");
 }
 
 pub async fn shutdown(actor: &ChainPubsubActor) {
@@ -76,7 +67,5 @@ pub async fn shutdown(actor: &ChainPubsubActor) {
         .send_msg(ChainPubsubActorMessage::Shutdown { response: tx })
         .await
         .expect("failed to send Shutdown message");
-    rx.await
-        .expect("shutdown ack channel dropped")
-        .expect("shutdown failed");
+    rx.await.expect("shutdown ack channel dropped").expect("shutdown failed");
 }

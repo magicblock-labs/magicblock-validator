@@ -8,9 +8,7 @@ pub(crate) mod transaction_scheduler;
 use std::sync::Arc;
 
 use magicblock_core::intent::types::CommittedAccount;
-use magicblock_magic_program_api::{
-    MAGIC_CONTEXT_PUBKEY, pda::CALLBACK_SIGNER,
-};
+use magicblock_magic_program_api::{MAGIC_CONTEXT_PUBKEY, pda::CALLBACK_SIGNER};
 pub(crate) use process_add_action_callback::process_add_action_callback;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
@@ -30,12 +28,11 @@ pub use crate::outbox_intent::process_scheduled_commit_sent::{
 };
 use crate::{
     magic_sys::{
-        COMMIT_LIMIT, COMMIT_LIMIT_ERR, MISSING_COMMIT_NONCE_ERR,
-        fetch_current_commit_nonces,
+        COMMIT_LIMIT, COMMIT_LIMIT_ERR, MISSING_COMMIT_NONCE_ERR, fetch_current_commit_nonces,
     },
     utils::accounts::{
-        InstructionAccount, get_instruction_account_with_idx,
-        get_instruction_pubkey_with_idx, get_writable_with_idx,
+        InstructionAccount, get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        get_writable_with_idx,
     },
     validator::authority,
 };
@@ -43,40 +40,34 @@ use crate::{
 pub(crate) const PAYER_IDX: u16 = 0;
 pub(crate) const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 fn get_parent_program_id(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<Option<Pubkey>, InstructionError> {
     let parent_program_id = invoke_context.effective_caller()?;
 
     ic_msg!(
         invoke_context,
         "ScheduleCommit: parent program id: {}",
-        parent_program_id
-            .map_or_else(|| "None".to_string(), |id| id.to_string())
+        parent_program_id.map_or_else(|| "None".to_string(), |id| id.to_string())
     );
 
     Ok(parent_program_id)
 }
 
 pub(crate) fn get_clock(
-    invoke_context: &mut InvokeContext,
+    invoke_context: &mut InvokeContext<'_, '_>,
 ) -> Result<Arc<Clock>, InstructionError> {
-    invoke_context
-        .get_sysvar_cache()
-        .get_clock()
-        .map_err(|err| {
-            ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-            InstructionError::UnsupportedSysvar
-        })
+    invoke_context.get_sysvar_cache().get_clock().map_err(|err| {
+        ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+        InstructionError::UnsupportedSysvar
+    })
 }
 
 pub fn check_magic_context_id(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     idx: u16,
 ) -> Result<(), InstructionError> {
-    let provided_magic_context = get_instruction_pubkey_with_idx(
-        invoke_context.transaction_context,
-        idx,
-    )?;
+    let provided_magic_context =
+        get_instruction_pubkey_with_idx(invoke_context.transaction_context, idx)?;
     if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
         ic_msg!(
             invoke_context,
@@ -91,7 +82,7 @@ pub fn check_magic_context_id(
 
 pub(crate) fn check_commit_limits(
     commits: &[CommittedAccount],
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let mut nonces = fetch_current_commit_nonces(commits)?;
     let mut limit_exceeded = false;
@@ -136,31 +127,20 @@ pub(crate) fn magic_fee_vault_pubkey() -> Pubkey {
 /// not needed, so callers can still skip over it deterministically.
 pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     transaction_context: &'a TransactionContext<'ix_data>,
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     payer_idx: u16,
     fee_vault_idx: u16,
-) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError>
-{
-    let payer_account =
-        get_instruction_account_with_idx(transaction_context, payer_idx)?;
+) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError> {
+    let payer_account = get_instruction_account_with_idx(transaction_context, payer_idx)?;
     // Confined payers are Ephemeral in the engine's exclusive account modes.
-    let payer_requires_fee_vault =
-        payer_account.borrow()?.is(AccountMode::Delegated);
+    let payer_requires_fee_vault = payer_account.borrow()?.is(AccountMode::Delegated);
 
-    let fee_vault = match get_instruction_pubkey_with_idx(
-        transaction_context,
-        fee_vault_idx,
-    ) {
+    let fee_vault = match get_instruction_pubkey_with_idx(transaction_context, fee_vault_idx) {
         Ok(vault_pubkey) if vault_pubkey == &magic_fee_vault_pubkey() => {
-            let vault_account = get_instruction_account_with_idx(
-                transaction_context,
-                fee_vault_idx,
-            )?;
-            let is_vault_writable =
-                get_writable_with_idx(transaction_context, fee_vault_idx)?;
-            if !vault_account.borrow()?.is(AccountMode::Delegated)
-                || !is_vault_writable
-            {
+            let vault_account =
+                get_instruction_account_with_idx(transaction_context, fee_vault_idx)?;
+            let is_vault_writable = get_writable_with_idx(transaction_context, fee_vault_idx)?;
+            if !vault_account.borrow()?.is(AccountMode::Delegated) || !is_vault_writable {
                 ic_msg!(
                     invoke_context,
                     "ScheduleTransaction ERR: magic fee vault must be writable and delegated"
@@ -173,8 +153,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
         Err(err) => return Err(err),
     };
 
-    let next_account_idx =
-        fee_vault_idx as usize + usize::from(fee_vault.is_some());
+    let next_account_idx = fee_vault_idx as usize + usize::from(fee_vault.is_some());
 
     Ok(if payer_requires_fee_vault {
         if fee_vault.is_none() {
@@ -189,16 +168,11 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
 /// Restricts callback signers to the callback PDA and excludes validator authority.
 /// Engine enforces MagicRoot authorization independently at every CPI depth.
 pub(crate) fn validate_callback_accounts(
-    invoke_context: &InvokeContext,
+    invoke_context: &InvokeContext<'_, '_>,
     accounts_meta: &[AccountMeta],
     err_prefix: &str,
 ) -> Result<(), InstructionError> {
-    for AccountMeta {
-        pubkey,
-        is_signer,
-        is_writable,
-    } in accounts_meta
-    {
+    for AccountMeta { pubkey, is_signer, is_writable } in accounts_meta {
         if *is_writable && pubkey == &CALLBACK_SIGNER {
             ic_msg!(
                 invoke_context,
