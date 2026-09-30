@@ -12,7 +12,10 @@ use crate::{
         commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
         BaseTask, BaseTaskImpl,
     },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    transactions::{
+        serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
+        MAX_TRANSACTION_WIRE_SIZE,
+    },
 };
 
 #[derive(Default, Debug)]
@@ -238,14 +241,17 @@ impl TaskStrategist {
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
-        let tx_size =
-            Self::try_optimize_tx_size_if_needed(&mut tasks, uniqueness_nonce)?;
+        let tx_size = Self::try_optimize_tx_size_if_needed(
+            &mut tasks,
+            uniqueness_nonce,
+            MAX_TRANSACTION_V1_WIRE_SIZE,
+        )?;
 
         if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
             return Err(TaskStrategistError::FailedToFitError);
         }
 
-        if tx_size <= MAX_TRANSACTION_WIRE_SIZE {
+        if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE {
             // Persist tasks strategy
             if let Some(persistor) = persistor {
                 Self::persist_tasks_strategy(persistor, &tasks, false);
@@ -414,26 +420,26 @@ impl TaskStrategist {
         }
     }
 
-    /// Optimizes tasks so as to bring the transaction size within the limit [`MAX_TRANSACTION_WIRE_SIZE`]
+    /// Optimizes tasks so as to bring the transaction size within the requested limit.
     /// Returns Ok(size of tx after optimizations) else Err(SignerError).
     /// Note that the returned size, though possibly optimized one, may still not be under
-    /// the limit MAX_TRANSACTION_WIRE_SIZE. The caller needs to check and make decision accordingly.
+    /// the requested limit. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
+        tx_size_limit: usize,
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
             // Include the constant-size uniqueness noop so fit decisions
             // match the assembled transaction.
-            match TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+            match TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                 &Keypair::new(), // placeholder
                 tasks,
                 u64::default(), // placeholder
-                &[],
                 uniqueness_nonce,
             ) {
-                Ok(tx) => Ok(serialized_transaction_size(&tx)),
+                Ok(tx) => Ok(tx.serialized_size()),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }
@@ -442,7 +448,7 @@ impl TaskStrategist {
         // Get initial transaction size
         let mut current_tx_length = calculate_tx_length(tasks)?;
 
-        if current_tx_length <= MAX_TRANSACTION_WIRE_SIZE {
+        if current_tx_length <= tx_size_limit {
             return Ok(current_tx_length);
         }
 
@@ -464,7 +470,7 @@ impl TaskStrategist {
 
         // We keep popping heaviest el-ts & try to optimize while heap is non-empty
         while let Some((_, index)) = map.pop() {
-            if current_tx_length <= MAX_TRANSACTION_WIRE_SIZE {
+            if current_tx_length <= tx_size_limit {
                 break;
             }
 
@@ -934,8 +940,11 @@ mod tests {
             create_test_commit_task(3, 1000, 0).into(), // Larger task
         ];
 
-        let _ =
-            TaskStrategist::try_optimize_tx_size_if_needed(&mut tasks, None);
+        let _ = TaskStrategist::try_optimize_tx_size_if_needed(
+            &mut tasks,
+            None,
+            MAX_TRANSACTION_V1_WIRE_SIZE,
+        );
         // The larger task should have been optimized first
         assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
         assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
