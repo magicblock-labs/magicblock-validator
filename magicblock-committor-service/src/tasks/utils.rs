@@ -14,11 +14,15 @@ use solana_pubkey::{pubkey, Pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::tasks::{
-    commit_finalize_task::CommitFinalizeTask,
-    commit_task::{CommitDelivery, CommitTask},
-    task_strategist::TaskStrategistResult,
-    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
+use crate::{
+    tasks::{
+        commit_finalize_task::CommitFinalizeTask,
+        commit_task::{CommitDelivery, CommitTask},
+        task_strategist::TaskStrategistResult,
+        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask,
+        BaseTaskImpl,
+    },
+    transactions::v1,
 };
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
@@ -199,6 +203,39 @@ impl TransactionUtils {
         )
     }
 
+    pub(crate) fn assemble_tasks_v1_tx_with_uniqueness_nonce(
+        authority: &Keypair,
+        tasks: &[BaseTaskImpl],
+        compute_unit_price: u64,
+        uniqueness_nonce: Option<u64>,
+    ) -> TaskStrategistResult<v1::Transaction> {
+        let message = Self::assemble_tasks_v1_message_with_uniqueness_nonce(
+            authority,
+            tasks,
+            compute_unit_price,
+            uniqueness_nonce,
+        )?;
+        Ok(v1::Transaction::try_new(message, authority)?)
+    }
+
+    pub(crate) fn assemble_tasks_v1_message_with_uniqueness_nonce(
+        authority: &Keypair,
+        tasks: &[BaseTaskImpl],
+        compute_unit_price: u64,
+        uniqueness_nonce: Option<u64>,
+    ) -> TaskStrategistResult<v1::Message> {
+        let budget_instructions = Self::budget_instructions(
+            Self::tasks_compute_units(tasks),
+            compute_unit_price,
+            Self::tasks_accounts_size_budget(tasks),
+        );
+        let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
+        if let Some(nonce) = uniqueness_nonce {
+            ixs.push(Self::uniqueness_noop_instruction(nonce));
+        }
+        Self::assemble_v1_message_raw(authority, &ixs, &budget_instructions)
+    }
+
     pub fn assemble_tx_raw(
         authority: &Keypair,
         instructions: &[Instruction],
@@ -244,6 +281,39 @@ impl TransactionUtils {
         )?;
 
         Ok(tx)
+    }
+
+    pub(crate) fn assemble_v1_message_raw(
+        authority: &Keypair,
+        instructions: &[Instruction],
+        budget_instructions: &[Instruction],
+    ) -> TaskStrategistResult<v1::Message> {
+        let message = match v1::Message::try_compile(
+            &authority.pubkey(),
+            &[budget_instructions, instructions].concat(),
+            Hash::new_unique(),
+        ) {
+            Ok(message) => Ok(message),
+            Err(CompileError::AccountIndexOverflow)
+            | Err(CompileError::AddressTableLookupIndexOverflow) => {
+                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
+            }
+            Err(CompileError::UnknownInstructionKey(pubkey)) => {
+                // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
+                // when User's pubkeys in Instruction doesn't exist in AccountKeys.
+                // This is impossible in our case since AccountKeys created on keys of our Ixs
+                // that means that all keys from out ixs exist in AccountKeys
+                panic!(
+                    "Supplied instruction has to be valid: {}",
+                    CompileError::UnknownInstructionKey(pubkey)
+                );
+            }
+        }?;
+
+        message.validate().map_err(|_| {
+            crate::tasks::task_strategist::TaskStrategistError::FailedToFitError
+        })?;
+        Ok(message)
     }
 
     pub(crate) fn uniqueness_noop_instruction(id: u64) -> Instruction {

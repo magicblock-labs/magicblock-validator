@@ -25,6 +25,7 @@ use crate::{
         ExecutionOutput,
     },
     tasks::BaseTaskImpl,
+    transactions::{v1, PreparedMessage},
 };
 
 #[derive(Clone)]
@@ -44,7 +45,7 @@ impl IntentExecutionClient {
     pub(in crate::intent_executor) async fn execute_message_with_retries(
         &self,
         authority: &Keypair,
-        prepared_message: VersionedMessage,
+        prepared_message: PreparedMessage,
         tasks: &[BaseTaskImpl],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
@@ -129,29 +130,47 @@ impl IntentExecutionClient {
     async fn send_prepared_message(
         &self,
         authority: &Keypair,
-        mut prepared_message: VersionedMessage,
+        mut prepared_message: PreparedMessage,
     ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
     {
         let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
-        match &mut prepared_message {
-            VersionedMessage::V0(value) => {
-                value.recent_blockhash = latest_blockhash;
+        let result = match &mut prepared_message {
+            PreparedMessage::Versioned(message) => {
+                match message {
+                    VersionedMessage::V0(value) => {
+                        value.recent_blockhash = latest_blockhash;
+                    }
+                    VersionedMessage::Legacy(value) => {
+                        warn!("Legacy message not expected");
+                        value.recent_blockhash = latest_blockhash;
+                    }
+                }
+
+                let transaction = VersionedTransaction::try_new(
+                    message.clone(),
+                    &[&authority],
+                )?;
+                self.rpc_client
+                    .send_transaction(
+                        &transaction,
+                        &MagicBlockSendTransactionConfig::ensure_committed(),
+                    )
+                    .await?
             }
-            VersionedMessage::Legacy(value) => {
-                warn!("Legacy message not expected");
-                value.recent_blockhash = latest_blockhash;
+            PreparedMessage::V1(message) => {
+                message.set_recent_blockhash(latest_blockhash);
+                let transaction =
+                    v1::Transaction::try_new(message.clone(), authority)?;
+                self.rpc_client
+                    .send_serialized_transaction(
+                        transaction.serialized(),
+                        transaction.signature(),
+                        transaction.recent_blockhash(),
+                        &MagicBlockSendTransactionConfig::ensure_committed(),
+                    )
+                    .await?
             }
         };
-
-        let transaction =
-            VersionedTransaction::try_new(prepared_message, &[&authority])?;
-        let result = self
-            .rpc_client
-            .send_transaction(
-                &transaction,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
-            )
-            .await?;
 
         Ok(result)
     }
@@ -165,7 +184,7 @@ impl IntentExecutionClient {
 
         let config = RpcTransactionConfig {
             commitment: Some(self.rpc_client.commitment()),
-            max_supported_transaction_version: Some(0),
+            max_supported_transaction_version: Some(1),
             ..Default::default()
         };
         let cu_metrics = || async {
