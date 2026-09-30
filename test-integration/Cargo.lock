@@ -4157,6 +4157,7 @@ dependencies = [
 name = "magicblock-rpc-client"
 version = "0.16.1"
 dependencies = [
+ "base64 0.21.7",
  "futures-util",
  "magicblock-metrics",
  "serde_json",
