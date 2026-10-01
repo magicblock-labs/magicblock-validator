@@ -1028,7 +1028,7 @@ async fn test_reconnect_gap_invalidates_uncovered_direct_subscription() {
     assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     pubsub_client.remove_subscription(&pubkey);
-    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test(None).await;
 
     assert_eq!(evicted, 1);
     assert!(!provider.is_watching(&pubkey));
@@ -1036,6 +1036,8 @@ async fn test_reconnect_gap_invalidates_uncovered_direct_subscription() {
     assert_eq!(stale_rx.try_recv(), Ok(pubkey));
 }
 
+/// Pending undelegation and a completion newer than a queued disconnect retain
+/// their watch; a subsequent disconnect still invalidates the ordinary mirror.
 #[tokio::test]
 async fn test_reconnect_gap_keeps_uncovered_undelegation_tracking() {
     let pubkey = Pubkey::new_unique();
@@ -1063,7 +1065,7 @@ async fn test_reconnect_gap_keeps_uncovered_undelegation_tracking() {
     assert!(pubsub_client.subscriptions_union().contains(&pubkey));
 
     pubsub_client.remove_subscription(&pubkey);
-    let evicted = provider.evict_uncovered_subscriptions_once_for_test().await;
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test(None).await;
 
     assert_eq!(evicted, 0);
     assert!(provider.is_watching(&pubkey));
@@ -1072,6 +1074,37 @@ async fn test_reconnect_gap_keeps_uncovered_undelegation_tracking() {
         stale_rx.try_recv(),
         Err(tokio::sync::mpsc::error::TryRecvError::Empty)
     ));
+
+    let gap = SubscriptionGap {
+        detected_at: Instant::now(),
+        pubkeys: HashSet::from([pubkey]),
+    };
+    provider
+        .ensure_subscription(&pubkey, SubscriptionReason::DirectAccount)
+        .await
+        .unwrap();
+    provider
+        .release_subscription_reason_silently_for_delegated_account(
+            &pubkey,
+            SubscriptionReason::UndelegationTracking,
+        )
+        .await
+        .unwrap();
+
+    // Process the old disconnect only after the completion handoff.
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test(Some(gap)).await;
+    assert_eq!(evicted, 0);
+    assert!(provider.is_watching(&pubkey));
+    assert!(stale_rx.try_recv().is_err());
+
+    let gap = SubscriptionGap {
+        detected_at: Instant::now(),
+        pubkeys: HashSet::from([pubkey]),
+    };
+    let evicted = provider.evict_uncovered_subscriptions_once_for_test(Some(gap)).await;
+    assert_eq!(evicted, 1);
+    assert!(!provider.is_watching(&pubkey));
+    assert_eq!(stale_rx.try_recv(), Ok(pubkey));
 }
 
 #[tokio::test]
@@ -2097,11 +2130,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         .await
     }
 
-    async fn evict_uncovered_subscriptions_once_for_test(&self) -> usize {
+    async fn evict_uncovered_subscriptions_once_for_test(
+        &self,
+        gap: Option<SubscriptionGap>,
+    ) -> usize {
         subscription_reconciler::evict_uncovered_subscriptions(
             &self.subscribed_accounts,
             &self.pubsub_client,
-            None,
+            gap,
             &self.stale_account_tx,
             Some(&self.subscription_key_locks),
             Some(&self.subscription_ownership),

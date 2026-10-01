@@ -20,7 +20,7 @@ use tracing::*;
 
 use crate::remote_account_provider::{
     chain_pubsub_client::{
-        ChainPubsubClient, ReconnectableClient, SubscriptionReconciliationSnapshot,
+        ChainPubsubClient, ReconnectableClient, SubscriptionGap, SubscriptionReconciliationSnapshot,
     },
     errors::RemoteAccountProviderResult,
     pubsub_common::SubscriptionUpdate,
@@ -156,8 +156,8 @@ where
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
     /// Signals reconnect/disconnect events that can create a subscription
     /// freshness gap for accounts with no remaining live coverage.
-    reconnect_reconciliation_tx: mpsc::Sender<HashSet<Pubkey>>,
-    reconnect_reconciliation_rx: Arc<Mutex<Option<mpsc::Receiver<HashSet<Pubkey>>>>>,
+    reconnect_reconciliation_tx: mpsc::Sender<SubscriptionGap>,
+    reconnect_reconciliation_rx: Arc<Mutex<Option<mpsc::Receiver<SubscriptionGap>>>>,
     /// Whether take_updates() has started the per-client forwarders.
     forwarders_started: Arc<AtomicBool>,
     /// Token cancelled on drop to stop background tasks
@@ -187,7 +187,7 @@ struct ReconnectorParams<T, U> {
     connected_client_ids: Arc<Mutex<HashSet<usize>>>,
     connected_clients: Arc<AtomicU16>,
     connected_clients_subscribing_immediately: Arc<AtomicU16>,
-    reconnect_reconciliation_tx: mpsc::Sender<HashSet<Pubkey>>,
+    reconnect_reconciliation_tx: mpsc::Sender<SubscriptionGap>,
 }
 
 impl<T> SubMuxClient<T>
@@ -329,6 +329,7 @@ where
             let reconnect_reconciliation_tx = params.reconnect_reconciliation_tx.clone();
             tokio::spawn(async move {
                 while (abort_rx.recv().await).is_some() {
+                    let detected_at = Instant::now();
                     // Drain any duplicate abort signals to coalesce reconnect attempts
                     while abort_rx.try_recv().is_ok() {}
 
@@ -364,7 +365,8 @@ where
                         subscribed_accounts_tracker.subscribed_accounts(),
                     );
                     if !uncovered.is_empty() {
-                        let _ = reconnect_reconciliation_tx.try_send(uncovered);
+                        let _ = reconnect_reconciliation_tx
+                            .try_send(SubscriptionGap { detected_at, pubkeys: uncovered });
                     }
 
                     Self::reconnect_client_with_backoff(
@@ -1217,7 +1219,7 @@ where
         Some(SubscriptionReconciliationSnapshot { union, intersection })
     }
 
-    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<SubscriptionGap>> {
         self.reconnect_reconciliation_rx.lock().take()
     }
 

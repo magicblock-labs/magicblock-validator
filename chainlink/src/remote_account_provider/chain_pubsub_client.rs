@@ -4,7 +4,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use async_trait::async_trait;
@@ -22,6 +22,14 @@ use super::{
 };
 
 const MAX_RESUB_DELAY_MS: u64 = 800;
+
+/// Accounts whose live coverage was lost at a particular disconnect boundary.
+pub struct SubscriptionGap {
+    /// Local disconnect observation, before capturing the affected watch set.
+    pub detected_at: Instant,
+    /// Watches with no remaining live coverage at that boundary.
+    pub pubkeys: HashSet<Pubkey>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubscriptionReconciliationSnapshot {
@@ -100,7 +108,7 @@ pub trait ChainPubsubClient: Send + Sync + Clone + 'static {
     /// notifications during a transport gap. Consumers use this to run
     /// freshness reconciliation immediately instead of waiting for the
     /// periodic safety net.
-    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<HashSet<Pubkey>>> {
+    fn take_reconnect_reconciliation_rx(&self) -> Option<mpsc::Receiver<SubscriptionGap>> {
         None
     }
 

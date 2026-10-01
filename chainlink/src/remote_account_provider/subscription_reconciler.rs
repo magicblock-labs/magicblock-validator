@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 use tracing::*;
 
 use super::{
-    ChainPubsubClient, SubscribedAccounts, SubscriptionKeyLocks, SubscriptionOwnershipMap,
-    SubscriptionReason, subscription_key_owned_guard_from_map,
+    ChainPubsubClient, SubscribedAccounts, SubscriptionGap, SubscriptionKeyLocks,
+    SubscriptionOwnershipMap, SubscriptionReason, subscription_key_owned_guard_from_map,
 };
 use crate::remote_account_provider::RemoteAccountProviderError;
 
@@ -312,16 +312,21 @@ pub(crate) async fn reconcile_subscriptions<PubsubClient: ChainPubsubClient>(
 /// watches, discard the local mirror so the next access must refetch from RPC.
 /// Undelegation-tracked accounts are kept because their dedicated refresher
 /// performs RPC catch-up while undelegation is in flight.
+/// A queued gap must not discard a watch retained by a newer undelegation
+/// completion. Later disconnects still invalidate that watch normally.
 pub(crate) async fn evict_uncovered_subscriptions<PubsubClient: ChainPubsubClient>(
     subscribed_accounts: &SubscribedAccounts,
     pubsub_client: &PubsubClient,
-    gap_candidates: Option<HashSet<Pubkey>>,
+    gap_candidates: Option<SubscriptionGap>,
     stale_account_tx: &mpsc::Sender<Pubkey>,
     subscription_key_locks: Option<&SubscriptionKeyLocks>,
     subscription_ownership: Option<&SubscriptionOwnershipMap>,
 ) -> usize {
     let from_reconnect_gap = gap_candidates.is_some();
-    let tracked_pubkeys = gap_candidates.unwrap_or_else(|| subscribed_accounts.pubkeys());
+    let detected_at = gap_candidates.as_ref().map(|gap| gap.detected_at);
+    let tracked_pubkeys = gap_candidates
+        .map(|gap| gap.pubkeys)
+        .unwrap_or_else(|| subscribed_accounts.pubkeys());
     let tracked_count = tracked_pubkeys.len();
     if tracked_pubkeys.is_empty() {
         return 0;
@@ -367,16 +372,14 @@ pub(crate) async fn evict_uncovered_subscriptions<PubsubClient: ChainPubsubClien
         }
 
         if let Some(ownership) = subscription_ownership
-            && ownership
-                .lock()
-                .await
-                .get(&pubkey)
-                .is_some_and(|own| own.contains(SubscriptionReason::UndelegationTracking))
+            && ownership.lock().await.get(&pubkey).is_some_and(|own| {
+                own.contains(SubscriptionReason::UndelegationTracking)
+                    || detected_at.is_some_and(|gap| {
+                        own.recovered_at.is_some_and(|recovered| recovered >= gap)
+                    })
+            })
         {
-            trace!(
-                pubkey = %pubkey,
-                "Keeping uncovered undelegation-tracked subscription for RPC catch-up"
-            );
+            trace!(pubkey = %pubkey, "Keeping undelegation recovery watch");
             continue;
         }
 
