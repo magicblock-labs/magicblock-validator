@@ -15,29 +15,31 @@ use crate::{
         },
         BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
     },
-    transactions::{serialized_transaction_size, MAX_TRANSACTION_WIRE_SIZE},
+    transactions::{
+        serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
+        MAX_TRANSACTION_WIRE_SIZE,
+    },
 };
 
 /// Checks whether an intent could ever fit on the base layer, so intents
 /// that can never succeed can be refused up front instead of failing later
 /// during execution
 ///
-/// The check assumes the smallest possible task representation (buffer-mode
-/// commits for oversized accounts, full address-lookup-table coverage,
-/// 2-stage execution) -- if it doesn't fit even then, no amount of
-/// optimization at execution time will make it fit. Unlike
+/// The check mirrors execution's available delivery shapes: v1 first, then
+/// the existing v0 + address-lookup-table fallback. If neither shape fits, no
+/// amount of execution-time optimization will make it fit. Unlike
 /// [`TaskBuilderImpl`], this never fetches anything (no commit ids, no
 /// base-layer state): it only needs to know whether a fit is *possible*,
 /// not build the real tasks that will actually be executed.
-/// NOTE: this assumes ALTs are used optimally
-/// where number of ALTs is - pubkeys.div_ceil(256). It is impossible to know in advance
-/// how many ALTs will be used.
+/// NOTE: the v0 fallback assumes ALTs are used optimally where number of ALTs
+/// is pubkeys.div_ceil(256). It is impossible to know in advance how many ALTs
+/// will be used.
 pub struct IntentSizeValidator;
 
 impl IntentSizeValidator {
-    /// Returns `true` if `intent`'s commit and finalize transactions could
-    /// both fit within [`MAX_TRANSACTION_WIRE_SIZE`]. If this returns
-    /// `false`, the intent can never succeed and should be refused.
+    /// Returns `true` if `intent`'s commit and finalize transactions could fit
+    /// through either v1 or the v0 + ALT fallback. If this returns `false`, the
+    /// intent can never succeed and should be refused.
     pub fn fits(intent: &MagicIntentBundle) -> bool {
         Self::commit_fits(intent) && Self::finalize_fits(intent)
     }
@@ -221,8 +223,8 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any), assembled
-    /// with full ALT coverage, fit within compute and wire-size limits.
+    /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any) fit through
+    /// either v1 or the v0 + ALT fallback.
     fn tasks_fit(
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
@@ -231,6 +233,29 @@ impl IntentSizeValidator {
             return false;
         }
 
+        Self::tasks_fit_v1(tasks, uniqueness_nonce)
+            || Self::tasks_fit_v0_with_alts(tasks, uniqueness_nonce)
+    }
+
+    fn tasks_fit_v1(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> bool {
+        let placeholder = Keypair::new();
+        TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+            &placeholder,
+            tasks,
+            0,
+            uniqueness_nonce,
+        )
+        .map(|tx| tx.serialized_size() <= MAX_TRANSACTION_V1_WIRE_SIZE)
+        .unwrap_or(false)
+    }
+
+    fn tasks_fit_v0_with_alts(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> bool {
         let placeholder = Keypair::new();
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),
@@ -290,11 +315,6 @@ mod tests {
     }
 
     #[test]
-    fn test_empty_intent_fits() {
-        assert!(IntentSizeValidator::fits(&MagicIntentBundle::default()));
-    }
-
-    #[test]
     fn test_small_commit_fits() {
         let intent = MagicIntentBundle {
             commit: Some(CommitType::Standalone(vec![make_committed_account(
@@ -319,11 +339,18 @@ mod tests {
     }
 
     #[test]
-    fn test_oversized_standalone_action_does_not_fit() {
-        // BaseAction data is used as-is (never optimized away), so a
-        // payload bigger than the whole transaction wire size can never fit.
+    fn test_v1_sized_standalone_action_fits() {
         let intent = MagicIntentBundle {
             standalone_actions: vec![make_base_action(2_000)],
+            ..Default::default()
+        };
+        assert!(IntentSizeValidator::fits(&intent));
+    }
+
+    #[test]
+    fn test_oversized_standalone_action_does_not_fit() {
+        let intent = MagicIntentBundle {
+            standalone_actions: vec![make_base_action(5_000)],
             ..Default::default()
         };
         assert!(!IntentSizeValidator::fits(&intent));

@@ -122,6 +122,10 @@ impl TransactionUtils {
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
     const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
+    // Current DLP program-data is ~454 KiB; the upstream size class is 350 KiB.
+    const DLP_PROGRAM_DATA_SIZE_BUDGET: u32 = 455 * 1024;
+    // Nonced transactions also load the noop program data (~40 KiB).
+    const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
 
     pub fn dummy_lookup_table(
         pubkeys: &[Pubkey],
@@ -190,7 +194,10 @@ impl TransactionUtils {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(tasks),
             compute_unit_price,
-            Self::tasks_accounts_size_budget(tasks),
+            Self::tasks_accounts_size_budget_with_uniqueness_nonce(
+                tasks,
+                uniqueness_nonce,
+            ),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
@@ -229,7 +236,10 @@ impl TransactionUtils {
         let config = Self::v1_config(
             compute_units,
             compute_unit_price,
-            Self::tasks_accounts_size_budget(tasks),
+            Self::tasks_accounts_size_budget_with_uniqueness_nonce(
+                tasks,
+                uniqueness_nonce,
+            ),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
@@ -342,6 +352,7 @@ impl TransactionUtils {
 
         let total_budget: u32 =
             tasks.iter().map(|task| task.accounts_size_budget()).sum();
+        let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
 
         let dlp_task_count: u32 = tasks
             .iter()
@@ -349,13 +360,28 @@ impl TransactionUtils {
             .count() as u32;
 
         if dlp_task_count > 0 {
-            let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
-            let deduction = dlp_task_count
-                .saturating_sub(1)
-                .saturating_mul(dlp_program_budget);
-            total_budget.saturating_sub(deduction)
+            total_budget
+                .saturating_sub(
+                    dlp_task_count.saturating_mul(dlp_program_budget),
+                )
+                .saturating_add(
+                    dlp_program_budget.max(Self::DLP_PROGRAM_DATA_SIZE_BUDGET),
+                )
         } else {
             total_budget
+        }
+    }
+
+    fn tasks_accounts_size_budget_with_uniqueness_nonce(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> u32 {
+        let budget = Self::tasks_accounts_size_budget(tasks);
+        if uniqueness_nonce.is_some() {
+            budget
+                .saturating_add(Self::UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET)
+        } else {
+            budget
         }
     }
 
