@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use futures_util::future::try_join_all;
 use serde_json::json;
 use signature_confirmer::{SignatureConfirmer, SignatureConfirmerConfig};
@@ -689,6 +690,39 @@ impl MagicblockRpcClient {
                 MagicBlockRpcClientError::SendTransaction(Box::new(e))
             })?;
 
+        self.confirm_sent_transaction(sig, tx.get_recent_blockhash(), config)
+            .await
+    }
+
+    pub async fn send_serialized_transaction(
+        &self,
+        serialized_transaction: &[u8],
+        signature: Signature,
+        recent_blockhash: &Hash,
+        config: &MagicBlockSendTransactionConfig,
+    ) -> MagicBlockRpcClientResult<MagicBlockSendTransactionOutcome> {
+        let encoded = BASE64_STANDARD.encode(serialized_transaction);
+        let _: String = self
+            .client
+            .send(
+                RpcRequest::SendTransaction,
+                json!([encoded, SEND_TRANSACTION_CONFIG]),
+            )
+            .await
+            .map_err(|e| {
+                MagicBlockRpcClientError::SendTransaction(Box::new(e))
+            })?;
+
+        self.confirm_sent_transaction(signature, recent_blockhash, config)
+            .await
+    }
+
+    async fn confirm_sent_transaction(
+        &self,
+        sig: Signature,
+        recent_blockhash: &Hash,
+        config: &MagicBlockSendTransactionConfig,
+    ) -> MagicBlockRpcClientResult<MagicBlockSendTransactionOutcome> {
         let MagicBlockSendTransactionConfig::SendAndConfirm {
             wait_for_processed_level,
             check_for_processed_interval,
@@ -711,7 +745,7 @@ impl MagicblockRpcClient {
             let processed_status = self
                 .wait_for_processed_status(
                     &sig,
-                    tx.get_recent_blockhash(),
+                    recent_blockhash,
                     wait_for_processed_level,
                     check_for_processed_interval,
                     wait_for_blockhash_to_become_valid,
