@@ -32,7 +32,6 @@ magicblock-config = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-ledger-deprecated = { workspace = true }
 magicblock-metrics = { workspace = true }
-magicblock-version = { workspace = true }
 nucleus = { workspace = true, features = ["runtime"] }
 
 # solana

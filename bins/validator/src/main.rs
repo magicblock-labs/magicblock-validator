@@ -10,6 +10,7 @@ use std::process::ExitCode;
 use anyhow::{Context, Result};
 use leader::Leader;
 use magicblock_config::{ConfigError, LeaderParams};
+use magicblock_core::version::Version;
 use nucleus::shutdown::ShutdownReason;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
@@ -88,11 +89,14 @@ fn load_config() -> Result<Option<LeaderParams>> {
 }
 
 fn print_startup(rpc_url: &str, ws_url: &str, remote_rpc_url: &str, identity: &str) {
-    let version = magicblock_version::Version::default();
+    let version = Version::default();
     for line in [
         String::new(),
         "🧙 MagicBlock leader is running! 🪄✦".to_owned(),
-        format!("🏷️ Version: {} (Git: {})", version, version.git_version),
+        format!(
+            "🏷️ Version: {} (Git: {})",
+            version.magicblock_core, version.git_version
+        ),
         "-----------------------------------".to_owned(),
         format!("📡 RPC endpoint:       {rpc_url}"),
         format!("🔌 WebSocket endpoint: {ws_url}"),

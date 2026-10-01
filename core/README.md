@@ -1,7 +1,7 @@
 # magicblock-core
 
 Shared types and utilities for validator services, including settlement intents,
-account helpers, and logging setup.
+account helpers, logging setup, and build metadata for version reporting.
 
 Use this crate for concepts shared across services. Keep service-specific
 behavior in the owning crate; transaction execution and storage belong to

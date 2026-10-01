@@ -10,6 +10,7 @@ version.workspace = true
 [dependencies]
 
 console-subscriber = { workspace = true, optional = true }
+git-version = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 wincode = { workspace = true }
 
@@ -17,10 +18,12 @@ magicblock-magic-program-api = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true, features = ["wincode"] }
 solana-clock = { workspace = true }
+solana-feature-set = { workspace = true }
 solana-hash = { workspace = true, features = ["wincode"] }
 solana-message = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true, features = ["wincode"] }
+solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-transaction-error = { workspace = true }
 spl-token = { workspace = true }
