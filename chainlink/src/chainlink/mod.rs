@@ -282,7 +282,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     fn subscribe_account_evictions(
         engine: Engine,
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        mut evictions: mpsc::Receiver<Pubkey>,
+        mut evictions: mpsc::UnboundedReceiver<Pubkey>,
     ) -> task::JoinHandle<()> {
         let remote_account_provider = remote_account_provider.clone();
 

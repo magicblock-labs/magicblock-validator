@@ -25,7 +25,7 @@ use crate::{
 pub struct TaskSchedulerService {
     /// Receives service messages the engine publishes once a transaction
     /// commits; task requests arrive on this stream.
-    service_messages: mpsc::Receiver<Vec<u8>>,
+    service_messages: mpsc::UnboundedReceiver<Vec<u8>>,
     /// Cloneable schedule/cancel worker; cloned into each spawned request
     /// so the receive loop never awaits RPC.
     processor: Processor,
