@@ -140,13 +140,47 @@ impl Message {
         if self.instructions.len() > MAX_INSTRUCTIONS {
             return Err(());
         }
-        if self
-            .instructions
-            .iter()
-            .any(|ix| ix.data.len() > u16::MAX as usize)
+
+        let num_account_keys = self.account_keys.len();
+        let min_account_keys = usize::from(self.header.num_required_signatures)
+            .saturating_add(usize::from(
+                self.header.num_readonly_unsigned_accounts,
+            ));
+        if num_account_keys < min_account_keys {
+            return Err(());
+        }
+        if self.header.num_readonly_signed_accounts
+            >= self.header.num_required_signatures
         {
             return Err(());
         }
+        for (index, key) in self.account_keys.iter().enumerate() {
+            if self.account_keys[..index].contains(key) {
+                return Err(());
+            }
+        }
+
+        let max_account_index = num_account_keys.checked_sub(1).ok_or(())?;
+        for ix in &self.instructions {
+            if usize::from(ix.program_id_index) > max_account_index {
+                return Err(());
+            }
+            if ix.program_id_index == 0 {
+                return Err(());
+            }
+            if ix.accounts.len() > u8::MAX as usize {
+                return Err(());
+            }
+            if ix.data.len() > u16::MAX as usize {
+                return Err(());
+            }
+            for &account_index in &ix.accounts {
+                if usize::from(account_index) > max_account_index {
+                    return Err(());
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -253,6 +287,24 @@ impl Transaction {
 mod tests {
     use super::*;
 
+    fn valid_message() -> Message {
+        Message {
+            header: MessageHeader {
+                num_required_signatures: 1,
+                num_readonly_signed_accounts: 0,
+                num_readonly_unsigned_accounts: 1,
+            },
+            config: TransactionConfig::empty(),
+            account_keys: vec![Pubkey::new_unique(), Pubkey::new_unique()],
+            recent_blockhash: Hash::new_unique(),
+            instructions: vec![CompiledInstruction {
+                program_id_index: 1,
+                accounts: vec![0],
+                data: vec![7, 8, 9],
+            }],
+        }
+    }
+
     #[test]
     fn serializes_config_before_instruction_headers() {
         let config = TransactionConfig::empty()
@@ -303,5 +355,34 @@ mod tests {
         );
         assert_eq!(serialized[config_values_offset + 16], 1);
         assert_eq!(serialized.len(), message.serialized_size());
+    }
+
+    #[test]
+    fn validate_accepts_valid_message() {
+        assert!(valid_message().validate().is_ok());
+    }
+
+    #[test]
+    fn validate_rejects_fee_payer_program() {
+        let mut message = valid_message();
+        message.instructions[0].program_id_index = 0;
+
+        assert!(message.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_invalid_account_index() {
+        let mut message = valid_message();
+        message.instructions[0].accounts = vec![2];
+
+        assert!(message.validate().is_err());
+    }
+
+    #[test]
+    fn validate_rejects_oversized_instruction_account_list() {
+        let mut message = valid_message();
+        message.instructions[0].accounts = vec![0; usize::from(u8::MAX) + 1];
+
+        assert!(message.validate().is_err());
     }
 }
