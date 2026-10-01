@@ -2514,6 +2514,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e629b9b98ef3dd8afe6ca2bd0f89306cec16d43d907889945bc5d6687f2f13c7"
 
 [[package]]
+name = "git-version"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad568aa3db0fcbc81f2f116137f263d7304f512a1209b35b85150d3ef88ad19"
+dependencies = [
+ "git-version-macro",
+]
+
+[[package]]
+name = "git-version-macro"
+version = "0.3.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53010ccb100b96a67bc32c0175f0ed1426b31b655d562898e57325f81c023ac0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "glam"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3854,6 +3874,8 @@ dependencies = [
 name = "magicblock-core"
 version = "0.15.4"
 dependencies = [
+ "agave-feature-set",
+ "git-version",
  "magicblock-magic-program-api 0.15.4",
  "serde",
  "solana-account 4.3.1",
@@ -3862,6 +3884,7 @@ dependencies = [
  "solana-message 4.2.4",
  "solana-program 4.0.0",
  "solana-pubkey 4.2.0",
+ "solana-rpc-client-api",
  "solana-signature",
  "solana-transaction-error 3.3.1",
  "spl-token-2022-interface 2.1.0",

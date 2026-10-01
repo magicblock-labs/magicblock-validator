@@ -3999,7 +3999,6 @@ dependencies = [
  "magicblock-ledger",
  "magicblock-ledger-deprecated",
  "magicblock-metrics",
- "magicblock-version",
  "num_cpus",
  "parking_lot",
  "reqwest",
@@ -4186,7 +4185,9 @@ dependencies = [
 name = "magicblock-core"
 version = "0.15.4"
 dependencies = [
+ "agave-feature-set",
  "console-subscriber",
+ "git-version",
  "magicblock-magic-program-api",
  "serde",
  "solana-account 4.3.1",
@@ -4195,6 +4196,7 @@ dependencies = [
  "solana-message 4.2.4",
  "solana-program 4.0.0",
  "solana-pubkey 4.2.0",
+ "solana-rpc-client-api",
  "solana-signature 3.4.1",
  "solana-transaction-error 3.3.1",
  "spl-token-2022-interface 2.1.0",
@@ -4678,7 +4680,6 @@ dependencies = [
  "magicblock-runtime",
  "magicblock-services",
  "magicblock-task-scheduler",
- "magicblock-version",
  "mimalloc",
  "num_cpus",
  "solana-commitment-config",
@@ -4733,19 +4734,6 @@ dependencies = [
  "mimalloc",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "magicblock-version"
-version = "0.15.4"
-dependencies = [
- "agave-feature-set",
- "git-version",
- "rustc_version",
- "semver",
- "serde",
- "solana-rpc-client-api",
- "solana-sanitize 3.0.1",
 ]
 
 [[package]]

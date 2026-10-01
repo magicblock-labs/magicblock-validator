@@ -19,3 +19,4 @@ pub mod intent;
 pub mod logger;
 pub mod token_programs;
 pub mod traits;
+pub mod version;
