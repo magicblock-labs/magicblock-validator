@@ -4,11 +4,11 @@ use std::{
         Arc, Weak,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub(crate) use chain_pubsub_client::{
-    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient,
+    ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient, SubscriptionGap,
 };
 pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
 use config::RemoteAccountProviderConfig;
@@ -328,7 +328,7 @@ struct FetchingAccountState {
     generation: FetchingAccountGeneration,
     fetch_start_slot: u64,
     fetch_context: AccountFetchContext,
-    owner_started_at: std::time::Instant,
+    owner_started_at: Instant,
     waiters: Vec<oneshot::Sender<FetchResult>>,
 }
 
@@ -462,6 +462,8 @@ pub(crate) type SubscriptionOwnershipMap = Arc<AsyncMutex<HashMap<Pubkey, Subscr
 #[derive(Debug, Default, Clone)]
 pub(crate) struct SubscriptionOwnership {
     reasons: HashMap<SubscriptionReason, usize>,
+    // A queued disconnect must not erase a newer completed-undelegation watch.
+    recovered_at: Option<Instant>,
 }
 
 impl SubscriptionOwnership {
@@ -488,7 +490,14 @@ impl SubscriptionOwnership {
     }
 
     fn release_all(&mut self, reason: SubscriptionReason) -> usize {
-        self.reasons.remove(&reason).unwrap_or_default()
+        let count = self.reasons.remove(&reason).unwrap_or_default();
+        if reason == SubscriptionReason::UndelegationTracking
+            && count > 0
+            && self.contains(SubscriptionReason::DirectAccount)
+        {
+            self.recovered_at = Some(Instant::now());
+        }
+        count
     }
 
     fn is_empty(&self) -> bool {
@@ -670,7 +679,7 @@ impl From<&MatchSlotsConfig> for MatchSlotsRetryConfig {
 
 fn next_match_slots_retry(
     retries: &mut u64,
-    start: std::time::Instant,
+    start: Instant,
     config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     *retries += 1;
@@ -688,7 +697,7 @@ fn next_match_slots_retry(
 
 fn next_match_slots_rpc_error_retry(
     retries: &mut u64,
-    start: std::time::Instant,
+    start: Instant,
     config: &MatchSlotsRetryConfig,
 ) -> Result<Duration, String> {
     next_match_slots_retry(retries, start, config).map(|delay| delay.max(RPC_FETCH_RETRY_DELAY))
@@ -703,7 +712,7 @@ fn observe_companion_fetch_if_configured(
     kind: Option<ChainlinkCompanionFetchKind>,
     outcome: ChainlinkCompanionFetchOutcome,
     attempts: u64,
-    started_at: std::time::Instant,
+    started_at: Instant,
 ) {
     if let Some(kind) = kind {
         observe_chainlink_companion_fetch_attempts(context.clone(), kind, outcome, attempts as f64);
@@ -752,7 +761,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         stale_account_tx: mpsc::Sender<Pubkey>,
         subscription_key_locks: SubscriptionKeyLocks,
         subscription_ownership: SubscriptionOwnershipMap,
-        reconnect_reconciliation_rx: Option<mpsc::Receiver<HashSet<Pubkey>>>,
+        reconnect_reconciliation_rx: Option<mpsc::Receiver<SubscriptionGap>>,
         emit_metrics: bool,
     ) -> task::JoinHandle<()> {
         task::spawn(async move {
@@ -1304,7 +1313,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let fetch_context = fetch_context.into();
         let companion_fetch_kind = config.as_ref().map(|config| config.companion_fetch_kind);
         let config = config.as_ref().map(MatchSlotsRetryConfig::from).unwrap_or_default();
-        let companion_fetch_started_at = std::time::Instant::now();
+        let companion_fetch_started_at = Instant::now();
         let mut companion_fetch_attempts = 1u64;
         // 1. Fetch the _normal_ way and hope the slots match and if required
         //    the min_context_slot is met
@@ -1354,7 +1363,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         let mut fetch_start_slot = self.chain_slot.load().max(min_context_slot.unwrap_or_default());
         // 2. Wait for the slots to match. Once the fast path mixed slots,
         // retry with an RPC-only batch so all accounts share one response slot.
-        let start = std::time::Instant::now();
+        let start = Instant::now();
         let mut retries = 0;
         loop {
             if tracing::enabled!(Level::TRACE) {
@@ -1693,7 +1702,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             generation,
                             fetch_start_slot,
                             fetch_context: fetch_context.clone(),
-                            owner_started_at: std::time::Instant::now(),
+                            owner_started_at: Instant::now(),
                             waiters: vec![sender],
                         });
                         inc_chainlink_pending_fetch_accounts_with_context(
@@ -2509,7 +2518,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         tokio::spawn(async move {
             use RemoteAccount::*;
 
-            let fetch_started_at = std::time::Instant::now();
+            let fetch_started_at = Instant::now();
             // Helper to notify all pending requests of fetch failure
             let notify_error = |error_msg: &str| {
                 let mut fetching = fetching_accounts.lock();
