@@ -77,15 +77,18 @@ pub(crate) fn process_create_magic_ata(
 
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
     let ata_shared = ata.to_account_shared_data()?;
-    if !is_empty_system_account(&ata_shared)
-        && !is_matching_base_ata_mirror(
-            &ata_pubkey,
-            &ata_shared,
-            &wallet_owner,
-            &mint,
-            &token_program,
-        )
-    {
+    let is_overlayable_mirror = is_matching_base_ata_mirror(
+        &ata_pubkey,
+        &ata_shared,
+        &wallet_owner,
+        &mint,
+        &token_program,
+    ) && !token_program_wrote_earlier(
+        transaction_context,
+        &ata_pubkey,
+        &token_program,
+    )?;
+    if !is_empty_system_account(&ata_shared) && !is_overlayable_mirror {
         if is_matching_existing_magic_ata(
             &ata_pubkey,
             &ata_shared,
@@ -169,6 +172,34 @@ fn is_matching_base_ata_mirror(
         && is_ata(ata_pubkey, account).is_some_and(|info| {
             info.owner == *wallet_owner && info.mint == *mint
         })
+}
+
+/// Whether the token program got `ata` as writable earlier in this
+/// transaction. Only the token program can move a mirror's tokens or
+/// lamports, so an untouched mirror still holds the cloned base state and
+/// its balance cannot be spent in the ER before the overlay.
+fn token_program_wrote_earlier(
+    transaction_context: &TransactionContext,
+    ata: &Pubkey,
+    token_program: &Pubkey,
+) -> Result<bool, InstructionError> {
+    for index in 0..transaction_context.get_instruction_trace_length() {
+        let ix_ctx = transaction_context
+            .get_instruction_context_at_index_in_trace(index)?;
+        if ix_ctx.get_program_key()? != token_program {
+            continue;
+        }
+        for account in 0..ix_ctx.get_number_of_instruction_accounts() {
+            let key = transaction_context.get_key_of_account_at_index(
+                ix_ctx
+                    .get_index_of_instruction_account_in_transaction(account)?,
+            )?;
+            if key == ata && ix_ctx.is_instruction_account_writable(account)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 fn is_native_mint(mint: &Pubkey) -> bool {
