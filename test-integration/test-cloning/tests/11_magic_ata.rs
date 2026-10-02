@@ -538,6 +538,90 @@ fn test_magic_ata_receive_drain_and_close() {
     );
 }
 
+/// A wallet whose base ATA is already cloned into the ER as a readonly mirror
+/// can still receive: the Magic ATA overlays the mirror, and closing it brings
+/// the base ATA back untouched.
+#[test]
+fn test_magic_ata_overlays_existing_base_ata() {
+    init_logger!();
+    let ctx = IntegrationTestContext::try_new().unwrap();
+
+    let (fee_payer, source_authority, mint) = setup_delegated_source(&ctx);
+    let mint = mint.pubkey();
+    let source_ata = derive_ata(&source_authority.pubkey(), &mint);
+    let destination = Keypair::new();
+    let destination_ata = derive_ata(&destination.pubkey(), &mint);
+
+    let ixs = vec![
+        create_associated_token_account_idempotent(
+            &fee_payer.pubkey(),
+            &destination.pubkey(),
+            &mint,
+            &spl_token::id(),
+        ),
+        spl_token_ix::mint_to(
+            &spl_token::id(),
+            &mint,
+            &destination_ata,
+            &source_authority.pubkey(),
+            &[],
+            EATA_DEPOSIT,
+        )
+        .unwrap(),
+    ];
+    let mut tx = Transaction::new_with_payer(&ixs, Some(&fee_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_chain(
+            &mut tx,
+            &[&fee_payer, &source_authority],
+        )
+        .unwrap();
+    assert!(confirmed, "base ATA setup transaction failed");
+    ctx.fetch_ephem_account(destination_ata).unwrap();
+    assert!(!ephem_account_is_magic_ata(&ctx, &destination_ata));
+
+    let ephem_payer = Keypair::new();
+    ctx.airdrop_chain_escrowed(&ephem_payer, 2_000_000_000)
+        .unwrap();
+    receive_into_magic_ata(
+        &ctx,
+        &ephem_payer,
+        &source_authority,
+        &destination.pubkey(),
+        &mint,
+        RECEIVE_AMOUNT,
+    );
+    assert!(ephem_account_is_magic_ata(&ctx, &destination_ata));
+
+    let ixs = vec![
+        spl_token_ix::transfer(
+            &spl_token::id(),
+            &destination_ata,
+            &source_ata,
+            &destination.pubkey(),
+            &[],
+            RECEIVE_AMOUNT,
+        )
+        .unwrap(),
+        close_magic_ata_ix(destination.pubkey(), mint),
+    ];
+    let mut tx = Transaction::new_with_payer(&ixs, Some(&ephem_payer.pubkey()));
+    let (_sig, confirmed) = ctx
+        .send_and_confirm_transaction_ephem(
+            &mut tx,
+            &[&ephem_payer, &destination],
+        )
+        .unwrap();
+    assert!(confirmed, "drain + close transaction failed");
+
+    ctx.fetch_ephem_account(destination_ata).unwrap();
+    assert!(!ephem_account_is_magic_ata(&ctx, &destination_ata));
+    assert_eq!(
+        token_balance_ephem(&ctx, &destination_ata),
+        Some(EATA_DEPOSIT)
+    );
+}
+
 /// A Magic ATA drained by a plain transfer stays delegated in the ER until it
 /// is closed. A later eATA delegation for the same wallet must still replace
 /// it with the projected balance instead of being deduplicated away.
