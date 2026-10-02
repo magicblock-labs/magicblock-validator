@@ -379,6 +379,23 @@ pub fn is_ata(
     }
 }
 
+/// Returns Some(AtaInfo) if the account is a base ATA mirror: a plain clone
+/// of a base ATA, neither delegated, ephemeral, confined nor undelegating,
+/// so it is readable but not writable in the ER.
+pub fn try_get_base_ata_mirror_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<AtaInfo> {
+    if account.delegated()
+        || account.ephemeral()
+        || account.confined()
+        || account.undelegating()
+    {
+        return None;
+    }
+    is_ata(pubkey, account)
+}
+
 /// Return the eata pubkey and EphemeralAta
 pub fn try_remap_ata_to_eata(
     pubkey: &Pubkey,

@@ -1,9 +1,9 @@
 use magicblock_core::{
     tls::ExecutionTlsStash,
     token_programs::{
-        derive_ata_with_token_program, is_ata, is_supported_token_program,
-        try_get_magic_ata_info, try_remap_ata_to_eata,
-        MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
+        derive_ata_with_token_program, is_supported_token_program,
+        try_get_base_ata_mirror_info, try_get_magic_ata_info,
+        try_remap_ata_to_eata, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
     },
 };
 use solana_account::{ReadableAccount, WritableAccount};
@@ -77,18 +77,16 @@ pub(crate) fn process_create_magic_ata(
 
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
     let ata_shared = ata.to_account_shared_data()?;
-    let is_overlayable_mirror = is_matching_base_ata_mirror(
-        &ata_pubkey,
-        &ata_shared,
-        &wallet_owner,
-        &mint,
-        &token_program,
-    ) && !token_program_wrote_earlier(
-        transaction_context,
-        &ata_pubkey,
-        &token_program,
-    )?;
-    if !is_empty_system_account(&ata_shared) && !is_overlayable_mirror {
+    if !is_empty_system_account(&ata_shared)
+        && !is_overlayable_mirror(
+            transaction_context,
+            &ata_pubkey,
+            &ata_shared,
+            &wallet_owner,
+            &mint,
+            &token_program,
+        )?
+    {
         if is_matching_existing_magic_ata(
             &ata_pubkey,
             &ata_shared,
@@ -155,29 +153,38 @@ fn is_empty_system_account(
         && account.data().is_empty()
 }
 
-/// A plain, non-delegated clone of the base ATA, readable but not writable
-/// in the ER. A Magic ATA may overlay it; undelegating copies stay locked.
-fn is_matching_base_ata_mirror(
+/// Whether a Magic ATA may overlay `account`: a base ATA mirror of this
+/// owner and mint that the token program has not had as writable earlier
+/// in the transaction. The overlay keeps the address and lamports (the
+/// cloned rent, dropped with the account on close), rebuilds the token data
+/// from the mint at zero amount, and leaves the base ATA untouched.
+fn is_overlayable_mirror(
+    transaction_context: &TransactionContext,
     ata_pubkey: &Pubkey,
     account: &solana_account::AccountSharedData,
     wallet_owner: &Pubkey,
     mint: &Pubkey,
     token_program: &Pubkey,
-) -> bool {
-    account.owner() == token_program
-        && !account.delegated()
-        && !account.ephemeral()
-        && !account.confined()
-        && !account.undelegating()
-        && is_ata(ata_pubkey, account).is_some_and(|info| {
-            info.owner == *wallet_owner && info.mint == *mint
-        })
+) -> Result<bool, InstructionError> {
+    let is_mirror = account.owner() == token_program
+        && try_get_base_ata_mirror_info(ata_pubkey, account).is_some_and(
+            |info| info.owner == *wallet_owner && info.mint == *mint,
+        );
+    Ok(is_mirror
+        && !token_program_wrote_earlier(
+            transaction_context,
+            ata_pubkey,
+            token_program,
+        )?)
 }
 
 /// Whether the token program got `ata` as writable earlier in this
-/// transaction. Only the token program can move a mirror's tokens or
-/// lamports, so an untouched mirror still holds the cloned base state and
-/// its balance cannot be spent in the ER before the overlay.
+/// transaction. The trace holds only instructions pushed so far, with every
+/// CPI at any depth as its own entry (post-delegation actions included, via
+/// `native_invoke`), so writes through intermediate programs are caught.
+/// Only the token program can change a mirror's data or debit its lamports,
+/// so an unexposed mirror still holds the cloned base state. Writable metas
+/// are checked rather than actual writes, which keeps this conservative.
 fn token_program_wrote_earlier(
     transaction_context: &TransactionContext,
     ata: &Pubkey,
@@ -509,16 +516,23 @@ mod tests {
     }
 
     #[test]
-    fn create_magic_ata_rejects_undelegating_base_ata_mirror() {
+    fn create_magic_ata_rejects_flagged_base_ata_mirror() {
         let (wallet_owner, mint) = (Pubkey::new_unique(), Pubkey::new_unique());
-        let mut mirror = base_ata_mirror(wallet_owner, mint);
-        mirror.set_undelegating(true);
-        create_over_base_ata_mirror(
-            wallet_owner,
-            mint,
-            mirror,
-            Err(InstructionError::InvalidAccountData),
-        );
+        let flags: [fn(&mut AccountSharedData, bool); 3] = [
+            AccountSharedData::set_undelegating,
+            AccountSharedData::set_ephemeral,
+            AccountSharedData::set_confined,
+        ];
+        for set_flag in flags {
+            let mut mirror = base_ata_mirror(wallet_owner, mint);
+            set_flag(&mut mirror, true);
+            create_over_base_ata_mirror(
+                wallet_owner,
+                mint,
+                mirror,
+                Err(InstructionError::InvalidAccountData),
+            );
+        }
     }
 
     #[test]

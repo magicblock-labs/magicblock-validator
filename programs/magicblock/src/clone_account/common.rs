@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use magicblock_core::token_programs::{is_ata, try_get_magic_ata_info};
+use magicblock_core::token_programs::{
+    try_get_base_ata_mirror_info, try_get_magic_ata_info,
+};
 use magicblock_magic_program_api::{
     instruction::{
         AccountCloneFields, PostDelegationActionExecutorInstruction,
@@ -324,7 +326,7 @@ pub fn execute_post_delegation_actions(
             &account_meta.pubkey,
         )?;
         // A base ATA mirror can be overlaid by a Magic ATA inside the action.
-        let is_base_ata_mirror = is_ata(
+        let is_base_ata_mirror = try_get_base_ata_mirror_info(
             &account_meta.pubkey,
             &instruction_account.to_account_shared_data()?,
         )
