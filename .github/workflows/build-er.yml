@@ -87,7 +87,7 @@ jobs:
 
       - name: Build committor program
         run: |
-          cargo build-sbf --manifest-path committor-program/Cargo.toml \
+          cargo build-sbf --manifest-path programs/committor-program/Cargo.toml \
             --sbf-out-dir target/deploy/ --quiet
           test -f target/deploy/magicblock_committor_program.so
         shell: bash

@@ -76,7 +76,7 @@ jobs:
           # source dirs alone don't capture. Also include rustc + solana
           # versions in the key so a toolchain bump invalidates stale .so
           # artifacts produced by the previous compiler.
-          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/test-integration/rust-toolchain.toml') }}-agave${{ steps.agave.outputs.agave_version }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/committor-program/**', 'magicblock-validator/programs/**', 'magicblock-validator/magic-program-api/**', 'magicblock-validator/core/**') }}
+          key: sbf-programs-${{ runner.os }}-${{ runner.arch }}-rust${{ hashFiles('magicblock-validator/rust-toolchain.toml', 'magicblock-validator/test-integration/rust-toolchain.toml') }}-agave${{ steps.agave.outputs.agave_version }}-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock', 'magicblock-validator/test-integration/programs/**', 'magicblock-validator/programs/**', 'magicblock-validator/core/**') }}
 
       - name: Build SBF programs
         run: make -C test-integration programs

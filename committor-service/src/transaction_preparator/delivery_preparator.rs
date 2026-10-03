@@ -1,7 +1,7 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use futures_util::future::{join, join_all, try_join_all};
-use magicblock_committor_program::{Chunks, instruction_chunks::chunk_realloc_ixs};
+use magicblock_committor_interface::{Chunks, instruction_chunks::chunk_realloc_ixs};
 use magicblock_metrics::metrics;
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,

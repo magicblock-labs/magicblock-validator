@@ -1,7 +1,7 @@
 # magicblock-task-scheduler
 
 Stores and runs recurring application tasks on the leader. Applications schedule
-work through the [native Magic programs](../programs/magicblock/README.md);
+work through the [native Magic programs](../programs/magic-program/README.md);
 the scheduler persists it and submits due transactions to Engine.
 
 ## Task behavior

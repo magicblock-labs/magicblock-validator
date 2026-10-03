@@ -9,16 +9,11 @@ version.workspace = true
 
 [dependencies]
 borsh = { workspace = true }
-paste = { workspace = true }
-solana-account = { workspace = true }
+magicblock-committor-interface = { workspace = true }
 solana-account-info = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-sdk-ids = { workspace = true }
 solana-system-interface = { workspace = true, features = ["wincode"] }
-thiserror = { workspace = true }
-
-[dev-dependencies]
 
 [lib]
 crate-type = ["cdylib", "lib"]

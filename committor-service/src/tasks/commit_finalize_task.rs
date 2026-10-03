@@ -64,7 +64,7 @@ impl CommitFinalizeTask {
         validator: &Pubkey,
         base_account: Option<&Account>,
     ) -> Instruction {
-        let (data_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+        let (data_buffer_pubkey, _) = magicblock_committor_interface::pdas::buffer_pda(
             validator,
             &self.committed_account.pubkey,
             &self.commit_id.to_le_bytes(),

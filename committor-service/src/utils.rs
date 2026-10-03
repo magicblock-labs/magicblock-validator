@@ -1,6 +1,6 @@
 // https://solana.com/docs/core/transactions#transaction-size
 
-use magicblock_committor_program::{
+use magicblock_committor_interface::{
     consts::MAX_INSTRUCTION_DATA_SIZE, instruction::IX_WRITE_SIZE_WITHOUT_CHUNKS,
 };
 use solana_packet::PACKET_DATA_SIZE;

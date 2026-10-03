@@ -72,13 +72,13 @@ light-sdk-types = "0.23"
 
 magicblock-aml = { path = "../aml" }
 magicblock-chainlink = { path = "../chainlink", features = ["dev-context"] }
-magicblock-committor-program = { path = "../committor-program", features = ["no-entrypoint"] }
+magicblock-committor-interface = { path = "../programs/committor-interface" }
 magicblock-committor-service = { path = "../committor-service" }
 magicblock-config = { path = "../config" }
 magicblock-core = { path = "../core" }
 magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de", default-features = false }
-magicblock-magic-program-api = { path = "../magic-program-api" }
-magicblock-program = { path = "../programs/magicblock" }
+magicblock-magic-program-api = { path = "../programs/magic-interface" }
+magicblock-program = { path = "../programs/magic-program" }
 magicblock-rpc-client = { path = "../rpc-client" }
 magicblock-table-mania = { path = "../table-mania" }
 paste = "1.0"

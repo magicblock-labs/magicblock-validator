@@ -1,4 +1,7 @@
 use borsh::{BorshDeserialize, to_vec};
+use magicblock_committor_interface::{
+    Chunks, consts, error::CommittorError, instruction::CommittorInstruction, pdas,
+};
 use solana_account_info::AccountInfo;
 use solana_program::{
     entrypoint::ProgramResult, log::sol_log_64, msg, program::invoke_signed,
@@ -7,14 +10,9 @@ use solana_program::{
 use solana_pubkey::Pubkey;
 use solana_system_interface::instruction as system_instruction;
 
-use crate::{
-    Chunks, consts,
-    error::CommittorError,
-    instruction::CommittorInstruction,
-    utils::{
-        assert_account_unallocated, assert_is_signer, assert_program_id, close_and_refund_authority,
-    },
-    verified_seeds_and_pda,
+use crate::utils::{
+    assert_account_unallocated, assert_is_signer, assert_program_id, close_and_refund_authority,
+    verify_pda,
 };
 
 pub fn process(
@@ -116,24 +114,14 @@ fn process_init(
     assert_is_signer(authority_info, "authority")?;
     let chunks_bump = &[chunks_bump];
     let commit_id_slice = &commit_id.to_le_bytes();
-    let (chunks_seeds, _chunks_pda) = verified_seeds_and_pda!(
-        chunks,
-        authority_info,
-        pubkey,
-        chunks_account_info,
-        commit_id_slice,
-        chunks_bump
-    );
+    let chunks_seeds =
+        pdas::chunks_seeds_with_bump(authority_info.key, pubkey, commit_id_slice, chunks_bump);
+    verify_pda(chunks_account_info, &chunks_seeds, "chunks")?;
 
     let buffer_bump = &[buffer_bump];
-    let (buffer_seeds, _buffer_pda) = verified_seeds_and_pda!(
-        buffer,
-        authority_info,
-        pubkey,
-        buffer_account_info,
-        commit_id_slice,
-        buffer_bump
-    );
+    let buffer_seeds =
+        pdas::buffer_seeds_with_bump(authority_info.key, pubkey, commit_id_slice, buffer_bump);
+    verify_pda(buffer_account_info, &buffer_seeds, "buffer")?;
 
     assert_account_unallocated(chunks_account_info, "chunks")?;
     assert_account_unallocated(buffer_account_info, "buffer")?;
@@ -219,16 +207,10 @@ fn process_realloc_buffer(
     assert_is_signer(authority_info, "authority")?;
 
     let buffer_bump = &[buffer_bump];
-    let commit_id_slice = commit_id.to_le_bytes();
-    let asd = commit_id_slice.as_slice();
-    verified_seeds_and_pda!(
-        buffer,
-        authority_info,
-        pubkey,
-        buffer_account_info,
-        asd,
-        buffer_bump
-    );
+    let commit_id_slice = &commit_id.to_le_bytes();
+    let buffer_seeds =
+        pdas::buffer_seeds_with_bump(authority_info.key, pubkey, commit_id_slice, buffer_bump);
+    verify_pda(buffer_account_info, &buffer_seeds, "buffer")?;
 
     let current_buffer_size = buffer_account_info.data.borrow().len() as u64;
     let next_alloc_size = std::cmp::min(
@@ -373,23 +355,13 @@ fn verify_seeds_and_pdas(
 ) -> ProgramResult {
     let chunks_bump = &[chunks_bump];
     let commit_id_slice = &commit_id.to_le_bytes();
-    let (_chunks_seeds, _chunks_pda) = verified_seeds_and_pda!(
-        chunks,
-        authority_info,
-        pubkey,
-        chunks_account_info,
-        commit_id_slice,
-        chunks_bump
-    );
+    let chunks_seeds =
+        pdas::chunks_seeds_with_bump(authority_info.key, pubkey, commit_id_slice, chunks_bump);
+    verify_pda(chunks_account_info, &chunks_seeds, "chunks")?;
 
     let buffer_bump = &[buffer_bump];
-    let (_buffer_seeds, _buffer_pda) = verified_seeds_and_pda!(
-        buffer,
-        authority_info,
-        pubkey,
-        buffer_account_info,
-        commit_id_slice,
-        buffer_bump
-    );
+    let buffer_seeds =
+        pdas::buffer_seeds_with_bump(authority_info.key, pubkey, commit_id_slice, buffer_bump);
+    verify_pda(buffer_account_info, &buffer_seeds, "buffer")?;
     Ok(())
 }

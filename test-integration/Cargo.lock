@@ -3788,13 +3788,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-committor-program"
+name = "magicblock-committor-interface"
 version = "0.15.4"
 dependencies = [
  "borsh 1.8.1",
  "paste",
  "solana-account 4.3.1",
- "solana-account-info 3.1.1",
  "solana-program 4.0.0",
  "solana-pubkey 4.2.0",
  "solana-sdk-ids 3.1.0",
@@ -3813,7 +3812,7 @@ dependencies = [
  "lru",
  "magicblock-accountsdb",
  "magicblock-chainlink",
- "magicblock-committor-program",
+ "magicblock-committor-interface",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",
  "magicblock-engine",
@@ -5836,7 +5835,7 @@ dependencies = [
  "futures",
  "integration-solana-sdk",
  "integration-test-tools",
- "magicblock-committor-program",
+ "magicblock-committor-interface",
  "magicblock-committor-service",
  "magicblock-core",
  "magicblock-delegation-program-api 3.1.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de)",

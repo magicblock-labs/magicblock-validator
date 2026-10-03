@@ -4,7 +4,7 @@ Delivers the leader's account commits, undelegations, and associated actions to
 the base chain. It prepares settlement transactions, sends them, and handles
 confirmation and recovery.
 
-Large payloads use [commit buffers](../committor-program/README.md)
+Large payloads use [commit buffers](../programs/committor-interface/README.md)
 and [address lookup tables](../table-mania/README.md). Work affecting
 the same accounts is ordered while independent work can proceed concurrently.
 

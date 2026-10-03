@@ -40,7 +40,7 @@ accounts** for state your application needs locally. Programs can create, resize
 and explicitly close these accounts, with a sponsor funding their backing.
 That gives applications room for session state and intermediate results without
 making every account part of the base-chain settlement flow. See the
-[native program guide](programs/magicblock/README.md) for the available operations.
+[native program guide](programs/magic-program/README.md) for the available operations.
 
 ### Keep the application moving between user interactions
 
@@ -118,8 +118,8 @@ start with the part of the application flow that interests you:
 - **Submit transactions and follow updates:** [Aperture](aperture/README.md).
 - **Commit state back to Solana:** [Committor](committor-service/README.md).
 - **Run recurring actions:** [task scheduler](task-scheduler/README.md).
-- **Build rollup instructions:** [native programs](programs/magicblock/README.md)
-  and the [instruction API](magic-program-api/README.md).
+- **Build rollup instructions:** [native programs](programs/magic-program/README.md)
+  and the [instruction API](programs/magic-interface/README.md).
 
 Want to contribute? Start with [contributing](docs/CONTRIBUTING.md) for development
 setup and checks, or explore the supported [integration tests](test-integration/).
