@@ -17,7 +17,7 @@ on:
       - '.github/workflows/ci-fmt.yml'
       - '.github/actions/setup-build-env/**'
   pull_request:
-    types: [opened, reopened, synchronize, ready_for_review]
+    types: [opened, reopened, synchronize]
     paths:
       - '**/*.rs'
       - '**/Cargo.toml'
@@ -41,7 +41,6 @@ jobs:
         with:
           build_cache_key_name: "magicblock-validator-ci-fmt-v001"
           rust_toolchain_release: "nightly"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - run: make ci-fmt
         shell: bash
