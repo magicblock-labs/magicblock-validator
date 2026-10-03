@@ -412,13 +412,11 @@ impl SignatureConfirmer {
             match self.rpc_client.get_signature_statuses(chunk).await {
                 Ok(response) => {
                     fetched.extend(
-                        chunk
-                            .iter()
-                            .copied()
-                            .zip(response.value.into_iter())
-                            .filter_map(|(signature, status)| {
+                        chunk.iter().copied().zip(response.value).filter_map(
+                            |(signature, status)| {
                                 status.map(|status| (signature, status))
-                            }),
+                            },
+                        ),
                     );
                 }
                 Err(err) => {
