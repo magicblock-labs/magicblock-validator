@@ -71,37 +71,3 @@ seeds!(chunks, CHUNKS_SEED);
 pda!(chunks);
 seeds!(buffer, BUFFER_SEED);
 pda!(buffer);
-
-#[macro_export]
-macro_rules! verified_seeds_and_pda {
-    ($prefix:ident,
-     $authority_info:ident,
-     $pubkey:ident,
-     $account_info:ident,
-     $commit_id_slice:ident,
-     $bump:ident) => {{
-        ::paste::paste! {
-            let seeds = $crate::pdas::[<$prefix _seeds_with_bump>](
-                $authority_info.key,
-                $pubkey,
-                $commit_id_slice,
-                $bump,
-            );
-            let pda = $crate::pdas::[<try_ $prefix _pda_with_bump>](
-                $authority_info.key,
-                $pubkey,
-                $commit_id_slice,
-                $bump,
-            )
-            .inspect_err(|err| ::solana_program::msg!("ERR: {}", err))?;
-            $crate::utils::assert_keys_equal($account_info.key, &pda, || {
-                format!(
-                    "Provided {} PDA does not match derived key '{}'",
-                    stringify!($prefix),
-                    pda
-                )
-            })?;
-            (seeds, pda)
-        }
-    }};
-}

@@ -1,5 +1,5 @@
 use dlp_api::diff::compute_diff;
-use magicblock_committor_program::{
+use magicblock_committor_interface::{
     ChangesetChunks, Chunks,
     instruction_builder::{
         close_buffer::{CreateCloseIxArgs, create_close_ix},

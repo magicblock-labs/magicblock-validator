@@ -1,5 +1,5 @@
 use borsh::BorshDeserialize;
-use magicblock_committor_program::Chunks;
+use magicblock_committor_interface::Chunks;
 use magicblock_committor_service::{
     tasks::{
         commit_stage_task::CleanupTask,

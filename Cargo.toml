@@ -14,19 +14,20 @@ members = [
     "aml",
     "aperture",
     "chainlink",
-    "committor-program",
+    "programs/committor-interface",
+    "programs/committor-program",
     "committor-service",
     "config",
     "core",
     "ledger",
-    "magic-program-api",
+    "programs/magic-interface",
     "metrics",
     "rpc-client",
     "runtime",
     "services",
     "table-mania",
     "task-scheduler",
-    "programs/magicblock",
+    "programs/magic-program",
     "storage-proto",
 ]
 
@@ -64,15 +65,15 @@ wildcard_dependencies = "deny"
 magicblock-aml = { path = "aml" }
 magicblock-aperture = { path = "aperture" }
 magicblock-chainlink = { path = "chainlink" }
-magicblock-committor-program = { path = "committor-program", features = ["no-entrypoint"] }
+magicblock-committor-interface = { path = "programs/committor-interface" }
 magicblock-committor-service = { path = "committor-service" }
 magicblock-config = { path = "config" }
 magicblock-core = { path = "core" }
 magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de" }
 magicblock-ledger-deprecated = { path = "ledger" }
-magicblock-magic-program-api = { path = "magic-program-api" }
+magicblock-magic-program-api = { path = "programs/magic-interface" }
 magicblock-metrics = { path = "metrics" }
-magicblock-program = { path = "programs/magicblock" }
+magicblock-program = { path = "programs/magic-program" }
 magicblock-rpc-client = { path = "rpc-client" }
 magicblock-runtime = { path = "runtime" }
 magicblock-services = { path = "services" }

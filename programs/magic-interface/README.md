@@ -2,7 +2,7 @@
 
 Shared instruction definitions, program IDs, account-address helpers, and
 response types for the validator's native Magic programs.
-[magicblock-program](../programs/magicblock/README.md) implements them.
+[magicblock-program](../magic-program/README.md) implements them.
 
 ## Using it
 
@@ -16,4 +16,4 @@ when working across that boundary.
 
 Constructing an instruction with a signer does not grant authority to sign it.
 
-[Back to workspace](../README.md)
+[Back to workspace](../../README.md)

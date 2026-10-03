@@ -2,19 +2,15 @@
 #![allow(clippy::manual_is_multiple_of)]
 
 use solana_pubkey::declare_id;
+
 pub mod consts;
 pub mod error;
 pub mod instruction;
+pub mod instruction_builder;
 pub mod instruction_chunks;
 pub mod pdas;
 mod state;
 
-pub mod instruction_builder;
-mod processor;
-mod utils;
-
-// #[cfg(not(feature = "no-entrypoint"))]
-pub use processor::process;
 pub use state::{
     changeset::{
         ChangedAccount, ChangedAccountMeta, ChangedBundle, Changeset, ChangesetBundles,
@@ -24,7 +20,15 @@ pub use state::{
     chunks::Chunks,
 };
 
-#[cfg(not(feature = "no-entrypoint"))]
-solana_program::entrypoint!(process);
-
 declare_id!("ComtrB2KEaWgXsW1dhr1xYL4Ht4Bjj3gXnnL6KMdABq");
+
+#[macro_export]
+macro_rules! compute {
+    ($msg:expr=> $($tt:tt)*) => {
+        ::solana_program::msg!(concat!($msg, " {"));
+        ::solana_program::log::sol_log_compute_units();
+        $($tt)*
+        ::solana_program::log::sol_log_compute_units();
+        ::solana_program::msg!(concat!(" } // ", $msg));
+    };
+}

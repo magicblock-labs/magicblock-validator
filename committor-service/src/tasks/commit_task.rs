@@ -54,7 +54,7 @@ impl CommitTask {
 
     #[inline(always)]
     fn commit_state_from_buffer_ix(&self, validator: &Pubkey) -> Instruction {
-        let (commit_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+        let (commit_buffer_pubkey, _) = magicblock_committor_interface::pdas::buffer_pda(
             validator,
             &self.committed_account.pubkey,
             &self.commit_id.to_le_bytes(),
@@ -91,7 +91,7 @@ impl CommitTask {
 
     #[inline(always)]
     fn commit_diff_from_buffer_ix(&self, validator: &Pubkey) -> Instruction {
-        let (commit_buffer_pubkey, _) = magicblock_committor_program::pdas::buffer_pda(
+        let (commit_buffer_pubkey, _) = magicblock_committor_interface::pdas::buffer_pda(
             validator,
             &self.committed_account.pubkey,
             &self.commit_id.to_le_bytes(),

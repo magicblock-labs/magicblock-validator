@@ -6,7 +6,7 @@ the base-chain Delegation Program.
 
 ## Working with the programs
 
-Use the [Magic Program API](../../magic-program-api/README.md) for
+Use the [Magic Program API](../magic-interface/README.md) for
 instruction builders, IDs, and response types. The
 [shared runtime](../../runtime/README.md) installs the programs, while
 leader services handle settlement and

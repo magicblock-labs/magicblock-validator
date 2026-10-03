@@ -51,7 +51,7 @@ pub(crate) fn init_flexi_counter_and_delegate_ixs(
     label: Option<String>,
 ) -> InitAccountAndDelegateIxs {
     const MAX_ALLOC: u64 =
-        magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
+        magicblock_committor_interface::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
     use program_flexi_counter::{instruction::*, state::*};
 

@@ -6,7 +6,7 @@ account helpers, logging setup, and build metadata for version reporting.
 Use this crate for concepts shared across services. Keep service-specific
 behavior in the owning crate; transaction execution and storage belong to
 Engine. Application instruction definitions live in the
-[Magic Program API](../magic-program-api/README.md).
+[Magic Program API](../programs/magic-interface/README.md).
 
 ## Logging
 

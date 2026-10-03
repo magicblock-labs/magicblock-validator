@@ -8,12 +8,13 @@ RUST_LOG ?= 'info'
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
-COMMITTOR_PROGRAM_DIR := $(DIR)../committor-program
+COMMITTOR_PROGRAM_DIR := $(DIR)../programs/committor-program
+COMMITTOR_INTERFACE_DIR := $(DIR)../programs/committor-interface
 
 FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SECURITY_SRC := $(shell find $(SCHEDULECOMMIT_SECURITY_DIR) -name '*.rs' -o -name '*.toml')
-COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
+COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) $(COMMITTOR_INTERFACE_DIR) -name '*.rs' -o -name '*.toml')
 
 FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
