@@ -47,6 +47,7 @@ version = "0.15.4"
 missing_docs = "allow"
 rust_2018_idioms = { level = "warn", priority = -1 }
 unreachable_pub = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
 unused_lifetimes = "warn"
 unused_macro_rules = "warn"
 unused_qualifications = "warn"
