@@ -316,7 +316,7 @@ impl CommittorProcessor {
             return Err(err);
         }
 
-        let results = join_all(receivers.into_iter())
+        let results = join_all(receivers)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, RecvError>>()?;
