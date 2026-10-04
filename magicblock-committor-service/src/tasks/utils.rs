@@ -123,7 +123,8 @@ impl TransactionUtils {
     pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
-    // Nonced transactions also load the noop program data (~40 KiB).
+    // The per-intent uniqueness instruction loads the spl-noop program.
+    // Reserve 42 KiB for its roughly 40 KiB of program data.
     const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
 
     pub fn dummy_lookup_table(
