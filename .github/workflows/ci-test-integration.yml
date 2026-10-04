@@ -411,6 +411,9 @@ jobs:
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
             needs_build_env: true
+          - batch_tests: "cloning_programs"
+            test_bins_artifact: "cloning"
+            needs_build_env: true
             solana_version: v4.0.3
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
