@@ -577,11 +577,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_5() {
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
     commit_8_accounts_1kb(
         8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 8),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 8)]),
         CommitIntentKind::Commit,
     )
     .await;

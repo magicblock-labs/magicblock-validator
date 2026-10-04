@@ -447,6 +447,8 @@ jobs:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: v4.2.0
 
       - name: Download prebuilt validator binary
         uses: actions/download-artifact@v8
