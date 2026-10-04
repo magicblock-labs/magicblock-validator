@@ -119,6 +119,7 @@ pub fn create_commit_finalize_task(
 
 pub struct TransactionUtils;
 impl TransactionUtils {
+    pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
     const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
@@ -390,7 +391,7 @@ impl TransactionUtils {
         compute_units: u32,
         compute_unit_price: u64,
         _accounts_size_budget: u32,
-    ) -> [Instruction; 2] {
+    ) -> [Instruction; Self::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize] {
         [
             ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
             ComputeBudgetInstruction::set_compute_unit_price(

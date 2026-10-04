@@ -223,7 +223,9 @@ where
             ) => {
                 let optimized_tasks =
                     self.state.commit_strategy.optimized_tasks.as_slice();
-                let task_index = err.task_index();
+                let task_index = err.task_index(
+                    self.state.commit_strategy.task_instruction_offset(),
+                );
                 if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
