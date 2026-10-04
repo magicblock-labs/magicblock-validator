@@ -81,6 +81,7 @@ impl TestConfigViaEnvVars {
 /// `SKIP_TESTS=committor` keeps doing what it always did.
 fn umbrella_aliases_for(name: &str) -> &'static [&'static str] {
     match name {
+        "cloning" => &["cloning", "cloning_programs"],
         "committor" => &[
             "committor",
             "committor_single_large",
