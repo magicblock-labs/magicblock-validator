@@ -24,7 +24,7 @@ use crate::{
         },
         ExecutionOutput,
     },
-    tasks::BaseTaskImpl,
+    tasks::{utils::TransactionUtils, BaseTaskImpl},
     transactions::{v1, PreparedMessage},
 };
 
@@ -109,7 +109,15 @@ impl IntentExecutionClient {
 
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
-            transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+            transaction_error_mapper: IntentTransactionErrorMapper {
+                tasks,
+                task_instruction_offset: match &prepared_message {
+                    PreparedMessage::V1(_) => 0,
+                    PreparedMessage::Versioned(_) => {
+                        TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
+                    }
+                },
+            },
             has_dedup_guard: tasks
                 .iter()
                 .any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),

@@ -95,6 +95,15 @@ impl TransactionStrategy {
             .any(BaseActionTask::has_callback)
     }
 
+    /// V0 prepends compute-budget instructions; V1 carries budgets in config.
+    pub(crate) fn task_instruction_offset(&self) -> u8 {
+        if self.uses_alts() {
+            TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
+        } else {
+            0
+        }
+    }
+
     pub fn uses_alts(&self) -> bool {
         !self.lookup_tables_keys.is_empty()
     }
