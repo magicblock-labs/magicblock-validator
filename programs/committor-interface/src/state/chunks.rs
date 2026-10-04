@@ -46,7 +46,13 @@ impl Chunks {
     }
 
     pub fn from_data_length(data_len: usize, chunk_size: u16) -> Self {
-        let chunk_count = data_len.div_ceil(chunk_size as usize);
+        // A chunk size of 0 means "do not chunk this account", so there is
+        // nothing to track. Guard it here as well, since `div_ceil` would
+        // otherwise divide by zero.
+        let chunk_count = match chunk_size {
+            0 => 0,
+            chunk_size => data_len.div_ceil(chunk_size as usize),
+        };
         Self::new(chunk_count, chunk_size)
     }
 
@@ -94,10 +100,11 @@ impl Chunks {
 
     /// Marks that chunk at offset was written to
     pub fn set_offset_delivered(&mut self, offset: usize) -> Result<(), ChunksError> {
-        if offset % self.chunk_size as usize != 0 {
+        let chunk_size = self.checked_chunk_size()?;
+        if offset % chunk_size != 0 {
             Err(ChunksError::InvalidOffsetError(offset, self.chunk_size))
         } else {
-            let idx = offset / self.chunk_size as usize;
+            let idx = offset / chunk_size;
             self.set_chunk_delivered(idx)?;
             Ok(())
         }
@@ -106,11 +113,23 @@ impl Chunks {
     /// Return [`true`] if offset delivered
     /// Returns error if offset isn't multuple of chunk
     pub fn is_offset_delivered(&self, offset: usize) -> Result<bool, ChunksError> {
-        if offset % self.chunk_size as usize != 0 {
+        let chunk_size = self.checked_chunk_size()?;
+        if offset % chunk_size != 0 {
             return Err(ChunksError::InvalidOffsetError(offset, self.chunk_size));
         }
-        let idx = offset / self.chunk_size as usize;
+        let idx = offset / chunk_size;
         self.is_chunk_delivered(idx).ok_or(ChunksError::OutOfBoundsError)
+    }
+
+    /// Returns the chunk size as a `usize`, rejecting the `0` sentinel that
+    /// means "not chunked". Without this guard the offset helpers below would
+    /// divide by zero and abort the program.
+    fn checked_chunk_size(&self) -> Result<usize, ChunksError> {
+        if self.chunk_size == 0 {
+            Err(ChunksError::InvalidChunkSize)
+        } else {
+            Ok(self.chunk_size as usize)
+        }
     }
 
     pub fn count(&self) -> usize {
@@ -165,12 +184,14 @@ impl fmt::Display for Chunks {
     }
 }
 
-#[derive(thiserror::Error, Debug)]
+#[derive(thiserror::Error, Debug, PartialEq, Eq)]
 pub enum ChunksError {
     #[error("Out of bounds access")]
     OutOfBoundsError,
     #[error("Offset ({0}) must be multiple of chunk size ({1})")]
     InvalidOffsetError(usize, u16),
+    #[error("Chunk size must be non-zero to address chunks by offset")]
+    InvalidChunkSize,
 }
 
 #[cfg(test)]
@@ -230,6 +251,19 @@ mod test {
                 true, false, false, false, false, false, false, false,
                 false, false, true, false
             ]
+        );
+    }
+
+    #[test]
+    fn test_chunks_zero_chunk_size_is_rejected_not_divided_by() {
+        let chunks = Chunks::from_data_length(547, 0);
+
+        assert_eq!(chunks.count(), 0);
+        assert!(chunks.get_missing_chunks().is_empty());
+        assert_eq!(chunks.set_offset_delivered(0), Err(ChunksError::InvalidChunkSize));
+        assert_eq!(
+            chunks.is_offset_delivered(0),
+            Err(ChunksError::InvalidChunkSize)
         );
     }
 

@@ -21,6 +21,9 @@ pub enum CommittorError {
 
     #[error("Out of bound access to chunks")]
     OutOfBoundsError,
+
+    #[error("Chunk size must be non-zero to address chunks by offset")]
+    InvalidChunkSize,
 }
 
 impl From<ChunksError> for CommittorError {
@@ -30,6 +33,7 @@ impl From<ChunksError> for CommittorError {
             ChunksError::InvalidOffsetError(offset, chunk_size) => {
                 CommittorError::OffsetMustBeMultipleOfChunkSize(offset, chunk_size)
             }
+            ChunksError::InvalidChunkSize => CommittorError::InvalidChunkSize,
         }
     }
 }
@@ -44,6 +48,7 @@ impl From<CommittorError> for ProgramError {
             OffsetMustBeMultipleOfChunkSize(_, _) => 0x69002,
             OffsetChunkOutOfRange(_, _, _) => 0x69003,
             OutOfBoundsError => 0x69004,
+            InvalidChunkSize => 0x69005,
         };
         ProgramError::Custom(n)
     }
