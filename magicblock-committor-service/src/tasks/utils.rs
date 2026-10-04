@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use dlp_api::DLP_PROGRAM_DATA_SIZE_CLASS;
+use dlp_api::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
 use magicblock_core::intent::{types::CommittedAccount, BaseAction};
 use solana_account::Account;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
@@ -354,7 +354,14 @@ impl TransactionUtils {
             let deduction = dlp_task_count
                 .saturating_sub(1)
                 .saturating_mul(dlp_program_budget);
-            total_budget.saturating_sub(deduction)
+            // The API's 350 KiB estimate is smaller than the deployed DLP.
+            // Reserve at least 1 MiB for its program data, counted only once.
+            let program_headroom = AccountSizeClass::Huge
+                .size_budget()
+                .saturating_sub(dlp_program_budget);
+            total_budget
+                .saturating_sub(deduction)
+                .saturating_add(program_headroom)
         } else {
             total_budget
         }
