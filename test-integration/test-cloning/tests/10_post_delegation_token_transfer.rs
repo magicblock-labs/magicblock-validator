@@ -376,8 +376,19 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         .unwrap();
     assert!(confirmed, "assign transaction failed");
 
+    // The target is already DLP-owned, so delegation can leave its account
+    // unchanged while creating the delegation record. Change its balance in
+    // the same transaction so the program subscription observes the target
+    // after the record and its post-delegation action are available.
     let mut delegate_tx = Transaction::new_with_payer(
-        &[delegate_with_actions_ix],
+        &[
+            delegate_with_actions_ix,
+            system_instruction::transfer(
+                &fee_payer.pubkey(),
+                &delegated_account.pubkey(),
+                1,
+            ),
+        ],
         Some(&fee_payer.pubkey()),
     );
     let (_sig, confirmed) = ctx
