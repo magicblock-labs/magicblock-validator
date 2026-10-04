@@ -1113,9 +1113,9 @@ async fn test_commit_unfinalized_account_recovery() {
 async fn test_commit_unfinalized_account_recovery_two_stage() {
     let TestEnv {
         fixture,
-        mut intent_executor,
-        task_info_fetcher: _,
-        callback_executor: _,
+        intent_executor: _,
+        task_info_fetcher,
+        callback_executor,
         pre_test_tablemania_state: _,
     } = TestEnv::setup().await;
 
@@ -1166,7 +1166,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     }
 
     // Now simulate user sending new intent
-    let committed_accounts = counters
+    let committed_accounts: Vec<_> = counters
         .into_iter()
         .map(|el| CommittedAccount {
             pubkey: el.1,
@@ -1174,29 +1174,54 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
             remote_slot: Default::default(),
         })
         .collect();
-    let intent = create_intent(committed_accounts, true);
+    let intent = create_intent(committed_accounts.clone(), true);
+    let committed_pubkeys = intent.get_all_committed_pubkeys();
+    let transaction_preparator = fixture.create_transaction_preparator();
+    let mut execution_report = IntentExecutionReport::default();
 
-    let result = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
-    assert!(result.inner.is_ok());
-    assert!(matches!(
-        result.inner.unwrap(),
-        ExecutionOutput::TwoStage {
-            commit_signature: _,
-            finalize_signature: _
-        }
-    ));
+    // V1 can fit this intent in one transaction. Select both stages explicitly
+    // so this test continues to exercise two-stage recovery.
+    let mut executor = create_two_stage_executor(
+        &fixture,
+        &callback_executor,
+        &intent,
+        &task_info_fetcher,
+        &mut execution_report,
+    )
+    .await;
+    let commit_signature = executor
+        .commit(
+            &committed_pubkeys,
+            &transaction_preparator,
+            &task_info_fetcher,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .expect("commit must recover");
+    let mut finalize_executor = executor.done(commit_signature);
+    let finalize_signature = finalize_executor
+        .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
+        .await
+        .expect("finalize must succeed");
+    let finalized = finalize_executor.done(finalize_signature);
+    assert_ne!(finalized.commit_signature, finalized.finalize_signature);
 
-    assert_eq!(result.patched_errors.len(), 2);
+    let patched_errors = execution_report.patched_errors();
+    assert_eq!(patched_errors.len(), 2);
     assert!(matches!(
-        result.patched_errors[0],
+        patched_errors[0],
         TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
     ));
     assert!(matches!(
-        result.patched_errors[1],
+        patched_errors[1],
         TransactionStrategyExecutionError::CommitIDError(_, _)
-    ))
+    ));
+
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &committed_accounts,
+    )
+    .await;
 }
 
 #[tokio::test]

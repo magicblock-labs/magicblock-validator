@@ -92,7 +92,7 @@ pub async fn fetch_tx_logs(
                 signature,
                 RpcTransactionConfig {
                     commitment: Some(CommitmentConfig::confirmed()),
-                    max_supported_transaction_version: Some(0),
+                    max_supported_transaction_version: Some(1),
                     ..Default::default()
                 },
             )
