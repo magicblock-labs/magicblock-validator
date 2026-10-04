@@ -38,8 +38,10 @@ pub(crate) fn process_close_magic_ata(
         return Ok(());
     }
 
+    // Lamports are kept so the instruction stays balanced (a Magic ATA
+    // overlaying a base ATA mirror holds its cloned rent); the account is
+    // removed from the bank regardless.
     let mut acc = ata.borrow_mut()?;
-    acc.set_lamports(0);
     acc.set_owner(Pubkey::default());
     acc.resize(0, 0);
     acc.set_delegated(false);
@@ -133,6 +135,34 @@ mod tests {
         assert_eq!(ata_after.owner(), &Pubkey::default());
         assert!(ata_after.data().is_empty());
         assert!(!ata_after.delegated());
+        assert!(ata_after.ephemeral());
+    }
+
+    #[test]
+    fn close_magic_ata_keeps_lamports_of_base_ata_overlay() {
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata(&wallet_owner, &mint);
+        let mut overlay = magic_ata_account(wallet_owner, mint, 0);
+        overlay.set_lamports(2_039_280);
+
+        let ix = close_ix(wallet_owner, ata);
+        let accounts = process_instruction(
+            &ix.data,
+            vec![
+                (
+                    wallet_owner,
+                    AccountSharedData::new(1_000_000, 0, &system_program::id()),
+                ),
+                (ata, overlay),
+            ],
+            ix.accounts,
+            Ok(()),
+        );
+
+        let ata_after = &accounts[1];
+        assert_eq!(ata_after.lamports(), 2_039_280);
+        assert_eq!(ata_after.owner(), &Pubkey::default());
         assert!(ata_after.ephemeral());
     }
 

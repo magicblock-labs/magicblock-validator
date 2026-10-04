@@ -2,7 +2,9 @@
 
 use std::collections::HashSet;
 
-use magicblock_core::token_programs::try_get_magic_ata_info;
+use magicblock_core::token_programs::{
+    try_get_base_ata_mirror_info, try_get_magic_ata_info,
+};
 use magicblock_magic_program_api::{
     instruction::{
         AccountCloneFields, PostDelegationActionExecutorInstruction,
@@ -323,6 +325,12 @@ pub fn execute_post_delegation_actions(
             "Post-delegation action account not found",
             &account_meta.pubkey,
         )?;
+        // A base ATA mirror can be overlaid by a Magic ATA inside the action.
+        let is_base_ata_mirror = try_get_base_ata_mirror_info(
+            &account_meta.pubkey,
+            &instruction_account.to_account_shared_data()?,
+        )
+        .is_some();
         let locally_writable = {
             let account = instruction_account.borrow()?;
             // An empty account can be created inside the action itself (e.g. an
@@ -338,7 +346,8 @@ pub fn execute_post_delegation_actions(
                 && account.data().is_empty();
             not_created_yet
                 || (!account.undelegating()
-                    && (account.delegated()
+                    && (is_base_ata_mirror
+                        || account.delegated()
                         || account.ephemeral()
                         || account.confined()))
         };
