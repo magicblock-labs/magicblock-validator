@@ -235,55 +235,81 @@ impl TaskStrategist {
     /// Returns [`TransactionStrategy`] for tasks
     /// Returns Error if all optimizations weren't enough
     pub fn build_strategy<P: IntentPersister>(
-        mut tasks: Vec<BaseTaskImpl>,
+        tasks: Vec<BaseTaskImpl>,
         validator: &Pubkey,
         persistor: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
-        // Attempt optimizing tasks themselves(using buffers)
-        let tx_size = Self::try_optimize_tx_size_if_needed(
-            &mut tasks,
-            uniqueness_nonce,
-            MAX_TRANSACTION_V1_WIRE_SIZE,
-        )?;
-
         if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
             return Err(TaskStrategistError::FailedToFitError);
         }
 
+        let mut optimized_tasks = tasks.clone();
+        let tx_size = Self::try_optimize_tx_size_if_needed(
+            &mut optimized_tasks,
+            uniqueness_nonce,
+            MAX_TRANSACTION_V1_WIRE_SIZE,
+        )?;
+
         if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE {
-            // Persist tasks strategy
-            if let Some(persistor) = persistor {
-                Self::persist_tasks_strategy(persistor, &tasks, false);
-            }
-
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys: vec![],
-                uniqueness_nonce,
-            })
-        }
-        // In case task optimization didn't work
-        // attempt using lookup tables for all keys involved in tasks
-        else if Self::attempt_lookup_tables(&tasks, uniqueness_nonce) {
-            // Persist tasks strategy
-            if let Some(persistor) = persistor {
-                Self::persist_tasks_strategy(persistor, &tasks, true);
-            }
-
-            // Get lookup table keys
-            let lookup_tables_keys = Self::collect_lookup_table_keys(
+            return Ok(Self::build_transaction_strategy(
+                optimized_tasks,
                 validator,
-                &tasks,
+                persistor,
                 uniqueness_nonce,
-            );
-            Ok(TransactionStrategy {
-                optimized_tasks: tasks,
-                lookup_tables_keys,
+                false,
+            ));
+        }
+
+        // V1 can miss on structural limits such as the 64 static account-key
+        // cap, not only on byte size. Give the original tasks the old v0+ALT
+        // path before introducing buffer preparation and cleanup work.
+        if Self::attempt_lookup_tables(&tasks, uniqueness_nonce) {
+            return Ok(Self::build_transaction_strategy(
+                tasks,
+                validator,
+                persistor,
                 uniqueness_nonce,
-            })
+                true,
+            ));
+        }
+
+        // If the original tasks still do not fit v0+ALT, use the
+        // buffer-optimized V1 probe result as the final payload-size fallback.
+        if Self::attempt_lookup_tables(&optimized_tasks, uniqueness_nonce) {
+            return Ok(Self::build_transaction_strategy(
+                optimized_tasks,
+                validator,
+                persistor,
+                uniqueness_nonce,
+                true,
+            ));
+        }
+
+        Err(TaskStrategistError::FailedToFitError)
+    }
+
+    fn build_transaction_strategy<P: IntentPersister>(
+        tasks: Vec<BaseTaskImpl>,
+        validator: &Pubkey,
+        persistor: &Option<P>,
+        uniqueness_nonce: Option<u64>,
+        uses_lookup_tables: bool,
+    ) -> TransactionStrategy {
+        if let Some(persistor) = persistor {
+            Self::persist_tasks_strategy(persistor, &tasks, uses_lookup_tables);
+        }
+
+        let lookup_tables_keys = if uses_lookup_tables {
+            Self::collect_lookup_table_keys(validator, &tasks, uniqueness_nonce)
         } else {
-            Err(TaskStrategistError::FailedToFitError)
+            vec![]
+        };
+
+        TransactionStrategy {
+            optimized_tasks: tasks,
+            lookup_tables_keys,
+            uniqueness_nonce,
         }
     }
 
@@ -514,6 +540,7 @@ mod tests {
     use magicblock_core::intent::{
         types::CommittedAccount, BaseAction, ProgramArgs,
     };
+    use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
     use solana_pubkey::Pubkey;
 
@@ -847,26 +874,73 @@ mod tests {
     #[test]
     fn test_build_strategy_reserves_space_for_uniqueness_nonce() {
         let validator = Pubkey::new_unique();
-        let tasks = vec![create_test_base_action_task(910).into()];
+        let build = |data_len, nonce| {
+            TaskStrategist::build_strategy(
+                vec![create_test_base_action_task(data_len).into()],
+                &validator,
+                &None::<IntentPersisterImpl>,
+                nonce,
+            )
+        };
 
-        let result = TaskStrategist::build_strategy(
-            tasks.clone(),
-            &validator,
-            &None::<IntentPersisterImpl>,
-            Some(42),
-        );
-        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
+        let no_nonce_boundary_len = (0..MAX_TRANSACTION_V1_WIRE_SIZE)
+            .rev()
+            .find(|data_len| {
+                build(*data_len, None).is_ok()
+                    && matches!(
+                        build(*data_len, Some(42)),
+                        Err(TaskStrategistError::FailedToFitError)
+                    )
+            })
+            .expect("expected a payload size at the v1 boundary");
+        let nonce_boundary_len = (0..no_nonce_boundary_len)
+            .rev()
+            .find(|data_len| build(*data_len, Some(42)).is_ok())
+            .expect("expected a nonce-bearing payload size to fit");
 
-        // One byte fewer fits again, and the nonce lands on the strategy.
-        let tasks = vec![create_test_base_action_task(909).into()];
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            Some(42),
-        )
-        .expect("should fit with one task fewer");
+        let strategy = build(nonce_boundary_len, Some(42))
+            .expect("should fit below the nonce boundary");
         assert_eq!(strategy.uniqueness_nonce, Some(42));
+    }
+
+    #[test]
+    fn test_build_strategy_tries_v0_alts_before_buffering_v1_key_overflow() {
+        let validator = Pubkey::new_unique();
+        let action: BaseActionTask = BaseActionTaskV1 {
+            action: BaseAction {
+                id: 0,
+                destination_program: Pubkey::new_unique(),
+                source_program: None,
+                escrow_authority: Pubkey::new_unique(),
+                account_metas_per_program: (0..65)
+                    .map(|_| ShortAccountMeta {
+                        pubkey: Pubkey::new_unique(),
+                        is_writable: false,
+                    })
+                    .collect(),
+                data_per_program: ProgramArgs {
+                    data: vec![],
+                    escrow_index: 0,
+                },
+                compute_units: 30_000,
+                callback: None,
+            },
+        }
+        .into();
+
+        let strategy = TaskStrategist::build_strategy(
+            vec![action.into()],
+            &validator,
+            &None::<IntentPersisterImpl>,
+            None,
+        )
+        .expect("should fall back to v0 + ALTs");
+
+        assert!(!strategy.lookup_tables_keys.is_empty());
+        assert!(strategy
+            .optimized_tasks
+            .iter()
+            .all(|task| task.strategy() == TaskStrategy::Args));
     }
 
     #[test]
@@ -1090,5 +1164,4 @@ mod tests {
             panic!("Unexpected execution mode");
         };
     }
-
 }
