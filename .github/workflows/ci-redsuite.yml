@@ -41,6 +41,11 @@ env:
 
 jobs:
   build_er:
+    # Temporarily disable RedSuite: the pinned revision uses a base runtime
+    # that cannot decode our v1 commits, while the latest revision expects
+    # validator configuration fields this branch does not support yet.
+    # Restore this job after choosing a compatible runtime and RedSuite revision.
+    if: ${{ false }}
     runs-on: blacksmith-32vcpu-ubuntu-2404
     name: Build ER Release Artifact
     timeout-minutes: 90
