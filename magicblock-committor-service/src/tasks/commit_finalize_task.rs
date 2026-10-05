@@ -116,10 +116,6 @@ impl CommitFinalizeTask {
 }
 
 impl BaseTask for CommitFinalizeTask {
-    fn program_id(&self) -> Pubkey {
-        dlp_api::id()
-    }
-
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery {
             CommitDelivery::StateInArgs => {
@@ -166,7 +162,7 @@ impl BaseTask for CommitFinalizeTask {
 
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
-            CommitDelivery::StateInArgs => {
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
                 commit_finalize_size_budget(AccountSizeClass::Dynamic(
                     self.committed_account.account.data.len() as u32,
                 ))
@@ -174,11 +170,6 @@ impl BaseTask for CommitFinalizeTask {
             CommitDelivery::StateInBuffer { .. }
             | CommitDelivery::DiffInBuffer { .. } => {
                 commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
-            }
-            CommitDelivery::DiffInArgs { .. } => {
-                commit_finalize_size_budget(AccountSizeClass::Dynamic(
-                    self.committed_account.account.data.len() as u32,
-                ))
             }
         }
     }

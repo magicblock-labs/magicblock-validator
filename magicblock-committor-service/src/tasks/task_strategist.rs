@@ -576,9 +576,9 @@ mod tests {
         persist::IntentPersisterImpl,
         tasks::{
             commit_finalize_task::CommitFinalizeTask,
-            task_builder::{TaskBuilderImpl, TasksBuilder},
+            task_builder::TaskBuilderImpl,
             utils::{create_commit_finalize_task, COMMIT_STATE_SIZE_THRESHOLD},
-            BaseActionTask, BaseActionTaskV1, TaskStrategy, UndelegateTask,
+            BaseActionTask, BaseActionTaskV1, UndelegateTask,
         },
         test_utils,
     };
@@ -704,6 +704,13 @@ mod tests {
         .into()
     }
 
+    fn commit_delivery(task: &BaseTaskImpl) -> &CommitDelivery {
+        let BaseTaskImpl::CommitFinalize(task) = task else {
+            panic!("expected a combined commit");
+        };
+        &task.delivery
+    }
+
     // Helper to create an undelegate task
     fn create_test_undelegate_task() -> UndelegateTask {
         UndelegateTask {
@@ -750,8 +757,8 @@ mod tests {
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
-            strategy.optimized_tasks[0].strategy(),
-            TaskStrategy::Buffer
+            commit_delivery(&strategy.optimized_tasks[0]),
+            CommitDelivery::StateInBuffer { .. }
         ));
     }
 
@@ -770,10 +777,10 @@ mod tests {
         )
         .expect("Buffer delivery must fit even when inline data exceeds u16");
 
-        assert_eq!(
-            strategy.optimized_tasks[0].strategy(),
-            TaskStrategy::Buffer
-        );
+        assert!(matches!(
+            commit_delivery(&strategy.optimized_tasks[0]),
+            CommitDelivery::StateInBuffer { .. }
+        ));
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 
@@ -794,7 +801,10 @@ mod tests {
         .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
+        assert!(matches!(
+            commit_delivery(&strategy.optimized_tasks[0]),
+            CommitDelivery::DiffInArgs { .. }
+        ));
     }
 
     #[test]
@@ -815,7 +825,10 @@ mod tests {
         .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert_eq!(strategy.optimized_tasks[0].strategy(), TaskStrategy::Args);
+        assert!(matches!(
+            commit_delivery(&strategy.optimized_tasks[0]),
+            CommitDelivery::DiffInArgs { .. }
+        ));
     }
 
     #[test]
@@ -834,10 +847,10 @@ mod tests {
         .expect("Should build strategy with buffer optimization");
 
         assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert_eq!(
-            strategy.optimized_tasks[0].strategy(),
-            TaskStrategy::Buffer
-        );
+        assert!(matches!(
+            commit_delivery(&strategy.optimized_tasks[0]),
+            CommitDelivery::DiffInBuffer { .. }
+        ));
     }
 
     #[test]
@@ -862,8 +875,11 @@ mod tests {
         )
         .expect("Should build strategy with buffer optimization");
 
-        for optimized_task in strategy.optimized_tasks {
-            assert!(matches!(optimized_task.strategy(), TaskStrategy::Buffer));
+        for optimized_task in &strategy.optimized_tasks {
+            assert!(matches!(
+                commit_delivery(optimized_task),
+                CommitDelivery::StateInBuffer { .. }
+            ));
         }
         assert!(strategy.lookup_tables_keys.is_empty());
     }
@@ -905,7 +921,10 @@ mod tests {
 
         for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize]
         {
-            assert!(matches!(optimized_task.strategy(), TaskStrategy::Buffer));
+            assert!(matches!(
+                commit_delivery(optimized_task),
+                CommitDelivery::StateInBuffer { .. }
+            ));
         }
         assert!(!strategy.lookup_tables_keys.is_empty());
     }
@@ -976,10 +995,10 @@ mod tests {
         .expect("should fall back to v0 + ALTs");
 
         assert!(!strategy.lookup_tables_keys.is_empty());
-        assert!(strategy
-            .optimized_tasks
-            .iter()
-            .all(|task| task.strategy() == TaskStrategy::Args));
+        assert!(matches!(
+            strategy.optimized_tasks.as_slice(),
+            [BaseTaskImpl::BaseAction(_)]
+        ));
     }
 
     #[test]
@@ -1058,8 +1077,14 @@ mod tests {
             MAX_TRANSACTION_V1_WIRE_SIZE,
         );
         // The larger task should have been optimized first
-        assert!(matches!(tasks[0].strategy(), TaskStrategy::Args));
-        assert!(matches!(tasks[1].strategy(), TaskStrategy::Buffer));
+        assert!(matches!(
+            commit_delivery(&tasks[0]),
+            CommitDelivery::StateInArgs
+        ));
+        assert!(matches!(
+            commit_delivery(&tasks[1]),
+            CommitDelivery::StateInBuffer { .. }
+        ));
     }
 
     #[test]
@@ -1082,21 +1107,15 @@ mod tests {
 
         assert_eq!(strategy.optimized_tasks.len(), 4);
 
-        let strategies: Vec<TaskStrategy> = strategy
-            .optimized_tasks
-            .iter()
-            .map(|t| t.strategy())
-            .collect();
-
-        assert_eq!(
-            strategies,
-            vec![
-                TaskStrategy::Buffer, // Commit task optimized
-                TaskStrategy::Args,   // Undelegate stays
-                TaskStrategy::Args,   // BaseAction stays
-                TaskStrategy::Args,   // Undelegate stays
-            ]
-        );
+        assert!(matches!(
+            strategy.optimized_tasks.as_slice(),
+            [
+                BaseTaskImpl::CommitFinalize(task),
+                BaseTaskImpl::Undelegate(_),
+                BaseTaskImpl::BaseAction(_),
+                BaseTaskImpl::Undelegate(_),
+            ] if matches!(task.delivery, CommitDelivery::StateInBuffer { .. })
+        ));
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 
@@ -1354,49 +1373,42 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_two_stage_mode_when_task_count_exceeds_single_stage_limit(
-    ) {
-        let mut intent = create_test_intent(0, &[], false);
-        intent.intent_bundle.standalone_actions = (0..23)
-            .map(|_| BaseAction {
-                id: 0,
-                destination_program: Pubkey::new_unique(),
-                source_program: None,
-                escrow_authority: Pubkey::new_unique(),
-                account_metas_per_program: vec![],
-                data_per_program: ProgramArgs {
-                    data: vec![],
-                    escrow_index: 0,
-                },
-                compute_units: 30_000,
-                callback: None,
-            })
-            .collect();
-
+    async fn test_build_two_stage_mode_when_combined_compute_budget_exceeded() {
+        let pubkeys: [Pubkey; 6] =
+            std::array::from_fn(|_| Pubkey::new_unique());
+        let intent = create_test_intent(0, &pubkeys, true);
         let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(
+        let commit_tasks = TaskBuilderImpl::commit_tasks(
             &info_fetcher,
             &intent,
             &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
-        let finalize_task =
+        let finalize_tasks =
             TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
                 .await
                 .unwrap();
 
+        // Six commits and six undelegations need 1.44M CU together;
+        // each group fits separately with 720K CU.
         let execution_mode = TaskStrategist::build_execution_strategy(
-            commit_task,
-            finalize_task,
+            commit_tasks,
+            finalize_tasks,
             &Pubkey::new_unique(),
             &None::<IntentPersisterImpl>,
             None,
         )
-        .expect("Execution mode created");
+        .expect("Both transactions fit separately");
 
-        let StrategyExecutionMode::TwoStage { .. } = execution_mode else {
-            panic!("Unexpected execution mode");
+        let StrategyExecutionMode::TwoStage {
+            commit_stage,
+            finalize_stage,
+        } = execution_mode
+        else {
+            panic!("expected two transactions");
         };
+        assert_eq!(commit_stage.optimized_tasks.len(), 6);
+        assert_eq!(finalize_stage.optimized_tasks.len(), 6);
     }
 }

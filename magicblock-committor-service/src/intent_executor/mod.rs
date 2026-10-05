@@ -45,7 +45,7 @@ use crate::{
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::TaskBuilderImpl,
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
@@ -443,10 +443,9 @@ where
         )
         .await?;
 
-        let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.commit_signature,
-            finalize_signature: finalized_stage.finalize_signature,
+            commit_signature,
+            finalize_signature,
         })
     }
 

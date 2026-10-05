@@ -148,14 +148,4 @@ impl CommitStatus {
             _ => None,
         }
     }
-
-    /// The commit fully succeeded and no retry is necessary.
-    pub fn is_complete(&self) -> bool {
-        use CommitStatus::*;
-        matches!(self, Succeeded(_))
-    }
-
-    pub fn all_completed(stages: &[Self]) -> bool {
-        stages.iter().all(Self::is_complete)
-    }
 }

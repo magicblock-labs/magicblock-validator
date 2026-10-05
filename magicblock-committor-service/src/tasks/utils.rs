@@ -140,21 +140,6 @@ impl TransactionUtils {
             .collect()
     }
 
-    pub fn assemble_tasks_tx(
-        authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        compute_unit_price: u64,
-        lookup_tables: &[AddressLookupTableAccount],
-    ) -> TaskStrategistResult<VersionedTransaction> {
-        Self::assemble_tasks_tx_with_uniqueness_nonce(
-            authority,
-            tasks,
-            compute_unit_price,
-            lookup_tables,
-            None,
-        )
-    }
-
     pub fn assemble_tasks_tx_with_uniqueness_nonce(
         authority: &Keypair,
         tasks: &[BaseTaskImpl],
@@ -317,27 +302,19 @@ impl TransactionUtils {
         let total_budget: u32 =
             tasks.iter().map(|task| task.accounts_size_budget()).sum();
 
-        let dlp_task_count: u32 = tasks
-            .iter()
-            .filter(|task| task.program_id() == dlp_api::id())
-            .count() as u32;
-
-        if dlp_task_count > 0 {
-            let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
-            let deduction = dlp_task_count
-                .saturating_sub(1)
-                .saturating_mul(dlp_program_budget);
-            // The API's 350 KiB estimate is smaller than the deployed DLP.
-            // Reserve at least 1 MiB for its program data, counted only once.
-            let program_headroom = AccountSizeClass::Huge
-                .size_budget()
-                .saturating_sub(dlp_program_budget);
-            total_budget
-                .saturating_sub(deduction)
-                .saturating_add(program_headroom)
-        } else {
-            total_budget
-        }
+        // All tasks target DLP, so count its program data only once.
+        let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
+        let deduction = (tasks.len() as u32)
+            .saturating_sub(1)
+            .saturating_mul(dlp_program_budget);
+        // The API's 350 KiB estimate is smaller than the deployed DLP.
+        // Reserve at least 1 MiB for its program data, counted only once.
+        let program_headroom = AccountSizeClass::Huge
+            .size_budget()
+            .saturating_sub(dlp_program_budget);
+        total_budget
+            .saturating_sub(deduction)
+            .saturating_add(program_headroom)
     }
 
     fn tasks_accounts_size_budget_with_uniqueness_nonce(

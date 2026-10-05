@@ -25,7 +25,7 @@ use crate::{
 /// Estimates whether an intent's commit and finalize stages fit the supported
 /// transaction formats without fetching base-layer state or commit metadata.
 ///
-/// Unlike [`crate::tasks::task_builder::TasksBuilder`], admission cannot compute
+/// Unlike [`crate::tasks::task_builder::TaskBuilderImpl`], admission cannot compute
 /// the actual account diff. It estimates larger accounts using buffers, reserves
 /// distinct keys for unknown rent payers, and includes a uniqueness noop in each
 /// stage. Each stage is checked against v1, then v0 with full ALT coverage.
@@ -78,7 +78,7 @@ impl IntentSizeValidator {
     }
 
     /// Builds the finalize-stage tasks used for the size estimate, mirroring
-    /// [`crate::tasks::task_builder::TasksBuilder::finalize_tasks`] but
+    /// [`crate::tasks::task_builder::TaskBuilderImpl::finalize_tasks`] but
     /// without fetching rent payers. [`Self::tasks_fit`] assigns distinct
     /// placeholder keys before compiling these tasks, accounting for each
     /// unknown payer's contribution to the transaction size and account count.
@@ -524,7 +524,7 @@ mod tests {
                 Some(0),
             );
             known_keys.push(authority.pubkey());
-            known_keys.extend(original.iter().map(BaseTask::program_id));
+            known_keys.push(dlp_api::id());
             assert!(payers.iter().all(|payer| !known_keys.contains(payer)));
             assert_eq!(wire_size(&estimated), wire_size(&actual));
 

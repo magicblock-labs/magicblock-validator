@@ -26,7 +26,7 @@ use magicblock_committor_service::{
     },
     persist::IntentPersisterImpl,
     tasks::{
-        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
+        task_builder::{TaskBuilderError, TaskBuilderImpl},
         task_strategist::{
             TaskStrategist, TaskStrategistError, TransactionStrategy,
         },

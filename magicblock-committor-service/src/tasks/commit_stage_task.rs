@@ -98,11 +98,6 @@ impl<'a> PreparationTask<'a> {
         instruction
     }
 
-    /// Returns compute units required for realloc instruction
-    pub fn init_compute_units(&self) -> u32 {
-        12_000
-    }
-
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
@@ -116,11 +111,6 @@ impl<'a> PreparationTask<'a> {
             });
 
         realloc_instructions
-    }
-
-    /// Returns compute units required for realloc instruction
-    pub fn realloc_compute_units(&self) -> u32 {
-        6_000
     }
 
     /// Returns realloc instruction required for Buffer preparation
@@ -142,33 +132,6 @@ impl<'a> PreparationTask<'a> {
             .collect::<Vec<_>>();
 
         write_instructions
-    }
-
-    pub fn write_compute_units(&self, bytes_count: usize) -> u32 {
-        const PER_BYTE: u32 = 3;
-
-        u32::try_from(bytes_count)
-            .ok()
-            .and_then(|bytes_count| bytes_count.checked_mul(PER_BYTE))
-            .unwrap_or(u32::MAX)
-    }
-
-    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::chunks_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
-    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::buffer_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
     }
 
     pub fn cleanup_task(&self) -> CleanupTask {

@@ -1,21 +1,9 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        Arc, Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc, Mutex,
 };
 
-use async_trait::async_trait;
-use dlp_api::state::{DelegationMetadata, UndelegationRequester};
 use magicblock_committor_service::{
-    intent_executor::{
-        task_info_fetcher::{
-            AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher,
-            TaskInfoFetcherError, TaskInfoFetcherResult,
-        },
-        IntentExecutorImpl,
-    },
     tasks::{
         commit_delivery::CommitDelivery,
         commit_finalize_task::CommitFinalizeTask,
@@ -23,7 +11,7 @@ use magicblock_committor_service::{
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
-    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
+    ComputeBudgetConfig,
 };
 use magicblock_core::{
     intent::{types::CommittedAccount, BaseActionCallback},
@@ -134,34 +122,6 @@ impl TestFixture {
             self.compute_budget_config.clone(),
         )
     }
-
-    #[allow(dead_code)]
-    pub fn create_intent_executor(
-        &self,
-    ) -> IntentExecutorImpl<
-        TransactionPreparatorImpl,
-        MockTaskInfoFetcher,
-        MockActionsCallbackExecutor,
-    > {
-        let transaction_preparator = self.create_transaction_preparator();
-
-        IntentExecutorImpl::new(
-            self.rpc_client.clone(),
-            transaction_preparator,
-            self.create_task_info_fetcher(),
-            MockActionsCallbackExecutor::default(),
-            DEFAULT_ACTIONS_TIMEOUT,
-        )
-    }
-
-    #[allow(dead_code)]
-    pub fn create_task_info_fetcher(
-        &self,
-    ) -> Arc<CacheTaskInfoFetcher<MockTaskInfoFetcher>> {
-        Arc::new(CacheTaskInfoFetcher::new(MockTaskInfoFetcher(
-            self.rpc_client.clone(),
-        )))
-    }
 }
 
 type CallbackCalls = Vec<(Vec<BaseActionCallback>, ActionResult)>;
@@ -191,68 +151,6 @@ impl ActionsCallbackScheduler for MockActionsCallbackExecutor {
             .collect();
         self.calls.lock().unwrap().push((callbacks, result));
         signatures
-    }
-}
-
-pub struct MockTaskInfoFetcher(MagicblockRpcClient);
-
-#[async_trait]
-impl TaskInfoFetcher for MockTaskInfoFetcher {
-    async fn fetch_next_commit_nonces(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
-    }
-
-    async fn fetch_current_commit_nonces(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
-        Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
-    }
-
-    async fn fetch_delegation_metadata(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
-        Ok(accounts
-            .iter()
-            .map(|(pubkey, _)| {
-                (
-                    *pubkey,
-                    DelegationMetadata {
-                        last_commit_id: 0,
-                        undelegation_requester: UndelegationRequester::None,
-                        seeds: vec![],
-                        rent_payer: *pubkey,
-                    },
-                )
-            })
-            .collect())
-    }
-
-    async fn get_base_accounts(
-        &self,
-        pubkeys: &[Pubkey],
-        _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-        self.0
-            .get_multiple_accounts(pubkeys, None)
-            .await
-            .map_err(|err| {
-                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(err))
-            })
-            .map(|accounts| {
-                pubkeys
-                    .iter()
-                    .zip(accounts)
-                    .filter_map(|(key, value)| value.map(|value| (*key, value)))
-                    .collect()
-            })
     }
 }
 
