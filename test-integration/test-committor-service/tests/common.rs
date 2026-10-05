@@ -16,7 +16,10 @@ use magicblock_committor_service::{
         },
         IntentExecutorImpl,
     },
-    tasks::commit_task::{CommitDelivery, CommitTask},
+    tasks::{
+        commit_delivery::CommitDelivery,
+        commit_finalize_task::CommitFinalizeTask,
+    },
     transaction_preparator::{
         delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl,
     },
@@ -262,9 +265,9 @@ pub fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub fn create_commit_task(data: &[u8]) -> CommitTask {
+pub fn create_commit_finalize_task(data: &[u8]) -> CommitFinalizeTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask {
+    CommitFinalizeTask {
         commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         allow_undelegation: false,
         committed_account: CommittedAccount {
@@ -278,15 +281,15 @@ pub fn create_commit_task(data: &[u8]) -> CommitTask {
             },
             remote_slot: Default::default(),
         },
-        delivery_details: CommitDelivery::StateInArgs,
+        delivery: CommitDelivery::StateInArgs,
     }
 }
 
 #[allow(dead_code)]
-pub fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
-    let task = create_commit_task(data);
-    CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
+pub fn create_buffer_commit_finalize_task(data: &[u8]) -> CommitFinalizeTask {
+    let task = create_commit_finalize_task(data);
+    CommitFinalizeTask {
+        delivery: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }

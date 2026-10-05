@@ -147,9 +147,6 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .optimized_tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::Commit(commit_task) => {
-                    CleanupTask::from_commit(commit_task)
-                }
                 BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                     CleanupTask::from_commit_finalize(commit_finalize_task)
                 }

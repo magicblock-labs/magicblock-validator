@@ -9,7 +9,7 @@ use solana_signer::Signer;
 
 use crate::{
     tasks::{
-        commit_task::CommitDelivery,
+        commit_delivery::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{
             create_action_tasks, create_commit_finalize_task, TransactionUtils,
@@ -160,20 +160,6 @@ impl IntentSizeValidator {
     /// value we pass here doesn't matter. What actually differs between a
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
     /// built in [`Self::finalize_tasks`].
-    fn commit_task(account: &CommittedAccount) -> BaseTaskImpl {
-        let mut task = create_commit_finalize_task(
-            0,
-            false,
-            account.clone(),
-            Some(account.account.clone()),
-        );
-        if matches!(task.delivery, CommitDelivery::DiffInArgs { .. }) {
-            task.try_optimize_tx_size();
-        }
-        task.into()
-    }
-
-    /// Same as [`Self::commit_task`] but for `CommitFinalizeTask`.
     fn commit_finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
         let mut task = create_commit_finalize_task(
             0,
@@ -194,7 +180,7 @@ impl IntentSizeValidator {
         commit_type
             .get_committed_accounts()
             .iter()
-            .map(Self::commit_task)
+            .map(Self::commit_finalize_task)
             .collect()
     }
 
@@ -409,12 +395,6 @@ mod tests {
                         finalizes.len(),
                         usize::from(!combined) + usize::from(undelegate)
                     );
-                    assert!(commits.iter().chain(&finalizes).all(
-                        |task| !matches!(
-                            task,
-                            BaseTaskImpl::Commit(_) | BaseTaskImpl::Finalize(_)
-                        )
-                    ));
                     assert!(IntentSizeValidator::fits(&intent));
                 }
             }

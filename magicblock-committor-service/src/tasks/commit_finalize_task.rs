@@ -11,7 +11,7 @@ use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::tasks::{commit_task::CommitDelivery, BaseTask, BaseTaskImpl};
+use crate::tasks::{commit_delivery::CommitDelivery, BaseTask, BaseTaskImpl};
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
 /// instruction.

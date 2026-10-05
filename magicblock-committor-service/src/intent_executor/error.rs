@@ -208,8 +208,6 @@ pub enum TransactionStrategyExecutionError {
         #[source] TransactionError,
         Option<Signature>,
     ),
-    #[error("Unfinalized account error: {0}, {1:?}")]
-    UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("Transaction too large to send over the wire: {0}")]
     TransactionTooLargeError(#[source] InternalError),
     #[error("InternalError: {0}")]
@@ -245,32 +243,6 @@ impl TransactionStrategyExecutionError {
             || matches!(self, Self::TransactionTooLargeError(_))
     }
 
-    pub fn task_index(&self, task_instruction_offset: u8) -> Option<u8> {
-        match self {
-            Self::CommitIDError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::ActionsError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::UndelegationError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::UnfinalizedAccountError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::CpiLimitError(
-                TransactionError::InstructionError(index, _),
-                _,
-            ) => index.checked_sub(task_instruction_offset),
-            _ => None,
-        }
-    }
-
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::InternalError(err) => err.signature(),
@@ -278,7 +250,6 @@ impl TransactionStrategyExecutionError {
             Self::CommitIDError(_, signature)
             | Self::ActionsError(_, signature)
             | Self::UndelegationError(_, signature)
-            | Self::UnfinalizedAccountError(_, signature)
             | Self::CpiLimitError(_, signature)
             | Self::LoadedAccountsDataSizeExceeded(_, signature) => *signature,
         }
@@ -296,16 +267,6 @@ impl TransactionStrategyExecutionError {
         // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 =
             dlp_api::error::DlpError::NonceOutOfOrder as u32;
-        // Errors when commit state already exists
-        const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::error::DlpError::CommitStateInvalidAccountOwner as u32;
-        const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
-            dlp_api::error::DlpError::CommitStateAlreadyInitialized as u32;
-        const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::error::DlpError::CommitRecordInvalidAccountOwner as u32;
-        const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
-            dlp_api::error::DlpError::CommitRecordAlreadyInitialized as u32;
-
         match err {
             // Some tx may use too much CPIs and we can handle it in certain cases
             transaction_err @ TransactionError::InstructionError(
@@ -338,8 +299,7 @@ impl TransactionStrategyExecutionError {
 
                 match (task, instruction_err) {
                     (
-                        BaseTaskImpl::Commit(_)
-                        | BaseTaskImpl::CommitFinalize(_),
+                        BaseTaskImpl::CommitFinalize(_),
                         instruction_err,
                     ) => match instruction_err {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
@@ -350,25 +310,6 @@ impl TransactionStrategyExecutionError {
                                 signature,
                             ),
                         ),
-                        // Only legacy commits use the temporary state/record
-                        // PDAs that a separate Finalize can recover.
-                        instruction_err @ (InstructionError::Custom(
-                            COMMIT_STATE_INVALID_ACCOUNT_OWNER,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_STATE_ALREADY_INITIALIZED,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_RECORD_INVALID_ACCOUNT_OWNER,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_RECORD_ALREADY_INITIALIZED,
-                        )) if matches!(task, BaseTaskImpl::Commit(_)) => {
-                            Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
-                                tx_err_helper(instruction_err),
-                                signature
-                            ))
-                        }
                         err => Err(tx_err_helper(err)),
                     },
                     (BaseTaskImpl::BaseAction(_), instruction_err) => {
@@ -383,7 +324,6 @@ impl TransactionStrategyExecutionError {
                             signature,
                         ),
                     ),
-                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
@@ -405,7 +345,6 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
             }
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
-            Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
             Self::TransactionTooLargeError(_) => "transaction_too_large",
             _ => "failed",
         }
@@ -491,7 +430,7 @@ mod tests {
         use solana_transaction_error::TransactionError;
 
         use crate::tasks::utils::{
-            create_commit_finalize_task, create_commit_task, TransactionUtils,
+            create_commit_finalize_task, TransactionUtils,
         };
 
         let account = CommittedAccount {
@@ -499,7 +438,6 @@ mod tests {
             account: Account::default(),
             remote_slot: 0,
         };
-        let legacy = create_commit_task(1, false, account.clone(), None).into();
         let combined =
             create_commit_finalize_task(1, false, account, None).into();
         let pending_errors = [
@@ -514,10 +452,6 @@ mod tests {
                     offset,
                     InstructionError::Custom(*pending_error as u32),
                 );
-                let legacy_result = TransactionStrategyExecutionError::try_from_transaction_error(
-                    error.clone(), None, std::slice::from_ref(&legacy), offset,
-                );
-                assert!(matches!(legacy_result, Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(_, _))));
                 let combined_result = TransactionStrategyExecutionError::try_from_transaction_error(
                     error.clone(), None, std::slice::from_ref(&combined), offset,
                 );
