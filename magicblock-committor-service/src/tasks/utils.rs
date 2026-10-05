@@ -78,12 +78,8 @@ fn commit_delivery(
     }
 }
 
-/// Builds a [`CommitTask`] for `account`, used by both
-/// [`crate::tasks::task_builder::TaskBuilderImpl`] (real task construction,
-/// passing the real base-layer account state to diff against) and
-/// [`crate::tasks::intent_size_validator::IntentSizeValidator`] (size
-/// estimation, passing a stand-in base account purely to exercise this same
-/// `COMMIT_STATE_SIZE_THRESHOLD` check).
+/// Builds a legacy [`CommitTask`] for `account`. Intent execution and admission
+/// use [`create_commit_finalize_task`]; this helper remains for legacy tasks.
 pub fn create_commit_task(
     commit_id: u64,
     allow_undelegation: bool,

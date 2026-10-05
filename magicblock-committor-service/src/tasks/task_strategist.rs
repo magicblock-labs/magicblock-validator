@@ -148,6 +148,22 @@ impl TaskStrategist {
     ) -> TaskStrategistResult<StrategyExecutionMode> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
 
+        // Combined commits need no finalization transaction. Splitting an
+        // empty second stage cannot make the commit transaction smaller.
+        if finalize_tasks.is_empty()
+            && commit_tasks
+                .iter()
+                .any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)))
+        {
+            return Self::build_strategy(
+                commit_tasks,
+                authority,
+                persister,
+                uniqueness_nonce,
+            )
+            .map(StrategyExecutionMode::SingleStage);
+        }
+
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.
@@ -543,11 +559,13 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
+    use dlp_api::discriminator::DlpDiscriminator;
     use std::{collections::HashMap, sync::Arc};
 
     use dlp_api::state::{DelegationMetadata, UndelegationRequester};
     use magicblock_core::intent::{
-        types::CommittedAccount, BaseAction, ProgramArgs,
+        types::CommittedAccount, BaseAction, CommitAndUndelegate, CommitType,
+        MagicBaseIntent, ProgramArgs, UndelegateType,
     };
     use magicblock_program::args::ShortAccountMeta;
     use solana_account::Account;
@@ -573,6 +591,7 @@ mod tests {
     #[derive(Default)]
     struct MockInfoFetcher {
         delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
+        base_accounts: HashMap<Pubkey, Account>,
     }
 
     #[async_trait::async_trait]
@@ -625,7 +644,7 @@ mod tests {
             _pubkeys: &[Pubkey],
             _: u64,
         ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
-            Ok(Default::default())
+            Ok(self.base_accounts.clone())
         }
     }
 
@@ -1080,18 +1099,214 @@ mod tests {
                 delegated_account,
                 (UndelegationRequester::OwnerProgram, delegated_account),
             )]),
+            ..Default::default()
         });
 
         let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
             .await
             .unwrap();
 
-        let BaseTaskImpl::Undelegate(task) = &tasks[1] else {
+        let BaseTaskImpl::Undelegate(task) = &tasks[0] else {
             panic!("expected undelegate task");
         };
         assert_eq!(task.delegated_account, delegated_account);
         assert_eq!(task.rent_reimbursement, delegated_account);
         assert!(task.include_undelegation_request);
+    }
+
+    #[tokio::test]
+    async fn test_all_commit_intents_use_combined_tasks() {
+        let pubkey = Pubkey::new_unique();
+        let authority = Pubkey::new_unique();
+        for use_diff in [false, true] {
+            for combined in [false, true] {
+                for undelegate in [false, true] {
+                    let mut intent = create_test_intent(0, &[pubkey], false);
+                    let mut accounts = intent
+                        .intent_bundle
+                        .commit
+                        .take()
+                        .unwrap()
+                        .get_committed_accounts()
+                        .clone();
+                    accounts[0].account.data =
+                        vec![1; if use_diff { 1024 } else { 40 }];
+                    let mut base = accounts[0].account.clone();
+                    base.data[0] = 0;
+                    let info_fetcher = Arc::new(MockInfoFetcher {
+                        base_accounts: if use_diff {
+                            HashMap::from([(pubkey, base)])
+                        } else {
+                            HashMap::new()
+                        },
+                        ..Default::default()
+                    });
+                    let BaseActionTask::V1(action) =
+                        create_test_base_action_task(0)
+                    else {
+                        panic!("expected v1 action");
+                    };
+                    let commit = CommitType::WithBaseActions {
+                        committed_accounts: accounts,
+                        base_actions: vec![action.action.clone()],
+                    };
+                    let base_intent = match (combined, undelegate) {
+                        (false, false) => MagicBaseIntent::Commit(commit),
+                        (true, false) => {
+                            MagicBaseIntent::CommitFinalize(commit)
+                        }
+                        (false, true) => MagicBaseIntent::CommitAndUndelegate(
+                            CommitAndUndelegate {
+                                commit_action: commit,
+                                undelegate_action:
+                                    UndelegateType::WithBaseActions(vec![
+                                        action.action,
+                                    ]),
+                            },
+                        ),
+                        (true, true) => {
+                            MagicBaseIntent::CommitFinalizeAndUndelegate(
+                                CommitAndUndelegate {
+                                    commit_action: commit,
+                                    undelegate_action:
+                                        UndelegateType::WithBaseActions(vec![
+                                            action.action,
+                                        ]),
+                                },
+                            )
+                        }
+                    };
+                    intent.intent_bundle = base_intent.into();
+                    let mut commits = TaskBuilderImpl::commit_tasks(
+                        &info_fetcher,
+                        &intent,
+                        &None::<IntentPersisterImpl>,
+                    )
+                    .await
+                    .unwrap();
+                    let finalizes =
+                        TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent)
+                            .await
+                            .unwrap();
+                    assert_eq!(commits.len(), 1 + usize::from(combined));
+                    let BaseTaskImpl::CommitFinalize(task) = &mut commits[0]
+                    else {
+                        panic!("all commit intents must use CommitFinalize");
+                    };
+                    assert_eq!(task.allow_undelegation, undelegate);
+                    assert_eq!(task.committed_account.pubkey, pubkey);
+                    assert_eq!(
+                        matches!(
+                            task.delivery,
+                            CommitDelivery::DiffInArgs { .. }
+                        ),
+                        use_diff
+                    );
+                    let inline_ix = task.instruction(&authority);
+                    assert!(task.try_optimize_tx_size());
+                    let buffer_ix = task.instruction(&authority);
+                    assert!(inline_ix.data.starts_with(
+                        &DlpDiscriminator::CommitFinalize.to_vec()
+                    ));
+                    assert!(buffer_ix.data.starts_with(
+                        &DlpDiscriminator::CommitFinalizeFromBuffer.to_vec()
+                    ));
+                    assert_eq!(inline_ix.program_id, dlp_api::id());
+                    assert_eq!(buffer_ix.program_id, dlp_api::id());
+                    assert_eq!(
+                        finalizes.len(),
+                        usize::from(!combined) + 2 * usize::from(undelegate)
+                    );
+                    let mut tail = finalizes.iter();
+                    if !combined {
+                        assert!(matches!(
+                            tail.next(),
+                            Some(BaseTaskImpl::BaseAction(_))
+                        ));
+                    }
+                    if undelegate {
+                        assert!(matches!(
+                            tail.next(),
+                            Some(BaseTaskImpl::Undelegate(_))
+                        ));
+                        assert!(matches!(
+                            tail.next(),
+                            Some(BaseTaskImpl::BaseAction(_))
+                        ));
+                    }
+                    assert!(tail.next().is_none());
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_combined_commit_delivery_formats_without_finalize_stage() {
+        for data_len in [40, 10_240] {
+            for use_alts in [false, true] {
+                let mut intent =
+                    create_test_intent(0, &[Pubkey::new_unique()], false);
+                intent
+                    .intent_bundle
+                    .commit
+                    .as_mut()
+                    .unwrap()
+                    .get_committed_accounts_mut()[0]
+                    .account
+                    .data = vec![1; data_len];
+                let BaseActionTask::V1(mut action) =
+                    create_test_base_action_task(0)
+                else {
+                    panic!("expected v1 action");
+                };
+                if use_alts {
+                    action.action.account_metas_per_program = (0..65)
+                        .map(|_| ShortAccountMeta {
+                            pubkey: Pubkey::new_unique(),
+                            is_writable: false,
+                        })
+                        .collect();
+                }
+                intent.intent_bundle.standalone_actions.push(action.action);
+                let fetcher = Arc::new(MockInfoFetcher::default());
+                let commits = TaskBuilderImpl::commit_tasks(
+                    &fetcher,
+                    &intent,
+                    &None::<IntentPersisterImpl>,
+                )
+                .await
+                .unwrap();
+                let finalizes =
+                    TaskBuilderImpl::finalize_tasks(&fetcher, &intent)
+                        .await
+                        .unwrap();
+                assert!(finalizes.is_empty());
+                let mode = TaskStrategist::build_execution_strategy(
+                    commits,
+                    finalizes,
+                    &Pubkey::new_unique(),
+                    &None::<IntentPersisterImpl>,
+                    Some(1),
+                )
+                .unwrap();
+                let StrategyExecutionMode::SingleStage(strategy) = mode else {
+                    panic!("no separate finalization transaction is needed");
+                };
+                assert_eq!(strategy.uses_alts(), use_alts);
+                let BaseTaskImpl::CommitFinalize(task) =
+                    &strategy.optimized_tasks[1]
+                else {
+                    panic!("format fallback must retain CommitFinalize");
+                };
+                assert_eq!(
+                    matches!(
+                        task.delivery,
+                        CommitDelivery::StateInBuffer { .. }
+                    ),
+                    data_len > 4096
+                );
+            }
+        }
     }
 
     #[tokio::test]

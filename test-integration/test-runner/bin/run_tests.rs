@@ -477,6 +477,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
             "test_action_callback_fired_on_failure",
             "test_action_callback_fired_on_timeout",
             "test_callbacks_fired_in_two_stage",
+            "test_two_stage_action_failure_keeps_combined_commit",
         ],
         extra_files: &[],
     };
