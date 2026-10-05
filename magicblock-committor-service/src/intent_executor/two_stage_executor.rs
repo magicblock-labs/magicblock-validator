@@ -454,6 +454,20 @@ where
             self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
+            // Failed actions may be removed after a confirmed combined commit.
+            // If nothing remains, reuse that commit's signature. An empty
+            // strategy after an undelegation failure must retain the failure.
+            if self.state.finalize_strategy.optimized_tasks.is_empty() {
+                if matches!(
+                    execution_err,
+                    TransactionStrategyExecutionError::ActionsError(_, _)
+                ) {
+                    self.execution_report.add_patched_error(execution_err);
+                    break Ok(self.state.commit_signature);
+                }
+                break Err(execution_err);
+            }
+
             if self.state.current_attempt >= Self::RECURSION_CEILING {
                 error!("CRITICAL! Recursion ceiling reached");
                 break Err(execution_err);

@@ -19,9 +19,9 @@ use crate::{
     tasks::{
         utils::{
             create_action_tasks, create_commit_finalize_task,
-            create_commit_task, COMMIT_STATE_SIZE_THRESHOLD,
+            COMMIT_STATE_SIZE_THRESHOLD,
         },
-        BaseTaskImpl, FinalizeTask, UndelegateTask,
+        BaseTaskImpl, UndelegateTask,
     },
 };
 
@@ -130,7 +130,7 @@ impl TaskBuilderImpl {
         let commit_nonces =
             commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let base_accounts = base_accounts.unwrap_or_else(|err| {
-            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to CommitState");
+            tracing::warn!(intent_id = intent_bundle.id, error = ?err, "Failed to fetch base accounts, falling back to full-state CommitFinalize");
             Default::default()
         });
 
@@ -225,14 +225,6 @@ impl TasksBuilder for TaskBuilderImpl {
         info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
-        // Helper to create a finalize task
-        fn finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
-            FinalizeTask {
-                delegated_account: account.pubkey,
-            }
-            .into()
-        }
-
         // Helper to create an undelegate task
         fn undelegate_task(
             account: &CommittedAccount,
@@ -251,19 +243,11 @@ impl TasksBuilder for TaskBuilderImpl {
         // Helper to process commit types
         fn create_finalize_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
             match commit {
-                CommitType::Standalone(accounts) => {
-                    accounts.iter().map(finalize_task).collect()
-                }
-                CommitType::WithBaseActions {
-                    committed_accounts,
-                    base_actions,
-                } => {
-                    let mut tasks = committed_accounts
-                        .iter()
-                        .map(finalize_task)
-                        .collect::<Vec<_>>();
-                    tasks.extend(create_action_tasks(base_actions));
-                    tasks
+                CommitType::Standalone(_) => Vec::new(),
+                CommitType::WithBaseActions { base_actions, .. } => {
+                    // State is finalized in the commit stage. Keep ordinary
+                    // commit actions here, before undelegation, as before.
+                    create_action_tasks(base_actions).collect()
                 }
             }
         }
@@ -350,7 +334,8 @@ impl<'a> CommitBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                create_commit_task(nonce, false, account.clone(), base).into()
+                create_commit_finalize_task(nonce, false, account.clone(), base)
+                    .into()
             })
             .collect()
     }
@@ -370,7 +355,8 @@ impl<'a> CommitAndUndelegateBuilder<'a> {
                 let nonce =
                     take_commit_nonce(self.commit_nonces, account.pubkey);
                 let base = self.base_accounts.remove(&account.pubkey);
-                create_commit_task(nonce, true, account.clone(), base).into()
+                create_commit_finalize_task(nonce, true, account.clone(), base)
+                    .into()
             })
             .collect()
     }

@@ -12,10 +12,9 @@ use crate::{
         commit_task::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{
-            create_action_tasks, create_commit_finalize_task,
-            create_commit_task, TransactionUtils,
+            create_action_tasks, create_commit_finalize_task, TransactionUtils,
         },
-        BaseTask, BaseTaskImpl, FinalizeTask, UndelegateTask,
+        BaseTask, BaseTaskImpl, UndelegateTask,
     },
     transactions::{
         serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
@@ -56,7 +55,7 @@ impl IntentSizeValidator {
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
-    /// standalone/base actions, and an estimated `Commit`/`CommitFinalize`
+    /// standalone/base actions, and an estimated `CommitFinalize`
     /// task for each committed account.
     fn commit_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
         let mut tasks: Vec<BaseTaskImpl> =
@@ -84,13 +83,6 @@ impl IntentSizeValidator {
     /// placeholder keys before compiling these tasks, accounting for each
     /// unknown payer's contribution to the transaction size and account count.
     fn finalize_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
-        fn finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
-            FinalizeTask {
-                delegated_account: account.pubkey,
-            }
-            .into()
-        }
-
         fn undelegate_task(account: &CommittedAccount) -> BaseTaskImpl {
             UndelegateTask {
                 delegated_account: account.pubkey,
@@ -106,11 +98,7 @@ impl IntentSizeValidator {
         fn commit_type_finalize_tasks(
             commit_type: &CommitType,
         ) -> Vec<BaseTaskImpl> {
-            let mut tasks: Vec<BaseTaskImpl> = commit_type
-                .get_committed_accounts()
-                .iter()
-                .map(finalize_task)
-                .collect();
+            let mut tasks = Vec::new();
             if let CommitType::WithBaseActions { base_actions, .. } =
                 commit_type
             {
@@ -159,8 +147,8 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Builds the estimated `CommitTask` for `account`. Reuses
-    /// [`create_commit_task`]'s real `COMMIT_STATE_SIZE_THRESHOLD` check by
+    /// Builds the estimated `CommitFinalizeTask` for `account`. Reuses
+    /// [`create_commit_finalize_task`]'s real `COMMIT_STATE_SIZE_THRESHOLD` check by
     /// passing a clone of the account's own data as a stand-in base account
     /// -- large enough accounts land on `DiffInArgs`, which is then
     /// immediately escalated to buffer mode since the real diff size is
@@ -173,13 +161,13 @@ impl IntentSizeValidator {
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
     /// built in [`Self::finalize_tasks`].
     fn commit_task(account: &CommittedAccount) -> BaseTaskImpl {
-        let mut task = create_commit_task(
+        let mut task = create_commit_finalize_task(
             0,
             false,
             account.clone(),
             Some(account.account.clone()),
         );
-        if matches!(task.delivery_details, CommitDelivery::DiffInArgs { .. }) {
+        if matches!(task.delivery, CommitDelivery::DiffInArgs { .. }) {
             task.try_optimize_tx_size();
         }
         task.into()
@@ -374,6 +362,62 @@ mod tests {
             },
             account_metas_per_program: vec![],
             callback: None,
+        }
+    }
+
+    #[test]
+    fn test_admission_estimates_combined_commits() {
+        for data_len in [40, 10_240] {
+            let commit = CommitType::WithBaseActions {
+                committed_accounts: vec![make_committed_account(data_len)],
+                base_actions: vec![make_base_action(0)],
+            };
+            for combined in [false, true] {
+                for undelegate in [false, true] {
+                    let mut intent = MagicIntentBundle::default();
+                    let action = CommitAndUndelegate {
+                        commit_action: commit.clone(),
+                        undelegate_action: UndelegateType::Standalone,
+                    };
+                    match (combined, undelegate) {
+                        (false, false) => intent.commit = Some(commit.clone()),
+                        (true, false) => {
+                            intent.commit_finalize = Some(commit.clone())
+                        }
+                        (false, true) => {
+                            intent.commit_and_undelegate = Some(action)
+                        }
+                        (true, true) => {
+                            intent.commit_finalize_and_undelegate = Some(action)
+                        }
+                    }
+                    let commits = IntentSizeValidator::commit_tasks(&intent);
+                    let finalizes =
+                        IntentSizeValidator::finalize_tasks(&intent);
+                    assert_eq!(commits.len(), 1 + usize::from(combined));
+                    let BaseTaskImpl::CommitFinalize(task) = &commits[0] else {
+                        panic!("admission must estimate combined commits");
+                    };
+                    assert_eq!(
+                        matches!(
+                            task.delivery,
+                            CommitDelivery::DiffInBuffer { .. }
+                        ),
+                        data_len > 256
+                    );
+                    assert_eq!(
+                        finalizes.len(),
+                        usize::from(!combined) + usize::from(undelegate)
+                    );
+                    assert!(commits.iter().chain(&finalizes).all(
+                        |task| !matches!(
+                            task,
+                            BaseTaskImpl::Commit(_) | BaseTaskImpl::Finalize(_)
+                        )
+                    ));
+                    assert!(IntentSizeValidator::fits(&intent));
+                }
+            }
         }
     }
 
