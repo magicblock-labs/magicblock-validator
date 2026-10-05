@@ -573,10 +573,12 @@ pub type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 #[cfg(test)]
 #[allow(deprecated)]
 mod tests {
-    use dlp_api::discriminator::DlpDiscriminator;
     use std::{collections::HashMap, sync::Arc};
 
-    use dlp_api::state::{DelegationMetadata, UndelegationRequester};
+    use dlp_api::{
+        discriminator::DlpDiscriminator,
+        state::{DelegationMetadata, UndelegationRequester},
+    };
     use magicblock_core::intent::{
         types::CommittedAccount, BaseAction, CommitAndUndelegate, CommitType,
         MagicBaseIntent, ProgramArgs, UndelegateType,

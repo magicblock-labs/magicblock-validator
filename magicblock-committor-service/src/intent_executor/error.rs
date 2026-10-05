@@ -483,15 +483,16 @@ mod tests {
 
     #[test]
     fn combined_commits_do_not_trigger_legacy_finalization() {
-        use crate::tasks::utils::{
-            create_commit_finalize_task, create_commit_task, TransactionUtils,
-        };
         use dlp_api::error::DlpError;
         use magicblock_core::intent::types::CommittedAccount;
         use solana_account::Account;
         use solana_instruction::error::InstructionError;
         use solana_pubkey::Pubkey;
         use solana_transaction_error::TransactionError;
+
+        use crate::tasks::utils::{
+            create_commit_finalize_task, create_commit_task, TransactionUtils,
+        };
 
         let account = CommittedAccount {
             pubkey: Pubkey::new_unique(),
