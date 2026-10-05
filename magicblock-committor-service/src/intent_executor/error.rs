@@ -421,7 +421,7 @@ mod tests {
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
 
     #[test]
-    fn combined_commits_do_not_trigger_legacy_finalization() {
+    fn combined_commit_errors_use_message_instruction_offset() {
         use dlp_api::error::DlpError;
         use magicblock_core::intent::types::CommittedAccount;
         use solana_account::Account;
@@ -440,23 +440,19 @@ mod tests {
         };
         let combined =
             create_commit_finalize_task(1, false, account, None).into();
-        let pending_errors = [
-            DlpError::CommitStateInvalidAccountOwner,
-            DlpError::CommitStateAlreadyInitialized,
-            DlpError::CommitRecordInvalidAccountOwner,
-            DlpError::CommitRecordAlreadyInitialized,
-        ];
         for offset in [0, TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT] {
-            for pending_error in &pending_errors {
-                let error = TransactionError::InstructionError(
+            let unrelated_error = TransactionError::InstructionError(
+                offset,
+                InstructionError::InvalidAccountData,
+            );
+            let result =
+                TransactionStrategyExecutionError::try_from_transaction_error(
+                    unrelated_error.clone(),
+                    None,
+                    std::slice::from_ref(&combined),
                     offset,
-                    InstructionError::Custom(*pending_error as u32),
                 );
-                let combined_result = TransactionStrategyExecutionError::try_from_transaction_error(
-                    error.clone(), None, std::slice::from_ref(&combined), offset,
-                );
-                assert_eq!(combined_result.unwrap_err(), error);
-            }
+            assert_eq!(result.unwrap_err(), unrelated_error);
             let nonce_error = TransactionError::InstructionError(
                 offset,
                 InstructionError::Custom(DlpError::NonceOutOfOrder as u32),

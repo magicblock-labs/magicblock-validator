@@ -45,13 +45,6 @@ pub struct Committed {
     current_attempt: u8,
 }
 
-pub struct Finalized {
-    /// Signature of commit stage
-    pub commit_signature: Signature,
-    /// Signature of finalize stage
-    pub finalize_signature: Signature,
-}
-
 pub struct TwoStageExecutor<'a, A, S: Sealed> {
     state: S,
     intent_id: u64,
@@ -499,14 +492,6 @@ where
             }
         }
     }
-
-    /// Transitions to next executor state
-    pub fn done(self, finalize_signature: Signature) -> Finalized {
-        Finalized {
-            commit_signature: self.state.commit_signature,
-            finalize_signature,
-        }
-    }
 }
 
 mod sealed {
@@ -514,5 +499,4 @@ mod sealed {
 
     impl Sealed for super::Initialized {}
     impl Sealed for super::Committed {}
-    impl Sealed for super::Finalized {}
 }
