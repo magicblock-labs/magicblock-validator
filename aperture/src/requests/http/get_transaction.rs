@@ -1,4 +1,4 @@
-use json::{JsonContainerTrait, JsonValueMutTrait, JsonValueTrait};
+use json::{JsonValueMutTrait, JsonValueTrait};
 use ledger::request::{BlockDetails, BlockParams};
 use solana_rpc_client_api::config::{RpcEncodingConfigWrapper, RpcTransactionConfig};
 use solana_transaction_status::{ConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
@@ -28,9 +28,8 @@ impl HttpDispatcher {
             let encoded_transaction =
                 transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
 
-            let mut encoded_value = value_from_serializable(&encoded_transaction)
-                .ok_or_else(|| RpcError::internal("failed to serialize getTransaction response"))?;
-            normalize_failed_transaction_balance_arrays(&mut encoded_value);
+            let mut encoded_value = json::to_value(&encoded_transaction)
+                .map_err(|_| RpcError::internal("failed to serialize getTransaction response"))?;
 
             if encoding == UiTransactionEncoding::JsonParsed {
                 sanitize_nan_strings(&mut encoded_value);
@@ -65,41 +64,6 @@ impl HttpDispatcher {
 
         encode(transaction)
     }
-}
-
-fn value_from_serializable<T: json::Serialize>(value: &T) -> Option<json::Value> {
-    json::to_value(value).ok()
-}
-
-fn normalize_failed_transaction_balance_arrays(value: &mut json::Value) {
-    if value["meta"]["err"].is_null() {
-        return;
-    }
-
-    let Some(pre_balances) = value["meta"]["preBalances"]
-        .as_array()
-        .filter(|pre_balances| !pre_balances.is_empty())
-        .map(|pre_balances| pre_balances.to_vec())
-    else {
-        return;
-    };
-
-    let mut repaired_post_balances = pre_balances;
-
-    let fee = json_value_as_u64(&value["meta"]["fee"]).unwrap_or(0);
-    if let Some(first_balance) = repaired_post_balances.first_mut()
-        && let Some(balance) = json_value_as_u64(first_balance)
-    {
-        *first_balance = balance.saturating_sub(fee).into();
-    }
-
-    if let Some(encoded_balances) = value_from_serializable(&repaired_post_balances) {
-        value["meta"]["postBalances"] = encoded_balances;
-    }
-}
-
-fn json_value_as_u64(value: &json::Value) -> Option<u64> {
-    value.as_u64().or_else(|| value.as_str().and_then(|s| s.parse().ok()))
 }
 
 fn sanitize_nan_strings(value: &mut json::Value) {
@@ -248,91 +212,5 @@ mod tests {
             value["transaction"]["message"]["extra"]["description"],
             "nan"
         );
-    }
-
-    #[test]
-    fn normalize_failed_transaction_balance_arrays_repairs_post_balances() {
-        let mut value = json::json!({
-            "meta": {
-                "err": "InvalidWritableAccount",
-                "fee": 5000,
-                "preBalances": [10000, 20000, 30000],
-                "postBalances": []
-            }
-        });
-
-        normalize_failed_transaction_balance_arrays(&mut value);
-
-        assert_eq!(value["meta"]["postBalances"][0], 5000);
-        assert_eq!(value["meta"]["postBalances"][1], 20000);
-        assert_eq!(value["meta"]["postBalances"][2], 30000);
-    }
-
-    #[test]
-    fn normalize_failed_transaction_overwrites_stale_post_balances() {
-        let mut value = json::json!({
-            "meta": {
-                "err": "InvalidWritableAccount",
-                "fee": 5000,
-                "preBalances": [10000, 20000, 30000],
-                "postBalances": [7000, 23000, 30000]
-            }
-        });
-
-        normalize_failed_transaction_balance_arrays(&mut value);
-
-        assert_eq!(
-            value["meta"]["postBalances"],
-            json::json!([5000, 20000, 30000])
-        );
-    }
-
-    #[test]
-    fn normalize_failed_transaction_balance_arrays_keeps_successful_tx() {
-        let mut value = json::json!({
-            "meta": {
-                "err": null,
-                "fee": 5000,
-                "preBalances": [10000, 20000],
-                "postBalances": []
-            }
-        });
-
-        normalize_failed_transaction_balance_arrays(&mut value);
-
-        assert_eq!(value["meta"]["postBalances"], json::json!([]));
-    }
-
-    #[test]
-    fn normalize_failed_transaction_balance_arrays_handles_fee_exceeding_balance() {
-        let mut value = json::json!({
-            "meta": {
-                "err": "SomeError",
-                "fee": 15000,
-                "preBalances": [10000, 20000],
-                "postBalances": []
-            }
-        });
-
-        normalize_failed_transaction_balance_arrays(&mut value);
-
-        assert_eq!(value["meta"]["postBalances"][0], 0);
-        assert_eq!(value["meta"]["postBalances"][1], 20000);
-    }
-
-    #[test]
-    fn normalize_failed_transaction_balance_arrays_handles_missing_fee() {
-        let mut value = json::json!({
-            "meta": {
-                "err": "SomeError",
-                "preBalances": [10000, 20000],
-                "postBalances": []
-            }
-        });
-
-        normalize_failed_transaction_balance_arrays(&mut value);
-
-        assert_eq!(value["meta"]["postBalances"][0], 10000);
-        assert_eq!(value["meta"]["postBalances"][1], 20000);
     }
 }
