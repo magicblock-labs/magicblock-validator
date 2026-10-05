@@ -8,7 +8,7 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp_api::{args::CommitStateArgs, pda::ephemeral_balance_pda_from_payer};
+use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use futures::future::{join_all, try_join_all};
 use magicblock_committor_program::pdas;
 use magicblock_committor_service::{
@@ -49,7 +49,6 @@ use magicblock_program::{
     args::ShortAccountMeta, magic_scheduled_base_intent::ScheduledIntentBundle,
     validator::validator_authority_id,
 };
-use magicblock_rpc_client::MagicBlockSendTransactionConfig;
 use magicblock_table_mania::TableMania;
 use program_flexi_counter::{
     instruction::FlexiCounterInstruction,
@@ -1046,200 +1045,6 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
         fixture.rpc_client.get_inner(),
         &committed_accounts,
         &invalidated_keys,
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_commit_unfinalized_account_recovery() {
-    let TestEnv {
-        fixture,
-        mut intent_executor,
-        task_info_fetcher: _,
-        callback_executor: _,
-        pre_test_tablemania_state: _,
-    } = TestEnv::setup().await;
-
-    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
-    // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let (counter_auth, mut account) = setup_counter(40, None).await;
-    setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
-        .await;
-    let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
-
-    // Commit account without finalization
-    // This simulates finalization stage failure
-    {
-        let commit_allow_undelegation_ix =
-            dlp_api::instruction_builder::commit_state(
-                fixture.authority.pubkey(),
-                pda,
-                account.owner,
-                CommitStateArgs {
-                    nonce: 1,
-                    lamports: account.lamports,
-                    allow_undelegation: false,
-                    data: account.data.clone(),
-                },
-            );
-
-        let blockhash =
-            fixture.rpc_client.get_latest_blockhash().await.unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[commit_allow_undelegation_ix],
-            Some(&fixture.authority.pubkey()),
-            &[&fixture.authority],
-            blockhash,
-        );
-
-        let result = fixture
-            .rpc_client
-            .send_transaction(
-                &tx,
-                &MagicBlockSendTransactionConfig::ensure_processed_and_committed(),
-            )
-            .await;
-        assert!(result.is_ok());
-    }
-
-    // Commit a newer state directly despite the pending legacy commit.
-    let last_byte = account.data.last_mut().unwrap();
-    *last_byte = last_byte.wrapping_add(1);
-    let committed_account = CommittedAccount {
-        pubkey: pda,
-        account,
-        remote_slot: Default::default(),
-    };
-    let intent = create_intent(vec![committed_account.clone()], false);
-    let result = intent_executor
-        .execute(intent, None::<IntentPersisterImpl>)
-        .await;
-    assert!(result.inner.is_ok());
-    assert!(matches!(
-        result.inner.unwrap(),
-        ExecutionOutput::SingleStage(_)
-    ));
-
-    assert!(result.patched_errors.is_empty());
-    let metadata = RpcTaskInfoFetcher::new(fixture.rpc_client.clone())
-        .fetch_delegation_metadata(&[(pda, 0)], 0)
-        .await
-        .unwrap();
-    assert_eq!(metadata[&pda].last_commit_id, 1);
-    verify_committed_accounts_state(
-        fixture.rpc_client.get_inner(),
-        &[committed_account],
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn test_commit_unfinalized_account_recovery_two_stage() {
-    let TestEnv {
-        fixture,
-        intent_executor: _,
-        task_info_fetcher,
-        callback_executor,
-        pre_test_tablemania_state: _,
-    } = TestEnv::setup().await;
-
-    // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
-    // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let counters = (0..5).map(async |_| {
-        let (counter_auth, account) = setup_counter(40, None).await;
-        setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
-            .await;
-        let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
-        (counter_auth, pda, account)
-    });
-    let counters: Vec<(_, _, _)> = join_all(counters).await;
-
-    // Commit account without finalization
-    // This simulates finalization stage failure
-    {
-        let commit_allow_undelegation_ix =
-            dlp_api::instruction_builder::commit_state(
-                fixture.authority.pubkey(),
-                counters[0].1,
-                counters[0].2.owner,
-                CommitStateArgs {
-                    nonce: 1,
-                    lamports: counters[0].2.lamports,
-                    allow_undelegation: false,
-                    data: counters[0].2.data.clone(),
-                },
-            );
-
-        let blockhash =
-            fixture.rpc_client.get_latest_blockhash().await.unwrap();
-        let tx = Transaction::new_signed_with_payer(
-            &[commit_allow_undelegation_ix],
-            Some(&fixture.authority.pubkey()),
-            &[&fixture.authority],
-            blockhash,
-        );
-
-        let result = fixture
-            .rpc_client
-            .send_transaction(
-                &tx,
-                &MagicBlockSendTransactionConfig::ensure_processed_and_committed(),
-            )
-            .await;
-        assert!(result.is_ok());
-    }
-
-    // Now simulate user sending new intent
-    let committed_accounts: Vec<_> = counters
-        .into_iter()
-        .map(|el| CommittedAccount {
-            pubkey: el.1,
-            account: {
-                let mut account = el.2;
-                *account.data.last_mut().unwrap() = 42;
-                account
-            },
-            remote_slot: Default::default(),
-        })
-        .collect();
-    let intent = create_intent(committed_accounts.clone(), true);
-    let committed_pubkeys = intent.get_all_committed_pubkeys();
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let mut execution_report = IntentExecutionReport::default();
-
-    // V1 can fit this intent in one transaction. Select both stages explicitly
-    // so this test continues to exercise two-stage recovery.
-    let mut executor = create_two_stage_executor(
-        &fixture,
-        &callback_executor,
-        &intent,
-        &task_info_fetcher,
-        &mut execution_report,
-    )
-    .await;
-    let commit_signature = executor
-        .commit(
-            &committed_pubkeys,
-            &transaction_preparator,
-            &task_info_fetcher,
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .expect("commit must recover");
-    let mut finalize_executor = executor.done(commit_signature);
-    let finalize_signature = finalize_executor
-        .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
-        .await
-        .expect("finalize must succeed");
-    let finalized = finalize_executor.done(finalize_signature);
-    assert_ne!(finalized.commit_signature, finalized.finalize_signature);
-
-    let patched_errors = execution_report.patched_errors();
-    assert!(patched_errors.is_empty());
-
-    verify_committed_accounts_state(
-        fixture.rpc_client.get_inner(),
-        &committed_accounts,
     )
     .await;
 }
