@@ -1,11 +1,14 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 #![allow(dead_code)]
 
-use std::sync::{Arc, OnceLock};
+use std::{
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 
 use engine::{Engine, testkit::TestEngine};
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
-use magicblock_aperture::{SharedState, initialize_aperture};
+use magicblock_aperture::Aperture;
 use magicblock_chainlink::ProdChainlink;
 use magicblock_config::config::aperture::ApertureConfig;
 use magicblock_ledger_deprecated::Ledger;
@@ -75,14 +78,16 @@ impl RpcTestEnv {
     }
 
     pub(crate) async fn with_engine(engine: TestEngine) -> Self {
-        let state = SharedState::new((*engine).clone(), shared_ledger(), chainlink(&engine), 100);
         let cancel = CancellationToken::new();
-        let server = initialize_aperture(
+        let server = Aperture::bind(
             &ApertureConfig {
                 listen: "127.0.0.1:0".parse().expect("test listen address"),
                 ..Default::default()
             },
-            state,
+            (*engine).clone(),
+            chainlink(&engine),
+            shared_ledger(),
+            Duration::from_millis(100),
             cancel.clone(),
         )
         .await

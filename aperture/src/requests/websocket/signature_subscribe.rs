@@ -1,5 +1,6 @@
 use super::prelude::*;
-use crate::{encoder::TransactionResultEncoder, requests::params::SerdeSignature};
+use crate::{encoder::encode_signature, requests::params::SerdeSignature};
+use tracing::warn;
 
 impl WsDispatcher {
     pub(crate) async fn signature_subscribe(
@@ -9,7 +10,6 @@ impl WsDispatcher {
         let signature = request.required::<SerdeSignature>(0)?.into();
 
         let id = next_subid();
-        let encoder = TransactionResultEncoder;
 
         let rx = self
             .engine
@@ -18,13 +18,18 @@ impl WsDispatcher {
             .await
             .map_err(crate::error::RpcError::internal)?;
 
-        let tx = self.chan.tx.clone();
+        let tx = self.tx.clone();
         let engine = self.engine.clone();
         let handle = tokio::spawn(async move {
-            if let Ok(status) = rx.await
-                && let Some(bytes) = encoder.encode(context_slot(&engine), &status.result, id)
-            {
-                let _ = tx.send(bytes).await;
+            if let Ok(status) = rx.await {
+                match encode_signature(context_slot(&engine), &status.result, id) {
+                    Ok(bytes) => {
+                        let _ = tx.send(bytes).await;
+                    }
+                    Err(error) => {
+                        warn!(?error, id, "signature notification serialization failed")
+                    }
+                }
             }
         });
         self.register(id, handle);

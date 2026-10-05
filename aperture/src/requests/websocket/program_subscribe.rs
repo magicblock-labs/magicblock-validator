@@ -1,23 +1,18 @@
+use crate::account::ProgramConfig;
 use solana_account_decoder::UiAccountEncoding;
-use solana_rpc_client_api::config::RpcProgramAccountsConfig;
 
 use super::prelude::*;
 use crate::encoder::{AccountEncoder, ProgramAccountEncoder};
 
 impl WsDispatcher {
-    pub(crate) async fn program_subscribe(
-        &mut self,
-        request: &JsonRequest,
-    ) -> RpcResult<SubResult> {
+    pub(crate) fn program_subscribe(&mut self, request: &JsonRequest) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
-        let config = request.optional::<RpcProgramAccountsConfig>(1)?.unwrap_or_default();
+        let ProgramConfig { config, filters } =
+            request.optional::<ProgramConfig>(1)?.unwrap_or_default();
 
         let encoding = config.account_config.encoding.unwrap_or(UiAccountEncoding::Base58);
 
-        let filters = config.filters.unwrap_or_default();
-        for filter in &filters {
-            filter.verify().map_err(crate::RpcError::invalid_params)?;
-        }
+        let filters = filters.unwrap_or_default();
         let encoder = AccountEncoder {
             encoding,
             data_slice: config.account_config.data_slice,
@@ -25,21 +20,11 @@ impl WsDispatcher {
         let encoder = ProgramAccountEncoder { encoder, filters };
 
         let id = next_subid();
-        let mut rx = self.engine.accounts().subscribe_program(pubkey);
-        let tx = self.chan.tx.clone();
+        let rx = self.engine.accounts().subscribe_program(pubkey);
         let engine = self.engine.clone();
-        let handle = tokio::spawn(async move {
-            while let Some((pubkey, account)) = rx.recv().await {
-                let slot = context_slot(&engine);
-                let Some(bytes) = encoder.encode(slot, &pubkey, &account, id) else {
-                    continue;
-                };
-                if tx.send(bytes).await.is_err() {
-                    break;
-                }
-            }
+        self.forward(id, rx, move |(pubkey, account)| {
+            encoder.encode(context_slot(&engine), &pubkey, &account, id)
         });
-        self.register(id, handle);
 
         Ok(SubResult::SubId(id))
     }

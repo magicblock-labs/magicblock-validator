@@ -21,9 +21,6 @@ num_cpus = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
-# containers
-scc = { workspace = true }
-
 # magicblock
 engine = { workspace = true }
 ledger = { workspace = true }

@@ -1,18 +1,10 @@
-use ledger::request::{BlockDetails, BlockParams, BlockResponse};
+use ledger::request::BlockDetails;
 use magicblock_core::Slot;
 use solana_rpc_client_api::config::RpcBlockConfig;
-use solana_transaction_status::{
-    BlockEncodingOptions, ConfirmedBlock, TransactionDetails, UiConfirmedBlock,
-    UiTransactionEncoding,
-};
+use solana_transaction_status::{BlockEncodingOptions, TransactionDetails, UiTransactionEncoding};
 
-use super::HandlerResult;
-use crate::{
-    engine_types::confirmed_transaction,
-    error::RpcError,
-    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
-};
+use super::{HandlerResult, RpcHandlers};
+use crate::requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload};
 
 #[derive(serde::Deserialize)]
 #[serde(untagged)]
@@ -21,7 +13,7 @@ enum BlockConfigParam {
     Encoding(UiTransactionEncoding),
 }
 
-impl HttpDispatcher {
+impl RpcHandlers {
     pub(crate) async fn get_block(&self, request: &JsonRequest) -> HandlerResult {
         let slot = request.required::<Slot>(0)?;
         let config = match request.optional::<BlockConfigParam>(1)? {
@@ -50,94 +42,7 @@ impl HttpDispatcher {
             TransactionDetails::Signatures => BlockDetails::Signatures,
             TransactionDetails::None => BlockDetails::None,
         };
-        let block = self
-            .engine
-            .blocks()
-            .get(BlockParams { slot, details })
-            .await
-            .map_err(RpcError::internal)?;
-
-        let encoded_block = if let Some(block) = block {
-            Some(encode_engine_block(block, encoding, options)?)
-        } else {
-            self.with_ledger(|ledger| {
-                ledger
-                    .get_block(slot)?
-                    .map(ConfirmedBlock::from)
-                    .map(|block| {
-                        block.encode_with_options(encoding, options).map_err(|error| {
-                            RpcError::internal(format!("failed to encode legacy block: {error}"))
-                        })
-                    })
-                    .transpose()
-            })
-            .await?
-        };
-
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            encoded_block,
-        ))
-    }
-}
-
-fn encode_engine_block(
-    response: BlockResponse,
-    encoding: UiTransactionEncoding,
-    options: BlockEncodingOptions,
-) -> Result<UiConfirmedBlock, RpcError> {
-    let block = *response.block();
-    let previous_blockhash = solana_hash::Hash::default().to_string();
-    let blockhash = block.hash.to_string();
-    let parent_slot = block.slot.saturating_sub(1);
-
-    match response {
-        BlockResponse::Full(full) => {
-            let transactions = full
-                .transactions
-                .into_iter()
-                .map(|transaction| {
-                    confirmed_transaction(transaction, Some(block.time))
-                        .map(|transaction| transaction.tx_with_meta)
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            ConfirmedBlock {
-                previous_blockhash,
-                blockhash,
-                parent_slot,
-                transactions,
-                rewards: Vec::new(),
-                num_partitions: None,
-                block_time: Some(block.time),
-                block_height: Some(block.slot),
-            }
-            .encode_with_options(encoding, options)
-            .map_err(|error| RpcError::internal(format!("failed to encode engine block: {error}")))
-        }
-        BlockResponse::WithSignatures(block) => Ok(UiConfirmedBlock {
-            previous_blockhash,
-            blockhash,
-            parent_slot,
-            transactions: None,
-            signatures: Some(block.signatures.into_iter().map(|s| s.to_string()).collect()),
-            rewards: options.show_rewards.then(Vec::new),
-            num_reward_partitions: None,
-            block_time: Some(block.block.time),
-            block_height: Some(block.block.slot),
-        }),
-        BlockResponse::Bare(block) => Ok(UiConfirmedBlock {
-            previous_blockhash,
-            blockhash,
-            parent_slot,
-            transactions: None,
-            signatures: None,
-            rewards: options.show_rewards.then(Vec::new),
-            num_reward_partitions: None,
-            block_time: Some(block.time),
-            block_height: Some(block.slot),
-        }),
-        BlockResponse::WithTransactions(_) => Err(RpcError::internal(
-            "engine returned transaction-only block for an unsupported detail request",
-        )),
+        let encoded_block = self.history.block(slot, details, encoding, options).await?;
+        ResponsePayload::encode_no_context(&request.id, encoded_block)
     }
 }

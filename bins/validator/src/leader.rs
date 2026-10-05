@@ -4,7 +4,7 @@ use std::{
 };
 
 use engine::Engine;
-use magicblock_aperture::{SharedState, initialize_aperture};
+use magicblock_aperture::Aperture;
 use magicblock_chainlink::{
     ProdChainlink,
     errors::ChainlinkError,
@@ -149,14 +149,16 @@ impl Leader {
             engine.clone(),
             config.chainlink.undelegation_request_poll_interval,
         );
-        let shared_state = SharedState::new(
-            engine.clone(),
-            ledger.clone(),
-            chainlink.clone(),
-            config.engine.blockstore.blocktime.as_millis() as u64,
-        );
         let mut rpc_shutdown = shutdown.handle(Service::Rpc);
-        let rpc = initialize_aperture(&config.aperture, shared_state, rpc_shutdown.child()).await?;
+        let rpc = Aperture::bind(
+            &config.aperture,
+            engine.clone(),
+            chainlink.clone(),
+            ledger.clone(),
+            config.engine.blockstore.blocktime,
+            rpc_shutdown.child(),
+        )
+        .await?;
         timer.record("RPC service initialized");
         tokio::spawn(async move {
             rpc.run().await;

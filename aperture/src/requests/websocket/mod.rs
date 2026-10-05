@@ -10,6 +10,7 @@ mod prelude {
     };
 }
 
+/// Uses the latest local block as notification context, not a commitment lookup.
 fn context_slot(engine: &Engine) -> u64 {
     engine.blocks().latest().slot
 }

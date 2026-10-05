@@ -13,43 +13,39 @@ use solana_rpc_client_api::response::{
     RpcBlockCommitment, RpcContactInfo, RpcSnapshotSlotInfo, RpcSupply, RpcVoteAccountStatus,
 };
 
-use super::HandlerResult;
-use crate::{
-    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
+use super::{HandlerResult, RpcHandlers};
+use crate::requests::{
+    JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload,
 };
 
-impl HttpDispatcher {
+impl RpcHandlers {
     /// Handles the `getSlotLeader` RPC request.
     /// This is a **mocked implementation** that always returns the validator's own
     /// identity as the current slot leader.
     pub(crate) fn get_slot_leader(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            Serde32Bytes::from(self.engine.authority()),
-        ))
+        ResponsePayload::encode_no_context(&request.id, Serde32Bytes::from(self.engine.authority()))
     }
 
     pub(crate) fn mock_zero(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(&request.id, 0u64))
+        ResponsePayload::encode_no_context(&request.id, 0u64)
     }
 
     /// Handles the `getSlotLeaders` RPC request.
     /// This is a **mocked implementation** that always returns a list containing
     /// only the validator's own identity.
     pub(crate) fn get_slot_leaders(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
+        ResponsePayload::encode_no_context(
             &request.id,
             [Serde32Bytes::from(self.engine.authority())],
-        ))
+        )
     }
 
     pub(crate) fn mock_empty_context(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode(
+        ResponsePayload::encode(
             &request.id,
             Vec::<()>::new(),
             self.engine.blocks().latest().slot,
-        ))
+        )
     }
 
     /// Handles the `getTokenSupply` RPC request.
@@ -61,11 +57,7 @@ impl HttpDispatcher {
             amount: "0".into(),
             ui_amount_string: "0.0".into(),
         };
-        Ok(ResponsePayload::encode(
-            &request.id,
-            supply,
-            self.engine.blocks().latest().slot,
-        ))
+        ResponsePayload::encode(&request.id, supply, self.engine.blocks().latest().slot)
     }
 
     /// Handles the `getSupply` RPC request.
@@ -78,33 +70,29 @@ impl HttpDispatcher {
             non_circulating_accounts: vec![],
             circulating: u64::MAX / 2,
         };
-        Ok(ResponsePayload::encode(
-            &request.id,
-            supply,
-            self.engine.blocks().latest().slot,
-        ))
+        ResponsePayload::encode(&request.id, supply, self.engine.blocks().latest().slot)
     }
 
     /// Handles the `getHighestSnapshotSlot` RPC request.
     /// This is a **mocked implementation** that returns a default snapshot info struct.
     pub(crate) fn get_highest_snapshot_slot(&self, request: &JsonRequest) -> HandlerResult {
         let info = RpcSnapshotSlotInfo { full: 0, incremental: None };
-        Ok(ResponsePayload::encode_no_context(&request.id, info))
+        ResponsePayload::encode_no_context(&request.id, info)
     }
 
     /// Handles the `getHealth` RPC request.
     /// Returns a simple `"ok"` status to indicate that the RPC endpoint is reachable.
     pub(crate) fn get_health(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(&request.id, "ok"))
+        ResponsePayload::encode_no_context(&request.id, "ok")
     }
 
     /// Handles the `getGenesisHash` RPC request.
     /// This is a **placeholder implementation** that returns a default hash.
     pub(crate) fn get_genesis_hash(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
+        ResponsePayload::encode_no_context(
             &request.id,
             Serde32Bytes::from(solana_hash::Hash::default()),
-        ))
+        )
     }
 
     /// Handles the `getEpochInfo` RPC request.
@@ -121,16 +109,13 @@ impl HttpDispatcher {
             "blockHeight": slot,
             "transactionCount": Some(0),
         }};
-        Ok(ResponsePayload::encode_no_context(&request.id, info))
+        ResponsePayload::encode_no_context(&request.id, info)
     }
 
     /// Handles the `getEpochSchedule` RPC request.
     /// Returns the same local schedule used by Engine's runtime sysvars.
     pub(crate) fn get_epoch_schedule(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            self.engine.epoch_schedule(),
-        ))
+        ResponsePayload::encode_no_context(&request.id, self.engine.epoch_schedule())
     }
 
     /// Handles the `getBlockCommitment` RPC request.
@@ -140,7 +125,7 @@ impl HttpDispatcher {
             commitment: Some([0; 32]),
             total_stake: 0,
         };
-        Ok(ResponsePayload::encode_no_context(&request.id, response))
+        ResponsePayload::encode_no_context(&request.id, response)
     }
 
     /// Handles the `getClusterNodes` RPC request.
@@ -164,7 +149,7 @@ impl HttpDispatcher {
             shred_version: None,
             feature_set: None,
         };
-        Ok(ResponsePayload::encode_no_context(&request.id, [info]))
+        ResponsePayload::encode_no_context(&request.id, [info])
     }
 
     pub(crate) fn get_vote_accounts(&self, request: &JsonRequest) -> HandlerResult {
@@ -172,13 +157,10 @@ impl HttpDispatcher {
             current: Vec::new(),
             delinquent: Vec::new(),
         };
-        Ok(ResponsePayload::encode_no_context(&request.id, status))
+        ResponsePayload::encode_no_context(&request.id, status)
     }
 
     pub(crate) fn mock_empty(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            Vec::<()>::new(),
-        ))
+        ResponsePayload::encode_no_context(&request.id, Vec::<()>::new())
     }
 }

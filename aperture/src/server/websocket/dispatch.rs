@@ -2,9 +2,10 @@ use std::collections::HashMap;
 
 use engine::Engine;
 use hyper::body::Bytes;
-use json::{Serialize, Value};
+use json::Serialize;
 use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
 use tokio::{sync::mpsc, task::JoinHandle};
+use tracing::warn;
 
 use crate::{
     RpcResult,
@@ -31,39 +32,34 @@ pub(crate) struct WsDispatcher {
     /// public `SubscriptionID` returned to the client.
     pub(crate) unsubs: HashMap<SubscriptionID, JoinHandle<()>>,
     /// The communication channel for this specific connection.
-    pub(crate) chan: WsConnectionChannel,
+    pub(crate) tx: ConnectionTx,
 }
 
 impl WsDispatcher {
     /// Creates a new dispatcher for a single client connection.
-    pub(crate) fn new(engine: Engine, chan: WsConnectionChannel) -> Self {
+    pub(crate) fn new(engine: Engine, tx: ConnectionTx) -> Self {
         Self {
             engine,
             unsubs: Default::default(),
-            chan,
+            tx,
         }
     }
 
     /// Routes an incoming JSON-RPC request to the appropriate subscription handler.
-    pub(crate) async fn dispatch(
-        &mut self,
-        request: &JsonWsRequest,
-    ) -> RpcResult<WsDispatchResult> {
+    pub(crate) async fn dispatch(&mut self, request: &JsonWsRequest) -> RpcResult<SubResult> {
         use JsonRpcWsMethod::*;
         RPC_REQUESTS_COUNT.with_label_values(&[request.method.as_str()]).inc();
-        let result = match request.method {
-            AccountSubscribe => self.account_subscribe(request).await,
-            ProgramSubscribe => self.program_subscribe(request).await,
+        match request.method {
+            AccountSubscribe => self.account_subscribe(request),
+            ProgramSubscribe => self.program_subscribe(request),
             SignatureSubscribe => self.signature_subscribe(request).await,
-            SlotSubscribe => self.slot_subscribe().await,
+            SlotSubscribe => self.slot_subscribe(),
             LogsSubscribe => self.logs_subscribe(request).await,
             AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe | SlotUnsubscribe
             | SignatureUnsubscribe => self.unsubscribe(request),
             Ping => Ok(SubResult::Pong("pong")),
             MethodNotFound => Err(RpcError::method_not_found()),
-        }?;
-
-        Ok(WsDispatchResult { id: request.id.clone(), result })
+        }
     }
 
     /// Handles a request to unsubscribe from a previously established subscription.
@@ -77,9 +73,37 @@ impl WsDispatcher {
         Ok(SubResult::Unsub(success))
     }
 
+    /// Forward every streaming subscription through the same delivery loop.
+    pub(crate) fn forward<T: Send + 'static>(
+        &mut self,
+        id: SubscriptionID,
+        mut rx: mpsc::Receiver<T>,
+        encode: impl Fn(T) -> RpcResult<Option<Bytes>> + Send + 'static,
+    ) {
+        let tx = self.tx.clone();
+        let handle = tokio::spawn(async move {
+            while let Some(update) = rx.recv().await {
+                let bytes = match encode(update) {
+                    Ok(Some(bytes)) => bytes,
+                    Ok(None) => continue,
+                    Err(error) => {
+                        warn!(?error, id, "subscription serialization failed");
+                        break;
+                    }
+                };
+                if tx.send(bytes).await.is_err() {
+                    break;
+                }
+            }
+        });
+        self.register(id, handle);
+    }
+
     /// Registers a spawned forwarding task under its subscription id. A duplicate
     /// id (should not happen with the global counter) aborts the previous task.
     pub(crate) fn register(&mut self, id: SubscriptionID, handle: JoinHandle<()>) {
+        // Completed one-shot subscriptions no longer need connection-owned handles.
+        self.unsubs.retain(|_, task| !task.is_finished());
         if let Some(previous) = self.unsubs.insert(id, handle) {
             previous.abort();
         }
@@ -95,12 +119,6 @@ impl Drop for WsDispatcher {
     }
 }
 
-/// Bundles a connection's unique ID with its dedicated sender channel.
-#[derive(Clone)]
-pub(crate) struct WsConnectionChannel {
-    pub(crate) tx: ConnectionTx,
-}
-
 /// An enum representing the successful result of a subscription or unsubscription request.
 #[derive(Serialize)]
 #[serde(untagged)]
@@ -111,11 +129,4 @@ pub(crate) enum SubResult {
     Unsub(bool),
     /// The heartbeat response message
     Pong(&'static str),
-}
-
-/// A container for a successfully processed RPC request, pairing the result with
-/// the original request ID for the client to correlate.
-pub(crate) struct WsDispatchResult {
-    pub(crate) id: Value,
-    pub(crate) result: SubResult,
 }

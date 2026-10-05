@@ -9,7 +9,11 @@ use setup::{PROGRAM_ID, RpcTestEnv, transfer};
 use solana_account::AccountMode;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError;
 use solana_rpc_client_api::{
-    config::{RpcBlockSubscribeFilter, RpcTransactionLogsConfig, RpcTransactionLogsFilter},
+    config::{
+        RpcBlockSubscribeFilter, RpcProgramAccountsConfig, RpcTransactionLogsConfig,
+        RpcTransactionLogsFilter,
+    },
+    filter::{Memcmp, RpcFilterType},
     response::{ProcessedSignatureResult, RpcSignatureResult},
 };
 use tokio::time::timeout;
@@ -95,10 +99,19 @@ async fn test_account_subscribe() {
 async fn test_program_subscribe() {
     let env = RpcTestEnv::new().await;
 
-    // Subscribe to the test program.
+    // Subscribe to matching account data from the test program.
     let (mut stream, unsub) = env
         .pubsub
-        .program_subscribe(&PROGRAM_ID, None)
+        .program_subscribe(
+            &PROGRAM_ID,
+            Some(RpcProgramAccountsConfig {
+                filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new_base58_encoded(
+                    0,
+                    &[42],
+                ))]),
+                ..Default::default()
+            }),
+        )
         .await
         .expect("failed to subscribe to program");
 

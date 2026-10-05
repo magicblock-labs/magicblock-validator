@@ -1,11 +1,18 @@
 #![doc = include_str!("../README.md")]
 
-use std::{io, net::SocketAddr};
+use account::Accounts;
+use engine::Engine;
+use history::History;
+use magicblock_chainlink::ProdChainlink;
+use magicblock_ledger_deprecated::Ledger;
+use requests::http::RpcHandlers;
+use std::{io, net::SocketAddr, sync::Arc, time::Duration};
+use tokio::task::JoinSet;
 
-pub use error::{ApertureError, RpcError};
+pub use error::ApertureError;
+use error::RpcError;
 use magicblock_config::config::aperture::ApertureConfig;
 use server::{http::HttpServer, websocket::WebsocketServer};
-pub use state::SharedState;
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
@@ -13,32 +20,29 @@ use tracing::info;
 type RpcResult<T> = Result<T, RpcError>;
 type ApertureResult<T> = Result<T, ApertureError>;
 
-pub async fn initialize_aperture(
-    config: &ApertureConfig,
-    state: SharedState,
-    cancel: CancellationToken,
-) -> ApertureResult<JsonRpcServer> {
-    // Reads, subscriptions and transaction submission are all served directly
-    // from the engine held in `state`; there is no separate event-processing
-    // stage to start here.
-    JsonRpcServer::new(config, state, cancel).await
-}
-
-/// An entrypoint to startup JSON-RPC server, for both HTTP and WS requests
-pub struct JsonRpcServer {
+/// Bound HTTP/PubSub service whose consuming run owns background delivery tasks.
+pub struct Aperture {
     http: HttpServer,
     websocket: WebsocketServer,
     http_addr: SocketAddr,
     ws_addr: SocketAddr,
+    handlers: Arc<RpcHandlers>,
+    geyser: Option<geyser::Delivery>,
+    cancel: CancellationToken,
 }
 
-impl JsonRpcServer {
-    /// Create a new instance of JSON-RPC server, hooked into validator via dispatch channels
-    async fn new(
+impl Aperture {
+    /// Bind both listeners and prepare delivery without starting background tasks.
+    pub async fn bind(
         config: &ApertureConfig,
-        state: SharedState,
+        engine: Engine,
+        chainlink: Arc<ProdChainlink>,
+        legacy: Arc<Ledger>,
+        blocktime: Duration,
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
+        // Service exit cancels its connections without cancelling the caller's token.
+        let cancel = cancel.child_token();
         // try to bind to socket before spawning anything (handy in tests)
         let http = TcpListener::bind(config.listen.0).await?;
         let http_addr = http.local_addr()?;
@@ -65,22 +69,20 @@ impl JsonRpcServer {
 
         // Initialize HTTP and Websocket servers before starting any background
         // delivery tasks, so a bind failure cannot leak engine subscriptions.
-        let websocket = {
-            let cancel = cancel.clone();
-            WebsocketServer::new(ws, &state, cancel).await?
-        };
-        let http = HttpServer::new(http, state.clone(), cancel.clone()).await?;
-        let _geyser = geyser::start(
-            &config.geyser_plugins,
-            config.event_processors,
-            state.engine,
-            cancel,
-        )?;
+        let websocket = WebsocketServer::new(ws, engine.clone(), cancel.clone());
+        let accounts = Accounts::new(engine.clone(), chainlink);
+        let history = History::new(engine.clone(), legacy);
+        let handlers = RpcHandlers::new(engine.clone(), accounts, history, blocktime);
+        let http = HttpServer::new(http, handlers.clone(), cancel.clone());
+        let geyser = geyser::prepare(&config.geyser_plugins, engine)?;
         Ok(Self {
             http,
             websocket,
             http_addr,
             ws_addr,
+            handlers,
+            geyser,
+            cancel,
         })
     }
 
@@ -92,21 +94,35 @@ impl JsonRpcServer {
         self.ws_addr
     }
 
-    /// Run JSON-RPC server indefinitely, until cancel token is used to signal shut down
+    /// Runs until cancellation or any service task exits, then aborts and drains background tasks.
     pub async fn run(self) {
+        // Also cancel detached connection tasks if the run future itself is dropped.
+        let _cancel_on_drop = self.cancel.clone().drop_guard();
         info!("JSON-RPC server running");
-        tokio::join! {
-            self.http.run(),
-            self.websocket.run()
-        };
+        let mut tasks = JoinSet::new();
+        tasks.spawn(self.handlers.run_perf_samples_collector(self.cancel.clone()));
+        if let Some(geyser) = self.geyser {
+            geyser.spawn(&mut tasks, self.cancel.clone());
+        }
+        tokio::select! {
+            _ = self.http.run() => {},
+            _ = self.websocket.run() => {},
+            _ = self.cancel.cancelled() => {},
+            _ = tasks.join_next() => {},
+        }
+        self.cancel.cancel();
+        tasks.abort_all();
+        while tasks.join_next().await.is_some() {}
         info!("JSON-RPC server shutdown");
     }
 }
 
+mod account;
 mod encoder;
-mod engine_types;
 mod error;
 mod geyser;
+mod history;
 mod requests;
 mod server;
 mod state;
+mod transaction;

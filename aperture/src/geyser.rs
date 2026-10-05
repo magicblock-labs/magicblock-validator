@@ -1,10 +1,6 @@
 use std::{
     fs,
     path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
 };
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
@@ -18,18 +14,16 @@ use ledger::schema::Block;
 use libloading::{Library, Symbol};
 use nucleus::runtime::FullTransaction;
 use solana_account::{AccountSeqLock, AccountSharedData, ReadableAccount};
-use tokio::{
-    sync::{Mutex, mpsc},
-    task::JoinHandle,
-};
+use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{ApertureResult, engine_types::processed_transaction};
+use crate::{ApertureResult, transaction::processed_transaction};
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
 
+/// Dynamic-library entrypoint; its returned plugin must be dropped before its library.
 #[allow(improper_ctypes_definitions)]
 type PluginCreate = unsafe extern "C" fn() -> *mut dyn GeyserPlugin;
 
@@ -37,10 +31,11 @@ type PluginCreate = unsafe extern "C" fn() -> *mut dyn GeyserPlugin;
 /// while their defining code is still loaded.
 pub(crate) struct GeyserPluginManager {
     plugins: Vec<Box<dyn GeyserPlugin>>,
-    write_version: AtomicU64,
+    write_version: u64,
     _libs: Vec<Library>,
 }
 
+/// Feeder-order delivery across Engine's independent transaction and block streams.
 enum GeyserEvent {
     Transaction(FullTransaction),
     Block(Block),
@@ -52,7 +47,7 @@ impl GeyserPluginManager {
     fn load(configs: &[PathBuf]) -> Self {
         let mut manager = Self {
             plugins: Vec::with_capacity(configs.len()),
-            write_version: AtomicU64::new(0),
+            write_version: 0,
             _libs: Vec::with_capacity(configs.len()),
         };
         for config in configs {
@@ -121,7 +116,11 @@ impl GeyserPluginManager {
         Ok((plugin, library))
     }
 
-    fn notify_transaction(&self, transaction: &FullTransaction) {
+    fn notify_transaction(&self, transaction: &mut FullTransaction) {
+        if !self.plugins.iter().any(|plugin| plugin.transaction_notifications_enabled()) {
+            return;
+        }
+        let slot = transaction.execution.slot;
         let Ok((sanitized, meta)) = processed_transaction(transaction)
             .inspect_err(|error| warn!(?error, "failed to convert engine transaction for Geyser"))
         else {
@@ -138,10 +137,8 @@ impl GeyserPluginManager {
         };
         for plugin in &self.plugins {
             if plugin.transaction_notifications_enabled()
-                && let Err(error) = plugin.notify_transaction(
-                    ReplicaTransactionInfoVersions::V0_0_2(&info),
-                    transaction.execution.slot,
-                )
+                && let Err(error) =
+                    plugin.notify_transaction(ReplicaTransactionInfoVersions::V0_0_2(&info), slot)
             {
                 warn!(
                     plugin = plugin.name(),
@@ -152,24 +149,27 @@ impl GeyserPluginManager {
         }
     }
 
-    fn notify_accounts(&self, mut transaction: FullTransaction) {
+    fn notify_accounts(&mut self, transaction: FullTransaction) {
+        if !self.plugins.iter().any(|plugin| plugin.account_data_notifications_enabled()) {
+            return;
+        }
         let slot = transaction.execution.slot;
-        let Some(execution) = transaction
-            .execution
-            .result
-            .as_mut()
-            .ok()
-            .filter(|execution| execution.was_successful())
-        else {
+        let Ok(execution) = transaction.execution.result else {
             return;
         };
-        for (pubkey, account) in std::mem::take(&mut execution.loaded_transaction.accounts) {
+        // Failed executions do not publish committed account changes.
+        if !execution.was_successful() {
+            return;
+        }
+        for (pubkey, account) in execution.loaded_transaction.accounts {
+            // Snapshot dirty images inside the scoped seqlock read.
             let Some(account) = AccountSeqLock::new(account)
                 .read(|account| account.dirty().then(|| AccountSharedData::from(account.owned())))
             else {
                 continue;
             };
-            let write_version = self.write_version.fetch_add(1, Ordering::Relaxed);
+            let write_version = self.write_version;
+            self.write_version += 1;
             let info = ReplicaAccountInfoV3 {
                 pubkey: pubkey.as_array(),
                 lamports: account.lamports(),
@@ -246,7 +246,7 @@ impl GeyserPluginManager {
     fn from_plugins(plugins: Vec<Box<dyn GeyserPlugin>>) -> Self {
         Self {
             plugins,
-            write_version: AtomicU64::new(0),
+            write_version: 0,
             _libs: Vec::new(),
         }
     }
@@ -260,76 +260,73 @@ impl Drop for GeyserPluginManager {
     }
 }
 
-/// Starts bounded Geyser delivery after RPC sockets have bound. With no valid
-/// plugins this returns without subscribing to the engine, keeping the normal
-/// execution path free of Geyser fanout and balance-clone overhead.
-pub(crate) fn start(
-    configs: &[PathBuf],
-    event_processors: usize,
-    engine: Engine,
-    cancel: CancellationToken,
-) -> ApertureResult<Vec<JoinHandle<()>>> {
-    let manager = Arc::new(GeyserPluginManager::load(configs));
-    Ok(start_manager(manager, event_processors, engine, cancel)?)
+/// Prepared Engine subscriptions; no delivery runs until Aperture::run.
+pub(crate) struct Delivery {
+    manager: GeyserPluginManager,
+    transactions: mpsc::UnboundedReceiver<FullTransaction>,
+    blocks: mpsc::Receiver<Block>,
 }
 
-fn start_manager(
-    manager: Arc<GeyserPluginManager>,
-    event_processors: usize,
-    engine: Engine,
-    cancel: CancellationToken,
-) -> Result<Vec<JoinHandle<()>>, keeper::error::KeeperError> {
-    if manager.plugins.is_empty() {
-        return Ok(Vec::new());
-    }
-    let (tx, rx) = mpsc::channel(EVENT_QUEUE_CAPACITY);
-    let mut transactions = engine.transactions().subscribe_processed()?;
-    let mut blocks = engine.blocks().subscribe();
-    let feeder_cancel = cancel.clone();
-    let feeder = tokio::spawn(async move {
-        loop {
-            let event = tokio::select! {
-                _ = feeder_cancel.cancelled() => break,
-                result = transactions.recv() => match result {
-                    Some(transaction) => GeyserEvent::Transaction(transaction),
-                    None => break,
-                },
-                result = blocks.recv() => match result {
-                    Some(block) => GeyserEvent::Block(block),
-                    None => break,
-                },
-            };
-            if tx.send(event).await.is_err() {
-                break;
-            }
-        }
-    });
+/// Loads plugins and opens subscriptions without spawning tasks; empty managers do no work.
+pub(crate) fn prepare(configs: &[PathBuf], engine: Engine) -> ApertureResult<Option<Delivery>> {
+    Ok(prepare_manager(GeyserPluginManager::load(configs), engine)?)
+}
 
-    let rx = Arc::new(Mutex::new(rx));
-    let mut tasks = Vec::with_capacity(event_processors.max(1) + 1);
-    tasks.push(feeder);
-    for _ in 0..event_processors.max(1) {
-        let manager = manager.clone();
-        let rx = rx.clone();
-        let worker_cancel = cancel.clone();
-        tasks.push(tokio::spawn(async move {
+/// Acquires Engine streams only when there are loaded plugins to receive them.
+fn prepare_manager(
+    manager: GeyserPluginManager,
+    engine: Engine,
+) -> Result<Option<Delivery>, keeper::error::KeeperError> {
+    if manager.plugins.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Delivery {
+        manager,
+        transactions: engine.transactions().subscribe_processed()?,
+        blocks: engine.blocks().subscribe(),
+    }))
+}
+
+impl Delivery {
+    /// Serial callbacks preserve feeder order, not cross-stream Engine ordering.
+    pub(crate) fn spawn(self, tasks: &mut JoinSet<()>, cancel: CancellationToken) {
+        let Self {
+            mut manager,
+            mut transactions,
+            mut blocks,
+        } = self;
+        let (tx, mut rx) = mpsc::channel(EVENT_QUEUE_CAPACITY);
+        let feeder_cancel = cancel.clone();
+        tasks.spawn(async move {
             loop {
                 let event = tokio::select! {
-                    _ = worker_cancel.cancelled() => break,
-                    event = async { rx.lock().await.recv().await } => event,
+                    _ = feeder_cancel.cancelled() => break,
+                    result = transactions.recv() => match result { Some(tx) => GeyserEvent::Transaction(tx), None => break },
+                    result = blocks.recv() => match result { Some(block) => GeyserEvent::Block(block), None => break },
+                };
+                tokio::select! {
+                    _ = feeder_cancel.cancelled() => break,
+                    result = tx.send(event) => if result.is_err() { break; },
+                }
+            }
+        });
+        tasks.spawn(async move {
+            loop {
+                let event = tokio::select! {
+                    _ = cancel.cancelled() => break,
+                    event = rx.recv() => event,
                 };
                 match event {
-                    Some(GeyserEvent::Transaction(transaction)) => {
-                        manager.notify_transaction(&transaction);
+                    Some(GeyserEvent::Transaction(mut transaction)) => {
+                        manager.notify_transaction(&mut transaction);
                         manager.notify_accounts(transaction);
                     }
                     Some(GeyserEvent::Block(block)) => manager.notify_block(block),
                     None => break,
                 }
             }
-        }));
+        });
     }
-    Ok(tasks)
 }
 
 #[cfg(test)]
@@ -348,7 +345,8 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use v42_calculator_interface::builder::Expr as E;
 
-    use super::{GeyserPluginManager, start_manager};
+    use super::{GeyserPluginManager, prepare_manager};
+    use tokio::task::JoinSet;
 
     #[derive(Debug)]
     struct TransactionEvent {
@@ -438,16 +436,23 @@ mod tests {
         }
     }
 
+    /// Proves that both plugins receive metadata and monotonically versioned writes.
     #[tokio::test(flavor = "multi_thread")]
     async fn fake_plugin_receives_engine_metadata_and_monotonic_writes() {
         let mut te = TestEngine::new().await;
         let output = store_v42(&te, 0, AccountMode::Magic);
         let events = Arc::new(StdMutex::new(Events::default()));
-        let manager = Arc::new(GeyserPluginManager::from_plugins(vec![Box::new(
-            FakePlugin(events.clone()),
-        )]));
+        let other_events = Arc::new(StdMutex::new(Events::default()));
+        let manager = GeyserPluginManager::from_plugins(vec![
+            Box::new(FakePlugin(events.clone())),
+            Box::new(FakePlugin(other_events.clone())),
+        ]);
         let cancel = CancellationToken::new();
-        let tasks = start_manager(manager, 0, (*te).clone(), cancel.clone()).unwrap();
+        let mut tasks = JoinSet::new();
+        prepare_manager(manager, (*te).clone())
+            .unwrap()
+            .unwrap()
+            .spawn(&mut tasks, cancel.clone());
 
         te.execute(&[E::lit(7).cpi().compose(output, &[])])
             .await
@@ -458,13 +463,13 @@ mod tests {
         te.advance(1).await;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
-            let ready = {
+            let ready = [&events, &other_events].iter().all(|events| {
                 let events = events.lock();
                 events.transactions.len() >= 2
                     && events.accounts.len() >= 2
                     && !events.slots.is_empty()
                     && !events.blocks.is_empty()
-            };
+            });
             if ready {
                 break;
             }
@@ -481,7 +486,7 @@ mod tests {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        {
+        for events in [&events, &other_events] {
             let events = events.lock();
             let transaction = events.transactions.first().expect("transaction delivered");
             assert!(transaction.slot > 0);
@@ -505,8 +510,8 @@ mod tests {
             );
         }
         cancel.cancel();
-        for task in tasks {
-            task.await.expect("Geyser task exits cleanly");
+        while let Some(task) = tasks.join_next().await {
+            task.expect("Geyser task exits cleanly");
         }
         te.close().await;
     }

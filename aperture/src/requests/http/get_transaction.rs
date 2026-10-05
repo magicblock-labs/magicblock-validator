@@ -1,17 +1,14 @@
 use json::{JsonValueMutTrait, JsonValueTrait};
-use ledger::request::{BlockDetails, BlockParams};
 use solana_rpc_client_api::config::{RpcEncodingConfigWrapper, RpcTransactionConfig};
 use solana_transaction_status::{ConfirmedTransactionWithStatusMeta, UiTransactionEncoding};
 
-use super::HandlerResult;
+use super::{HandlerResult, RpcHandlers};
 use crate::{
-    engine_types::confirmed_transaction,
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, params::SerdeSignature, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
 };
 
-impl HttpDispatcher {
+impl RpcHandlers {
     pub(crate) async fn get_transaction(&self, request: &JsonRequest) -> HandlerResult {
         let signature = request.required::<SerdeSignature>(0)?.into();
         let config = request
@@ -28,48 +25,25 @@ impl HttpDispatcher {
             let encoded_transaction =
                 transaction.and_then(|tx| tx.encode(encoding, max_version).ok());
 
-            let mut encoded_value = json::to_value(&encoded_transaction)
-                .map_err(|_| RpcError::internal("failed to serialize getTransaction response"))?;
-
-            if encoding == UiTransactionEncoding::JsonParsed {
-                sanitize_nan_strings(&mut encoded_value);
+            if encoding != UiTransactionEncoding::JsonParsed {
+                return ResponsePayload::encode_no_context(&request.id, encoded_transaction);
             }
-
-            Ok(ResponsePayload::encode_no_context(
-                &request.id,
-                encoded_value,
-            ))
+            let mut encoded_value =
+                json::to_value(&encoded_transaction).map_err(RpcError::internal)?;
+            sanitize_nan_strings(&mut encoded_value);
+            ResponsePayload::encode_no_context(&request.id, encoded_value)
         };
 
-        let engine_transaction =
-            self.engine.transactions().get(signature).await.map_err(RpcError::internal)?;
-        let transaction = if let Some(transaction) = engine_transaction {
-            let slot = transaction.execution.header.slot;
-            let block_time = self
-                .engine
-                .blocks()
-                .get(BlockParams {
-                    slot,
-                    details: BlockDetails::None,
-                })
-                .await
-                .map_err(RpcError::internal)?
-                .map(|block| block.block().time);
-            Some(confirmed_transaction(transaction, block_time)?)
-        } else {
-            return self
-                .with_ledger(|ledger| encode(ledger.get_complete_transaction(signature, u64::MAX)?))
-                .await;
-        };
-
-        encode(transaction)
+        self.history.transaction(signature, encode).await
     }
 }
 
+/// Normalizes parser-produced NaN strings only in known numeric fields.
 fn sanitize_nan_strings(value: &mut json::Value) {
     sanitize_nan_strings_for_key(value, None);
 }
 
+/// Walks parsed transaction fields while retaining the containing key's semantics.
 fn sanitize_nan_strings_for_key(value: &mut json::Value, parent_key: Option<&str>) {
     if let Some(values) = value.as_array_mut() {
         for value in values {
@@ -93,6 +67,7 @@ fn sanitize_nan_strings_for_key(value: &mut json::Value, parent_key: Option<&str
     }
 }
 
+/// Keeps string amounts as strings and replaces other numeric NaNs with zero.
 fn nan_replacement_for_field(key: &str) -> json::Value {
     match key {
         "amount" | "uiAmountString" => "0".into(),
@@ -100,6 +75,7 @@ fn nan_replacement_for_field(key: &str) -> json::Value {
     }
 }
 
+/// Limits normalization so logs, memos, and arbitrary string data remain unchanged.
 fn is_numeric_json_field(key: &str) -> bool {
     matches!(
         key,
@@ -129,6 +105,7 @@ fn is_numeric_json_field(key: &str) -> bool {
     )
 }
 
+/// Recognizes the parser's signed, case-insensitive NaN spellings.
 fn is_nan_string(value: &str) -> bool {
     value.eq_ignore_ascii_case("nan")
         || value.eq_ignore_ascii_case("+nan")
