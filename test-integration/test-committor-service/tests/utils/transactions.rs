@@ -171,27 +171,6 @@ async fn airdrop_and_confirm(
     );
 }
 
-#[allow(dead_code)]
-pub async fn tx_logs_contain(
-    rpc_client: &RpcClient,
-    signature: &Signature,
-    needle: &str,
-) -> bool {
-    fetch_tx_logs(rpc_client, signature)
-        .await
-        .iter()
-        .any(|log| {
-            // Keep legacy log queries compatible with both commit instruction families.
-            if needle == "CommitState" {
-                log.contains(needle)
-                    || log.contains("CommitDiff")
-                    || log.contains("CommitFinalize")
-            } else {
-                log.contains(needle)
-            }
-        })
-}
-
 /// This needs to be run for each test that required a new counter to be delegated
 #[allow(dead_code)]
 pub async fn init_and_delegate_account_on_chain(
