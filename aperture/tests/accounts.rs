@@ -7,7 +7,11 @@ use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
 use solana_account::{AccountMode, accounts_equal};
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::request::TokenAccountsFilter;
+use solana_rpc_client_api::{
+    config::RpcProgramAccountsConfig,
+    filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
+    request::TokenAccountsFilter,
+};
 
 mod setup;
 
@@ -351,6 +355,27 @@ async fn test_get_program_accounts() {
     for (pubkey, account) in accounts {
         assert!(expected_pubkeys.contains(&pubkey));
         assert_eq!(account.owner, PROGRAM_ID);
+    }
+
+    // All supported memcmp wire encodings select the same account.
+    for bytes in [
+        MemcmpEncodedBytes::Base58(bs58::encode([1]).into_string()),
+        MemcmpEncodedBytes::Base64("AQ==".into()),
+        MemcmpEncodedBytes::Bytes(vec![1]),
+    ] {
+        let accounts = env
+            .rpc
+            .get_program_ui_accounts_with_config(
+                &PROGRAM_ID,
+                RpcProgramAccountsConfig {
+                    filters: Some(vec![RpcFilterType::Memcmp(Memcmp::new(0, bytes))]),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("filtered program accounts");
+        assert_eq!(accounts.len(), 1);
+        assert_eq!(accounts[0].0, acc1);
     }
 
     // Test a program with no accounts

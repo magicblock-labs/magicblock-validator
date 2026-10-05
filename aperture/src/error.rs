@@ -64,12 +64,6 @@ impl From<TransactionError> for RpcError {
     }
 }
 
-impl From<magicblock_ledger_deprecated::errors::LedgerError> for RpcError {
-    fn from(value: magicblock_ledger_deprecated::errors::LedgerError) -> Self {
-        Self::internal(value)
-    }
-}
-
 impl From<engine::EngineError> for RpcError {
     fn from(value: engine::EngineError) -> Self {
         use engine::EngineError::*;

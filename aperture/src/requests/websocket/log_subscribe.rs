@@ -34,27 +34,17 @@ impl WsDispatcher {
         };
 
         let id = next_subid();
-        let mut rx = self.engine.transactions().subscribe_logs(pubkey).await;
-        let tx = self.chan.tx.clone();
+        let rx = self.engine.transactions().subscribe_logs(pubkey).await;
         let engine = self.engine.clone();
-        let handle = tokio::spawn(async move {
-            while let Some(logs) = rx.recv().await {
-                let slot = context_slot(&engine);
-                let value = LogsValue {
-                    signature: logs.signature.to_string(),
-                    err: logs.result.as_ref().err().cloned(),
-                    logs: logs.logs.as_ref().clone(),
-                };
-                let Some(bytes) = NotificationPayload::encode(value, slot, "logsNotification", id)
-                else {
-                    continue;
-                };
-                if tx.send(bytes).await.is_err() {
-                    break;
-                }
-            }
+        self.forward(id, rx, move |logs| {
+            let value = LogsValue {
+                signature: logs.signature.to_string(),
+                err: logs.result.as_ref().err().cloned(),
+                logs: logs.logs.as_ref().clone(),
+            };
+            NotificationPayload::encode(value, context_slot(&engine), "logsNotification", id)
+                .map(Some)
         });
-        self.register(id, handle);
 
         Ok(SubResult::SubId(id))
     }

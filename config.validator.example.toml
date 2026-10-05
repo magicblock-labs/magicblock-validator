@@ -129,14 +129,6 @@ bind-address = "127.0.0.1:10000"
 # Env: MBV_APERTURE__LISTEN
 listen = "127.0.0.1:8899"
 
-# Number of event processor tasks to handle state updates
-# Greater number might improve the performance of websocket
-# and/or geyser plugins if there are enough idle CPU cores
-# Default: 1
-# CLI: --event-processors <COUNT>
-# Env: MBV_APERTURE__EVENT_PROCESSORS
-event-processors = 1
-
 # List of paths to geyser json configuration files
 # Default: empty list (no plugins)
 geyser-plugins = ["config.json"]

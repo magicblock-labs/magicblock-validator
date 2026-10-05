@@ -1,10 +1,9 @@
 use magicblock_core::Slot;
 
-use super::HandlerResult;
+use super::{HandlerResult, RpcHandlers};
 use crate::{
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
 };
 
 const MAX_BLOCKS: u64 = 500_000;
@@ -15,7 +14,7 @@ pub(crate) enum BlockRange {
     Limit,
 }
 
-impl HttpDispatcher {
+impl RpcHandlers {
     pub(crate) fn get_blocks(&self, request: &JsonRequest, range: BlockRange) -> HandlerResult {
         let start = request.required::<Slot>(0)?;
         let latest = self.engine.blocks().latest().slot;
@@ -39,6 +38,6 @@ impl HttpDispatcher {
                 (start..end).collect()
             }
         };
-        Ok(ResponsePayload::encode_no_context(&request.id, slots))
+        ResponsePayload::encode_no_context(&request.id, slots)
     }
 }

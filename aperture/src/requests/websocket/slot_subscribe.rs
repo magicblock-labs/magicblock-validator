@@ -1,23 +1,11 @@
 use super::prelude::*;
-use crate::encoder::SlotEncoder;
+use crate::encoder::encode_slot;
 
 impl WsDispatcher {
-    pub(crate) async fn slot_subscribe(&mut self) -> RpcResult<SubResult> {
+    pub(crate) fn slot_subscribe(&mut self) -> RpcResult<SubResult> {
         let id = next_subid();
-        let mut rx = self.engine.blocks().subscribe();
-        let tx = self.chan.tx.clone();
-        let encoder = SlotEncoder;
-        let handle = tokio::spawn(async move {
-            while let Some(block) = rx.recv().await {
-                let Some(bytes) = encoder.encode(block.slot, id) else {
-                    continue;
-                };
-                if tx.send(bytes).await.is_err() {
-                    break;
-                }
-            }
-        });
-        self.register(id, handle);
+        let rx = self.engine.blocks().subscribe();
+        self.forward(id, rx, move |block| encode_slot(block.slot, id).map(Some));
 
         Ok(SubResult::SubId(id))
     }

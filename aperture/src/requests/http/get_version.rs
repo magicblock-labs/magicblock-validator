@@ -1,16 +1,10 @@
 use magicblock_core::version::Version;
 
-use super::HandlerResult;
-use crate::{
-    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
-};
+use super::{HandlerResult, RpcHandlers};
+use crate::requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload};
 
-impl HttpDispatcher {
+impl RpcHandlers {
     pub(crate) fn get_version(&self, request: &JsonRequest) -> HandlerResult {
-        Ok(ResponsePayload::encode_no_context(
-            &request.id,
-            Version::default(),
-        ))
+        ResponsePayload::encode_no_context(&request.id, Version::default())
     }
 }

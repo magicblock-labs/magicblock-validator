@@ -1,46 +1,37 @@
-use std::collections::HashMap;
+use crate::account::TransactionKind;
+use crate::transaction::live_inner_instructions;
+use std::{collections::HashMap, sync::Arc};
 
 use magicblock_metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
-use solana_message::inner_instruction::InnerInstructions;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig, response::RpcSimulateTransactionResult,
 };
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
-use solana_transaction_status::{
-    InnerInstruction, InnerInstructions as StatusInnerInstructions, UiTransactionEncoding,
-};
+use solana_transaction_status::UiTransactionEncoding;
 
-use super::{ClaimedHandlerResult, HandlerResult, send_transaction::TransactionKind};
+use super::{HandlerResult, RpcHandlers};
 use crate::{
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
 };
 
-impl HttpDispatcher {
-    pub(crate) async fn simulate_transaction(&self, request: &JsonRequest) -> ClaimedHandlerResult {
-        let mut claims = 0;
-        let result = self.simulate_transaction_inner(request, &mut claims).await;
-        (result, claims)
-    }
-
-    async fn simulate_transaction_inner(
+impl RpcHandlers {
+    pub(crate) async fn simulate_transaction(
         &self,
         request: &JsonRequest,
         claims: &mut u64,
     ) -> HandlerResult {
-        let transaction_str = request.required::<String>(0)?;
+        let transaction_str = request.required::<&str>(0)?;
         let config = request.optional::<RpcSimulateTransactionConfig>(1)?.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let (transaction, remote_account_claims) = self
-            .prepare_transaction(&transaction_str, encoding, TransactionKind::Simulate)
-            .await;
-        *claims += remote_account_claims;
-        let transaction = transaction?;
+        let transaction = self
+            .accounts
+            .prepare_transaction(transaction_str, encoding, TransactionKind::Simulate, claims)
+            .await?;
         let number_of_accounts = transaction.static_account_keys().len();
 
         let replacement_blockhash =
@@ -62,7 +53,7 @@ impl HttpDispatcher {
                 let executed = *executed;
                 let details = executed.execution_details;
                 (
-                    details.log_messages.map(|l| l.as_ref().clone()),
+                    details.log_messages.map(Arc::unwrap_or_clone),
                     details.executed_units,
                     details.return_data,
                     details.inner_instructions,
@@ -95,66 +86,40 @@ impl HttpDispatcher {
                     .into_iter()
                     .map(|address| address.parse::<Pubkey>().map_err(RpcError::invalid_params))
                     .collect::<Result<Vec<_>, _>>()?;
-                let reader = |pubkey: &Pubkey, account: &AccountSharedData| {
-                    encode_ui_account(pubkey, account, accounts_encoding, None, None)
-                };
-                let (current_accounts, remote_account_claims) = self
-                    .read_accounts_with_ensure(
+                // Keep synchronization and claim accounting even for simulated images.
+                self.accounts
+                    .ensure(
                         &pubkeys,
                         AccountFetchEntrypoint::RpcGetMultipleAccounts,
-                        reader,
+                        claims,
                     )
                     .await;
-                *claims += remote_account_claims;
-                let post_simulation_accounts = post_accounts.into_iter().collect::<HashMap<_, _>>();
-
-                Some(
-                    pubkeys
-                        .into_iter()
-                        .zip(current_accounts)
-                        .map(|(pubkey, account)| {
-                            post_simulation_accounts
-                                .get(&pubkey)
-                                .cloned()
-                                .map(|account| {
-                                    encode_ui_account(
-                                        &pubkey,
-                                        &account,
-                                        accounts_encoding,
-                                        None,
-                                        None,
-                                    )
-                                })
-                                .or(account)
-                        })
-                        .collect(),
-                )
+                let post_accounts = post_accounts.into_iter().collect::<HashMap<_, _>>();
+                let accessor = self.engine.accounts();
+                let loader = accessor.loader();
+                let mut accounts = Vec::with_capacity(pubkeys.len());
+                for pubkey in pubkeys {
+                    let encode = |account: &AccountSharedData| {
+                        encode_ui_account(&pubkey, account, accounts_encoding, None, None)
+                    };
+                    // Read current state only when simulation did not return this address.
+                    let account = match post_accounts.get(&pubkey) {
+                        Some(account) => Some(encode(account)),
+                        None => loader.read(&pubkey, encode).ok().flatten(),
+                    };
+                    accounts.push(account);
+                }
+                Some(accounts)
             }
         } else {
             None
         };
 
-        let converter = |(index, ixs): (usize, InnerInstructions)| {
-            StatusInnerInstructions {
-                index: index as u8,
-                instructions: ixs
-                    .into_iter()
-                    .map(|ix| InnerInstruction {
-                        instruction: ix.instruction,
-                        stack_height: Some(ix.stack_height as u32),
-                    })
-                    .collect(),
-            }
-            .into()
-        };
-
         let inner_instructions = inner_instructions_enabled.then(|| {
-            recorded_inner
+            live_inner_instructions(recorded_inner.unwrap_or_default())
                 .into_iter()
-                .flatten()
-                .enumerate()
-                .map(converter)
-                .collect::<Vec<_>>()
+                .map(Into::into)
+                .collect()
         });
 
         let result = RpcSimulateTransactionResult {
@@ -175,6 +140,6 @@ impl HttpDispatcher {
         };
 
         let slot = record.slot;
-        Ok(ResponsePayload::encode(&request.id, result, slot))
+        ResponsePayload::encode(&request.id, result, slot)
     }
 }

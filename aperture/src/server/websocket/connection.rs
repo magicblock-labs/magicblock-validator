@@ -1,4 +1,6 @@
+use engine::Engine;
 use std::time::Duration;
+use tracing::warn;
 
 use fastwebsockets::{CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError};
 use hyper::{body::Bytes, upgrade::Upgraded};
@@ -10,14 +12,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::{
-    ConnectionState,
-    dispatch::{WsDispatchResult, WsDispatcher},
-};
+use super::dispatch::{SubResult, WsDispatcher};
 use crate::{
     error::RpcError,
     requests::payload::{ResponseErrorPayload, ResponsePayload},
-    server::websocket::dispatch::WsConnectionChannel,
 };
 
 /// A type alias for the underlying WebSocket stream provided by `fastwebsockets`.
@@ -39,25 +37,22 @@ pub(super) struct ConnectionHandler {
     /// The request dispatcher for this specific connection. It manages all active
     /// subscriptions for this client.
     dispatcher: WsDispatcher,
-    /// A channel for receiving subscription updates (e.g., account changes, slot updates)
-    /// from the server's background `EventProcessor`s.
+    /// Bounded notification queue fed by this connection's subscription tasks.
     updates_rx: Receiver<Bytes>,
 }
 
 impl ConnectionHandler {
     /// Creates a new handler for an established WebSocket connection.
     ///
-    /// This function generates a unique ID and creates a dedicated MPSC channel for this
-    /// connection, which is used to push subscription notifications from the EventProcessor.
-    pub(super) fn new(ws: WebsocketStream, state: ConnectionState) -> Self {
+    /// Subscription tasks belong to its dispatcher and are aborted when it drops.
+    pub(super) fn new(ws: WebsocketStream, engine: Engine, cancel: CancellationToken) -> Self {
         let (tx, updates_rx) = mpsc::channel(4096);
-        let chan = WsConnectionChannel { tx };
 
         // The dispatcher is tied to this specific connection via its channel.
-        let dispatcher = WsDispatcher::new(state.engine, chan);
+        let dispatcher = WsDispatcher::new(engine, tx);
         Self {
             dispatcher,
-            cancel: state.cancel,
+            cancel,
             ws,
             updates_rx,
         }
@@ -112,7 +107,7 @@ impl ConnectionHandler {
 
                     // Dispatch the request and report the outcome to the client.
                     let success = match self.dispatcher.dispatch(&request).await {
-                        Ok(r) => self.report_success(r).await,
+                        Ok(r) => self.report_success(&request.id, r).await,
                         Err(e) => self.report_failure(Some(&request.id), e).await,
                     };
 
@@ -158,15 +153,21 @@ impl ConnectionHandler {
     }
 
     /// Formats and sends a standard JSON-RPC success response to the client.
-    async fn report_success(&mut self, result: WsDispatchResult) -> bool {
-        let payload = ResponsePayload::encode_no_context_raw(&result.id, result.result);
-        self.send(payload.0).await.is_ok()
+    async fn report_success(&mut self, id: &Value, result: SubResult) -> bool {
+        match ResponsePayload::encode_no_context(id, result) {
+            Ok(payload) => self.send(payload.0).await.is_ok(),
+            Err(error) => self.report_failure(Some(id), error).await,
+        }
     }
 
-    /// Formats and sends a standard JSON-RPC error response to the client.
     async fn report_failure(&mut self, id: Option<&Value>, error: RpcError) -> bool {
-        let payload = ResponseErrorPayload::encode(id, error);
-        self.send(payload.into_body().0).await.is_ok()
+        match ResponseErrorPayload::encode(id, error) {
+            Ok(payload) => self.send(payload.0).await.is_ok(),
+            Err(error) => {
+                warn!(?error, "failed to serialize WebSocket error");
+                false
+            }
+        }
     }
 
     /// A low-level helper to write a payload as a WebSocket text frame.

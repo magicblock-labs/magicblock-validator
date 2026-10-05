@@ -7,11 +7,11 @@ use spl_token_2022::{
     state::{Account as TokenAccount, AccountState, Mint},
 };
 
-use super::{HandlerResult, get_program_accounts::AccountWithPubkey};
+use super::{HandlerResult, RpcHandlers};
+use crate::account::AccountWithPubkey;
 use crate::{
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
-    server::http::dispatch::HttpDispatcher,
 };
 
 #[derive(Clone, Copy)]
@@ -20,7 +20,7 @@ pub(crate) enum TokenAccountAuthority {
     Delegate,
 }
 
-impl HttpDispatcher {
+impl RpcHandlers {
     pub(crate) fn get_token_accounts(
         &self,
         request: &JsonRequest,
@@ -85,6 +85,6 @@ impl HttpDispatcher {
             .collect::<Vec<_>>();
 
         let slot = self.engine.blocks().latest().slot;
-        Ok(ResponsePayload::encode(&request.id, accounts, slot))
+        ResponsePayload::encode(&request.id, accounts, slot)
     }
 }

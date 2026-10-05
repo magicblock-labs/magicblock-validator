@@ -1,5 +1,4 @@
 use json::{Array, Deserialize, JsonValueTrait, Value};
-use serde::de::DeserializeOwned;
 
 use crate::{RpcResult, error::RpcError};
 
@@ -23,7 +22,7 @@ pub(crate) enum RpcRequest {
 }
 
 impl<M> JsonRequest<M> {
-    pub(crate) fn required<T: DeserializeOwned>(&self, index: usize) -> RpcResult<T> {
+    pub(crate) fn required<'a, T: Deserialize<'a>>(&'a self, index: usize) -> RpcResult<T> {
         let value = self
             .params
             .as_ref()
@@ -32,7 +31,7 @@ impl<M> JsonRequest<M> {
         json::from_value(value).map_err(RpcError::invalid_params)
     }
 
-    pub(crate) fn optional<T: DeserializeOwned>(&self, index: usize) -> RpcResult<Option<T>> {
+    pub(crate) fn optional<'a, T: Deserialize<'a>>(&'a self, index: usize) -> RpcResult<Option<T>> {
         self.params
             .as_ref()
             .and_then(|params| params.get(index))

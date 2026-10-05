@@ -13,7 +13,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{RpcResult, error::RpcError, state::SharedState};
+use crate::{RpcResult, error::RpcError};
 
 const MAX_BODY_SIZE: usize = 1024 * 1024;
 
@@ -26,35 +26,17 @@ const MAX_BODY_SIZE: usize = 1024 * 1024;
 pub(crate) struct WebsocketServer {
     /// The TCP listener that accepts new client connections.
     socket: TcpListener,
-    /// The shared state required by each individual connection handler.
-    state: ConnectionState,
-}
 
-/// A container for shared state that is cloned for each new WebSocket connection.
-///
-/// This serves as a dependency container, providing each connection handler with
-/// the necessary context to process requests and manage subscriptions.
-#[derive(Clone)]
-struct ConnectionState {
     /// A handle to the engine, used to open per-subscription update streams.
     engine: Engine,
-    /// The global cancellation token for shutting down the server.
+    /// Cancels both pending upgrades and established connections.
     cancel: CancellationToken,
 }
 
 impl WebsocketServer {
-    /// Initializes the WebSocket server by binding a TCP
-    /// listener and preparing the shared connection state.
-    pub(crate) async fn new(
-        socket: TcpListener,
-        state: &SharedState,
-        cancel: CancellationToken,
-    ) -> RpcResult<Self> {
-        let state = ConnectionState {
-            engine: state.engine.clone(),
-            cancel,
-        };
-        Ok(Self { socket, state })
+    /// Takes ownership of a bound listener and the connection dependencies.
+    pub(crate) fn new(socket: TcpListener, engine: Engine, cancel: CancellationToken) -> Self {
+        Self { socket, engine, cancel }
     }
 
     /// Starts the main server loop to accept and handle incoming connections.
@@ -62,7 +44,7 @@ impl WebsocketServer {
     /// When the server's `cancel` token is triggered, the loop stops accepting
     /// new connections and returns immediately so validator restart time is not
     /// blocked by active WebSocket connections.
-    pub(crate) async fn run(mut self) {
+    pub(crate) async fn run(self) {
         loop {
             tokio::select! {
                 // A new client is attempting to connect.
@@ -70,30 +52,30 @@ impl WebsocketServer {
                     self.handle(stream);
                 },
                 // The server shutdown signal has been received.
-                _ = self.state.cancel.cancelled() => break,
+                _ = self.cancel.cancelled() => break,
             }
         }
-        // Drop shared state before returning; active connection tasks are
-        // dropped with the RPC runtime.
-        drop(self.state);
     }
 
     /// Spawns a task to handle a new TCP stream as a potential WebSocket connection.
     ///
     /// This function sets up a Hyper service to perform the initial HTTP Upgrade handshake.
-    fn handle(&mut self, stream: TcpStream) {
-        // Clone the state for the new connection.
-        let state = self.state.clone();
-
+    fn handle(&self, stream: TcpStream) {
+        let engine = self.engine.clone();
+        let cancel = self.cancel.clone();
+        let connection_cancel = cancel.clone();
         let io = TokioIo::new(stream);
-        let handler = service_fn(move |request| handle_upgrade(request, state.clone()));
+        let handler = service_fn(move |request| {
+            handle_upgrade(request, engine.clone(), connection_cancel.clone())
+        });
 
         tokio::spawn(async move {
             let builder = http1::Builder::new();
             // The `with_upgrades` method enables Hyper to handle the WebSocket upgrade protocol.
             let connection = builder.serve_connection(io, handler).with_upgrades();
-            if let Err(error) = connection.await {
-                warn!(error = ?error, "WebSocket connection terminated");
+            tokio::select! {
+                result = connection => if let Err(error) = result { warn!(?error, "WebSocket connection terminated"); },
+                _ = cancel.cancelled() => {},
             }
         });
     }
@@ -103,7 +85,8 @@ impl WebsocketServer {
 /// and attempts to upgrade it to a WebSocket connection.
 async fn handle_upgrade(
     request: Request<Incoming>,
-    state: ConnectionState,
+    engine: Engine,
+    cancel: CancellationToken,
 ) -> RpcResult<Response<Empty<Bytes>>> {
     // `fastwebsockets::upgrade` checks the request headers (e.g., `Connection: upgrade`).
     // If valid, it returns the "101 Switching Protocols" response and a future that
@@ -113,7 +96,11 @@ async fn handle_upgrade(
     // Spawn a new task to manage the WebSocket communication, freeing up the
     // Hyper service to handle other potential incoming connections.
     tokio::spawn(async move {
-        let mut ws = match ws.await {
+        let result = tokio::select! {
+            result = ws => result,
+            _ = cancel.cancelled() => return,
+        };
+        let mut ws = match result {
             Ok(ws) => ws,
             Err(e) => {
                 warn!(
@@ -125,7 +112,7 @@ async fn handle_upgrade(
         };
         ws.set_max_message_size(MAX_BODY_SIZE);
         // The `ConnectionHandler` will now take over the WebSocket stream.
-        let handler = ConnectionHandler::new(ws, state);
+        let handler = ConnectionHandler::new(ws, engine, cancel);
         handler.run().await
     });
 

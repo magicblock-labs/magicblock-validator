@@ -8,7 +8,7 @@ use serde::{
 };
 use solana_hash::Hash as BlockHash;
 use solana_pubkey::Pubkey;
-use solana_signature::{SIGNATURE_BYTES, Signature};
+use solana_signature::Signature;
 
 /// A newtype wrapper for `solana_signature::Signature` to provide a custom
 /// `serde` implementation for Base58 encoding.
@@ -53,104 +53,58 @@ impl From<SerdeSignature> for Signature {
     }
 }
 
+/// Encodes fixed-size public keys and signatures using a stack buffer.
+fn serialize_base58<const N: usize, S: Serializer>(
+    bytes: &[u8; N],
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    // The largest supported value is a 64-byte signature (at most 88 characters).
+    let mut buffer = [0u8; 88];
+    let size = bs58::encode(bytes).onto(buffer.as_mut_slice()).map_err(S::Error::custom)?;
+    // SAFETY: bs58 only emits ASCII characters from its alphabet.
+    serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buffer[..size]) })
+}
+
+/// Rejects any Base58 value whose decoded length differs from the target type.
+fn deserialize_base58<'de, const N: usize, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<[u8; N], D::Error> {
+    /// Decodes directly into the fixed-size destination and rejects short values.
+    struct Base58Visitor<const N: usize>;
+    impl<const N: usize> Visitor<'_> for Base58Visitor<N> {
+        type Value = [u8; N];
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(formatter, "a Base58 string representing {N} bytes")
+        }
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+            let mut buffer = [0u8; N];
+            let size = bs58::decode(value).onto(&mut buffer).map_err(E::custom)?;
+            if size != N {
+                return Err(E::custom(format!("expected {N} bytes, got {size}")));
+            }
+            Ok(buffer)
+        }
+    }
+    deserializer.deserialize_str(Base58Visitor::<N>)
+}
+
 impl Serialize for Serde32Bytes {
-    /// Serializes the 32-byte array into a Base58 encoded string.
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // 32 bytes will expand to at most 44 base58 characters
-        let mut buf = [0u8; 44];
-        let size = bs58::encode(&self.0).onto(buf.as_mut_slice()).map_err(S::Error::custom)?;
-        // SAFETY:
-        // The `bs58` crate guarantees that its encoded output is valid UTF-8.
-        serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buf[..size]) })
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_base58(&self.0, serializer)
     }
 }
-
 impl<'de> Deserialize<'de> for Serde32Bytes {
-    /// Deserializes a Base58 encoded string into a 32-byte array.
-    /// It returns an error if the decoded data is not exactly 32 bytes.
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct Serde32BytesVisitor;
-
-        impl Visitor<'_> for Serde32BytesVisitor {
-            type Value = Serde32Bytes;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a Base58 string representing a 32-byte array")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let mut buffer = [0u8; 32];
-                let decoded_len =
-                    bs58::decode(value).onto(&mut buffer).map_err(de::Error::custom)?;
-                if decoded_len != 32 {
-                    return Err(de::Error::custom(format!(
-                        "expected 32 bytes, got {}",
-                        decoded_len
-                    )));
-                }
-                Ok(Serde32Bytes(buffer))
-            }
-        }
-        deserializer.deserialize_str(Serde32BytesVisitor)
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_base58(deserializer).map(Self)
     }
 }
-
 impl Serialize for SerdeSignature {
-    /// Serializes the 64-byte signature into a Base58 encoded string.
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        // 64 bytes will expand to at most 88 base58 characters
-        let mut buf = [0u8; 88];
-        let size = bs58::encode(&self.0).onto(buf.as_mut_slice()).map_err(S::Error::custom)?;
-        // SAFETY:
-        // The `bs58` crate guarantees that its encoded output is valid UTF-8.
-        serializer.serialize_str(unsafe { std::str::from_utf8_unchecked(&buf[..size]) })
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serialize_base58(self.0.as_array(), serializer)
     }
 }
-
 impl<'de> Deserialize<'de> for SerdeSignature {
-    /// Deserializes a Base58 encoded string into a 64-byte `Signature`.
-    /// It returns an error if the decoded data is not exactly 64 bytes.
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        struct SerdeSignatureVisitor;
-
-        impl Visitor<'_> for SerdeSignatureVisitor {
-            type Value = SerdeSignature;
-
-            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter.write_str("a Base58 encoded string representing a 64-byte signature")
-            }
-
-            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                let mut buffer = [0u8; SIGNATURE_BYTES];
-                let decoded_len =
-                    bs58::decode(value).onto(&mut buffer).map_err(de::Error::custom)?;
-                if decoded_len != SIGNATURE_BYTES {
-                    return Err(de::Error::custom(format!(
-                        "expected {} bytes, got {}",
-                        SIGNATURE_BYTES, decoded_len
-                    )));
-                }
-                Ok(SerdeSignature(Signature::from(buffer)))
-            }
-        }
-        deserializer.deserialize_str(SerdeSignatureVisitor)
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserialize_base58(deserializer).map(|bytes: [u8; 64]| Self(Signature::from(bytes)))
     }
 }

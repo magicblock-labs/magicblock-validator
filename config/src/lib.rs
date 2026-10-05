@@ -270,9 +270,8 @@ impl fmt::Display for LeaderParams {
             (
                 "RPC",
                 format!(
-                    "{} ({} workers, {} Geyser plugins)",
+                    "{} ({} Geyser plugins)",
                     self.aperture.listen,
-                    self.aperture.event_processors,
                     self.aperture.geyser_plugins.len(),
                 ),
             ),
