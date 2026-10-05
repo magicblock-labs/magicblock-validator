@@ -16,7 +16,7 @@ const MAX_PERF_SAMPLES: usize = 720;
 
 impl RpcHandlers {
     pub(crate) fn get_recent_performance_samples(&self, request: &JsonRequest) -> HandlerResult {
-        let count = request.required::<usize>(0)?.min(MAX_PERF_SAMPLES);
+        let count = request.optional::<usize>(0)?.unwrap_or(MAX_PERF_SAMPLES).min(MAX_PERF_SAMPLES);
         let samples = self.samples.lock().unwrap_or_else(PoisonError::into_inner);
         ResponsePayload::encode_no_context(
             &request.id,
