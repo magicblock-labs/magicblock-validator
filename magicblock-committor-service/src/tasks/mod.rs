@@ -4,9 +4,9 @@ use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod commit_delivery;
 pub mod commit_finalize_task;
 pub mod commit_stage_task;
-pub mod commit_task;
 pub mod intent_size_validator;
 pub mod task_builder;
 pub mod task_strategist;
@@ -14,15 +14,11 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::{
-    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
-};
+use crate::tasks::commit_finalize_task::CommitFinalizeTask;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum TaskType {
-    Commit,
     CommitFinalize,
-    Finalize,
     Undelegate,
     Action,
 }
@@ -35,9 +31,7 @@ pub enum TaskStrategy {
 
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
-    Commit(CommitTask),
     CommitFinalize(CommitFinalizeTask),
-    Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
 }
@@ -49,9 +43,7 @@ impl BaseTask for BaseTaskImpl {
 
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
-            Self::Commit(value) => value.instruction(validator),
             Self::CommitFinalize(value) => value.instruction(validator),
-            Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
         }
@@ -59,7 +51,6 @@ impl BaseTask for BaseTaskImpl {
 
     fn try_optimize_tx_size(&mut self) -> bool {
         match self {
-            Self::Commit(value) => value.try_optimize_tx_size(),
             Self::CommitFinalize(value) => value.try_optimize_tx_size(),
             _ => false,
         }
@@ -67,24 +58,16 @@ impl BaseTask for BaseTaskImpl {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(value) => value.compute_units(),
             Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
-            Self::Finalize(_) => 120_000,
             Self::Undelegate(_) => 120_000,
         }
     }
 
     fn accounts_size_budget(&self) -> u32 {
         match self {
-            Self::Commit(value) => value.accounts_size_budget(),
             Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
-            Self::Finalize(_) => {
-                dlp_api::instruction_builder::finalize_size_budget(
-                    AccountSizeClass::Huge,
-                )
-            }
             Self::Undelegate(value) => {
                 if value.include_undelegation_request {
                     dlp_api::instruction_builder::undelegate_with_request_size_budget(
@@ -103,7 +86,6 @@ impl BaseTask for BaseTaskImpl {
 impl BaseTaskImpl {
     pub fn strategy(&self) -> TaskStrategy {
         match self {
-            Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
             Self::CommitFinalize(task) if task.is_buffer() => {
                 TaskStrategy::Buffer
             }
@@ -115,13 +97,6 @@ impl BaseTaskImpl {
 impl LabelValue for BaseTaskImpl {
     fn value(&self) -> &str {
         match self {
-            Self::Commit(task) => {
-                if task.is_buffer() {
-                    "buffer_commit"
-                } else {
-                    "args_commit"
-                }
-            }
             Self::CommitFinalize(task) => {
                 if task.is_buffer() {
                     "buffer_commit_finalize"
@@ -129,7 +104,6 @@ impl LabelValue for BaseTaskImpl {
                     "args_commit_finalize"
                 }
             }
-            Self::Finalize(_) => "args_finalize",
             Self::Undelegate(_) => "args_undelegate",
             Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
@@ -199,26 +173,6 @@ impl UndelegateTask {
 impl From<UndelegateTask> for BaseTaskImpl {
     fn from(value: UndelegateTask) -> Self {
         Self::Undelegate(value)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FinalizeTask {
-    pub delegated_account: Pubkey,
-}
-
-impl FinalizeTask {
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp_api::instruction_builder::finalize(
-            *validator,
-            self.delegated_account,
-        )
-    }
-}
-
-impl From<FinalizeTask> for BaseTaskImpl {
-    fn from(value: FinalizeTask) -> Self {
-        Self::Finalize(value)
     }
 }
 
@@ -404,9 +358,9 @@ mod serialization_safety_test {
 
     use crate::{
         tasks::{
-            commit_stage_task::PreparationTask,
-            commit_task::{CommitDelivery, CommitTask},
-            *,
+            commit_delivery::CommitDelivery,
+            commit_finalize_task::CommitFinalizeTask,
+            commit_stage_task::PreparationTask, *,
         },
         test_utils,
     };
@@ -415,13 +369,13 @@ mod serialization_safety_test {
         test_utils::init_test_logger();
     }
 
-    fn make_commit_task(
+    fn make_commit_finalize_task(
         commit_id: u64,
         allow_undelegation: bool,
         data: Vec<u8>,
         lamports: u64,
-    ) -> CommitTask {
-        CommitTask {
+    ) -> CommitFinalizeTask {
+        CommitFinalizeTask {
             commit_id,
             allow_undelegation,
             committed_account: CommittedAccount {
@@ -435,7 +389,7 @@ mod serialization_safety_test {
                 },
                 remote_slot: Default::default(),
             },
-            delivery_details: CommitDelivery::StateInArgs,
+            delivery: CommitDelivery::StateInArgs,
         }
     }
 
@@ -444,17 +398,10 @@ mod serialization_safety_test {
         setup();
         let validator = Pubkey::new_unique();
 
-        // Test Commit variant (StateInArgs)
+        // Test CommitFinalize variant (StateInArgs)
         let commit_task: BaseTaskImpl =
-            make_commit_task(123, true, vec![1, 2, 3], 1000).into();
+            make_commit_finalize_task(123, true, vec![1, 2, 3], 1000).into();
         assert_serializable(&commit_task.instruction(&validator));
-
-        // Test Finalize variant
-        let finalize_task: BaseTaskImpl = FinalizeTask {
-            delegated_account: Pubkey::new_unique(),
-        }
-        .into();
-        assert_serializable(&finalize_task.instruction(&validator));
 
         // Test Undelegate variant
         let undelegate_task: BaseTaskImpl = UndelegateTask {
@@ -536,16 +483,20 @@ mod serialization_safety_test {
         assert!(!ix.accounts[12].is_signer);
     }
 
-    fn make_buffer_commit_task(
+    fn make_buffer_commit_finalize_task(
         commit_id: u64,
         allow_undelegation: bool,
         data: Vec<u8>,
         lamports: u64,
-    ) -> CommitTask {
-        let task =
-            make_commit_task(commit_id, allow_undelegation, data, lamports);
-        CommitTask {
-            delivery_details: CommitDelivery::StateInBuffer { prepared: false },
+    ) -> CommitFinalizeTask {
+        let task = make_commit_finalize_task(
+            commit_id,
+            allow_undelegation,
+            data,
+            lamports,
+        );
+        CommitFinalizeTask {
+            delivery: CommitDelivery::StateInBuffer { prepared: false },
             ..task
         }
     }
@@ -555,7 +506,7 @@ mod serialization_safety_test {
         let validator = Pubkey::new_unique();
 
         let commit_task =
-            make_buffer_commit_task(456, false, vec![7, 8, 9], 2000);
+            make_buffer_commit_finalize_task(456, false, vec![7, 8, 9], 2000);
         assert!(commit_task.is_buffer());
         assert_serializable(&commit_task.instruction(&validator));
     }
@@ -565,10 +516,10 @@ mod serialization_safety_test {
         let authority = Pubkey::new_unique();
 
         let mut commit_task =
-            make_buffer_commit_task(789, true, vec![0; 1024], 3000);
+            make_buffer_commit_finalize_task(789, true, vec![0; 1024], 3000);
 
         let Some(preparation_task) =
-            PreparationTask::from_commit(&mut commit_task)
+            PreparationTask::from_commit_finalize(&mut commit_task)
         else {
             panic!("invalid preparation state on creation!");
         };

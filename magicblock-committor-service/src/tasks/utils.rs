@@ -17,21 +17,16 @@ use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{
     tasks::{
+        commit_delivery::CommitDelivery,
         commit_finalize_task::CommitFinalizeTask,
-        commit_task::{CommitDelivery, CommitTask},
-        task_strategist::TaskStrategistResult,
-        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask,
-        BaseTaskImpl,
+        task_strategist::TaskStrategistResult, BaseActionTask,
+        BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
     },
     transactions::v1,
 };
 
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
-// reduce instruction size. Below this threshold, the commit is sent
-// as CommitState. The value (256) is chosen because it is sufficient
-// for small accounts, which typically could hold up to 8 u32 fields or
-// 4 u64 fields. These integers are expected to be on the hot path
-// and updated continuously.
+// Small accounts send full state in CommitFinalize. Above this threshold,
+// compute a diff when a base account is available to reduce the payload.
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
 /// Builds a [`BaseTaskImpl`] for each `action`, used by both
@@ -59,8 +54,6 @@ pub fn create_action_tasks(
 /// Decides how a commit's data should be delivered based on account size:
 /// accounts larger than `COMMIT_STATE_SIZE_THRESHOLD` diff against
 /// `base_account` (when available), everything else is sent as full state.
-/// Shared by [`create_commit_task`] and [`create_commit_finalize_task`] so
-/// the two never drift apart.
 fn commit_delivery(
     account: &CommittedAccount,
     base_account: Option<Account>,
@@ -79,25 +72,7 @@ fn commit_delivery(
     }
 }
 
-/// Builds a legacy [`CommitTask`] for `account`. Intent execution and admission
-/// use [`create_commit_finalize_task`]; this helper remains for legacy tasks.
-pub fn create_commit_task(
-    commit_id: u64,
-    allow_undelegation: bool,
-    account: CommittedAccount,
-    base_account: Option<Account>,
-) -> CommitTask {
-    let delivery_details = commit_delivery(&account, base_account);
-
-    CommitTask {
-        commit_id,
-        allow_undelegation,
-        committed_account: account,
-        delivery_details,
-    }
-}
-
-/// Same as [`create_commit_task`] but for [`CommitFinalizeTask`].
+/// Builds a combined commit and finalization task for `account`.
 pub fn create_commit_finalize_task(
     commit_id: u64,
     allow_undelegation: bool,
