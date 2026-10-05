@@ -181,10 +181,7 @@ pub async fn tx_logs_contain(
         .await
         .iter()
         .any(|log| {
-            // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
-            // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
-            // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
-            // the decision and passing either CommitState or CommitDiff from the tests themselves.
+            // Keep legacy log queries compatible with both commit instruction families.
             if needle == "CommitState" {
                 log.contains(needle)
                     || log.contains("CommitDiff")

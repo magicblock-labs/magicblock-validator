@@ -75,10 +75,6 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
         .optimized_tasks
         .iter()
         .filter_map(|task| match task {
-            BaseTaskImpl::Commit(task) => Some((
-                task.committed_account.pubkey,
-                task.committed_account.remote_slot,
-            )),
             BaseTaskImpl::CommitFinalize(task) => Some((
                 task.committed_account.pubkey,
                 task.committed_account.remote_slot,
@@ -111,36 +107,19 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<
     // Broken tasks are prepared incorrectly so they have to be cleaned up
     let mut to_cleanup = Vec::new();
     for task in &mut strategy.optimized_tasks {
-        match task {
-            BaseTaskImpl::Commit(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
-                    continue;
-                };
-                if commit_id == &task.commit_id {
-                    continue;
-                }
-
-                // Handle invalid tasks
-                to_cleanup.push(BaseTaskImpl::Commit(task.clone()));
-                task.reset_commit_id(*commit_id);
+        if let BaseTaskImpl::CommitFinalize(task) = task {
+            let Some(commit_id) =
+                commit_ids.get(&task.committed_account.pubkey)
+            else {
+                continue;
+            };
+            if commit_id == &task.commit_id {
+                continue;
             }
-            BaseTaskImpl::CommitFinalize(task) => {
-                let Some(commit_id) =
-                    commit_ids.get(&task.committed_account.pubkey)
-                else {
-                    continue;
-                };
-                if commit_id == &task.commit_id {
-                    continue;
-                }
 
-                // Handle invalid tasks
-                to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
-                task.reset_commit_id(*commit_id);
-            }
-            _ => {}
+            // Handle invalid tasks
+            to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
+            task.reset_commit_id(*commit_id);
         }
     }
 
@@ -173,12 +152,10 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     // We encountered error "Max instruction trace length exceeded"
     // All the tasks a prepared to be executed at this point
     // We attempt Two stages commit flow, need to split tasks up
-    let last_commit_ind = strategy.optimized_tasks.iter().rposition(|el| {
-        matches!(
-            el,
-            BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
-        )
-    });
+    let last_commit_ind = strategy
+        .optimized_tasks
+        .iter()
+        .rposition(|el| matches!(el, BaseTaskImpl::CommitFinalize(_)));
     let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
     for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
         if Some(i) <= last_commit_ind {
@@ -460,7 +437,7 @@ mod tests {
         intent_executor::task_info_fetcher::{
             AccountSnapshot, TaskInfoFetcherResult,
         },
-        tasks::utils::create_commit_task,
+        tasks::utils::create_commit_finalize_task,
     };
 
     /// Reports commit id 1 except for one unchanged account at commit id 5.
@@ -531,7 +508,7 @@ mod tests {
         let unchanged_pubkey = Pubkey::new_unique();
         // Stale cache produced commit id 5; on chain the account was
         // re-delegated, so the correct commit id is 1.
-        let stale_task = create_commit_task(
+        let stale_task = create_commit_finalize_task(
             5,
             false,
             CommittedAccount {
@@ -544,7 +521,7 @@ mod tests {
         let mut strategy = TransactionStrategy {
             optimized_tasks: vec![
                 stale_task.into(),
-                create_commit_task(
+                create_commit_finalize_task(
                     5,
                     false,
                     CommittedAccount {

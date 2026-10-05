@@ -9,8 +9,8 @@ use tracing::error;
 use crate::{
     persist::{CommitStrategy, IntentPersister},
     tasks::{
-        commit_task::CommitDelivery, utils::TransactionUtils, BaseActionTask,
-        BaseTask, BaseTaskImpl,
+        commit_delivery::CommitDelivery, utils::TransactionUtils,
+        BaseActionTask, BaseTask, BaseTaskImpl,
     },
     transactions::{
         serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
@@ -93,15 +93,6 @@ impl TransactionStrategy {
                 }
             })
             .any(BaseActionTask::has_callback)
-    }
-
-    /// V0 prepends compute-budget instructions; V1 carries budgets in config.
-    pub(crate) fn task_instruction_offset(&self) -> u8 {
-        if self.uses_alts() {
-            TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
-        } else {
-            0
-        }
     }
 
     pub fn uses_alts(&self) -> bool {
@@ -439,13 +430,6 @@ impl TaskStrategist {
 
         for task in tasks {
             let (commit_id, pubkey, commit_strategy) = match task {
-                BaseTaskImpl::Commit(commit_task) => (
-                    commit_task.commit_id,
-                    commit_task.committed_account.pubkey,
-                    commit_strategy_from_delivery(
-                        &commit_task.delivery_details,
-                    ),
-                ),
                 BaseTaskImpl::CommitFinalize(commit_finalize_task) => (
                     commit_finalize_task.commit_id,
                     commit_finalize_task.committed_account.pubkey,
@@ -581,11 +565,10 @@ mod tests {
         },
         persist::IntentPersisterImpl,
         tasks::{
-            commit_task::CommitTask,
+            commit_finalize_task::CommitFinalizeTask,
             task_builder::{TaskBuilderImpl, TasksBuilder},
-            utils::{create_commit_task, COMMIT_STATE_SIZE_THRESHOLD},
-            BaseActionTask, BaseActionTaskV1, FinalizeTask, TaskStrategy,
-            UndelegateTask,
+            utils::{create_commit_finalize_task, COMMIT_STATE_SIZE_THRESHOLD},
+            BaseActionTask, BaseActionTaskV1, TaskStrategy, UndelegateTask,
         },
         test_utils,
     };
@@ -655,7 +638,7 @@ mod tests {
         commit_id: u64,
         data_size: usize,
         diff_len: usize,
-    ) -> CommitTask {
+    ) -> CommitFinalizeTask {
         let committed_account = CommittedAccount {
             pubkey: Pubkey::new_unique(),
             account: Account {
@@ -667,7 +650,12 @@ mod tests {
         };
 
         if diff_len == 0 {
-            create_commit_task(commit_id, false, committed_account, None)
+            create_commit_finalize_task(
+                commit_id,
+                false,
+                committed_account,
+                None,
+            )
         } else {
             let base_account = {
                 let mut acc = committed_account.account.clone();
@@ -677,7 +665,7 @@ mod tests {
                 }
                 acc
             };
-            create_commit_task(
+            create_commit_finalize_task(
                 commit_id,
                 false,
                 committed_account,
@@ -704,13 +692,6 @@ mod tests {
             },
         }
         .into()
-    }
-
-    // Helper to create a finalize task
-    fn create_test_finalize_task() -> FinalizeTask {
-        FinalizeTask {
-            delegated_account: Pubkey::new_unique(),
-        }
     }
 
     // Helper to create an undelegate task
@@ -765,20 +746,25 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_optimizes_to_buffer_u16_exceeded() {
+    fn test_build_strategy_buffers_payload_above_u16_limit() {
         let validator = Pubkey::new_unique();
 
         let task = create_test_commit_task(1, 66_000, 0); // Large task
         let tasks = vec![task.into()];
 
-        let result = TaskStrategist::build_strategy(
+        let strategy = TaskStrategist::build_strategy(
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
             None,
-        );
+        )
+        .expect("Buffer delivery must fit even when inline data exceeds u16");
 
-        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
+        assert_eq!(
+            strategy.optimized_tasks[0].strategy(),
+            TaskStrategy::Buffer
+        );
+        assert!(strategy.lookup_tables_keys.is_empty());
     }
 
     #[test]
@@ -874,18 +860,30 @@ mod tests {
 
     #[test]
     fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Also max number of committed accounts fit with ALTs!
+        // Eleven combined commits fit within the compute budget. Extra action
+        // accounts push their buffered form beyond V1's static-key limit.
         const NUM_COMMITS: u64 = 11;
 
         let validator = Pubkey::new_unique();
 
-        let tasks = (0..NUM_COMMITS)
+        let mut tasks: Vec<BaseTaskImpl> = (0..NUM_COMMITS)
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 1000, 0);
                 task.into()
             })
             .collect();
+        let mut action = create_test_base_action_task(0);
+        let BaseActionTask::V1(action_task) = &mut action else {
+            panic!("expected a V1 action");
+        };
+        action_task.action.account_metas_per_program = (0..20)
+            .map(|_| ShortAccountMeta {
+                pubkey: Pubkey::new_unique(),
+                is_writable: false,
+            })
+            .collect();
+        tasks.push(action.into());
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -895,7 +893,8 @@ mod tests {
         )
         .expect("Should build strategy with buffer optimization");
 
-        for optimized_task in strategy.optimized_tasks {
+        for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize]
+        {
             assert!(matches!(optimized_task.strategy(), TaskStrategy::Buffer));
         }
         assert!(!strategy.lookup_tables_keys.is_empty());
@@ -1058,7 +1057,7 @@ mod tests {
         let validator = Pubkey::new_unique();
         let tasks: Vec<BaseTaskImpl> = vec![
             create_test_commit_task(1, 5000, 0).into(),
-            create_test_finalize_task().into(),
+            create_test_undelegate_task().into(),
             create_test_base_action_task(500).into(),
             create_test_undelegate_task().into(),
         ];
@@ -1083,7 +1082,7 @@ mod tests {
             strategies,
             vec![
                 TaskStrategy::Buffer, // Commit task optimized
-                TaskStrategy::Args,   // Finalize stays
+                TaskStrategy::Args,   // Undelegate stays
                 TaskStrategy::Args,   // BaseAction stays
                 TaskStrategy::Args,   // Undelegate stays
             ]
