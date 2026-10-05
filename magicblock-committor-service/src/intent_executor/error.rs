@@ -350,6 +350,8 @@ impl TransactionStrategyExecutionError {
                                 signature,
                             ),
                         ),
+                        // Only legacy commits use the temporary state/record
+                        // PDAs that a separate Finalize can recover.
                         instruction_err @ (InstructionError::Custom(
                             COMMIT_STATE_INVALID_ACCOUNT_OWNER,
                         )
@@ -361,7 +363,7 @@ impl TransactionStrategyExecutionError {
                         )
                         | InstructionError::Custom(
                             COMMIT_RECORD_ALREADY_INITIALIZED,
-                        )) => {
+                        )) if matches!(task, BaseTaskImpl::Commit(_)) => {
                             Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
                                 tx_err_helper(instruction_err),
                                 signature
@@ -478,6 +480,65 @@ mod tests {
     use super::{InternalError, TransactionStrategyExecutionError};
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
+
+    #[test]
+    fn combined_commits_do_not_trigger_legacy_finalization() {
+        use crate::tasks::utils::{
+            create_commit_finalize_task, create_commit_task, TransactionUtils,
+        };
+        use dlp_api::error::DlpError;
+        use magicblock_core::intent::types::CommittedAccount;
+        use solana_account::Account;
+        use solana_instruction::error::InstructionError;
+        use solana_pubkey::Pubkey;
+        use solana_transaction_error::TransactionError;
+
+        let account = CommittedAccount {
+            pubkey: Pubkey::new_unique(),
+            account: Account::default(),
+            remote_slot: 0,
+        };
+        let legacy = create_commit_task(1, false, account.clone(), None).into();
+        let combined =
+            create_commit_finalize_task(1, false, account, None).into();
+        let pending_errors = [
+            DlpError::CommitStateInvalidAccountOwner,
+            DlpError::CommitStateAlreadyInitialized,
+            DlpError::CommitRecordInvalidAccountOwner,
+            DlpError::CommitRecordAlreadyInitialized,
+        ];
+        for offset in [0, TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT] {
+            for pending_error in &pending_errors {
+                let error = TransactionError::InstructionError(
+                    offset,
+                    InstructionError::Custom(*pending_error as u32),
+                );
+                let legacy_result = TransactionStrategyExecutionError::try_from_transaction_error(
+                    error.clone(), None, std::slice::from_ref(&legacy), offset,
+                );
+                assert!(matches!(legacy_result, Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(_, _))));
+                let combined_result = TransactionStrategyExecutionError::try_from_transaction_error(
+                    error.clone(), None, std::slice::from_ref(&combined), offset,
+                );
+                assert_eq!(combined_result.unwrap_err(), error);
+            }
+            let nonce_error = TransactionError::InstructionError(
+                offset,
+                InstructionError::Custom(DlpError::NonceOutOfOrder as u32),
+            );
+            let result =
+                TransactionStrategyExecutionError::try_from_transaction_error(
+                    nonce_error,
+                    None,
+                    std::slice::from_ref(&combined),
+                    offset,
+                );
+            assert!(matches!(
+                result,
+                Ok(TransactionStrategyExecutionError::CommitIDError(_, _))
+            ));
+        }
+    }
     const TX_TOO_LARGE_MAGICBLOCK: &str =
         "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
 

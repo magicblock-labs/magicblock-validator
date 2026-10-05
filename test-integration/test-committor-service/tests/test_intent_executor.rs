@@ -376,7 +376,15 @@ async fn test_cpi_limits_error_parsing() {
         })
         .collect();
 
-    let scheduled_intent = create_intent(committed_accounts.clone(), true);
+    let scheduled_intent = create_scheduled_intent(
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::WithBaseActions {
+                committed_accounts: committed_accounts.clone(),
+                base_actions: cpi_limit_actions(counters[0].0.pubkey()),
+            },
+            undelegate_action: UndelegateType::Standalone,
+        }),
+    );
     let mut transaction_strategy = single_flow_transaction_strategy(
         &fixture.authority.pubkey(),
         &task_info_fetcher,
@@ -813,7 +821,15 @@ async fn test_cpi_limits_error_recovery() {
         })
         .collect();
 
-    let scheduled_intent = create_intent(committed_accounts.clone(), true);
+    let scheduled_intent = create_scheduled_intent(
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::WithBaseActions {
+                committed_accounts: committed_accounts.clone(),
+                base_actions: cpi_limit_actions(counters[0].0.pubkey()),
+            },
+            undelegate_action: UndelegateType::Standalone,
+        }),
+    );
     // Form strategy that will fail due to CPI Limit
     // Recovery is to split this into 2 transactions: Commit & Finalize
     let strategy = single_flow_transaction_strategy(
@@ -873,7 +889,8 @@ async fn test_cpi_limits_error_recovery() {
 #[tokio::test]
 async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     const COUNTER_SIZE: u64 = 102;
-    // COUNTER_NUM = 10 or larger result in CpiLimitError even with 2 stage execution
+    // Additional post-commit CPIs keep the combined transaction above the
+    // trace limit while allowing the commit and action/undelegation stages to fit.
     const COUNTER_NUM: u64 = 9;
 
     let TestEnv {
@@ -917,7 +934,10 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     // We use CommitAndUndelegate so initial single-stage flow is guaranteed to be heavy.
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
 
-    let commit_action = CommitType::Standalone(committed_accounts.clone());
+    let commit_action = CommitType::WithBaseActions {
+        committed_accounts: committed_accounts.clone(),
+        base_actions: cpi_limit_actions(counters[0].0.pubkey()),
+    };
     let undelegate_action =
         failing_undelegate_action(payer.pubkey(), committed_accounts[0].pubkey);
     let base_intent =
@@ -1043,7 +1063,7 @@ async fn test_commit_unfinalized_account_recovery() {
 
     // Prepare multiple counters; each needs an escrow (payer) to be able to execute base actions.
     // We also craft unique on-chain data so we can verify post-commit state exactly.
-    let (counter_auth, account) = setup_counter(40, None).await;
+    let (counter_auth, mut account) = setup_counter(40, None).await;
     setup_payer_with_keypair(&counter_auth, fixture.rpc_client.get_inner())
         .await;
     let pda = FlexiCounter::pda(&counter_auth.pubkey()).0;
@@ -1083,13 +1103,15 @@ async fn test_commit_unfinalized_account_recovery() {
         assert!(result.is_ok());
     }
 
-    // Now simulate user sending new intent
+    // Commit a newer state directly despite the pending legacy commit.
+    let last_byte = account.data.last_mut().unwrap();
+    *last_byte = last_byte.wrapping_add(1);
     let committed_account = CommittedAccount {
         pubkey: pda,
         account,
         remote_slot: Default::default(),
     };
-    let intent = create_intent(vec![committed_account], false);
+    let intent = create_intent(vec![committed_account.clone()], false);
     let result = intent_executor
         .execute(intent, None::<IntentPersisterImpl>)
         .await;
@@ -1099,15 +1121,17 @@ async fn test_commit_unfinalized_account_recovery() {
         ExecutionOutput::SingleStage(_)
     ));
 
-    assert_eq!(result.patched_errors.len(), 2);
-    assert!(matches!(
-        result.patched_errors[0],
-        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
-    ));
-    assert!(matches!(
-        result.patched_errors[1],
-        TransactionStrategyExecutionError::CommitIDError(_, _)
-    ))
+    assert!(result.patched_errors.is_empty());
+    let metadata = RpcTaskInfoFetcher::new(fixture.rpc_client.clone())
+        .fetch_delegation_metadata(&[(pda, 0)], 0)
+        .await
+        .unwrap();
+    assert_eq!(metadata[&pda].last_commit_id, 1);
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &[committed_account],
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -1171,7 +1195,11 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
         .into_iter()
         .map(|el| CommittedAccount {
             pubkey: el.1,
-            account: el.2,
+            account: {
+                let mut account = el.2;
+                *account.data.last_mut().unwrap() = 42;
+                account
+            },
             remote_slot: Default::default(),
         })
         .collect();
@@ -1208,15 +1236,7 @@ async fn test_commit_unfinalized_account_recovery_two_stage() {
     assert_ne!(finalized.commit_signature, finalized.finalize_signature);
 
     let patched_errors = execution_report.patched_errors();
-    assert_eq!(patched_errors.len(), 2);
-    assert!(matches!(
-        patched_errors[0],
-        TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
-    ));
-    assert!(matches!(
-        patched_errors[1],
-        TransactionStrategyExecutionError::CommitIDError(_, _)
-    ));
+    assert!(patched_errors.is_empty());
 
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
@@ -1355,6 +1375,77 @@ async fn test_action_callback_fired_on_timeout() {
     verify_table_mania_released(
         &fixture.table_mania,
         &pre_test_tablemania_state,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_two_stage_action_failure_keeps_combined_commit() {
+    let TestEnv {
+        fixture,
+        task_info_fetcher,
+        callback_executor,
+        ..
+    } = TestEnv::setup().await;
+    let payer = setup_payer(fixture.rpc_client.get_inner()).await;
+    let (pubkey, mut account) =
+        init_and_delegate_account_on_chain(&payer, 70, None).await;
+    account.owner = program_flexi_counter::id();
+    let committed_account = CommittedAccount {
+        pubkey,
+        account,
+        remote_slot: 0,
+    };
+    let UndelegateType::WithBaseActions(actions) =
+        failing_undelegate_action(payer.pubkey(), pubkey)
+    else {
+        panic!("expected failing action");
+    };
+    let intent = create_scheduled_intent(MagicBaseIntent::Commit(
+        CommitType::WithBaseActions {
+            committed_accounts: vec![committed_account.clone()],
+            base_actions: actions,
+        },
+    ));
+    let preparator = fixture.create_transaction_preparator();
+    let mut report = IntentExecutionReport::default();
+    let mut executor = create_two_stage_executor(
+        &fixture,
+        &callback_executor,
+        &intent,
+        &task_info_fetcher,
+        &mut report,
+    )
+    .await;
+    let signature = executor
+        .commit(
+            &[pubkey],
+            &preparator,
+            &task_info_fetcher,
+            &None::<IntentPersisterImpl>,
+        )
+        .await
+        .unwrap();
+    let mut finalize = executor.done(signature);
+    let final_signature = finalize
+        .finalize(&preparator, &None::<IntentPersisterImpl>)
+        .await
+        .unwrap();
+    drop(finalize);
+    assert_eq!(
+        final_signature, signature,
+        "no empty second-stage transaction should be sent"
+    );
+    assert!(matches!(
+        report.patched_errors().as_slice(),
+        [TransactionStrategyExecutionError::ActionsError(_, _)]
+    ));
+    let calls = callback_executor.calls();
+    assert_eq!(calls.len(), 1);
+    assert!(matches!(calls[0].1, Err(ActionError::ActionsError(_, _))));
+    verify_committed_accounts_state(
+        fixture.rpc_client.get_inner(),
+        &[committed_account],
     )
     .await;
 }
@@ -1752,6 +1843,29 @@ fn create_intent(
     };
 
     create_scheduled_intent(base_intent)
+}
+
+fn cpi_limit_actions(escrow_authority: Pubkey) -> Vec<BaseAction> {
+    // Combined commits use fewer CPIs than legacy Commit + Finalize. Four
+    // noop calls push the united transaction over the trace limit, while
+    // the action/undelegation stage still fits when submitted separately.
+    (0..4)
+        .map(|id| BaseAction {
+            id,
+            compute_units: 10_000,
+            destination_program: solana_pubkey::pubkey!(
+                "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
+            ),
+            source_program: None,
+            escrow_authority,
+            data_per_program: ProgramArgs {
+                escrow_index: ACTOR_ESCROW_INDEX,
+                data: vec![],
+            },
+            account_metas_per_program: vec![],
+            callback: None,
+        })
+        .collect()
 }
 
 fn create_scheduled_intent(

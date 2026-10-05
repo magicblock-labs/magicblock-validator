@@ -166,6 +166,21 @@ where
         self.transaction_strategy
     }
 
+    pub(super) fn has_tasks_after_commit(&self) -> bool {
+        self.transaction_strategy
+            .optimized_tasks
+            .iter()
+            .rposition(|task| {
+                matches!(
+                    task,
+                    BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_)
+                )
+            })
+            .is_some_and(|index| {
+                index + 1 < self.transaction_strategy.optimized_tasks.len()
+            })
+    }
+
     /// Patch the current `transaction_strategy` in response to a recoverable
     /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
     /// to be applied after a retry.
