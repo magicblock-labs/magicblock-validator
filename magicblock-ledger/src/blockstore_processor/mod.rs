@@ -60,10 +60,7 @@ async fn replay_blocks(
     }
     .unwrap_or("N/A".to_string());
     const PROGRESS_REPORT_INTERVAL: u64 = 100;
-    loop {
-        let Ok(Some(block)) = ledger.get_block(slot) else {
-            break;
-        };
+    while let Ok(Some(block)) = ledger.get_block(slot) {
         if enabled!(Level::INFO)
             && slot.is_multiple_of(PROGRESS_REPORT_INTERVAL)
         {

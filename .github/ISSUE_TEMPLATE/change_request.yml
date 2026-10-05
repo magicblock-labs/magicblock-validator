@@ -1,0 +1,32 @@
+name: Change request
+description: Request a product, API, storage, or behavior change
+type: Feature
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: start with an imperative verb and describe the requested outcome
+        in sentence case, without a category prefix or terminal punctuation.
+        Example: `Add validator restart coverage`
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What outcome should this change produce?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What problem or limitation does this address?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: Add boundaries or implementation scope when known and not already clear from the goal.
+    validations:
+      required: false

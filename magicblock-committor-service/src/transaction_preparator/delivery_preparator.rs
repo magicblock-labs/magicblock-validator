@@ -251,7 +251,7 @@ impl DeliveryPreparator {
                         .instructions(ixs.len());
                     realloc_budget_ixs
                 };
-                ixs_with_budget.extend(ixs.into_iter());
+                ixs_with_budget.extend(ixs);
                 ixs_with_budget
             })
             .collect::<Vec<_>>();
