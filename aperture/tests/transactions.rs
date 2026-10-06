@@ -328,12 +328,7 @@ async fn test_simulate_transaction_returns_requested_accounts() {
     );
 }
 
-/// Tests simulation with config options like replacing blockhash and skipping signature verification.
-// TODO(phase 4): honoring `sigVerify: false` needs a simulate path that skips
-// signature verification. The engine's `IntoTransactionView` always sigverifies
-// before simulate, so a transaction whose signature was invalidated (by a
-// post-signing blockhash swap or a bogus signature) is rejected up front.
-#[ignore = "phase-4: engine simulate always sigverifies; sigVerify:false unsupported"]
+/// Verifies simulation accepts invalid signatures and reports a replacement blockhash.
 #[tokio::test]
 async fn test_simulate_transaction_with_config_options() {
     let env = RpcTestEnv::new().await;

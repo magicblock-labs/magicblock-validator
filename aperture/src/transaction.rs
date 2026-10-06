@@ -186,7 +186,7 @@ pub(crate) fn live_inner_instructions(groups: InnerInstructionsList) -> Vec<Inne
 }
 
 /// Decodes supported RPC wire encodings and sanitizes the Engine transaction view.
-/// Signature verification remains Engine admission's responsibility.
+/// Engine verifies signatures on execution submission, not simulation.
 pub(crate) fn decode_transaction(
     transaction: &str,
     encoding: UiTransactionEncoding,
