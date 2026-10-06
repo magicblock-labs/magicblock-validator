@@ -376,7 +376,7 @@ impl DeliveryPreparator {
     // That could lead for Intent2 init of buffers executing prior of Intent1 buffer cleanup
     // With same set A buffers will have same address
     //
-    // To avoid this race on buffers we cleanup only succesfully executed intents
+    // To avoid this race on buffers we cleanup only successfully executed intents
     // With intent retries all buffers will be eventually closed once intent succeeds
     pub async fn cleanup(
         &self,
