@@ -1,5 +1,5 @@
 use magicblock_program::magicblock_processor;
-use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
+use solana_program_runtime::invoke_context::BuiltinFunctionRegisterer;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{
     bpf_loader_upgradeable, compute_budget, loader_v4, system_program,
@@ -10,7 +10,7 @@ use solana_sdk_ids::{
 pub struct Builtin {
     pub program_id: Pubkey,
     pub name: &'static str,
-    pub entrypoint: BuiltinFunctionWithContext,
+    pub entrypoint: BuiltinFunctionRegisterer,
 }
 
 /// The set of builtin programs loaded at startup.
@@ -32,52 +32,56 @@ pub static BUILTINS: &[Builtin] = &[
     Builtin {
         program_id: system_program::ID,
         name: "system_program",
-        entrypoint: solana_system_program::system_processor::Entrypoint::vm,
+        entrypoint:
+            solana_system_program::system_processor::Entrypoint::register,
     },
     Builtin {
         program_id: bpf_loader_upgradeable::ID,
         name: "solana_bpf_loader_upgradeable_program",
-        entrypoint: solana_bpf_loader_program::Entrypoint::vm,
+        entrypoint: solana_bpf_loader_program::Entrypoint::register,
     },
     Builtin {
         program_id: loader_v4::ID,
         name: "solana_loader_v4_program",
-        entrypoint: solana_loader_v4_program::Entrypoint::vm,
+        entrypoint: solana_loader_v4_program::Entrypoint::register,
     },
     Builtin {
         program_id: magicblock_program::ID,
         name: "magicblock_program",
-        entrypoint: magicblock_processor::Entrypoint::vm,
+        entrypoint: magicblock_processor::Entrypoint::register,
     },
     Builtin {
         program_id: magicblock_program::CRANK_PROGRAM_ID,
         name: "magicblock_crank_program",
-        entrypoint: magicblock_processor::CrankEntrypoint::vm,
+        entrypoint: magicblock_processor::CrankEntrypoint::register,
     },
     Builtin {
         program_id: magicblock_program::CALLBACK_PROGRAM_ID,
         name: "magicblock_callback_program",
-        entrypoint: magicblock_processor::CallbackEntrypoint::vm,
+        entrypoint: magicblock_processor::CallbackEntrypoint::register,
     },
     Builtin {
         program_id:
             magicblock_program::POST_DELEGATION_ACTION_EXECUTOR_PROGRAM_ID,
         name: "magicblock_post_delegation_action_executor_program",
-        entrypoint: magicblock_processor::PostDelegationActionEntrypoint::vm,
+        entrypoint:
+            magicblock_processor::PostDelegationActionEntrypoint::register,
     },
     Builtin {
         program_id: magicblock_program::EPHEMERAL_SYSTEM_PROGRAM_ID,
         name: "magicblock_ephemeral_system_program",
-        entrypoint: magicblock_processor::EphemeralSystemEntrypoint::vm,
+        entrypoint: magicblock_processor::EphemeralSystemEntrypoint::register,
     },
     Builtin {
         program_id: compute_budget::ID,
         name: "compute_budget_program",
-        entrypoint: solana_compute_budget_program::Entrypoint::vm,
+        entrypoint: solana_compute_budget_program::Entrypoint::register,
     },
     Builtin {
         program_id: zk_elgamal_proof_program::ID,
         name: "solana_zk_elgamal_proof_program",
-        entrypoint: solana_zk_elgamal_proof_program::Entrypoint::vm,
+        entrypoint: solana_zk_elgamal_proof_program::Entrypoint::register,
     },
 ];
+
+use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;

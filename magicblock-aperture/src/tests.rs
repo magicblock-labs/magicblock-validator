@@ -87,11 +87,7 @@ mod event_processor {
 
     #[tokio::test]
     async fn block_updates_before_event_start_are_not_cached() {
-        let env = ExecutionTestEnv::new_with_config(
-            ExecutionTestEnv::BASE_FEE,
-            1,
-            true,
-        );
+        let env = ExecutionTestEnv::new_with_config(1, true);
         env.advance_slot();
         let state = SharedState::new(
             NodeContext {

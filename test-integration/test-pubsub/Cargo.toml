@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-transaction = { workspace = true }
 tracing = { workspace = true }
 solana-sdk = { workspace = true }
 solana-system-interface = { workspace = true }

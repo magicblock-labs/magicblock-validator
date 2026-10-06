@@ -71,7 +71,7 @@ pub struct CliParams {
 /// CLI analog of configuration for the validator's core behavior and identity.
 #[derive(Args, Serialize, Debug)]
 pub struct CliValidatorConfig {
-    /// Base fee in lamports for transactions.
+    /// Accepted for compatibility; ER transaction fees are always zero.
     #[arg(long)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub basefee: Option<u64>,

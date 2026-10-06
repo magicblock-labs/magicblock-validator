@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-message = { workspace = true }
+solana-transaction = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }
 futures = { workspace = true }

@@ -1,11 +1,5 @@
 #![allow(deprecated)]
 
-use std::sync::Arc;
-
-use agave_syscalls::{
-    create_program_runtime_environment_v1,
-    create_program_runtime_environment_v2,
-};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_core::link::blocks::BlockHash;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
@@ -21,13 +15,13 @@ use solana_program::{pubkey::Pubkey, rent::Rent};
 use solana_program_runtime::{
     execution_budget::SVMTransactionExecutionBudget,
     loaded_programs::ProgramRuntimeEnvironments,
-    solana_sbpf::program::BuiltinProgram,
 };
 use solana_sdk_ids::{
     ed25519_program, native_loader, secp256k1_program, secp256r1_program,
     sysvar,
 };
 use solana_svm::transaction_processor::TransactionProcessingEnvironment;
+use solana_syscalls::create_program_runtime_environment;
 use tracing::error;
 
 /// Transaction processing environment plus the exact active Agave feature set.
@@ -37,11 +31,7 @@ pub struct SvmEnv {
 }
 
 /// Initialize an SVM environment for transaction processing and retain the active feature set.
-pub fn build_svm_env(
-    accountsdb: &AccountsDb,
-    blockhash: BlockHash,
-    fee_per_signature: u64,
-) -> SvmEnv {
+pub fn build_svm_env(accountsdb: &AccountsDb, blockhash: BlockHash) -> SvmEnv {
     let mut feature_set = FeatureSet::default();
 
     // Activate features relevant to ER operations:
@@ -78,31 +68,23 @@ pub fn build_svm_env(
 
     let budget = SVMTransactionExecutionBudget::new_with_defaults(false);
     let runtime_features = feature_set.runtime_features();
-    let runtime_v1 = create_program_runtime_environment_v1(
+    let runtime_v1 = create_program_runtime_environment(
         &runtime_features,
         &budget,
         false,
         false,
     )
-    .map(Into::into)
-    .unwrap_or_else(|_| {
-        Arc::new(BuiltinProgram::new_loader(Default::default()))
-    });
-    let runtime_v2 =
-        create_program_runtime_environment_v2(&budget, false).into();
-    let runtime_environments = ProgramRuntimeEnvironments {
-        program_runtime_v1: runtime_v1,
-        program_runtime_v2: runtime_v2,
-    };
+    .expect("runtime syscall registration must be unique");
+    let runtime_environments =
+        ProgramRuntimeEnvironments::new(runtime_v1.clone(), runtime_v1);
 
     let environment = TransactionProcessingEnvironment {
         blockhash,
-        blockhash_lamports_per_signature: fee_per_signature,
+        blockhash_lamports_per_signature: 0,
         feature_set: runtime_features,
         epoch_total_stake: 0,
-        program_runtime_environments_for_execution: runtime_environments
-            .clone(),
-        program_runtime_environments_for_deployment: runtime_environments,
+        alpenglow_migration_succeeded: false,
+        program_runtime_environments: runtime_environments,
         // Sourced from the local rent sysvar, which mirrors the base chain
         // (synced at startup on the primary, replicated to replicas). Rent
         // must match the base layer exactly: a higher rate rejects cloning
@@ -134,12 +116,16 @@ fn read_rent_sysvar(accountsdb: &AccountsDb) -> Rent {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use solana_program_runtime::{
         invoke_context::InvokeContext,
-        solana_sbpf::{ebpf, elf::Executable, program::SBPFVersion},
+        solana_sbpf::{
+            ebpf,
+            elf::Executable,
+            program::{BuiltinProgram, SBPFVersion},
+        },
     };
-
-    use super::*;
 
     #[test]
     fn loads_stripped_sbpf_v3_elf() {

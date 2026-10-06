@@ -45,9 +45,7 @@ pub struct SharedState {
 pub struct NodeContext {
     /// The public key of the validator node.
     pub identity: Pubkey,
-    /// Base fee charged for transaction execution per signature.
-    pub base_fee: u64,
-    /// Runtime features activated for this node (used to compute fees)
+    /// Runtime features activated for this node.
     pub featureset: Arc<FeatureSet>,
     /// Block production time in milliseconds
     pub blocktime: u64,

@@ -30,6 +30,7 @@ message Message {
     repeated CompiledInstruction instructions = 4;
     bool versioned = 5;
     repeated MessageAddressTableLookup address_table_lookups = 6;
+    TransactionConfig config = 7;
 }
 
 message MessageHeader {
@@ -42,6 +43,13 @@ message MessageAddressTableLookup {
     bytes account_key = 1;
     bytes writable_indexes = 2;
     bytes readonly_indexes = 3;
+}
+
+message TransactionConfig {
+    optional uint64 priority_fee = 1;
+    optional uint32 compute_unit_limit = 2;
+    optional uint32 loaded_accounts_data_size_limit = 3;
+    optional uint32 heap_size = 4;
 }
 
 message TransactionStatusMeta {
@@ -65,6 +73,8 @@ message TransactionStatusMeta {
     // Available since Solana v1.10.35 / v1.11.6.
     // Set to `None` for txs executed on earlier versions.
     optional uint64 compute_units_consumed = 16;
+    // Total transaction cost
+    optional uint64 cost_units = 17;
 }
 
 message TransactionError {
@@ -119,6 +129,7 @@ enum RewardType {
     Rent = 2;
     Staking = 3;
     Voting = 4;
+    DeactivatedStake = 5;
 }
 
 message Reward {
@@ -127,6 +138,7 @@ message Reward {
     uint64 post_balance = 3;
     RewardType reward_type = 4;
     string commission = 5;
+    string commission_bps = 6;
 }
 
 message Rewards {

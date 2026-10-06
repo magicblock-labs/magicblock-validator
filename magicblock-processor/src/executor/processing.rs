@@ -17,11 +17,13 @@ use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
 };
 use solana_account::AccountSharedData;
-use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
 use solana_feature_set::raise_cpi_nesting_limit_to_8;
 use solana_fee_structure::FeeDetails;
-use solana_program_runtime::execution_budget::SVMTransactionExecutionAndFeeBudgetLimits;
+use solana_program_runtime::execution_budget::{
+    SVMTransactionExecutionAndFeeBudgetLimits, SVMTransactionExecutionBudget,
+};
 use solana_pubkey::Pubkey;
+use solana_runtime_transaction::transaction_meta::TransactionConfiguration;
 use solana_svm::{
     account_loader::CheckedTransactionDetails,
     rollback_accounts::RollbackAccounts,
@@ -317,7 +319,7 @@ impl super::TransactionExecutor {
             Some(bytes) => bytes,
             None => {
                 let versioned = transaction.to_versioned_transaction();
-                bincode::serialize(&versioned)
+                wincode::serialize(&versioned)
                     .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?
                     .into()
             }
@@ -363,7 +365,8 @@ impl super::TransactionExecutor {
             ProcessedTransaction::Executed(executed) => {
                 if succeeded && !executed.programs_modified_by_tx.is_empty() {
                     self.processor.global_program_cache.write().unwrap().merge(
-                        &self.processor.environments,
+                        &self.processor.program_runtime_environment,
+                        self.processor.slot,
                         &executed.programs_modified_by_tx,
                     );
                 }
@@ -503,24 +506,24 @@ impl super::TransactionExecutor {
         &self,
         txn: &SanitizedTransaction,
     ) -> TransactionResult<SVMTransactionExecutionAndFeeBudgetLimits> {
-        let limits = process_compute_budget_instructions(
-            txn.program_instructions_iter(),
+        let config = TransactionConfiguration::try_from_sanitized_message(
+            txn.message(),
             &self.feature_set,
         )?;
-        let signature_fee = signature_fee(
-            txn,
-            self.environment.blockhash_lamports_per_signature,
-        );
-        let fee_details = FeeDetails::new(signature_fee, 0);
         let raise_cpi_limit = self
             .feature_set
             .is_active(&raise_cpi_nesting_limit_to_8::id());
+        let mut budget =
+            SVMTransactionExecutionBudget::new_with_defaults(raise_cpi_limit);
+        budget.compute_unit_limit = u64::from(config.compute_unit_limit);
+        budget.heap_size = config.updated_heap_bytes;
 
-        Ok(limits.get_compute_budget_and_limits(
-            limits.loaded_accounts_bytes,
-            fee_details,
-            raise_cpi_limit,
-        ))
+        Ok(SVMTransactionExecutionAndFeeBudgetLimits {
+            budget,
+            loaded_accounts_data_size_limit: config
+                .loaded_accounts_data_size_limit,
+            fee_details: FeeDetails::default(),
+        })
     }
 }
 
@@ -538,13 +541,4 @@ fn transaction_balances(
         pre.pop().unwrap_or_else(|| vec![0; count]),
         post.pop().unwrap_or_else(|| vec![0; count]),
     )
-}
-
-fn signature_fee(
-    txn: &SanitizedTransaction,
-    lamports_per_signature: u64,
-) -> u64 {
-    txn.message()
-        .num_total_signatures()
-        .saturating_mul(lamports_per_signature)
 }

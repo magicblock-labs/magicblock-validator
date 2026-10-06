@@ -283,7 +283,9 @@ impl IntentSizeValidator {
             0,
             uniqueness_nonce,
         )
-        .map(|tx| tx.serialized_size() <= MAX_TRANSACTION_V1_WIRE_SIZE)
+        .map(|tx| {
+            serialized_transaction_size(&tx) <= MAX_TRANSACTION_V1_WIRE_SIZE
+        })
         .unwrap_or(false)
     }
 
@@ -464,8 +466,8 @@ mod tests {
                 0,
                 Some(0),
             )
+            .map(|tx| serialized_transaction_size(&tx))
             .unwrap()
-            .serialized_size()
         };
         let payer_keys = |tasks: &[BaseTaskImpl]| {
             tasks

@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-message = { workspace = true }
+solana-account = { workspace = true }
+solana-transaction = { workspace = true }
 magicblock-delegation-program-api = { workspace = true }
 anyhow = { workspace = true }
 cleanass = { workspace = true }

@@ -8,9 +8,11 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-runtime-transaction = { workspace = true }
 agave-precompiles = { workspace = true, features = ["agave-unstable-api"] }
-agave-syscalls = { workspace = true }
+solana-syscalls = { workspace = true }
 bincode = { workspace = true }
+wincode = { workspace = true }
 blake3 = { workspace = true }
 tracing = { workspace = true }
 parking_lot = { workspace = true }
@@ -53,6 +55,7 @@ solana-zk-elgamal-proof-program = { workspace = true }
 rustc-hash = { workspace = true }
 
 [dev-dependencies]
+solana-message = { workspace = true }
 guinea = { workspace = true }
 magicblock-magic-program-api = { workspace = true }
 solana-compute-budget-interface = { workspace = true }

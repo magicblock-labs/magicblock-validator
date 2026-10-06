@@ -301,10 +301,8 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         blockhash: solana_sdk::hash::Hash,
     ) -> solana_sdk::signature::Signature {
         use magicblock_rpc_client::MagicBlockSendTransactionConfig;
-        use solana_sdk::{
-            message::{v0::Message, VersionedMessage},
-            transaction::VersionedTransaction,
-        };
+        use solana_message::{v0::Message, VersionedMessage};
+        use solana_transaction::versioned::VersionedTransaction;
 
         let message = Message::try_compile(
             &fixture.authority.pubkey(),

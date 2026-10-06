@@ -14,8 +14,9 @@ use program_schedulecommit::{
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    signer::Signer,
 };
+use solana_transaction::Transaction;
 use test_task_scheduler::{setup_validator, wait_for_committed_count};
 
 #[test]

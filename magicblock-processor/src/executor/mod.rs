@@ -21,8 +21,11 @@ use magicblock_ledger::{LatestBlock, Ledger};
 use solana_account::ReadableAccount;
 use solana_feature_set::FeatureSet;
 use solana_program::{rent::Rent, slot_hashes::SlotHashes};
-use solana_program_runtime::loaded_programs::{
-    BlockRelation, ForkGraph, ProgramCache, ProgramCacheEntry,
+use solana_program_runtime::{
+    loaded_programs::{
+        BlockRelation, ForkGraph, ProgramCache, ProgramRuntimeEnvironments,
+    },
+    program_cache_entry::ProgramCacheEntry,
 };
 use solana_sdk_ids::sysvar;
 use solana_svm::transaction_processor::{
@@ -109,9 +112,10 @@ impl TransactionExecutor {
 
         // Use global program cache to share compilation results across executors
         processor.global_program_cache = programs_cache;
-        processor.environments = state
+        processor.program_runtime_environment = state
             .environment
-            .program_runtime_environments_for_execution
+            .program_runtime_environments
+            .get_env_for_execution()
             .clone();
 
         // Enable recording for accurate fee/unit usage tracking
@@ -235,7 +239,7 @@ impl TransactionExecutor {
         let slot = block.clock.slot;
         self.register_new_block(block.clone());
         self.environment.blockhash = block.blockhash;
-        self.processor.slot = slot;
+        self.set_slot(slot);
         self.set_sysvars(&block);
     }
 
@@ -269,14 +273,27 @@ impl TransactionExecutor {
     fn transition_to_slot(&mut self, slot: Slot) {
         // transactions execute in the latest finalized block + 1
         let prev_slot = slot.saturating_sub(1);
-        let Some(block) = self.block_history.get(&prev_slot) else {
+        let Some(block) = self.block_history.get(&prev_slot).cloned() else {
             // should never happen in practice
             warn!(slot, "tried to transition to slot which wasn't registered");
             return;
         };
         self.environment.blockhash = block.blockhash;
-        self.processor.slot = slot;
-        self.set_sysvars(block);
+        self.set_slot(slot);
+        self.set_sysvars(&block);
+    }
+
+    fn set_slot(&mut self, slot: Slot) {
+        // Upstream processors own a slot-scoped builtin cache. Preserve local
+        // sysvars while rebuilding that cache through its native lifecycle.
+        let processor = self.processor.new_from(slot, self.processor.epoch);
+        *processor.writable_sysvar_cache().write().unwrap() = self
+            .processor
+            .writable_sysvar_cache()
+            .read()
+            .unwrap()
+            .clone();
+        self.processor = processor;
     }
 
     /// Updates cache and persists slot hashes.
@@ -318,12 +335,15 @@ fn copy_env(
         blockhash_lamports_per_signature: env.blockhash_lamports_per_signature,
         epoch_total_stake: env.epoch_total_stake,
         feature_set: env.feature_set,
-        program_runtime_environments_for_execution: env
-            .program_runtime_environments_for_execution
-            .clone(),
-        program_runtime_environments_for_deployment: env
-            .program_runtime_environments_for_deployment
-            .clone(),
+        program_runtime_environments: ProgramRuntimeEnvironments::new(
+            env.program_runtime_environments
+                .get_env_for_execution()
+                .clone(),
+            env.program_runtime_environments
+                .get_env_for_deployment()
+                .clone(),
+        ),
+        alpenglow_migration_succeeded: env.alpenglow_migration_succeeded,
         rent: env.rent.clone(),
     }
 }

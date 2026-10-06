@@ -4,6 +4,7 @@ name = "test-schedule-intent"
 version.workspace = true
 
 [dependencies]
+solana-transaction = { workspace = true }
 log = "0.4.29"
 
 [dev-dependencies]

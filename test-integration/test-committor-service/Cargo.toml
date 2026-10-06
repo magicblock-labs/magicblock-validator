@@ -4,6 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
+solana-transaction-error = { workspace = true }
+solana-transaction = { workspace = true }
+solana-message = { workspace = true }
 async-trait = { workspace = true }
 borsh = { workspace = true }
 tracing = { workspace = true }

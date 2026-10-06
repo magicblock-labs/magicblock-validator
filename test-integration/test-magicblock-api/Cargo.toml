@@ -3,6 +3,7 @@ name = "test-magicblock-api"
 version.workspace = true
 edition.workspace = true
 [dependencies]
+solana-transaction = { workspace = true }
 integration-test-tools = { workspace = true }
 
 [dev-dependencies]

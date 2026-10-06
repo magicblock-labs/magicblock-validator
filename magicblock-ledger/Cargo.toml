@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+wincode = { workspace = true }
 arc-swap = { workspace = true }
 bincode = { workspace = true }
 tracing = { workspace = true }

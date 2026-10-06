@@ -18,9 +18,8 @@ use solana_account::{Account, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    hash::Hash, signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{hash::Hash, signature::Keypair, signer::Signer};
+use solana_transaction::Transaction;
 use test_kit::init_logger;
 use tokio::task::JoinSet;
 use tracing::*;

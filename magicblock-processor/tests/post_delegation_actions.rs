@@ -34,7 +34,7 @@ fn insert_magic_context(env: &ExecutionTestEnv) {
 #[tokio::test]
 async fn executor_runs_post_delegation_actions_after_clone() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -119,7 +119,7 @@ async fn executor_rejects_unwritable_action_dependencies_atomically() {
     generate_validator_authority_if_needed();
 
     for undelegating in [false, true] {
-        let env = ExecutionTestEnv::new_with_config(0, 1, false);
+        let env = ExecutionTestEnv::new_with_config(1, false);
         let validator = validator_authority();
         env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -191,7 +191,7 @@ async fn executor_rejects_unwritable_action_dependencies_atomically() {
 #[tokio::test]
 async fn executor_rejects_empty_undelegating_action_dependency() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -264,7 +264,7 @@ async fn executor_rejects_empty_undelegating_action_dependency() {
 #[tokio::test]
 async fn executor_allows_writable_action_account_created_by_the_action() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -352,7 +352,7 @@ async fn executor_allows_writable_action_account_created_by_the_action() {
 #[tokio::test]
 async fn executor_rejects_nonexistent_writable_signer_action_account() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -440,7 +440,7 @@ async fn executor_rejects_nonexistent_writable_signer_action_account() {
 #[tokio::test]
 async fn executor_rejects_squat_via_duplicate_writable_and_signer_metas() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -530,7 +530,7 @@ async fn executor_rejects_squat_via_duplicate_writable_and_signer_metas() {
 #[tokio::test]
 async fn nonexistent_writable_action_account_left_uncreated_still_rolls_back() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
 
@@ -587,7 +587,7 @@ async fn nonexistent_writable_action_account_left_uncreated_still_rolls_back() {
 #[tokio::test]
 async fn schedule_undelegation_marks_cloned_account_as_undelegated() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
     insert_magic_context(&env);
@@ -637,7 +637,7 @@ async fn schedule_undelegation_marks_cloned_account_as_undelegated() {
 #[tokio::test]
 async fn schedule_undelegation_commits_original_owner() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
     insert_magic_context(&env);
@@ -709,7 +709,7 @@ async fn schedule_undelegation_commits_original_owner() {
 #[tokio::test]
 async fn chunked_rescue_undelegation_clears_pending_clone() {
     generate_validator_authority_if_needed();
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let validator = validator_authority();
     env.fund_account(validator.pubkey(), 10_000_000);
     insert_magic_context(&env);

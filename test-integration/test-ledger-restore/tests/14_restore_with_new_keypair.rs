@@ -5,12 +5,13 @@ use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
     validator::cleanup,
 };
+use solana_account::Account;
 use solana_sdk::{
-    account::Account, instruction::Instruction, native_token::LAMPORTS_PER_SOL,
-    pubkey::Pubkey, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    instruction::Instruction, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
+    signature::Keypair, signer::Signer,
 };
 use solana_sdk_ids::loader_v4;
+use solana_transaction::Transaction;
 use test_ledger_restore::{
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };

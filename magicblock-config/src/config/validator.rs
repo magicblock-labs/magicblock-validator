@@ -14,7 +14,7 @@ use crate::{
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
 pub struct ValidatorConfig {
-    /// The minimum fee (in lamports) required to process a transaction.
+    /// Accepted for compatibility and ignored by execution; ER fees are zero.
     pub basefee: u64,
 
     /// The validator's identity keypair, encoded in Base58.

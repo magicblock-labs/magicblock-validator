@@ -370,7 +370,7 @@ fn test_close_buffer_limit() {
     ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    let tx_size = serialized_transaction_size(&tx);
+    let tx_size = serialized_transaction_size(&tx.into());
     info!(transaction_size = tx_size, "Cleanup task transaction size");
     assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
 
@@ -385,5 +385,7 @@ fn test_close_buffer_limit() {
     ixs.push(uniqueness_noop);
 
     let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+    assert!(
+        serialized_transaction_size(&tx.into()) > MAX_TRANSACTION_WIRE_SIZE
+    );
 }

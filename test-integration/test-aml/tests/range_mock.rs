@@ -14,11 +14,9 @@ use integration_test_tools::{
     tmpdir::resolve_tmp_dir,
 };
 use magicblock_core::token_programs::derive_ata;
-use solana_sdk::{
-    program_pack::Pack, signature::Keypair, signer::Signer,
-    transaction::Transaction,
-};
+use solana_sdk::{program_pack::Pack, signature::Keypair, signer::Signer};
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 use test_aml::{

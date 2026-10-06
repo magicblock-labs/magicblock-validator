@@ -1,5 +1,6 @@
 #![allow(unused)]
 
+use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::{
@@ -11,8 +12,8 @@ use solana_sdk::{
     pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use tracing::*;
 
 /// The memo v1 program is predeployed with the v1 loader
@@ -178,8 +179,8 @@ pub mod resolve_deploy {
     #[macro_export]
     macro_rules! fetch_and_assert_loaded_program_v1_v2_v4 {
         ($rpc_client:expr, $program_id:expr, $expected:expr) => {{
+            use solana_account::AccountSharedData;
             use solana_loader_v4_interface::state::LoaderV4Status;
-            use solana_sdk::account::AccountSharedData;
             use tracing::*;
 
             let program_account = $rpc_client
@@ -832,10 +833,10 @@ pub mod not_working {
         instruction::{AccountMeta, Instruction},
         signature::Keypair,
         signer::Signer,
-        transaction::Transaction,
     };
     use solana_sdk_ids::system_program;
     use solana_system_interface::instruction as system_instruction;
+    use solana_transaction::Transaction;
     use tracing::*;
 
     use super::{airdrop_sol, send_transaction, CHUNK_SIZE};

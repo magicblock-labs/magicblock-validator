@@ -38,9 +38,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
 use tempfile::TempDir;
 use tracing::*;
 

@@ -702,7 +702,7 @@ impl Ledger {
     ) -> LedgerResult<Option<VersionedTransaction>> {
         self.transaction_cf
             .get_bytes(index)?
-            .map(|bytes| deserialize(&bytes).map_err(Into::into))
+            .map(|bytes| wincode::deserialize(&bytes).map_err(Into::into))
             .transpose()
     }
 

@@ -15,8 +15,9 @@ use program_flexi_counter::{
 use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
-    signature::Keypair, signer::Signer, transaction::Transaction,
+    signature::Keypair, signer::Signer,
 };
+use solana_transaction::Transaction;
 use test_kit::init_logger;
 use tracing::*;
 

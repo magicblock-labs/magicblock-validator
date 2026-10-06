@@ -3,6 +3,7 @@ use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
+use solana_message::VersionedMessage;
 
 use crate::{
     persist::IntentPersister,
@@ -16,7 +17,6 @@ use crate::{
         },
         error::PreparatorResult,
     },
-    transactions::PreparedMessage,
     ComputeBudgetConfig,
 };
 
@@ -25,14 +25,14 @@ pub mod error;
 
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
-    /// Return [`PreparedMessage`] corresponding to [`TransactionStrategy`]
+    /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-    ) -> PreparatorResult<PreparedMessage>;
+    ) -> PreparatorResult<VersionedMessage>;
 
     /// Cleans up after strategy.
     /// `close_buffers`: if false, only ALT reservations are released.
@@ -78,7 +78,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-    ) -> PreparatorResult<PreparedMessage> {
+    ) -> PreparatorResult<VersionedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
         {
@@ -113,7 +113,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
         let message = if lookup_tables.is_empty() {
-            PreparedMessage::V1(
+            VersionedMessage::V1(
                 TransactionUtils::assemble_tasks_v1_message_with_uniqueness_nonce(
                     authority,
                     &tx_strategy.optimized_tasks,
@@ -122,16 +122,14 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 )?,
             )
         } else {
-            PreparedMessage::Versioned(
-                TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-                    authority,
-                    &tx_strategy.optimized_tasks,
-                    self.compute_budget_config.compute_unit_price,
-                    &lookup_tables,
-                    tx_strategy.uniqueness_nonce,
-                )?
-                .message,
-            )
+            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+                authority,
+                &tx_strategy.optimized_tasks,
+                self.compute_budget_config.compute_unit_price,
+                &lookup_tables,
+                tx_strategy.uniqueness_nonce,
+            )?
+            .message
         };
 
         Ok(message)

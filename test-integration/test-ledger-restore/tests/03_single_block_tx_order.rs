@@ -4,15 +4,17 @@ use cleanass::assert_eq;
 use integration_test_tools::{
     expect, tmpdir::resolve_tmp_dir, validator::cleanup,
 };
+use solana_message::{v0, v1, Message, VersionedMessage};
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
 };
+use solana_system_interface::instruction as system_instruction;
+use solana_transaction::versioned::VersionedTransaction;
 use test_ledger_restore::{
     airdrop_and_delegate_accounts, setup_offline_validator,
-    setup_validator_with_local_remote, transfer_lamports,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -66,57 +68,48 @@ fn write(
     let keypairs =
         airdrop_and_delegate_accounts(&ctx, &mut validator, &lamports);
 
-    // 2. Transfer 4 SOL from first account to second account
-    if separate_slot {
-        slot += 1;
-        expect!(ctx.wait_for_slot_ephem(slot), validator);
+    // Dependent transfers exercise legacy, v0 and v1 in durable execution order.
+    let rpc = expect!(ctx.try_ephem_client(), validator);
+    for (i, pair) in keypairs.windows(2).enumerate() {
+        if separate_slot {
+            slot += 1;
+            expect!(ctx.wait_for_slot_ephem(slot), validator);
+        }
+        let payer = &pair[0];
+        let ix = system_instruction::transfer(
+            &payer.pubkey(),
+            &pair[1].pubkey(),
+            (4 - i) as u64 * LAMPORTS_PER_SOL,
+        );
+        let hash = expect!(rpc.get_latest_blockhash(), validator);
+        let message = match i % 3 {
+            0 => VersionedMessage::Legacy(Message::new_with_blockhash(
+                &[ix],
+                Some(&payer.pubkey()),
+                &hash,
+            )),
+            1 => VersionedMessage::V0(expect!(
+                v0::Message::try_compile(&payer.pubkey(), &[ix], &[], hash),
+                validator
+            )),
+            _ => VersionedMessage::V1(expect!(
+                v1::Message::try_compile_with_config(
+                    &payer.pubkey(),
+                    &[ix],
+                    hash,
+                    v1::TransactionConfig::default()
+                        .with_compute_unit_limit(100_000)
+                        .with_loaded_accounts_data_size_limit(1_000_000)
+                ),
+                validator
+            )),
+        };
+        let transaction = expect!(
+            VersionedTransaction::try_new(message, &[payer]),
+            validator
+        );
+        expect!(rpc.send_and_confirm_transaction(&transaction), validator);
     }
-    transfer_lamports(
-        &ctx,
-        &mut validator,
-        &keypairs[0],
-        &keypairs[1].pubkey(),
-        4 * LAMPORTS_PER_SOL,
-    );
-
-    // 3. Transfer 3 SOL from second account to third account
-    if separate_slot {
-        slot += 1;
-        expect!(ctx.wait_for_slot_ephem(slot), validator);
-    }
-    transfer_lamports(
-        &ctx,
-        &mut validator,
-        &keypairs[1],
-        &keypairs[2].pubkey(),
-        3 * LAMPORTS_PER_SOL,
-    );
-
-    // 4. Transfer 2 SOL from third account to fourth account
-    if separate_slot {
-        slot += 1;
-        expect!(ctx.wait_for_slot_ephem(slot), validator);
-    }
-    transfer_lamports(
-        &ctx,
-        &mut validator,
-        &keypairs[2],
-        &keypairs[3].pubkey(),
-        2 * LAMPORTS_PER_SOL,
-    );
-
-    // 5. Transfer 1 SOL from fourth account to fifth account
-    if separate_slot {
-        slot += 1;
-        expect!(ctx.wait_for_slot_ephem(slot), validator);
-    }
-    transfer_lamports(
-        &ctx,
-        &mut validator,
-        &keypairs[3],
-        &keypairs[4].pubkey(),
-        LAMPORTS_PER_SOL,
-    );
 
     let slot = wait_for_ledger_persist(&ctx, &mut validator);
 
@@ -133,10 +126,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
                 .get_account(&keypair.pubkey()),
             validator
         );
-        // Since we don't collect fees at this point each account ends up
-        // with exactly 1 SOL.
-        // In the future we need to adapt this to allow for a range, i.e.
-        // 0.9 SOL <= lamports <= 1 SOL
+        // Gasless execution leaves exactly one SOL plus the original rent reserve.
         assert_eq!(
             acc.lamports,
             Rent::default().minimum_balance(0) + LAMPORTS_PER_SOL,
