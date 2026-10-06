@@ -19,22 +19,25 @@ use magicblock_committor_service::{
             CacheTaskInfoFetcher, RpcTaskInfoFetcher, TaskInfoFetcher,
             TaskInfoFetcherError,
         },
-        two_stage_executor::{Initialized, TwoStageExecutor},
         utils::prepare_and_execute_strategy,
         ExecutionOutput, IntentExecutionReport, IntentExecutionResult,
         IntentExecutor, IntentExecutorImpl,
     },
-    persist::IntentPersisterImpl,
+    persist::{IntentPersister, IntentPersisterImpl},
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl},
         task_strategist::{
-            TaskStrategist, TaskStrategistError, TransactionStrategy,
+            StrategyExecutionMode, TaskStrategist, TaskStrategistError,
+            TransactionStrategy,
         },
         BaseTask,
     },
     transaction_preparator::{
+        delivery_preparator::{BufferExecutionError, DeliveryPreparatorResult},
+        error::PreparatorResult,
         TransactionPreparator, TransactionPreparatorImpl,
     },
+    transactions::PreparedMessage,
     DEFAULT_ACTIONS_TIMEOUT,
 };
 use magicblock_core::{
@@ -839,9 +842,10 @@ async fn test_cpi_limits_error_recovery() {
     .await;
     let mut execution_report = IntentExecutionReport::default();
     let execution_result = intent_executor
-        .single_stage_execution_flow(
-            scheduled_intent,
-            strategy,
+        .execute_strategy(
+            scheduled_intent.id,
+            &scheduled_intent.get_all_committed_pubkeys(),
+            StrategyExecutionMode::SingleStage(strategy),
             &mut execution_report,
             &None::<IntentPersisterImpl>,
         )
@@ -968,9 +972,10 @@ async fn test_commit_id_actions_cpi_limit_errors_recovery() {
     intent_executor.started_at = std::time::Instant::now();
     let mut execution_report = IntentExecutionReport::default();
     let res = intent_executor
-        .single_stage_execution_flow(
-            scheduled_intent,
-            strategy,
+        .execute_strategy(
+            scheduled_intent.id,
+            &scheduled_intent.get_all_committed_pubkeys(),
+            StrategyExecutionMode::SingleStage(strategy),
             &mut execution_report,
             &None::<IntentPersisterImpl>,
         )
@@ -1188,6 +1193,7 @@ async fn test_action_callback_fired_on_timeout() {
 async fn test_two_stage_action_failure_keeps_combined_commit() {
     let TestEnv {
         fixture,
+        mut intent_executor,
         task_info_fetcher,
         callback_executor,
         ..
@@ -1212,34 +1218,30 @@ async fn test_two_stage_action_failure_keeps_combined_commit() {
             base_actions: actions,
         },
     ));
-    let preparator = fixture.create_transaction_preparator();
     let mut report = IntentExecutionReport::default();
-    let mut executor = create_two_stage_executor(
-        &fixture,
-        &callback_executor,
-        &intent,
-        &task_info_fetcher,
-        &mut report,
-    )
-    .await;
-    let signature = executor
-        .commit(
-            &[pubkey],
-            &preparator,
-            &task_info_fetcher,
+    let strategy =
+        create_two_transaction_strategy(&fixture, &intent, &task_info_fetcher)
+            .await;
+    let result = intent_executor
+        .execute_strategy(
+            intent.id,
+            &intent.get_all_committed_pubkeys(),
+            strategy,
+            &mut report,
             &None::<IntentPersisterImpl>,
         )
         .await
         .unwrap();
-    let mut finalize = executor.done(signature);
-    let final_signature = finalize
-        .finalize(&preparator, &None::<IntentPersisterImpl>)
-        .await
-        .unwrap();
-    drop(finalize);
+    let ExecutionOutput::TwoStage {
+        commit_signature,
+        finalize_signature,
+    } = result
+    else {
+        panic!("expected two-transaction execution");
+    };
     assert_eq!(
-        final_signature, signature,
-        "no empty second-stage transaction should be sent"
+        finalize_signature, commit_signature,
+        "no empty follow-up transaction should be sent"
     );
     assert!(matches!(
         report.patched_errors().as_slice(),
@@ -1327,72 +1329,96 @@ async fn test_callbacks_fired_in_two_stage() {
         standalone_actions: vec![commit_base_action],
         ..Default::default()
     });
-    let committed_pubkeys = intent.get_all_committed_pubkeys();
-
-    let transaction_preparator = fixture.create_transaction_preparator();
-    let mut execution_report = IntentExecutionReport::default();
-    let mut executor = create_two_stage_executor(
-        &fixture,
-        &callback_executor,
-        &intent,
-        &task_info_fetcher,
-        &mut execution_report,
-    )
-    .await;
-
-    // Execute commit stage
-    let commit_sig = executor
-        .commit(
-            &committed_pubkeys,
-            &transaction_preparator,
-            &task_info_fetcher,
+    let transaction_preparator = CallbackCheckingPreparator {
+        inner: fixture.create_transaction_preparator(),
+        callback_executor: callback_executor.clone(),
+        first_callback: expected_commit_callback.clone(),
+        preparations: AtomicU64::new(0),
+    };
+    let mut executor = IntentExecutorImpl::new(
+        fixture.rpc_client.clone(),
+        transaction_preparator,
+        task_info_fetcher.clone(),
+        callback_executor.clone(),
+        DEFAULT_ACTIONS_TIMEOUT,
+    );
+    let strategy =
+        create_two_transaction_strategy(&fixture, &intent, &task_info_fetcher)
+            .await;
+    let mut report = IntentExecutionReport::default();
+    executor
+        .execute_strategy(
+            intent.id,
+            &intent.get_all_committed_pubkeys(),
+            strategy,
+            &mut report,
             &None::<IntentPersisterImpl>,
         )
         .await
-        .expect("commit must succeed");
+        .expect("both transactions must succeed");
 
-    // standalone_actions land in the commit strategy as a BaseAction
     let calls = callback_executor.calls();
-    assert_eq!(
-        calls.len(),
-        1,
-        "commit-stage callback must be fired by execute_callbacks"
-    );
+    assert_eq!(calls.len(), 2, "each transaction reports its own callbacks");
     assert_eq!(calls[0].0[0], expected_commit_callback);
     assert!(calls[0].1.is_ok());
     assert_eq!(
         rpc_client.get_balance(&destination.pubkey()).await.unwrap(),
         destination_rent + 900_000,
     );
-
-    // Execute finalize stage
-    let mut finalize_executor = executor.done(commit_sig);
-    finalize_executor
-        .finalize(&transaction_preparator, &None::<IntentPersisterImpl>)
-        .await
-        .expect("finalize must succeed");
-
-    // Expect 2 actions to be executed in finalize stage
-    let calls = callback_executor.calls();
-    assert_eq!(
-        calls.len(),
-        2,
-        "finalize-stage callback must be fired by execute_callbacks"
-    );
     assert_eq!(calls[1].0[0], expected_finalize_callback);
     assert!(calls[1].1.is_ok());
 }
 
-/// Builds a [`TwoStageExecutor`] directly from an intent by constructing the
-/// commit and finalize strategies independently, without going through
-/// `execute_inner` or any CPI-limit recovery path.
-async fn create_two_stage_executor<'a>(
+/// Checks callback timing before preparing the next transaction.
+struct CallbackCheckingPreparator {
+    inner: TransactionPreparatorImpl,
+    callback_executor: MockActionsCallbackExecutor,
+    first_callback: BaseActionCallback,
+    preparations: AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl TransactionPreparator for CallbackCheckingPreparator {
+    async fn prepare_for_strategy<P: IntentPersister>(
+        &self,
+        authority: &Keypair,
+        strategy: &mut TransactionStrategy,
+        persister: &Option<P>,
+    ) -> PreparatorResult<PreparedMessage> {
+        if self.preparations.fetch_add(1, Ordering::Relaxed) == 1 {
+            let calls = self.callback_executor.calls();
+            assert_eq!(
+                calls.len(),
+                1,
+                "only the first transaction's callback is due"
+            );
+            assert_eq!(calls[0].0[0], self.first_callback);
+            assert!(calls[0].1.is_ok());
+        }
+        self.inner
+            .prepare_for_strategy(authority, strategy, persister)
+            .await
+    }
+
+    async fn cleanup_for_strategy(
+        &self,
+        authority: &Keypair,
+        strategy: &TransactionStrategy,
+        close_buffers: bool,
+    ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
+        self.inner
+            .cleanup_for_strategy(authority, strategy, close_buffers)
+            .await
+    }
+}
+
+/// Builds two transactions directly, bypassing the packing decision so tests
+/// can exercise follow-up execution without depending on size thresholds.
+async fn create_two_transaction_strategy(
     fixture: &TestFixture,
-    callback_executor: &MockActionsCallbackExecutor,
     intent: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<CacheTaskInfoFetcher<RpcTaskInfoFetcher>>,
-    execution_report: &'a mut IntentExecutionReport,
-) -> TwoStageExecutor<'a, MockActionsCallbackExecutor, Initialized> {
+) -> StrategyExecutionMode {
     let authority = &fixture.authority.pubkey();
     let commit_tasks = TaskBuilderImpl::commit_tasks(
         task_info_fetcher,
@@ -1419,15 +1445,10 @@ async fn create_two_stage_executor<'a>(
         None,
     )
     .unwrap();
-    TwoStageExecutor::new(
-        fixture.authority.insecure_clone(),
-        commit_strategy,
-        finalize_strategy,
-        IntentExecutionClient::new(fixture.rpc_client.clone()),
-        callback_executor.clone(),
-        execution_report,
-        intent.id,
-    )
+    StrategyExecutionMode::TwoStage {
+        commit_stage: commit_strategy,
+        finalize_stage: finalize_strategy,
+    }
 }
 
 fn succeeding_commit_action(
