@@ -1,5 +1,5 @@
 use crate::account::TransactionKind;
-use crate::transaction::live_inner_instructions;
+use crate::transaction::{live_inner_instructions, replace_blockhash};
 use std::{collections::HashMap, sync::Arc};
 
 use magicblock_metrics::metrics::AccountFetchEntrypoint;
@@ -26,23 +26,31 @@ impl RpcHandlers {
     ) -> HandlerResult {
         let transaction_str = request.required::<&str>(0)?;
         let config = request.optional::<RpcSimulateTransactionConfig>(1)?.unwrap_or_default();
+        if config.sig_verify && config.replace_recent_blockhash {
+            return Err(RpcError::invalid_params(
+                "sigVerify may not be used with replaceRecentBlockhash",
+            ));
+        }
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let transaction = self
+        let mut transaction = self
             .accounts
             .prepare_transaction(transaction_str, encoding, TransactionKind::Simulate, claims)
             .await?;
         let number_of_accounts = transaction.static_account_keys().len();
 
-        let replacement_blockhash =
-            config.replace_recent_blockhash.then(|| self.latest_blockhash().0);
-        let inner_instructions_enabled = config.inner_instructions;
-        let accounts_config = config.accounts;
+        let replacement_blockhash = if config.replace_recent_blockhash {
+            let block = self.engine.blocks().latest();
+            transaction = replace_blockhash(transaction, block.hash)?;
+            Some(self.blockhash_response(block))
+        } else {
+            None
+        };
 
         let record = self
             .engine
             .transaction(transaction)?
-            .simulate()
+            .simulate(config.sig_verify)
             .await?
             .map_err(RpcError::transaction_simulation_from_scheduler)?;
 
@@ -63,7 +71,7 @@ impl RpcHandlers {
             Err(_) => (None, 0, None, None, Vec::new()),
         };
 
-        let accounts = if let Some(config_accounts) = accounts_config {
+        let accounts = if let Some(config_accounts) = config.accounts {
             let accounts_encoding = config_accounts.encoding.unwrap_or(UiAccountEncoding::Base64);
 
             if accounts_encoding == UiAccountEncoding::Binary
@@ -115,7 +123,7 @@ impl RpcHandlers {
             None
         };
 
-        let inner_instructions = inner_instructions_enabled.then(|| {
+        let inner_instructions = config.inner_instructions.then(|| {
             live_inner_instructions(recorded_inner.unwrap_or_default())
                 .into_iter()
                 .map(Into::into)

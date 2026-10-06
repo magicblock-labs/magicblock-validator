@@ -328,7 +328,7 @@ async fn test_simulate_transaction_returns_requested_accounts() {
     );
 }
 
-/// Verifies simulation accepts invalid signatures and reports a replacement blockhash.
+/// Verifies simulation honors signature verification and replacement blockhash options.
 #[tokio::test]
 async fn test_simulate_transaction_with_config_options() {
     let env = RpcTestEnv::new().await;
@@ -386,6 +386,29 @@ async fn test_simulate_transaction_with_config_options() {
             result.err.is_none(),
             "simulation without signature verification should succeed"
         );
+
+        for (replace_recent_blockhash, expected) in [
+            (false, "transaction verification error"),
+            (
+                true,
+                "sigVerify may not be used with replaceRecentBlockhash",
+            ),
+        ] {
+            let config = RpcSimulateTransactionConfig {
+                sig_verify: true,
+                replace_recent_blockhash,
+                ..Default::default()
+            };
+            let error = env
+                .rpc
+                .simulate_transaction_with_config(&transfer_tx, config)
+                .await
+                .expect_err("invalid signature or incompatible options must be rejected");
+            assert!(
+                error.to_string().contains(expected),
+                "expected {expected}: {error}"
+            );
+        }
     }
 }
 
