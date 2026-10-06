@@ -197,8 +197,7 @@ impl<'a> OrderBook<'a> {
     }
 
     fn remaining_capacity(&self) -> usize {
-        self.capacity
-            .checked_sub((self.header.bids_len + self.header.asks_len) as usize)
-            .expect("remaining_capacity must exist")
+        let used = (self.header.bids_len as usize).saturating_add(self.header.asks_len as usize);
+        self.capacity.checked_sub(used).expect("remaining_capacity must exist")
     }
 }
