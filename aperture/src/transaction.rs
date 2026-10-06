@@ -12,6 +12,7 @@ use ledger::{
     request::TransactionResponse,
     schema::{Cpis, Execution},
 };
+use solana_hash::Hash;
 use solana_message::{
     SimpleAddressLoader, compiled_instruction::CompiledInstruction,
     inner_instruction::InnerInstructionsList, v0::LoadedAddresses, v1::V1_PREFIX,
@@ -186,7 +187,7 @@ pub(crate) fn live_inner_instructions(groups: InnerInstructionsList) -> Vec<Inne
 }
 
 /// Decodes supported RPC wire encodings and sanitizes the Engine transaction view.
-/// Signature verification remains Engine admission's responsibility.
+/// Engine verifies signatures on execution submission or when requested for simulation.
 pub(crate) fn decode_transaction(
     transaction: &str,
     encoding: UiTransactionEncoding,
@@ -200,6 +201,25 @@ pub(crate) fn decode_transaction(
         }
         _ => return Err(RpcError::invalid_params("unsupported transaction encoding")),
     };
+    sanitize_transaction(bytes)
+}
+
+/// Replaces the simulation blockhash while preserving the original wire version.
+pub(crate) fn replace_blockhash(
+    transaction: TransactionView,
+    blockhash: Hash,
+) -> Result<TransactionView, RpcError> {
+    let mut versioned =
+        deserialize_transaction(transaction.data(), "invalid simulation transaction")?;
+    versioned.message.set_recent_blockhash(blockhash);
+    let mut bytes = wincode::serialize(&versioned).map_err(RpcError::internal)?;
+    if matches!(transaction.version(), TransactionVersion::Magicblock) {
+        bytes[0] = transaction.data()[0];
+    }
+    sanitize_transaction(bytes)
+}
+
+fn sanitize_transaction(bytes: Vec<u8>) -> Result<TransactionView, RpcError> {
     TransactionView::try_new_sanitized(Arc::new(bytes), true)
         .map_err(|error| RpcError::invalid_params(format!("{error:?}")))
 }
