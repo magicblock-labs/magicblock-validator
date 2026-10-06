@@ -143,7 +143,7 @@ prometheus = "0.13.4"
 # Keep in sync with `solana-storage-proto` codegen.
 
 
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484", features = [
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686", features = [
     "dev-context-only-utils",
 ] }
 solana-transaction-error = { version = ">=3.3.1,<3.4.0" }
@@ -191,7 +191,7 @@ serde_json = "1.0"
 serde_with = "3.16"
 serial_test = "3.2"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
 solana-account-decoder = { version = "=4.2.2" }
 solana-account-decoder-client-types = { version = "=4.2.2" }
 solana-account-info = { version = "3.1.1" }
@@ -217,6 +217,7 @@ solana-instructions-sysvar = { version = "4.0.0" }
 solana-keypair = { version = "3.1.2" }
 solana-loader-v3-interface = { version = "7.0.0" }
 solana-loader-v4-interface = { version = "3.1.0" }
+solana-loader-v4-program = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686", features = ["agave-unstable-api"] }
 solana-log-collector = { package = "solana-svm-log-collector", version = "=4.2.2", features = [
     "agave-unstable-api"
 ] }
@@ -232,7 +233,7 @@ solana-program = "4.0.0"
 solana-program-error = { version = "3.0.1" }
 solana-program-option = { version = "3.1.0" }
 solana-program-pack = { version = "3.1.0" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
 solana-pubkey = { version = ">=4.2.0,<4.3.0" }
 solana-pubsub-client = { version = "=4.2.2" }
 solana-rent = { version = ">=4.2.1,<4.4.0" }
@@ -260,14 +261,14 @@ solana-transaction = { version = ">=4.1.4,<4.2.0" }
 [workspace.dependencies.solana-svm]
 features = ["agave-unstable-api", "dev-context-only-utils"]
 git = "https://github.com/magicblock-labs/magicblock-svm.git"
-rev = "112182c143702d05a593101abaa7d437a0abb484"
+rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686"
 
 [patch.crates-io]
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
 solana-storage-proto = { path = "storage-proto" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "112182c143702d05a593101abaa7d437a0abb484" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
 # Fork mirrors upstream rust-rocksdb; APIs missing from the safe wrapper
 # (disable_manual_compaction, mode-aware rate limiter) are reached through
 # the `raw-ptr` feature + librocksdb-sys directly.

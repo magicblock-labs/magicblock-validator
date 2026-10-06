@@ -43,7 +43,7 @@ pub static BUILTINS: &[Builtin] = &[
     Builtin {
         program_id: loader_v4::ID,
         name: "solana_loader_v4_program",
-        entrypoint: solana_bpf_loader_program::Entrypoint::register,
+        entrypoint: solana_loader_v4_program::Entrypoint::register,
     },
     Builtin {
         program_id: magicblock_program::ID,

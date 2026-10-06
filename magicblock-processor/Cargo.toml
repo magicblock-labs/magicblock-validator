@@ -36,6 +36,7 @@ solana-feature-set = { workspace = true }
 solana-fee-structure = { workspace = true }
 solana-instruction = { workspace = true }
 solana-loader-v3-interface = { workspace = true }
+solana-loader-v4-program = { workspace = true }
 solana-program = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-precompile-error = { workspace = true }
