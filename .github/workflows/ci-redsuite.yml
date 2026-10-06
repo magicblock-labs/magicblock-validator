@@ -159,7 +159,7 @@ jobs:
           sudo sysctl fs.inotify.max_user_watches=655360
           [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
           for target in $TARGETS; do
-            ./redsuite-dist/redsuite run "$target" --profile lite
+            ./redsuite-dist/redsuite run "$target"
           done
         shell: bash
         env:
