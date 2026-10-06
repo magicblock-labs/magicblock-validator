@@ -474,7 +474,7 @@ impl TaskStrategist {
                 u64::default(), // placeholder
                 uniqueness_nonce,
             ) {
-                Ok(tx) => Ok(tx.serialized_size()),
+                Ok(tx) => Ok(serialized_transaction_size(&tx)),
                 Err(TaskStrategistError::FailedToFitError) => Ok(usize::MAX),
                 Err(TaskStrategistError::SignerError(err)) => Err(err),
             }

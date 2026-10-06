@@ -214,11 +214,12 @@ mod test {
         init_validator_authority(Keypair::new());
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
-        let ix = InstructionUtils::execute_task_instruction(
+        let mut ix = InstructionUtils::execute_task_instruction(
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
         let wrong_validator = Pubkey::new_unique();
+        ix.accounts[0].pubkey = wrong_validator;
         let transaction_accounts = vec![
             (
                 wrong_validator,
@@ -269,11 +270,12 @@ mod test {
     fn fail_execute_task_wrong_crank_signer() {
         init_validator_authority(Keypair::new());
         let authority = Pubkey::new_unique();
-        let ix = InstructionUtils::execute_task_instruction(
+        let mut ix = InstructionUtils::execute_task_instruction(
             authority,
             vec![InstructionUtils::noop_instruction(0)],
         );
         let wrong_crank_signer = Pubkey::new_unique();
+        ix.accounts[1].pubkey = wrong_crank_signer;
         let transaction_accounts = vec![
             (
                 validator_authority_id(),
@@ -298,10 +300,11 @@ mod test {
         let payer = Pubkey::new_unique();
         let authority = Pubkey::new_unique();
         let crank_signer = crank_signer_pda(&authority);
-        let ix = InstructionUtils::execute_task_instruction(
+        let mut ix = InstructionUtils::execute_task_instruction(
             authority,
             vec![complex_ix(payer)],
         );
+        ix.accounts.retain(|account| account.pubkey != payer);
         let transaction_accounts = vec![
             (
                 validator_authority_id(),

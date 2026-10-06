@@ -20,9 +20,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
 use solana_system_interface::program as system_program;
+use solana_transaction::Transaction;
 use tracing::*;
 
 pub struct ScheduleCommitTestContext {

@@ -6,8 +6,8 @@ use magicblock_task_scheduler::SchedulerDatabase;
 use program_flexi_counter::instruction::create_schedule_task_ix;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use test_task_scheduler::{create_delegated_counter, setup_validator};
 use tokio::runtime::Runtime;
 

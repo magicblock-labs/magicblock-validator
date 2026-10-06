@@ -10,9 +10,9 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signer::Signer,
-    transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
 
 use crate::utils::{
     create_nested_schedule_cpis_instruction,

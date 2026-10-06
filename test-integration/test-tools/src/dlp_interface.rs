@@ -8,9 +8,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
 use tracing::*;
 
 pub fn create_topup_ixs(

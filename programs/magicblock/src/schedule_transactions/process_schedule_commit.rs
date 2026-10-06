@@ -307,14 +307,14 @@ pub(crate) fn process_schedule_commit(
 
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.
-    let clock =
-        invoke_context
-            .get_sysvar_cache()
-            .get_clock()
-            .map_err(|err| {
-                ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-                InstructionError::UnsupportedSysvar
-            })?;
+    let clock = invoke_context
+        .environment_config
+        .sysvar_cache()
+        .get_clock()
+        .map_err(|err| {
+            ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+            InstructionError::UnsupportedSysvar
+        })?;
     let blockhash = invoke_context.environment_config.blockhash;
     let action_sent_transaction =
         InstructionUtils::scheduled_commit_sent(intent_id, blockhash);

@@ -1,12 +1,11 @@
 use integration_test_tools::{expect, validator::cleanup};
 use program_flexi_counter::instruction::create_schedule_task_ix;
 use solana_sdk::{
-    instruction::InstructionError,
-    native_token::LAMPORTS_PER_SOL,
-    signature::Keypair,
-    signer::Signer,
-    transaction::{Transaction, TransactionError},
+    instruction::InstructionError, native_token::LAMPORTS_PER_SOL,
+    signature::Keypair, signer::Signer,
 };
+use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 use test_task_scheduler::{create_delegated_counter, setup_validator};
 
 /// Test that a task can be scheduled and executed when it has multiple signers

@@ -17,8 +17,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::{Transaction, TransactionError},
 };
+use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 use test_kit::{init_logger, AccountMeta, Instruction};
 use tracing::*;
 use utils::{

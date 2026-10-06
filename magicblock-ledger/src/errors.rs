@@ -4,6 +4,8 @@ pub type LedgerResult<T> = Result<T, LedgerError>;
 
 #[derive(Error, Debug)]
 pub enum LedgerError {
+    #[error("transaction wire decode error: {0}")]
+    WireDecode(#[from] wincode::ReadError),
     #[error("RocksDB error: {0}")]
     RocksDb(#[from] rocksdb::Error),
     #[error("io error: {0}")]

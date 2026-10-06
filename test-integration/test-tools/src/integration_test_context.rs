@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use solana_account::Account;
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
@@ -16,7 +17,6 @@ use solana_rpc_client_api::{
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
-    account::Account,
     clock::Slot,
     hash::Hash,
     instruction::Instruction,
@@ -24,8 +24,8 @@ use solana_sdk::{
     rent::Rent,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use solana_transaction_status_client_types::{
     EncodedConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
     UiTransactionEncoding,

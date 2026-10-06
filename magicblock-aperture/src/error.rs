@@ -3,10 +3,12 @@ use std::{error::Error, fmt::Display};
 use agave_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError;
 use json::Serialize;
 use solana_transaction_error::TransactionError;
+use solana_transaction_status::EncodeError;
 
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
 pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
+pub(crate) const UNSUPPORTED_TRANSACTION_VERSION: i16 = -32015;
 pub(crate) const INVALID_REQUEST: i16 = -32600;
 pub(crate) const METHOD_NOT_FOUND: i16 = -32601;
 pub(crate) const INVALID_PARAMS: i16 = -32602;
@@ -65,6 +67,16 @@ impl From<TransactionError> for RpcError {
         Self {
             http_status,
             ..Self::transaction_verification(value)
+        }
+    }
+}
+
+impl From<EncodeError> for RpcError {
+    fn from(error: EncodeError) -> Self {
+        Self {
+            code: UNSUPPORTED_TRANSACTION_VERSION,
+            message: error.to_string(),
+            http_status: 200,
         }
     }
 }

@@ -25,11 +25,11 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    transaction::Transaction,
 };
 use solana_system_interface::{
     instruction as system_instruction, program as system_program,
 };
+use solana_transaction::Transaction;
 use spl_associated_token_account_interface::instruction::create_associated_token_account_idempotent;
 use spl_token::{instruction as spl_token_ix, state::Mint};
 use test_kit::init_logger;

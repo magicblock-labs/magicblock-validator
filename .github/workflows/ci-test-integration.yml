@@ -454,7 +454,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         with:
-          solana_version: ${{ matrix.solana_version || 'v4.2.0' }}
+          solana_version: ${{ matrix.solana_version || 'v4.2.2' }}
 
       - name: Download prebuilt validator binary
         uses: actions/download-artifact@v8

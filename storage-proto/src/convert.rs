@@ -13,7 +13,7 @@ use solana_message::{
     legacy::Message as LegacyMessage,
     v0,
     v0::{LoadedAddresses, MessageAddressTableLookup},
-    MessageHeader, VersionedMessage,
+    v1, MessageHeader, VersionedMessage,
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
@@ -124,10 +124,17 @@ impl From<Reward> for generated::Reward {
                 Some(RewardType::Rent) => generated::RewardType::Rent,
                 Some(RewardType::Staking) => generated::RewardType::Staking,
                 Some(RewardType::Voting) => generated::RewardType::Voting,
+                Some(RewardType::DeactivatedStake) => {
+                    generated::RewardType::DeactivatedStake
+                }
             } as i32,
             commission: reward
                 .commission
                 .map(|c| c.to_string())
+                .unwrap_or_default(),
+            commission_bps: reward
+                .commission_bps
+                .map(|bps| bps.to_string())
                 .unwrap_or_default(),
         }
     }
@@ -145,10 +152,11 @@ impl From<generated::Reward> for Reward {
                 2 => Some(RewardType::Rent),
                 3 => Some(RewardType::Staking),
                 4 => Some(RewardType::Voting),
+                5 => Some(RewardType::DeactivatedStake),
                 _ => None,
             },
             commission: reward.commission.parse::<u8>().ok(),
-            commission_bps: None,
+            commission_bps: reward.commission_bps.parse::<u16>().ok(),
         }
     }
 }
@@ -335,7 +343,48 @@ impl From<LegacyMessage> for generated::Message {
                 .collect(),
             versioned: false,
             address_table_lookups: vec![],
+            config: None,
         }
+    }
+}
+
+impl From<v0::Message> for generated::Message {
+    fn from(message: v0::Message) -> Self {
+        let mut encoded = Self::from(LegacyMessage {
+            header: message.header,
+            account_keys: message.account_keys,
+            recent_blockhash: message.recent_blockhash,
+            instructions: message.instructions,
+        });
+        encoded.versioned = true;
+        encoded.address_table_lookups = message
+            .address_table_lookups
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        encoded
+    }
+}
+
+impl From<v1::Message> for generated::Message {
+    fn from(message: v1::Message) -> Self {
+        let mut encoded = Self::from(LegacyMessage {
+            header: message.header,
+            account_keys: message.account_keys,
+            recent_blockhash: message.lifetime_specifier,
+            instructions: message.instructions,
+        });
+        encoded.versioned = true;
+        // Presence distinguishes v1 from v0 even when all options are empty.
+        encoded.config = Some(generated::TransactionConfig {
+            priority_fee: message.config.priority_fee,
+            compute_unit_limit: message.config.compute_unit_limit,
+            loaded_accounts_data_size_limit: message
+                .config
+                .loaded_accounts_data_size_limit,
+            heap_size: message.config.heap_size,
+        });
+        encoded
     }
 }
 
@@ -343,26 +392,8 @@ impl From<VersionedMessage> for generated::Message {
     fn from(message: VersionedMessage) -> Self {
         match message {
             VersionedMessage::Legacy(message) => Self::from(message),
-            VersionedMessage::V0(message) => Self {
-                header: Some(message.header.into()),
-                account_keys: message
-                    .account_keys
-                    .iter()
-                    .map(|key| <Pubkey as AsRef<[u8]>>::as_ref(key).into())
-                    .collect(),
-                recent_blockhash: message.recent_blockhash.to_bytes().into(),
-                instructions: message
-                    .instructions
-                    .into_iter()
-                    .map(|ix| ix.into())
-                    .collect(),
-                versioned: true,
-                address_table_lookups: message
-                    .address_table_lookups
-                    .into_iter()
-                    .map(|lookup| lookup.into())
-                    .collect(),
-            },
+            VersionedMessage::V0(message) => Self::from(message),
+            VersionedMessage::V1(message) => Self::from(message),
         }
     }
 }
@@ -375,12 +406,32 @@ impl From<generated::Message> for VersionedMessage {
             .into_iter()
             .map(|key| Pubkey::try_from(key).unwrap())
             .collect();
-        let recent_blockhash = Hash::new_from_array(
-            <[u8; HASH_BYTES]>::try_from(value.recent_blockhash.as_slice())
-                .expect("failed to construct hash from slice"),
-        );
+        let recent_blockhash =
+            <[u8; HASH_BYTES]>::try_from(value.recent_blockhash)
+                .map(Hash::new_from_array)
+                .unwrap();
         let instructions =
             value.instructions.into_iter().map(|ix| ix.into()).collect();
+
+        // `config` is written only for V1 messages, whose lifetime specifier travels in
+        // `recent_blockhash` and which have no address table lookups. It has to be checked before
+        // `versioned`, which is true for V0 *and* V1 and so cannot tell them apart on its own.
+        if let Some(config) = value.config {
+            return Self::V1(v1::Message {
+                header,
+                config: v1::TransactionConfig {
+                    priority_fee: config.priority_fee,
+                    compute_unit_limit: config.compute_unit_limit,
+                    loaded_accounts_data_size_limit: config
+                        .loaded_accounts_data_size_limit,
+                    heap_size: config.heap_size,
+                },
+                lifetime_specifier: recent_blockhash,
+                account_keys,
+                instructions,
+            });
+        }
+
         let address_table_lookups = value
             .address_table_lookups
             .into_iter()
@@ -445,7 +496,7 @@ impl From<TransactionStatusMeta> for generated::TransactionStatusMeta {
             loaded_addresses,
             return_data,
             compute_units_consumed,
-            cost_units: _,
+            cost_units,
         } = value;
         let err = match status {
             Ok(()) => None,
@@ -514,6 +565,7 @@ impl From<TransactionStatusMeta> for generated::TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         }
     }
 }
@@ -548,6 +600,7 @@ impl TryFrom<generated::TransactionStatusMeta> for TransactionStatusMeta {
             return_data,
             return_data_none,
             compute_units_consumed,
+            cost_units,
         } = value;
         let status = match &err {
             None => Ok(()),
@@ -613,7 +666,7 @@ impl TryFrom<generated::TransactionStatusMeta> for TransactionStatusMeta {
             loaded_addresses,
             return_data: None,
             compute_units_consumed,
-            cost_units: None,
+            cost_units,
         };
         if !return_data_none {
             if let Some(return_data) = return_data {
@@ -1349,8 +1402,66 @@ impl From<entries::Entry> for EntrySummary {
 #[cfg(test)]
 mod test {
     use enum_iterator::all;
+    use prost::Message as ProtoMessage;
 
     use super::*;
+
+    /// Proves native wire and additive protobuf preserve every version and config,
+    /// including empty v1 config presence and the existing legacy/v0 wire format.
+    #[test]
+    fn test_native_wire_and_protobuf_roundtrip() {
+        let payer = Pubkey::new_unique();
+        let hash = Hash::new_from_array([7; HASH_BYTES]);
+        let legacy =
+            LegacyMessage::new_with_blockhash(&[], Some(&payer), &hash);
+        let v0 = v0::Message::try_compile(&payer, &[], &[], hash).unwrap();
+        let configs = [
+            v1::TransactionConfig::default(),
+            v1::TransactionConfig::default()
+                .with_priority_fee(42)
+                .with_compute_unit_limit(123_456)
+                .with_loaded_accounts_data_size_limit(789_012)
+                .with_heap_size(65_536),
+        ];
+        let messages =
+            [VersionedMessage::Legacy(legacy), VersionedMessage::V0(v0)]
+                .into_iter()
+                .chain(configs.into_iter().map(|config| {
+                    VersionedMessage::V1(
+                        v1::Message::try_compile_with_config(
+                            &payer,
+                            &[],
+                            hash,
+                            config,
+                        )
+                        .unwrap(),
+                    )
+                }));
+        for message in messages {
+            let is_v1 = matches!(message, VersionedMessage::V1(_));
+            let transaction = VersionedTransaction {
+                signatures: vec![Signature::default()],
+                message,
+            };
+            let wire = wincode::serialize(&transaction).unwrap();
+            let decoded: VersionedTransaction =
+                wincode::deserialize(&wire).unwrap();
+            assert_eq!(decoded, transaction);
+            if !is_v1 {
+                assert_eq!(wire, bincode::serialize(&transaction).unwrap());
+            }
+            let proto = generated::Transaction::from(transaction.clone());
+            // Presence, not populated options, is the v1 discriminator.
+            assert_eq!(proto.message.as_ref().unwrap().config.is_some(), is_v1);
+            let bytes = proto.encode_to_vec();
+            let restored: VersionedTransaction =
+                generated::Transaction::decode(bytes.as_slice())
+                    .unwrap()
+                    .into();
+            assert_eq!(restored, transaction);
+            assert_eq!(wincode::serialize(&restored).unwrap(), wire);
+        }
+    }
 
     #[test]
     fn test_reward_type_encode() {

@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
+solana-account = { workspace = true }
+solana-transaction = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 program-mini = { workspace = true, features = ["no-entrypoint"] }
 integration-test-tools = { workspace = true }

@@ -33,9 +33,8 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use program_schedulecommit::MainAccount;
-use solana_sdk::{
-    signature::Keypair, signer::Signer, transaction::Transaction,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_transaction::Transaction;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
 

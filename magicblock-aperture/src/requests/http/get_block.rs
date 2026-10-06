@@ -35,7 +35,9 @@ impl HttpDispatcher {
             // If the block exists, encode it for the RPC response according to the specified options.
             let encoded_block = block
                 .map(ConfirmedBlock::from)
-                .and_then(|b| b.encode_with_options(encoding, options).ok());
+                .map(|b| b.encode_with_options(encoding, options))
+                .transpose()
+                .map_err(RpcError::from)?;
 
             Ok(ResponsePayload::encode_no_context(
                 &request.id,

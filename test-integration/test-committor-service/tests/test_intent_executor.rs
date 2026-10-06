@@ -63,9 +63,10 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
     signature::{Keypair, Signer},
-    transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+use solana_transaction::Transaction;
+use solana_transaction_error::TransactionError;
 
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},

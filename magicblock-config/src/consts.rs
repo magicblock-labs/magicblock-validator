@@ -14,9 +14,6 @@ pub const DEFAULT_STORAGE_DIRECTORY: &str = "magicblock-test-storage/";
 pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
      "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ";
 
-/// Default base fee in lamports for transactions
-pub const DEFAULT_BASE_FEE: u64 = 0;
-
 /// Default compute unit price in microlamports
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;
 

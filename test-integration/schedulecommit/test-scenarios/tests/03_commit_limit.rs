@@ -22,8 +22,8 @@ use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use test_kit::init_logger;
 use tracing::*;
 use utils::{

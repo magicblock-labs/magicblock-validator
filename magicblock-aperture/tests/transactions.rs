@@ -481,7 +481,7 @@ async fn test_get_fee_for_message() {
         .await
         .expect("get_fee_for_message failed");
 
-    assert_eq!(fee, RpcTestEnv::BASE_FEE);
+    assert_eq!(fee, 0);
 }
 
 // --- Signature and Transaction History Tests ---
@@ -638,4 +638,191 @@ async fn test_get_transaction() {
         .await
         .expect("getTransaction request failed");
     assert!(transaction.transaction.meta.unwrap().err.is_some());
+}
+/// Proves native v1 budgets and signed bytes survive gasless simulation, submission,
+/// fee estimation and version-gated history, on successful and failed execution.
+#[tokio::test]
+async fn test_gasless_native_v1_rpc() {
+    use base64::{prelude::BASE64_STANDARD, Engine};
+    use serde_json as json;
+    use solana_message::{v1, VersionedMessage};
+    use solana_rpc_client_api::request::RpcRequest;
+    use solana_transaction::versioned::VersionedTransaction;
+    use test_kit::{AccountMeta, Instruction, Signer};
+
+    let env = RpcTestEnv::new().await;
+    let payer = &env.execution.payers[0];
+    let payer_balance = env
+        .execution
+        .accountsdb
+        .get_account(&payer.pubkey())
+        .unwrap()
+        .lamports();
+    for fail in [false, true] {
+        let sender = Pubkey::new_unique();
+        let recipient = Pubkey::new_unique();
+        env.build_transfer_txn_with_params(sender, recipient, fail);
+        let before = env
+            .execution
+            .accountsdb
+            .get_account(&sender)
+            .unwrap()
+            .lamports();
+        let instruction = Instruction::new_with_bincode(
+            guinea::ID,
+            &guinea::GuineaInstruction::Transfer(RpcTestEnv::TRANSFER_AMOUNT),
+            vec![
+                AccountMeta::new(sender, false),
+                AccountMeta::new(recipient, false),
+            ],
+        );
+        let config = v1::TransactionConfig::default()
+            .with_priority_fee(123)
+            .with_compute_unit_limit(100_000)
+            .with_loaded_accounts_data_size_limit(1_000_000)
+            .with_heap_size(65_536);
+        let message = VersionedMessage::V1(
+            v1::Message::try_compile_with_config(
+                &payer.pubkey(),
+                &[instruction],
+                env.execution.ledger.latest_blockhash(),
+                config,
+            )
+            .unwrap(),
+        );
+        let fee: json::Value = env
+            .rpc
+            .send(
+                RpcRequest::GetFeeForMessage,
+                json::json!([BASE64_STANDARD
+                    .encode(wincode::serialize(&message).unwrap())]),
+            )
+            .await
+            .unwrap();
+        assert_eq!(fee["value"], json::json!(0));
+        let transaction =
+            VersionedTransaction::try_new(message, &[payer]).unwrap();
+        let mut invalid_signature = transaction.clone();
+        invalid_signature.signatures[0] = Signature::new_unique();
+        assert!(env
+            .rpc
+            .send_transaction_with_config(
+                &invalid_signature,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err());
+        let mut stale_message = transaction.message.clone();
+        stale_message.set_recent_blockhash(BlockHash::new_unique());
+        let stale =
+            VersionedTransaction::try_new(stale_message, &[payer]).unwrap();
+        assert!(env
+            .rpc
+            .send_transaction_with_config(
+                &stale,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err());
+        let simulation = env
+            .rpc
+            .simulate_transaction_with_config(
+                &transaction,
+                RpcSimulateTransactionConfig {
+                    sig_verify: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap()
+            .value;
+        assert_eq!(simulation.err.is_some(), fail);
+        assert_eq!(
+            env.execution
+                .accountsdb
+                .get_account(&sender)
+                .unwrap()
+                .lamports(),
+            before
+        );
+        let signature = env
+            .rpc
+            .send_transaction_with_config(
+                &transaction,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        let meta = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(meta) = env.execution.get_transaction(signature) {
+                    break meta;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("submitted transaction must reach the ledger");
+        assert_eq!(meta.status.is_err(), fail);
+        assert_eq!(meta.fee, 0);
+        assert!(env
+            .rpc
+            .send_transaction_with_config(
+                &transaction,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                }
+            )
+            .await
+            .is_err());
+        assert_eq!(
+            env.execution
+                .accountsdb
+                .get_account(&payer.pubkey())
+                .unwrap()
+                .lamports(),
+            payer_balance
+        );
+        assert_eq!(
+            env.execution
+                .accountsdb
+                .get_account(&sender)
+                .unwrap()
+                .lamports(),
+            if fail {
+                before
+            } else {
+                before - RpcTestEnv::TRANSFER_AMOUNT
+            }
+        );
+        env.wait_for_slot_progress(1).await;
+        for encoding in ["base64", "json", "jsonParsed"] {
+            let history: json::Value = env.rpc.send(RpcRequest::GetTransaction,
+                json::json!([signature.to_string(), {"encoding": encoding, "maxSupportedTransactionVersion": 1}])).await.unwrap();
+            assert_eq!(history["version"], json::json!(1));
+            assert_eq!(history["meta"]["fee"], json::json!(0));
+            if encoding == "base64" {
+                let wire = BASE64_STANDARD
+                    .decode(history["transaction"][0].as_str().unwrap())
+                    .unwrap();
+                assert_eq!(wire, wincode::serialize(&transaction).unwrap());
+            }
+            let block: json::Value = env.rpc.send(RpcRequest::GetBlock,
+                json::json!([history["slot"], {"encoding": encoding, "maxSupportedTransactionVersion": 1}])).await.unwrap();
+            assert!(!block.is_null());
+        }
+        let error = env.rpc.send::<json::Value>(RpcRequest::GetTransaction,
+            json::json!([signature.to_string(), {"maxSupportedTransactionVersion": 0}])).await.unwrap_err();
+        assert!(error.to_string().contains("version"));
+    }
 }

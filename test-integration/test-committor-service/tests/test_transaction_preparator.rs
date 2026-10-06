@@ -9,10 +9,10 @@ use magicblock_committor_service::{
         BaseActionTask, BaseActionTaskV1, BaseTaskImpl, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
-    transactions::PreparedMessage,
 };
 use magicblock_core::intent::{BaseAction, ProgramArgs};
 use magicblock_program::args::ShortAccountMeta;
+use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;
@@ -57,7 +57,7 @@ async fn test_prepare_commit_tx_with_single_account() {
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
-    assert!(matches!(result.unwrap(), PreparedMessage::V1(_)));
+    assert!(matches!(result.unwrap(), VersionedMessage::V1(_)));
 }
 
 #[tokio::test]

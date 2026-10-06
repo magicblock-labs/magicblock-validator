@@ -9,10 +9,8 @@ use solana_program::{
     native_token::LAMPORTS_PER_SOL,
     rent::Rent,
 };
-use solana_transaction_error::TransactionError;
 use test_kit::{ExecutionTestEnv, Signer};
 
-const BASE_FEE: u64 = ExecutionTestEnv::BASE_FEE;
 const TIMEOUT: Duration = Duration::from_millis(100);
 
 /// Helper to setup a guinea instruction with a new account.
@@ -32,21 +30,19 @@ fn setup_guinea_ix(
     )
 }
 
+/// An empty payer can execute without funding transaction fees.
 #[tokio::test]
-async fn test_insufficient_fee() {
+async fn test_empty_payer_is_gasless() {
     let env = ExecutionTestEnv::new();
     let mut payer = env.get_payer();
-    payer.set_lamports(BASE_FEE - 1);
+    payer.set_lamports(0);
     payer.commit();
 
     let ix = setup_guinea_ix(&env, GuineaInstruction::PrintSizes);
     let txn = env.build_transaction(&[ix]);
 
     let result = env.execute_transaction(txn).await;
-    assert!(matches!(
-        result,
-        Err(TransactionError::InsufficientFundsForFee)
-    ));
+    result.expect("Empty payer must not need funds for fees");
 }
 
 #[tokio::test]
@@ -78,7 +74,7 @@ async fn test_separate_fee_payer() {
         env.get_account(recipient.pubkey()).lamports(),
         LAMPORTS_PER_SOL + AMOUNT
     );
-    assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
+    assert_eq!(env.get_payer().lamports(), initial_payer_bal);
 }
 
 #[tokio::test]
@@ -107,35 +103,13 @@ async fn test_compute_unit_price_does_not_change_fee() {
         .recv_timeout(TIMEOUT)
         .unwrap();
     assert!(status.meta.status.is_ok());
-    assert_eq!(status.meta.fee, BASE_FEE);
-    assert_eq!(env.get_payer().lamports(), initial_payer_bal - BASE_FEE);
+    assert_eq!(status.meta.fee, 0);
+    assert_eq!(env.get_payer().lamports(), initial_payer_bal);
 }
 
+/// Failed execution rolls back state without charging transaction fees.
 #[tokio::test]
-async fn test_non_delegated_payer_rejection() {
-    let env = ExecutionTestEnv::new();
-    let mut payer = env.get_payer();
-    payer.set_delegated(false);
-    let initial_bal = payer.lamports();
-    payer.commit();
-
-    let ix = setup_guinea_ix(&env, GuineaInstruction::PrintSizes);
-    let txn = env.build_transaction(&[ix]);
-
-    let result = env.execute_transaction(txn).await;
-    assert!(
-        matches!(result, Err(TransactionError::InvalidAccountForFee)),
-        "Non-delegated payer should be rejected"
-    );
-    assert_eq!(
-        env.get_payer().lamports(),
-        initial_bal,
-        "Rejected tx should not be charged"
-    );
-}
-
-#[tokio::test]
-async fn test_fee_charged_for_failed_transaction() {
+async fn test_failed_transaction_is_gasless() {
     let env = ExecutionTestEnv::new();
     env.wait_for_scheduler_ready().await;
     let initial_bal = env.get_payer().lamports();
@@ -158,16 +132,17 @@ async fn test_fee_charged_for_failed_transaction() {
         .recv_timeout(TIMEOUT)
         .unwrap();
     assert!(status.meta.status.is_err(), "Transaction should fail");
+    assert_eq!(status.meta.fee, 0);
     assert_eq!(
         env.get_payer().lamports(),
-        initial_bal - BASE_FEE,
-        "Fee should be charged on failure"
+        initial_bal,
+        "Failed execution must leave payer balance unchanged"
     );
 }
 
 #[tokio::test]
 async fn test_transaction_gasless_mode() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -202,7 +177,7 @@ async fn test_transaction_gasless_mode() {
 
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_cu_price() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);
@@ -242,7 +217,7 @@ async fn test_transaction_gasless_mode_with_cu_price() {
 
 #[tokio::test]
 async fn test_transaction_gasless_mode_with_non_existent_account() {
-    let env = ExecutionTestEnv::new_with_config(0, 1, false);
+    let env = ExecutionTestEnv::new_with_config(1, false);
     let mut payer = env.get_payer();
     payer.set_lamports(1);
     payer.set_delegated(false);

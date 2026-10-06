@@ -7,8 +7,8 @@ use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature, Signer},
-    transaction::TransactionError,
 };
+use solana_transaction_error::TransactionError;
 
 // -----------------
 // Setup

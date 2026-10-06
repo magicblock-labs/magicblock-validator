@@ -14,7 +14,10 @@ use magicblock_core::{
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
 use solana_instruction::{error::InstructionError, AccountMeta};
-use solana_program_runtime::invoke_context::mock_process_instruction;
+use solana_program_runtime::{
+    invoke_context::mock_process_instruction,
+    solana_sbpf::program::BuiltinFunctionDefinition,
+};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
 
@@ -80,12 +83,11 @@ pub fn process_instruction_with_logs(
     let mut logs = Vec::new();
     let accounts = mock_process_instruction(
         &crate::id(),
-        None,
         instruction_data,
         transaction_accounts,
         instruction_accounts,
         expected_result,
-        Entrypoint::vm,
+        Entrypoint::register,
         |_invoke_context| {},
         |invoke_context| {
             logs = invoke_context

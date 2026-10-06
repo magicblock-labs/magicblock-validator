@@ -2,8 +2,9 @@ use magicblock_accounts_db::traits::AccountsBank;
 use solana_account::AccountSharedData;
 use solana_precompile_error::PrecompileError;
 use solana_pubkey::Pubkey;
-use solana_svm::transaction_processing_callback::TransactionProcessingCallback;
-use solana_svm_callback::InvokeContextCallback;
+use solana_svm_callback::{
+    InvokeContextCallback, TransactionProcessingCallback,
+};
 
 use super::TransactionExecutor;
 

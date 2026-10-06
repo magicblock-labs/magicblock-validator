@@ -32,8 +32,9 @@ use magicblock_config::{
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer, transaction::Transaction,
+    signer::Signer,
 };
+use solana_transaction::Transaction;
 use tempfile::TempDir;
 
 pub struct MockRangeServer {

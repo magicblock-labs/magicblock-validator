@@ -24,14 +24,13 @@ pub struct GenesisConfigInfo {
 
 pub fn create_genesis_config_with_leader(
     validator_pubkey: &Pubkey,
-    lamports_per_signature: u64,
 ) -> GenesisConfigInfo {
     let genesis_config = create_genesis_config_with_leader_ex(
         validator_pubkey,
         VALIDATOR_LAMPORTS,
         FeeRateGovernor {
             target_lamports_per_signature: 0,
-            lamports_per_signature,
+            lamports_per_signature: 0,
             target_signatures_per_slot: 0,
             ..FeeRateGovernor::default()
         },

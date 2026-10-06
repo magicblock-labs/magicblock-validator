@@ -9,9 +9,8 @@ use program_schedulecommit::{
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{
-    instruction::InstructionError, signature::Signer, transaction::Transaction,
-};
+use solana_sdk::{instruction::InstructionError, signature::Signer};
+use solana_transaction::Transaction;
 use test_kit::init_logger;
 use tracing::*;
 use utils::{

@@ -8,9 +8,9 @@ use solana_rpc_client_api::config::{
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
     signature::{Keypair, Signature, Signer},
-    transaction::Transaction,
 };
 use solana_system_interface::instruction as system_instruction;
+use solana_transaction::Transaction;
 use tracing::{debug, error};
 
 use crate::utils::instructions::{

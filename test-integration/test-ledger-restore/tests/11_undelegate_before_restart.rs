@@ -15,8 +15,8 @@ use program_flexi_counter::{
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use test_kit::init_logger;
 use test_ledger_restore::{
     airdrop_accounts_on_chain, assert_counter_state,

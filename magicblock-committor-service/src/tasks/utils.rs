@@ -8,20 +8,17 @@ use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_message::{
-    v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
+    v0::Message, v1, AddressLookupTableAccount, CompileError, VersionedMessage,
 };
 use solana_pubkey::{pubkey, Pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
-use crate::{
-    tasks::{
-        commit_delivery::CommitDelivery,
-        commit_finalize_task::CommitFinalizeTask,
-        task_strategist::TaskStrategistResult, BaseActionTask,
-        BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
-    },
-    transactions::v1,
+use crate::tasks::{
+    commit_delivery::CommitDelivery,
+    commit_finalize_task::CommitFinalizeTask,
+    task_strategist::{TaskStrategistError, TaskStrategistResult},
+    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
 };
 
 // Small accounts send full state in CommitFinalize. Above this threshold,
@@ -172,14 +169,17 @@ impl TransactionUtils {
         tasks: &[BaseTaskImpl],
         compute_unit_price: u64,
         uniqueness_nonce: Option<u64>,
-    ) -> TaskStrategistResult<v1::Transaction> {
+    ) -> TaskStrategistResult<VersionedTransaction> {
         let message = Self::assemble_tasks_v1_message_with_uniqueness_nonce(
             authority,
             tasks,
             compute_unit_price,
             uniqueness_nonce,
         )?;
-        Ok(v1::Transaction::try_new(message, authority)?)
+        Ok(VersionedTransaction::try_new(
+            VersionedMessage::V1(message),
+            &[authority],
+        )?)
     }
 
     pub(crate) fn assemble_tasks_v1_message_with_uniqueness_nonce(
@@ -213,34 +213,19 @@ impl TransactionUtils {
         // This is needed because VersionedMessage::serialize uses unwrap() ¯\_(ツ)_/¯
         instructions.iter().try_for_each(|el| {
             if el.data.len() > u16::MAX as usize {
-                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
+                Err(TaskStrategistError::FailedToFitError)
             } else {
                 Ok(())
             }
         })?;
 
-        let message = match Message::try_compile(
+        let message = Message::try_compile(
             &authority.pubkey(),
             &[budget_instructions, instructions].concat(),
             lookup_tables,
             Hash::new_unique(),
-        ) {
-            Ok(message) => Ok(message),
-            Err(CompileError::AccountIndexOverflow)
-            | Err(CompileError::AddressTableLookupIndexOverflow) => {
-                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
-            }
-            Err(CompileError::UnknownInstructionKey(pubkey)) => {
-                // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
-                // when User's pubkeys in Instruction doesn't exist in AccountKeys.
-                // This is impossible in our case since AccountKeys created on keys of our Ixs
-                // that means that all keys from out ixs exist in AccountKeys
-                panic!(
-                    "Supplied instruction has to be valid: {}",
-                    CompileError::UnknownInstructionKey(pubkey)
-                );
-            }
-        }?;
+        )
+        .map_err(compile_error)?;
 
         // SignerError is critical
         let tx = VersionedTransaction::try_new(
@@ -256,32 +241,17 @@ impl TransactionUtils {
         instructions: &[Instruction],
         config: v1::TransactionConfig,
     ) -> TaskStrategistResult<v1::Message> {
-        let message = match v1::Message::try_compile_with_config(
+        let message = v1::Message::try_compile_with_config(
             &authority.pubkey(),
             instructions,
             Hash::new_unique(),
             config,
-        ) {
-            Ok(message) => Ok(message),
-            Err(CompileError::AccountIndexOverflow)
-            | Err(CompileError::AddressTableLookupIndexOverflow) => {
-                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
-            }
-            Err(CompileError::UnknownInstructionKey(pubkey)) => {
-                // SAFETY: this may occur in utility AccountKeys::try_compile_instructions
-                // when User's pubkeys in Instruction doesn't exist in AccountKeys.
-                // This is impossible in our case since AccountKeys created on keys of our Ixs
-                // that means that all keys from out ixs exist in AccountKeys
-                panic!(
-                    "Supplied instruction has to be valid: {}",
-                    CompileError::UnknownInstructionKey(pubkey)
-                );
-            }
-        }?;
+        )
+        .map_err(compile_error)?;
 
-        message.validate().map_err(|_| {
-            crate::tasks::task_strategist::TaskStrategistError::FailedToFitError
-        })?;
+        message
+            .validate()
+            .map_err(|_| TaskStrategistError::FailedToFitError)?;
         Ok(message)
     }
 
@@ -342,7 +312,7 @@ impl TransactionUtils {
         compute_unit_price: u64,
         accounts_size_budget: u32,
     ) -> v1::TransactionConfig {
-        v1::TransactionConfig::empty()
+        v1::TransactionConfig::default()
             .with_priority_fee(Self::priority_fee_lamports(
                 compute_unit_price,
                 compute_units,
@@ -355,12 +325,9 @@ impl TransactionUtils {
         compute_unit_price: u64,
         compute_units: u32,
     ) -> u64 {
-        let fee = (compute_unit_price as u128)
-            .saturating_mul(u128::from(compute_units))
-            .saturating_add(
-                u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT).saturating_sub(1),
-            )
-            / u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT);
+        // A u64 price multiplied by a u32 limit fits in u128.
+        let fee = (u128::from(compute_unit_price) * u128::from(compute_units))
+            .div_ceil(u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT));
         u64::try_from(fee).unwrap_or(u64::MAX)
     }
 
@@ -375,6 +342,20 @@ impl TransactionUtils {
                 compute_unit_price,
             ),
         ]
+    }
+}
+
+fn compile_error(error: CompileError) -> TaskStrategistError {
+    match error {
+        CompileError::AccountIndexOverflow
+        | CompileError::AddressTableLookupIndexOverflow => {
+            TaskStrategistError::FailedToFitError
+        }
+        // Compiled keys come from these same instructions, so a missing key
+        // indicates an internal compilation invariant violation.
+        CompileError::UnknownInstructionKey(_) => {
+            panic!("Supplied instruction has to be valid: {error}")
+        }
     }
 }
 

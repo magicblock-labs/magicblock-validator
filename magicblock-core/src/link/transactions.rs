@@ -3,7 +3,6 @@ use std::sync::Arc;
 use bytes::Bytes;
 use flume::{Receiver as MpmcReceiver, Sender as MpmcSender};
 use magicblock_magic_program_api::args::TaskRequest;
-use serde::Serialize;
 use solana_account::AccountSharedData;
 use solana_message::{
     inner_instruction::InnerInstructionsList, SimpleAddressLoader,
@@ -20,6 +19,7 @@ use tokio::sync::{
     mpsc::{Receiver, Sender, UnboundedReceiver, UnboundedSender},
     oneshot, OwnedSemaphorePermit, Semaphore,
 };
+use wincode::{config::DefaultConfig, SchemaWrite};
 
 use super::{blocks::BlockHash, replication};
 use crate::{Slot, TransactionIndex};
@@ -80,7 +80,7 @@ pub struct TransactionStatus {
 pub struct ProcessableTransaction {
     pub transaction: SanitizedTransaction,
     pub mode: TransactionProcessingMode,
-    /// Pre-encoded bincode bytes for the transaction.
+    /// Pre-encoded wire bytes for the transaction.
     /// Used by the replicator to avoid redundant serialization.
     pub encoded: Option<Bytes>,
 }
@@ -176,7 +176,7 @@ pub trait SanitizeableTransaction {
         verify: bool,
     ) -> Result<SanitizedTransaction, TransactionError>;
 
-    /// Sanitizes the transaction and optionally provides pre-encoded bincode bytes.
+    /// Sanitizes the transaction and optionally provides pre-encoded wire bytes.
     ///
     /// Default implementation delegates to `sanitize()` and returns `None` for encoded bytes.
     /// Override this method when you have pre-encoded bytes (e.g., from the wire) to avoid
@@ -193,7 +193,7 @@ pub trait SanitizeableTransaction {
     }
 }
 
-/// Wraps a transaction with its pre-encoded bincode representation.
+/// Wraps a transaction with its pre-encoded wire representation.
 /// Use for internally-constructed transactions that need encoded bytes.
 pub struct WithEncoded<T> {
     pub txn: T,
@@ -217,13 +217,13 @@ impl<T: SanitizeableTransaction> SanitizeableTransaction for WithEncoded<T> {
     }
 }
 
-/// Encodes a transaction to bincode and wraps it with its encoded form.
+/// Encodes a transaction to wire and wraps it with its encoded form.
 /// Use for internally-constructed transactions that need the encoded bytes.
 pub fn with_encoded<T>(txn: T) -> Result<WithEncoded<T>, TransactionError>
 where
-    T: Serialize,
+    T: SchemaWrite<DefaultConfig, Src = T>,
 {
-    let encoded = bincode::serialize(&txn)
+    let encoded = wincode::serialize(&txn)
         .map_err(|_| TransactionError::SanitizeFailure)?
         .into();
     Ok(WithEncoded { txn, encoded })

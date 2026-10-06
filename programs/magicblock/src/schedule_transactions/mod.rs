@@ -98,7 +98,8 @@ pub(crate) fn get_clock(
     invoke_context: &mut InvokeContext,
 ) -> Result<Arc<Clock>, InstructionError> {
     invoke_context
-        .get_sysvar_cache()
+        .environment_config
+        .sysvar_cache()
         .get_clock()
         .map_err(|err| {
             ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);

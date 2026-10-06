@@ -354,7 +354,10 @@ declare_process_instruction!(
 mod test {
     use magicblock_magic_program_api::args::ScheduleTaskArgs;
     use solana_instruction::AccountMeta;
-    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_program_runtime::{
+        invoke_context::mock_process_instruction,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
 
     use super::*;
 
@@ -372,12 +375,11 @@ mod test {
 
         mock_process_instruction(
             &crate::CRANK_PROGRAM_ID,
-            None,
             &data,
             Vec::new(),
             vec![AccountMeta::new_readonly(crate::CRANK_PROGRAM_ID, false)],
             Err(InstructionError::InvalidInstructionData),
-            CrankEntrypoint::vm,
+            CrankEntrypoint::register,
             |_invoke_context| {},
             |_invoke_context| {},
         );
@@ -389,12 +391,11 @@ mod test {
 
         mock_process_instruction(
             &crate::CALLBACK_PROGRAM_ID,
-            None,
             &data,
             Vec::new(),
             vec![AccountMeta::new_readonly(crate::CALLBACK_PROGRAM_ID, false)],
             Err(InstructionError::InvalidInstructionData),
-            CallbackEntrypoint::vm,
+            CallbackEntrypoint::register,
             |_invoke_context| {},
             |_invoke_context| {},
         );

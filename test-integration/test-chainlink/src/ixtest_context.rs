@@ -18,16 +18,16 @@ use magicblock_chainlink::{
 };
 use magicblock_config::config::LifecycleMode;
 use program_flexi_counter::state::FlexiCounter;
-use solana_account::AccountSharedData;
+use solana_account::{Account, AccountSharedData};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
 };
 use solana_sdk_ids::native_loader;
+use solana_transaction::Transaction;
 use tokio::task;
 use tracing::*;
 
@@ -406,10 +406,7 @@ impl IxtestContext {
         (ephemeral_balance_pda, escrow_deleg_record)
     }
 
-    pub async fn get_remote_account(
-        &self,
-        pubkey: &Pubkey,
-    ) -> Option<solana_sdk::account::Account> {
+    pub async fn get_remote_account(&self, pubkey: &Pubkey) -> Option<Account> {
         self.rpc_client.get_account(pubkey).await.ok()
     }
 

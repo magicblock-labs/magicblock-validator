@@ -279,7 +279,7 @@ impl HttpDispatcher {
         sigverify: bool,
         replace_blockhash: bool,
     ) -> RpcResult<WithEncoded<SanitizedTransaction>> {
-        // parse the string as bincode serialized bytes
+        // parse the string as wire-encoded bytes
         let encoded = match encoding {
             UiTransactionEncoding::Base58 => {
                 bs58::decode(txn).into_vec().map_err(RpcError::parse_error)
@@ -293,7 +293,7 @@ impl HttpDispatcher {
         }?;
 
         let mut transaction: VersionedTransaction =
-            bincode::deserialize(&encoded).map_err(RpcError::invalid_params)?;
+            wincode::deserialize(&encoded).map_err(RpcError::invalid_params)?;
 
         validate_supported_transaction_shape(&transaction)?;
 

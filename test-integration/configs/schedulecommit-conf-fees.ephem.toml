@@ -26,7 +26,6 @@ max-snapshots = 7
 reset = true
 
 [validator]
-basefee = 1000
 
 [[programs]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"

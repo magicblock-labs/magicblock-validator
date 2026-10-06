@@ -87,7 +87,7 @@ pub struct SuperBlock {
 
 impl Transaction {
     /// Deserializes the inner `VersionedTransaction`.
-    pub fn decode(&self) -> bincode::Result<VersionedTransaction> {
-        bincode::deserialize(&self.payload)
+    pub fn decode(&self) -> Result<VersionedTransaction, wincode::ReadError> {
+        wincode::deserialize(&self.payload)
     }
 }

@@ -10,8 +10,8 @@ use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signer},
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 
 // Test constants
 const DEVNET_URL: &str = "http://127.0.0.1:7799";

@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+wincode = { workspace = true }
 
 console-subscriber = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["sync"] }

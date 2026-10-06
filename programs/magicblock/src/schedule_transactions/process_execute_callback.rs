@@ -99,7 +99,10 @@ mod tests {
     use serial_test::serial;
     use solana_account::AccountSharedData;
     use solana_instruction::{error::InstructionError, AccountMeta};
-    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_program_runtime::{
+        invoke_context::mock_process_instruction,
+        solana_sbpf::program::BuiltinFunctionDefinition,
+    };
     use solana_pubkey::Pubkey;
 
     use crate::{
@@ -148,12 +151,11 @@ mod tests {
     ) {
         mock_process_instruction(
             &CALLBACK_PROGRAM_ID,
-            None,
             data,
             transaction_accounts,
             instruction_accounts,
             expected,
-            CallbackEntrypoint::vm,
+            CallbackEntrypoint::register,
             |_| {},
             |_| {},
         );

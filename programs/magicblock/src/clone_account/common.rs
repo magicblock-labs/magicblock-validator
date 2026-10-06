@@ -416,7 +416,8 @@ pub fn close_buffer_account(mut acc: AccountRefMut<'_>) {
 /// was deployed 5 slots ago.
 pub fn get_deploy_slot(invoke_context: &InvokeContext) -> u64 {
     invoke_context
-        .get_sysvar_cache()
+        .environment_config
+        .sysvar_cache()
         .get_clock()
         .map(|clock| clock.slot.saturating_sub(5))
         .unwrap_or(0)
@@ -428,7 +429,8 @@ pub fn minimum_balance(
     data_len: usize,
 ) -> Result<u64, InstructionError> {
     invoke_context
-        .get_sysvar_cache()
+        .environment_config
+        .sysvar_cache()
         .get_rent()
         .map(|rent| rent.minimum_balance(data_len))
 }

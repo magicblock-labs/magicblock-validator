@@ -12,8 +12,8 @@ use solana_sdk::{
     instruction::Instruction,
     signature::{Keypair, Signature},
     signer::Signer,
-    transaction::Transaction,
 };
+use solana_transaction::Transaction;
 use tracing::*;
 
 use crate::conversions::stringify_simulation_result;

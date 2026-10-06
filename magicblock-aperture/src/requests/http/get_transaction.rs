@@ -28,12 +28,16 @@ impl HttpDispatcher {
 
             let encoding =
                 config.encoding.unwrap_or(UiTransactionEncoding::Json);
-            // This implementation supports all transaction versions, so we pass a max version number.
-            let max_version = Some(u8::MAX);
-
             // If the transaction was found, encode it for the RPC response.
             let encoded_transaction = transaction
-                .and_then(|tx| tx.encode(encoding, max_version).ok());
+                .map(|tx| {
+                    tx.encode(
+                        encoding,
+                        config.max_supported_transaction_version,
+                    )
+                })
+                .transpose()
+                .map_err(RpcError::from)?;
 
             let mut encoded_value = value_from_serializable(
                 &encoded_transaction,

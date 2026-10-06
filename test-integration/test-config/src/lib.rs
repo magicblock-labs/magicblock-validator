@@ -21,9 +21,9 @@ use program_flexi_counter::instruction::{
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
-    transaction::Transaction,
 };
 use solana_sdk_ids::address_lookup_table;
+use solana_transaction::Transaction;
 use tempfile::TempDir;
 use tracing::*;
 

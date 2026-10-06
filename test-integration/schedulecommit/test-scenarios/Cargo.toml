@@ -4,6 +4,8 @@ name = "schedulecommit-test-scenarios"
 version.workspace = true
 
 [dev-dependencies]
+solana-transaction-error = { workspace = true }
+solana-transaction = { workspace = true }
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }

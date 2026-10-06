@@ -8,7 +8,7 @@ use magicblock_magic_program_api::{
 };
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_instruction::{error::InstructionError, AccountMeta, Instruction};
-use solana_sdk_ids::system_program;
+use solana_sdk_ids::{system_program, sysvar};
 use test_kit::init_logger;
 
 use super::*;
@@ -157,6 +157,11 @@ fn tx_accounts(
     mut account_data: HashMap<Pubkey, AccountSharedData>,
     ix_accounts: &[AccountMeta],
 ) -> Vec<(Pubkey, AccountSharedData)> {
+    // The native runtime updates this sysvar before entering the program,
+    // including tests that reject the action payload before reading it.
+    if !account_data.contains_key(&sysvar::instructions::id()) {
+        insert_instructions_sysvar(&mut account_data, &[], 0);
+    }
     ix_accounts
         .iter()
         .flat_map(|acc| {

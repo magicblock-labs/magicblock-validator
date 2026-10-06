@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-transaction = { workspace = true }
 integration-test-tools = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }

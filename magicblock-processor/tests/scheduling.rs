@@ -23,11 +23,7 @@ const TRANSFER_AMOUNT: u64 = 1000;
 // --- Helpers ---
 
 fn setup_env(executors: u32) -> ExecutionTestEnv {
-    ExecutionTestEnv::new_with_config(
-        ExecutionTestEnv::BASE_FEE,
-        executors,
-        true,
-    )
+    ExecutionTestEnv::new_with_config(executors, true)
 }
 
 fn create_accounts(env: &mut ExecutionTestEnv, count: usize) -> Vec<Pubkey> {
@@ -478,9 +474,7 @@ async fn test_large_queue_mixed_8_executors() {
 #[tokio::test]
 async fn test_wait_for_idle_coordination() {
     let mut env = ExecutionTestEnv::new_with_config(
-        ExecutionTestEnv::BASE_FEE,
-        1,
-        true, // defer_startup
+        1, true, // defer_startup
     );
 
     // 1. Acquire permit before scheduler starts (owned to avoid borrow issues)
