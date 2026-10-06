@@ -76,7 +76,7 @@ schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
 serial_test = "3.2.0"
 shlex = "1.3.0"
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "95e1fceecc7c94648494b1cd6f2312d425052422" }
 solana-address-lookup-table-interface = ">=3.1.0,<3.2.0"
 solana-commitment-config = "3.1.1"
 solana-compute-budget-interface = "3.0.0"
@@ -120,9 +120,9 @@ url = "2.5.0"
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
 rocksdb = { git = "https://github.com/magicblock-labs/rust-rocksdb.git", rev = "c6a3f91f" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "024d31fa5a4aba499e4a7162a33b9dfcad6d5686" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "95e1fceecc7c94648494b1cd6f2312d425052422" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "95e1fceecc7c94648494b1cd6f2312d425052422" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "95e1fceecc7c94648494b1cd6f2312d425052422" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "95e1fceecc7c94648494b1cd6f2312d425052422" }
 # Fix libsodium for ARM builds - upstream crates.io version breaks Linux ARM binaries
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }

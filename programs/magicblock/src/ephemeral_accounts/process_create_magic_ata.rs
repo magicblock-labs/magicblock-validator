@@ -190,9 +190,19 @@ fn token_program_wrote_earlier(
     ata: &Pubkey,
     token_program: &Pubkey,
 ) -> Result<bool, InstructionError> {
+    let current_top_level = transaction_context
+        .get_instruction_context_at_nesting_level(0)?
+        .get_index_in_trace();
     for index in 0..transaction_context.get_instruction_trace_length() {
         let ix_ctx = transaction_context
             .get_instruction_context_at_index_in_trace(index)?;
+        // Top-level frames are preconfigured, including future instructions.
+        // CPI frames are appended only when invoked, so keep all of them.
+        if ix_ctx.get_index_of_caller() == usize::from(u16::MAX)
+            && index > current_top_level
+        {
+            continue;
+        }
         if ix_ctx.get_program_key()? != token_program {
             continue;
         }
