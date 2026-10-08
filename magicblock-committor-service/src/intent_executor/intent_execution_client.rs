@@ -170,10 +170,8 @@ impl IntentExecutionClient {
                 let transaction =
                     v1::Transaction::try_new(message.clone(), authority)?;
                 self.rpc_client
-                    .send_serialized_transaction(
-                        transaction.serialized(),
-                        transaction.signature(),
-                        transaction.recent_blockhash(),
+                    .send_transaction(
+                        &transaction,
                         &MagicBlockSendTransactionConfig::ensure_committed(),
                     )
                     .await?
