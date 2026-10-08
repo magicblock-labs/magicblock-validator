@@ -69,7 +69,7 @@ pub(super) use delegation_dedup::DelegationDeduplicator;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
-    delegation_dedup::Admission,
+    delegation_dedup::DedupDecision,
     pending_clone_guard::{CloneClaim, CloneCompletion, PendingCloneGuard},
     pending_operation::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
@@ -836,8 +836,8 @@ where
             .scan(|_pubkey, pending| pending.cancel.notify_one());
     }
 
-    /// Stops chain subscriptions, cancels pending fetches, and drains admitted
-    /// delegation workflows while the transaction scheduler is still running.
+    /// Stops chain subscriptions, cancels pending fetches, and drains owned
+    /// delegation clones while the transaction scheduler is still running.
     ///
     /// Cloning runs through the transaction scheduler, so every update that
     /// still arrives once the scheduler is gone fails with
@@ -1898,18 +1898,18 @@ where
             return Ok(Signature::default());
         }
 
-        self.clone_admitted_delegation(identity, request, fetch_context)
+        self.clone_delegation_with_dedup(identity, request, fetch_context)
             .await
     }
 
-    async fn clone_admitted_delegation(
+    async fn clone_delegation_with_dedup(
         &self,
         identity: DelegationIdentity,
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Signature> {
         let clone_target = request.pubkey;
-        let admission =
+        let decision =
             self.delegation_dedup.claim(identity).inspect_err(|err| {
                 warn!(
                     delegated_account = %identity.delegated_account,
@@ -1918,14 +1918,14 @@ where
                     origin_entrypoint = %fetch_context.entrypoint(),
                     origin_reason = %fetch_context.reason(),
                     error = %err,
-                    "Delegation admission rejected"
+                    "Delegation clone claim rejected"
                 );
             })?;
-        let result = match admission {
-            Admission::Owner { guard, completion } => {
+        let result = match decision {
+            DedupDecision::Start { guard, completion } => {
                 let this = self.clone();
-                // The deduplicator owns this workflow, not the requesting RPC or
-                // subscription task. Its guard also participates in shutdown
+                // The deduplicator owns this delegation clone, not the requesting
+                // RPC or subscription task. Its guard participates in shutdown
                 // draining, including when the caller times out or disappears.
                 tokio::spawn(async move {
                     let result = this
@@ -1942,7 +1942,7 @@ where
                             origin_entrypoint = %fetch_context.entrypoint(),
                             origin_reason = %fetch_context.reason(),
                             error = %err,
-                            "Delegation activation failed; retaining deduplication history"
+                            "Delegation clone failed; retaining deduplication history"
                         );
                     }
                     if let Ok(signature) = &result {
@@ -1954,33 +1954,35 @@ where
                             origin_reason = %fetch_context.reason(),
                             signature = %signature,
                             executed = (*signature != Signature::default()),
-                            "Delegation workflow completed"
+                            "Delegation clone completed"
                         );
                     }
                     guard.finish(result.map_err(Arc::new));
                 });
-                delegation_dedup::wait(completion, identity).await
+                delegation_dedup::wait_for_completion(completion, identity)
+                    .await
             }
-            Admission::Running(completion) => {
-                delegation_dedup::wait(completion, identity).await
+            DedupDecision::Wait(completion) => {
+                delegation_dedup::wait_for_completion(completion, identity)
+                    .await
             }
-            Admission::Finished(result) => {
+            DedupDecision::Reuse(result) => {
                 debug!(
                     delegated_account = %identity.delegated_account,
                     delegation_slot = identity.delegation_slot,
                     clone_target = %clone_target,
                     origin_entrypoint = %fetch_context.entrypoint(),
                     origin_reason = %fetch_context.reason(),
-                    "Suppressing already processed delegation"
+                    "Reusing retained delegation clone result"
                 );
                 result
             }
         };
         let signature = result.map_err(|source| {
-            ChainlinkError::DelegationActivationFailed { identity, source }
+            ChainlinkError::DelegationCloneFailed { identity, source }
         })?;
-        // Successful processing can close or undelegate the target. Neither
-        // owners nor duplicates may report it as usable in the bank then.
+        // A successful delegation clone can close or undelegate its target.
+        // Neither owners nor duplicates may report it as usable in the bank then.
         let target_available = self
             .accounts_bank
             .get_account(&clone_target)
@@ -1989,7 +1991,7 @@ where
                     && !Self::is_empty_placeholder_account(&account)
             });
         if !target_available {
-            return Err(ChainlinkError::DelegationAlreadyProcessed {
+            return Err(ChainlinkError::DelegationTargetUnavailable {
                 identity,
                 clone_target,
             });
@@ -1997,8 +1999,8 @@ where
         Ok(signature)
     }
 
-    /// The sole admission owner performs dependency checks, clone execution,
-    /// and (if needed) the existing terminal rescue-undelegation workflow.
+    /// Checks dependencies, clones with post-delegation actions, and attempts
+    /// rescue undelegation if needed.
     async fn execute_delegation_clone(
         &self,
         request: AccountCloneRequest,
@@ -2057,7 +2059,7 @@ where
                     origin_entrypoint = %fetch_context.entrypoint(),
                     origin_reason = %fetch_context.reason(),
                     error = %err,
-                    "Post-delegation activation failed; scheduling rescue undelegation"
+                    "Delegation clone failed; scheduling rescue undelegation"
                 );
 
                 // The post-delegation actions could not be satisfied (e.g. a
@@ -2741,8 +2743,9 @@ where
                 )
                 .await
             {
-                if let ChainlinkError::DelegationAlreadyProcessed { .. } = err {
-                    debug!(pubkey = %pubkey, "Discarded duplicate delegation update after local account removal");
+                if let ChainlinkError::DelegationTargetUnavailable { .. } = err
+                {
+                    debug!(pubkey = %pubkey, "Skipped delegation update because the clone target is unavailable");
                 } else {
                     error!(
                         pubkey = %pubkey,
@@ -2918,9 +2921,9 @@ where
         )
         .await
         .or_else(|err| match err {
-            // This helper only handles subscription projections. Processing
-            // an old update is complete even when its target has been removed.
-            ChainlinkError::DelegationAlreadyProcessed { .. } => {
+            // Subscription projections need no usable target after the
+            // delegation clone completes.
+            ChainlinkError::DelegationTargetUnavailable { .. } => {
                 Ok(Signature::default())
             }
             err => Err(err),
@@ -3036,7 +3039,7 @@ where
                 .await
             {
                 Ok(result) => result,
-                Err(ChainlinkError::DelegationAlreadyProcessed { .. }) => {
+                Err(ChainlinkError::DelegationTargetUnavailable { .. }) => {
                     return
                 }
                 Err(err) => {
@@ -3294,7 +3297,7 @@ where
                 );
                 false
             }
-            Err(ChainlinkError::DelegationAlreadyProcessed { .. }) => true,
+            Err(ChainlinkError::DelegationTargetUnavailable { .. }) => true,
             Err(err) => {
                 warn!(
                     pubkey = %pubkey,
