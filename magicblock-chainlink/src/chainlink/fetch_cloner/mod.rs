@@ -1966,7 +1966,7 @@ where
                 delegation_dedup::wait_for_completion(completion, identity)
                     .await
             }
-            DedupDecision::Reuse(result) => {
+            DedupDecision::HistoricalResult(result) => {
                 debug!(
                     delegated_account = %identity.delegated_account,
                     delegation_slot = identity.delegation_slot,
