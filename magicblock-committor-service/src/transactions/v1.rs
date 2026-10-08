@@ -121,17 +121,6 @@ impl Message {
         &self.recent_blockhash
     }
 
-    pub(crate) fn matches_v0_message(&self, other: &v0::Message) -> bool {
-        if self.config != TransactionConfig::empty() {
-            return false;
-        }
-        other.address_table_lookups.is_empty()
-            && self.header == other.header
-            && self.account_keys == other.account_keys
-            && self.recent_blockhash == other.recent_blockhash
-            && self.instructions == other.instructions
-    }
-
     pub(crate) fn validate(&self) -> Result<(), ()> {
         if usize::from(self.header.num_required_signatures) > MAX_SIGNATURES {
             return Err(());
@@ -325,25 +314,11 @@ mod tests {
 
     #[test]
     fn serializes_config_before_instruction_headers() {
-        let config = TransactionConfig::empty()
+        let mut message = valid_message();
+        message.config = TransactionConfig::empty()
             .with_priority_fee(11)
             .with_compute_unit_limit(22)
             .with_loaded_accounts_data_size_limit(33);
-        let message = Message {
-            header: MessageHeader {
-                num_required_signatures: 1,
-                num_readonly_signed_accounts: 0,
-                num_readonly_unsigned_accounts: 1,
-            },
-            config,
-            account_keys: vec![Pubkey::new_unique(), Pubkey::new_unique()],
-            recent_blockhash: Hash::new_unique(),
-            instructions: vec![CompiledInstruction {
-                program_id_index: 1,
-                accounts: vec![0],
-                data: vec![7, 8, 9],
-            }],
-        };
         let serialized = message.serialize();
         let config_values_offset = 1
             + 3
