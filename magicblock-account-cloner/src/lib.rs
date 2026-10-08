@@ -746,7 +746,7 @@ impl Cloner for ChainlinkCloner {
 #[cfg(test)]
 mod tests {
     use magicblock_chainlink::cloner::{
-        ClonePostDelegationMode, DelegationActions,
+        ClonePostDelegationMode, DelegationActions, DelegationIdentity,
     };
     use magicblock_core::link::link;
     use magicblock_magic_program_api::{
@@ -787,6 +787,10 @@ mod tests {
             ),
             delegated_to_other: None,
             source_slots: None,
+            delegation_identity: Some(DelegationIdentity {
+                delegated_account: pubkey,
+                delegation_slot: 0,
+            }),
         }
     }
 
