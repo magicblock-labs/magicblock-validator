@@ -9120,6 +9120,69 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
 }
 
 #[tokio::test]
+async fn test_delegation_owner_rejects_undelegating_target() {
+    const CURRENT_SLOT: u64 = 100;
+    let target_pubkey = random_pubkey();
+    let identity = DelegationIdentity {
+        delegated_account: target_pubkey,
+        delegation_slot: CURRENT_SLOT,
+    };
+    let FetcherTestCtx {
+        accounts_bank,
+        cloner,
+        fetch_cloner,
+        ..
+    } = setup(
+        std::iter::empty::<(Pubkey, Account)>(),
+        CURRENT_SLOT,
+        Keypair::new(),
+    )
+    .await;
+
+    let mut incoming =
+        AccountSharedData::new(1_000_000, 0, &system_program::id());
+    incoming.set_remote_slot(CURRENT_SLOT);
+    incoming.set_delegated(true);
+
+    // The lower clone layer skips this older request, but the preserved
+    // undelegating target is unavailable to the caller that owns admission.
+    let mut locked = incoming.clone();
+    locked.set_owner(dlp_api::id());
+    locked.set_delegated(false);
+    locked.set_undelegating(true);
+    locked.set_remote_slot(CURRENT_SLOT + 1);
+    accounts_bank.insert(target_pubkey, locked.clone());
+
+    let error = fetch_cloner
+        .clone_account_with_post_delegation_action_invariants(
+            AccountCloneRequest {
+                pubkey: target_pubkey,
+                account: incoming,
+                commit_frequency_ms: None,
+                post_delegation_mode: ClonePostDelegationMode::None,
+                delegated_to_other: None,
+                source_slots: None,
+                delegation_identity: Some(identity),
+            },
+            AccountFetchContext::rpc_get_account(),
+        )
+        .await
+        .expect_err(
+            "the owner must not report an undelegating target as usable",
+        );
+
+    assert!(matches!(
+        error,
+        ChainlinkError::DelegationAlreadyProcessed {
+            identity: actual_identity,
+            clone_target,
+        } if actual_identity == identity && clone_target == target_pubkey
+    ));
+    assert!(cloner.clone_requests().is_empty());
+    assert_eq!(accounts_bank.get_account(&target_pubkey), Some(locked));
+}
+
+#[tokio::test]
 async fn test_failed_plain_clone_accepts_concurrent_active_delegation() {
     init_logger();
     let validator_keypair = Keypair::new();
