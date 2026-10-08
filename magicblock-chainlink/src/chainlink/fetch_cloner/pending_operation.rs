@@ -33,7 +33,7 @@ pub(super) enum PendingTerminal {
 #[derive(Debug, Clone)]
 pub(super) enum PendingFailure {
     OwnerFailed(String),
-    DelegationAlreadyProcessed {
+    DelegationTargetUnavailable {
         identity: DelegationIdentity,
         clone_target: Pubkey,
     },
@@ -47,10 +47,10 @@ impl PendingFailure {
             Self::OwnerFailed(msg) => {
                 ChainlinkError::PendingRequestOwnerFailed(pubkey, msg)
             }
-            Self::DelegationAlreadyProcessed {
+            Self::DelegationTargetUnavailable {
                 identity,
                 clone_target,
-            } => ChainlinkError::DelegationAlreadyProcessed {
+            } => ChainlinkError::DelegationTargetUnavailable {
                 identity,
                 clone_target,
             },
@@ -63,10 +63,10 @@ impl PendingFailure {
 impl From<ChainlinkError> for PendingFailure {
     fn from(err: ChainlinkError) -> Self {
         match err {
-            ChainlinkError::DelegationAlreadyProcessed {
+            ChainlinkError::DelegationTargetUnavailable {
                 identity,
                 clone_target,
-            } => Self::DelegationAlreadyProcessed {
+            } => Self::DelegationTargetUnavailable {
                 identity,
                 clone_target,
             },

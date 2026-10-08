@@ -9173,7 +9173,7 @@ async fn test_delegation_owner_rejects_undelegating_target() {
 
     assert!(matches!(
         error,
-        ChainlinkError::DelegationAlreadyProcessed {
+        ChainlinkError::DelegationTargetUnavailable {
             identity: actual_identity,
             clone_target,
         } if actual_identity == identity && clone_target == target_pubkey

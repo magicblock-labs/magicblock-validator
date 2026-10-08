@@ -36,29 +36,29 @@ pub enum ChainlinkError {
     #[error("Invalid delegation deduplication configuration: {0}")]
     InvalidDelegationDedupConfig(&'static str),
 
-    #[error("Delegation admission capacity exhausted ({0})")]
-    DelegationAdmissionCapacity(&'static str),
+    #[error("Delegation deduplication capacity exhausted ({0})")]
+    DelegationDedupCapacityExceeded(&'static str),
 
-    #[error("Delegation admission is closed during shutdown")]
-    DelegationAdmissionClosed,
+    #[error("Delegation deduplication is closed to new work during shutdown")]
+    DelegationDedupClosed,
 
     #[error("Delegated clone target {0} has no delegation identity")]
     MissingDelegationIdentity(Pubkey),
 
-    #[error("Delegation {identity:?} was already processed; clone target {clone_target} is unavailable")]
-    DelegationAlreadyProcessed {
+    #[error("Clone target {clone_target} is unavailable for delegation {identity:?}")]
+    DelegationTargetUnavailable {
         identity: DelegationIdentity,
         clone_target: Pubkey,
     },
 
-    #[error("Delegation {identity:?} activation failed: {source}")]
-    DelegationActivationFailed {
+    #[error("Delegation {identity:?} clone failed: {source}")]
+    DelegationCloneFailed {
         identity: DelegationIdentity,
         source: Arc<ChainlinkError>,
     },
 
-    #[error("Delegation {0:?} activation owner terminated without a result")]
-    DelegationActivationAbandoned(DelegationIdentity),
+    #[error("Delegation {0:?} clone owner terminated without a result")]
+    DelegationCloneAbandoned(DelegationIdentity),
 
     #[error("Token account could not be decoded while cloning: {0} ({1})")]
     InvalidTokenAccount(Pubkey, String),
