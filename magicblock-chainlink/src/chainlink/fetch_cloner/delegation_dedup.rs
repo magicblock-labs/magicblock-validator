@@ -5,7 +5,6 @@ use std::{
 };
 
 use magicblock_config::config::DelegationDedupConfig;
-use magicblock_metrics::metrics::{self, DelegationAdmissionOutcome};
 use parking_lot::Mutex;
 use solana_signature::Signature;
 use tokio::{sync::watch, time::Instant};
@@ -39,6 +38,15 @@ struct State {
     expiry: VecDeque<(Instant, DelegationIdentity)>,
     running: usize,
     closed: bool,
+}
+
+pub(super) enum Admission {
+    Owner {
+        guard: AdmissionGuard,
+        completion: Completion,
+    },
+    Running(Completion),
+    Finished(AdmissionResult),
 }
 
 /// Prevents duplicate delegation activation across the validator's clone paths.
@@ -84,15 +92,6 @@ pub(crate) struct DelegationDeduplicator {
     state: Mutex<State>,
     tasks: TaskTracker,
     stop_cleanup: CancellationToken,
-}
-
-pub(super) enum Admission {
-    Owner {
-        guard: AdmissionGuard,
-        completion: Completion,
-    },
-    Running(Completion),
-    Finished(AdmissionResult),
 }
 
 impl DelegationDeduplicator {
@@ -146,20 +145,13 @@ impl DelegationDeduplicator {
         if matches!(state.entries.get(&identity), Some(Entry::Finished { expires_at, .. }) if *expires_at <= now)
         {
             state.entries.remove(&identity);
-            metrics::add_delegation_admission_entries(0, -1);
         }
         if let Some(entry) = state.entries.get(&identity) {
             return Ok(match entry {
                 Entry::Running(sender) => {
-                    metrics::inc_delegation_admission(
-                        DelegationAdmissionOutcome::DuplicateRunning,
-                    );
                     Admission::Running(sender.subscribe())
                 }
                 Entry::Finished { result, .. } => {
-                    metrics::inc_delegation_admission(
-                        DelegationAdmissionOutcome::DuplicateRetained,
-                    );
                     Admission::Finished(result.clone())
                 }
             });
@@ -175,16 +167,11 @@ impl DelegationDeduplicator {
             None
         };
         if let Some(limit) = exhausted {
-            metrics::inc_delegation_admission(
-                DelegationAdmissionOutcome::CapacityRejected,
-            );
             return Err(ChainlinkError::DelegationAdmissionCapacity(limit));
         }
         let (sender, completion) = watch::channel(None);
         state.entries.insert(identity, Entry::Running(sender));
         state.running += 1;
-        metrics::inc_delegation_admission(DelegationAdmissionOutcome::Admitted);
-        metrics::add_delegation_admission_entries(1, 0);
         Ok(Admission::Owner {
             guard: AdmissionGuard {
                 deduplicator: self.clone(),
@@ -222,7 +209,6 @@ impl DelegationDeduplicator {
                 );
                 state.expiry.push_back((expires_at, identity));
             }
-            metrics::add_delegation_admission_entries(-1, i64::from(retain));
             sender
         };
         // Publish before dropping the tracker token so shutdown includes result delivery.
@@ -256,7 +242,6 @@ impl State {
             if matches!(self.entries.get(&identity), Some(Entry::Finished { expires_at: current, .. }) if *current == expires_at)
             {
                 self.entries.remove(&identity);
-                metrics::add_delegation_admission_entries(0, -1);
             }
         }
     }
@@ -265,11 +250,6 @@ impl State {
 impl Drop for DelegationDeduplicator {
     fn drop(&mut self) {
         self.stop_cleanup.cancel();
-        let state = self.state.get_mut();
-        metrics::add_delegation_admission_entries(
-            -(state.running as i64),
-            -((state.entries.len() - state.running) as i64),
-        );
     }
 }
 
