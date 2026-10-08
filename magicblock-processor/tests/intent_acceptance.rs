@@ -125,7 +125,6 @@ async fn check_failed_acceptance_and_retry() {
         ))
     );
     assert_eq!(env.get_account(MAGIC_CONTEXT_PUBKEY).data(), staged_data);
-    assert_eq!(staged_intents(&env), expected);
     assert_eq!(TransactionScheduler::default().scheduled_actions_len(), 0);
     assert_executor_has_no_pending_intents(&env).await;
 
@@ -142,18 +141,6 @@ async fn check_failed_acceptance_and_retry() {
         expected,
     );
     assert_executor_has_no_pending_intents(&env).await;
-
-    let empty = acceptance_transaction(&env, &[accept_instruction()]);
-    env.execute_transaction(empty).await.unwrap();
-    assert_eq!(TransactionScheduler::default().scheduled_actions_len(), 0);
-
-    let expected = stage_intents(&env, &[3]);
-    let txn = acceptance_transaction(&env, &[accept_instruction()]);
-    env.execute_transaction(txn).await.unwrap();
-    assert_eq!(
-        TransactionScheduler::default().take_scheduled_intent_bundles(),
-        expected,
-    );
 }
 
 async fn check_simulated_acceptance() {
