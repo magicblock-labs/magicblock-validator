@@ -1,9 +1,14 @@
+use std::sync::Arc;
+
 use magicblock_aml::RiskError;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;
 
-use crate::remote_account_provider::RemoteAccountProviderError;
+use crate::{
+    cloner::DelegationIdentity,
+    remote_account_provider::RemoteAccountProviderError,
+};
 
 pub type ChainlinkResult<T> = std::result::Result<T, ChainlinkError>;
 
@@ -27,6 +32,33 @@ pub enum ChainlinkError {
 
     #[error("Delegation actions could not be decoded: {0} ({1})")]
     InvalidDelegationActions(Pubkey, String),
+
+    #[error("Invalid delegation deduplication configuration: {0}")]
+    InvalidDelegationDedupConfig(&'static str),
+
+    #[error("Delegation admission capacity exhausted ({0})")]
+    DelegationAdmissionCapacity(&'static str),
+
+    #[error("Delegation admission is closed during shutdown")]
+    DelegationAdmissionClosed,
+
+    #[error("Delegated clone target {0} has no delegation identity")]
+    MissingDelegationIdentity(Pubkey),
+
+    #[error("Delegation {identity:?} was already processed; clone target {clone_target} is unavailable")]
+    DelegationAlreadyProcessed {
+        identity: DelegationIdentity,
+        clone_target: Pubkey,
+    },
+
+    #[error("Delegation {identity:?} activation failed: {source}")]
+    DelegationActivationFailed {
+        identity: DelegationIdentity,
+        source: Arc<ChainlinkError>,
+    },
+
+    #[error("Delegation {0:?} activation owner terminated without a result")]
+    DelegationActivationAbandoned(DelegationIdentity),
 
     #[error("Token account could not be decoded while cloning: {0} ({1})")]
     InvalidTokenAccount(Pubkey, String),

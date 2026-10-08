@@ -55,6 +55,7 @@ pub(crate) const FETCH_CLONE_OPERATION_TIMEOUT: Duration =
 
 mod ata_projection;
 mod delegation;
+mod delegation_admission;
 mod pending_clone_guard;
 mod pending_operation;
 mod pipeline;
@@ -64,8 +65,11 @@ mod subscription;
 mod tests;
 mod types;
 
+pub(super) use delegation_admission::DelegationAdmissionCache;
+
 pub use self::types::FetchAndCloneResult;
 use self::{
+    delegation_admission::Admission,
     pending_clone_guard::{CloneClaim, CloneCompletion, PendingCloneGuard},
     pending_operation::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
@@ -90,7 +94,7 @@ use crate::{
     cloner::{
         errors::{ClonerError, ClonerResult},
         AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
-        DelegationActions,
+        DelegationActions, DelegationIdentity,
     },
     remote_account_provider::{
         program_account::{
@@ -176,6 +180,8 @@ where
     >,
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
+
+    delegation_admissions: Arc<DelegationAdmissionCache>,
 
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
@@ -431,6 +437,7 @@ where
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
+            delegation_admissions: self.delegation_admissions.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -473,6 +480,7 @@ struct ResolvedSubscriptionAccount {
     delegation: Option<(DelegationRecord, DelegationActions)>,
     /// Fetch/projection provenance; otherwise the caller uses the sighting slot.
     source_slots: Option<CloneSourceSlots>,
+    delegation_identity: Option<DelegationIdentity>,
 }
 
 impl ResolvedSubscriptionAccount {
@@ -482,6 +490,7 @@ impl ResolvedSubscriptionAccount {
             account,
             delegation: None,
             source_slots: None,
+            delegation_identity: None,
         }
     }
 }
@@ -549,6 +558,34 @@ where
             ObservedUndelegationRequest,
         >,
     ) -> Arc<Self> {
+        Self::new_with_delegation_admissions(
+            remote_account_provider,
+            accounts_bank,
+            cloner,
+            validator_keypair,
+            subscription_updates_rx,
+            allowed_programs,
+            risk_service,
+            undelegation_request_sender,
+            DelegationAdmissionCache::new(Default::default())
+                .expect("default delegation dedup configuration is valid"),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new_with_delegation_admissions(
+        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
+        accounts_bank: &Arc<V>,
+        cloner: &Arc<C>,
+        validator_keypair: Keypair,
+        subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
+        allowed_programs: Option<Vec<AllowedProgram>>,
+        risk_service: Option<Arc<RiskService>>,
+        undelegation_request_sender: broadcast::Sender<
+            ObservedUndelegationRequest,
+        >,
+        delegation_admissions: Arc<DelegationAdmissionCache>,
+    ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
         let allowed_programs = allowed_programs.map(|programs| {
@@ -584,6 +621,7 @@ where
             )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
+            delegation_admissions,
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -823,17 +861,20 @@ where
             .scan(|_pubkey, pending| pending.cancel.notify_one());
     }
 
-    /// Stops chain subscriptions and cancels in-flight fetch+clone work.
+    /// Stops chain subscriptions, cancels pending fetches, and drains admitted
+    /// delegation workflows while the transaction scheduler is still running.
     ///
     /// Cloning runs through the transaction scheduler, so every update that
     /// still arrives once the scheduler is gone fails with
     /// `ClusterMaintenance` and is retried. Shutdown calls this before the
     /// scheduler is cancelled so the pipeline is already dry by then.
     pub async fn shutdown(&self) {
+        self.delegation_admissions.close();
         if let Err(err) = self.remote_account_provider.shutdown().await {
             warn!(error = ?err, "Failed to shut down chain subscriptions");
         }
         self.cancel_all_pending();
+        self.delegation_admissions.drain().await;
     }
 
     /// Check if a program is allowed to be cloned.
@@ -970,20 +1011,15 @@ where
                         } else {
                             PendingFailure::OwnerFailed(owner_msg.clone())
                         };
-                        op.owner.finish(match failure {
-                            PendingFailure::Cancelled => {
-                                ChainlinkPendingFetchOutcome::OwnerCancelled
-                            }
-                            PendingFailure::OwnerFailed(_)
-                            | PendingFailure::TimedOut => {
-                                ChainlinkPendingFetchOutcome::OwnerFailed
-                            }
-                        });
+                        let terminal = PendingTerminal::Failed(failure);
+                        op.owner.finish(Self::pending_terminal_owner_outcome(
+                            &terminal,
+                        ));
                         finish_pending(
                             &pending,
                             op.pubkey,
                             op.generation,
-                            PendingTerminal::Failed(failure),
+                            terminal,
                         );
                     }
                     return;
@@ -1055,7 +1091,7 @@ where
                     match result {
                         Ok(Ok(result)) => PendingTerminal::Success(result),
                         Ok(Err(err)) => PendingTerminal::Failed(
-                            PendingFailure::OwnerFailed(err.to_string()),
+                            PendingFailure::from(err),
                         ),
                         Err(_) => PendingTerminal::Failed(PendingFailure::TimedOut),
                     }
@@ -1862,26 +1898,166 @@ where
         }
         self.normalize_unresolved_dlp_clone_request(&mut request)?;
 
-        if request.account.delegated()
-            && self.local_delegated_clone_target_active(request.pubkey)
+        if request.post_delegation_mode.actions().is_some()
+            && !request.account.delegated()
         {
-            return Ok(Signature::default());
-        }
-
-        let Some(delegation_actions) = request.post_delegation_mode.actions()
-        else {
-            return Ok(self
-                .clone_account_with_ownership(request, fetch_context)
-                .await?);
-        };
-
-        if !request.account.delegated() {
             return Err(ChainlinkError::InvalidDelegationActions(
                 request.pubkey,
                 "post-delegation actions attached to non-delegated clone target"
                     .to_string(),
             ));
         }
+
+        if !request.account.delegated() || request.account.confined() {
+            return self.execute_delegation_clone(request, fetch_context).await;
+        }
+        let identity = request
+            .delegation_identity
+            .ok_or(ChainlinkError::MissingDelegationIdentity(request.pubkey))?;
+
+        // An already-authoritative local account may belong to a different
+        // generation. Preserve it without marking this identity as processed.
+        if self.local_delegated_clone_target_active(request.pubkey) {
+            return Ok(Signature::default());
+        }
+
+        self.clone_admitted_delegation(identity, request, fetch_context)
+            .await
+    }
+
+    async fn clone_admitted_delegation(
+        &self,
+        identity: DelegationIdentity,
+        request: AccountCloneRequest,
+        fetch_context: AccountFetchContext,
+    ) -> ChainlinkResult<Signature> {
+        let clone_target = request.pubkey;
+        let admission = self
+            .delegation_admissions
+            .claim(identity)
+            .inspect_err(|err| {
+                warn!(
+                    delegated_account = %identity.delegated_account,
+                    delegation_slot = identity.delegation_slot,
+                    clone_target = %clone_target,
+                    origin_entrypoint = %fetch_context.entrypoint(),
+                    origin_reason = %fetch_context.reason(),
+                    error = %err,
+                    "Delegation admission rejected"
+                );
+            })?;
+        let duplicate_result = match admission {
+            Admission::Owner { guard, completion } => {
+                debug!(
+                    delegated_account = %identity.delegated_account,
+                    delegation_slot = identity.delegation_slot,
+                    clone_target = %clone_target,
+                    origin_entrypoint = %fetch_context.entrypoint(),
+                    origin_reason = %fetch_context.reason(),
+                    "Delegation admitted"
+                );
+                let this = self.clone();
+                // The cache owns this workflow, not the requesting RPC or
+                // subscription task. Its guard also participates in shutdown
+                // draining, including when the caller times out or disappears.
+                tokio::spawn(async move {
+                    let result = this
+                        .execute_delegation_clone(
+                            request,
+                            fetch_context.clone(),
+                        )
+                        .await;
+                    if let Err(err) = &result {
+                        error!(
+                            delegated_account = %identity.delegated_account,
+                            delegation_slot = identity.delegation_slot,
+                            clone_target = %clone_target,
+                            origin_entrypoint = %fetch_context.entrypoint(),
+                            origin_reason = %fetch_context.reason(),
+                            error = %err,
+                            "Delegation activation failed; retaining deduplication history"
+                        );
+                    }
+                    if let Ok(signature) = &result {
+                        debug!(
+                            delegated_account = %identity.delegated_account,
+                            delegation_slot = identity.delegation_slot,
+                            clone_target = %clone_target,
+                            origin_entrypoint = %fetch_context.entrypoint(),
+                            origin_reason = %fetch_context.reason(),
+                            signature = %signature,
+                            executed = (*signature != Signature::default()),
+                            "Delegation workflow completed"
+                        );
+                    }
+                    guard.finish(result.map_err(Arc::new));
+                });
+                return delegation_admission::wait(completion, identity)
+                    .await
+                    .map_err(|source| {
+                        ChainlinkError::DelegationActivationFailed {
+                            identity,
+                            source,
+                        }
+                    });
+            }
+            Admission::Running(completion) => {
+                debug!(
+                    delegated_account = %identity.delegated_account,
+                    delegation_slot = identity.delegation_slot,
+                    clone_target = %clone_target,
+                    origin_entrypoint = %fetch_context.entrypoint(),
+                    origin_reason = %fetch_context.reason(),
+                    "Joining running delegation activation"
+                );
+                delegation_admission::wait(completion, identity).await
+            }
+            Admission::Finished(result) => {
+                debug!(
+                    delegated_account = %identity.delegated_account,
+                    delegation_slot = identity.delegation_slot,
+                    clone_target = %clone_target,
+                    origin_entrypoint = %fetch_context.entrypoint(),
+                    origin_reason = %fetch_context.reason(),
+                    "Suppressing already processed delegation"
+                );
+                result
+            }
+        };
+        let signature = duplicate_result.map_err(|source| {
+            ChainlinkError::DelegationActivationFailed { identity, source }
+        })?;
+        // Successful processing can close or undelegate the target. Suppression
+        // must not tell an account-ensure caller that it is usable in the bank.
+        let target_available = self
+            .accounts_bank
+            .get_account(&clone_target)
+            .is_some_and(|account| {
+                !account.undelegating()
+                    && !Self::is_empty_placeholder_account(&account)
+            });
+        if !target_available {
+            return Err(ChainlinkError::DelegationAlreadyProcessed {
+                identity,
+                clone_target,
+            });
+        }
+        Ok(signature)
+    }
+
+    /// The sole admission owner performs dependency checks, clone execution,
+    /// and (if needed) the existing terminal rescue-undelegation workflow.
+    async fn execute_delegation_clone(
+        &self,
+        request: AccountCloneRequest,
+        fetch_context: AccountFetchContext,
+    ) -> ChainlinkResult<Signature> {
+        let Some(delegation_actions) = request.post_delegation_mode.actions()
+        else {
+            return Ok(self
+                .clone_account_with_ownership(request, fetch_context)
+                .await?);
+        };
 
         let result = async {
             // Dependencies must be at least as fresh as every input view,
@@ -1922,6 +2098,15 @@ where
                 let Some(_guard) = self.claim_undelegation(pubkey) else {
                     return Err(err);
                 };
+
+                warn!(
+                    pubkey = %pubkey,
+                    delegation_identity = ?request.delegation_identity,
+                    origin_entrypoint = %fetch_context.entrypoint(),
+                    origin_reason = %fetch_context.reason(),
+                    error = %err,
+                    "Post-delegation activation failed; scheduling rescue undelegation"
+                );
 
                 // The post-delegation actions could not be satisfied (e.g. a
                 // high-risk signer or a missing dependency): the account is
@@ -2374,6 +2559,7 @@ where
             account,
             delegation,
             source_slots,
+            delegation_identity,
         }) = resolved
         else {
             return;
@@ -2597,16 +2783,21 @@ where
                         ),
                         delegated_to_other,
                         source_slots: Some(source_slots),
+                        delegation_identity,
                     },
                     subscription_clone_context.clone(),
                 )
                 .await
             {
-                error!(
-                    pubkey = %pubkey,
-                    error = %err,
-                    "Failed to clone account into bank"
-                );
+                if let ChainlinkError::DelegationAlreadyProcessed { .. } = err {
+                    debug!(pubkey = %pubkey, "Discarded duplicate delegation update after local account removal");
+                } else {
+                    error!(
+                        pubkey = %pubkey,
+                        error = %err,
+                        "Failed to clone account into bank"
+                    );
+                }
             } else if let Some(projected_ata_clone_request) =
                 projected_ata_clone_request
             {
@@ -2774,6 +2965,14 @@ where
             fetch_context.with_reason(AccountFetchReason::AtaProjection),
         )
         .await
+        .or_else(|err| match err {
+            // This helper only handles subscription projections. Processing
+            // an old update is complete even when its target has been removed.
+            ChainlinkError::DelegationAlreadyProcessed { .. } => {
+                Ok(Signature::default())
+            }
+            err => Err(err),
+        })
     }
 
     /// Deferred discovery for a parked candidate whose record was just
@@ -2885,6 +3084,9 @@ where
                 .await
             {
                 Ok(result) => result,
+                Err(ChainlinkError::DelegationAlreadyProcessed { .. }) => {
+                    return
+                }
                 Err(err) => {
                     warn!(
                         pubkey = %candidate.pubkey,
@@ -3140,6 +3342,7 @@ where
                 );
                 false
             }
+            Err(ChainlinkError::DelegationAlreadyProcessed { .. }) => true,
             Err(err) => {
                 warn!(
                     pubkey = %pubkey,
@@ -3393,10 +3596,18 @@ where
             });
         }
         let actions = actions.unwrap_or_default();
+        let delegation_identity = (account.delegated()
+            && !account.confined()
+            && delegation_record.authority == self.validator_pubkey)
+            .then_some(DelegationIdentity {
+                delegated_account: pubkey,
+                delegation_slot: delegation_record.delegation_slot,
+            });
         Some(ResolvedSubscriptionAccount {
             account: account.into_account_shared_data(),
             delegation: Some((delegation_record, actions)),
             source_slots: Some(source_slots),
+            delegation_identity,
         })
     }
 
@@ -4665,6 +4876,7 @@ where
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: None,
             })
             .await?;
         Ok(())
