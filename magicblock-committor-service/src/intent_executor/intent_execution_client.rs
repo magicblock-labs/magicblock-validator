@@ -14,7 +14,7 @@ use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     intent_executor::{
@@ -25,7 +25,10 @@ use crate::{
         ExecutionOutput,
     },
     tasks::{utils::TransactionUtils, BaseTaskImpl},
-    transactions::{v1, PreparedMessage},
+    transactions::{
+        serialized_transaction_size, v1, PreparedMessage,
+        MAX_TRANSACTION_V1_WIRE_SIZE, MAX_TRANSACTION_WIRE_SIZE,
+    },
 };
 
 #[derive(Clone)]
@@ -144,20 +147,29 @@ impl IntentExecutionClient {
         let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
         let result = match &mut prepared_message {
             PreparedMessage::Versioned(message) => {
-                match message {
+                let version = match message {
                     VersionedMessage::V0(value) => {
                         value.recent_blockhash = latest_blockhash;
+                        "v0"
                     }
                     VersionedMessage::Legacy(value) => {
                         warn!("Legacy message not expected");
                         value.recent_blockhash = latest_blockhash;
+                        "legacy"
                     }
-                }
+                };
 
                 let transaction = VersionedTransaction::try_new(
                     message.clone(),
                     &[&authority],
                 )?;
+                info!(
+                    transaction_version = version,
+                    transaction_size_bytes =
+                        serialized_transaction_size(&transaction),
+                    transaction_size_limit_bytes = MAX_TRANSACTION_WIRE_SIZE,
+                    "Sending intent transaction"
+                );
                 self.rpc_client
                     .send_transaction(
                         &transaction,
@@ -169,6 +181,12 @@ impl IntentExecutionClient {
                 message.set_recent_blockhash(latest_blockhash);
                 let transaction =
                     v1::Transaction::try_new(message.clone(), authority)?;
+                info!(
+                    transaction_version = "v1",
+                    transaction_size_bytes = transaction.serialized_size(),
+                    transaction_size_limit_bytes = MAX_TRANSACTION_V1_WIRE_SIZE,
+                    "Sending intent transaction"
+                );
                 self.rpc_client
                     .send_transaction(
                         &transaction,
