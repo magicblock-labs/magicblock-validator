@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use dlp_api::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
 use magicblock_core::intent::{types::CommittedAccount, BaseAction};
 use solana_account::Account;
+use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
@@ -122,7 +123,6 @@ impl TransactionUtils {
     pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
-    const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
 
     pub fn dummy_lookup_table(
         pubkeys: &[Pubkey],
@@ -372,26 +372,16 @@ impl TransactionUtils {
         compute_unit_price: u64,
         accounts_size_budget: u32,
     ) -> v1::TransactionConfig {
+        let priority_fee = ComputeBudgetLimits {
+            compute_unit_limit: compute_units,
+            compute_unit_price,
+            ..ComputeBudgetLimits::default()
+        }
+        .get_prioritization_fee();
         v1::TransactionConfig::empty()
-            .with_priority_fee(Self::priority_fee_lamports(
-                compute_unit_price,
-                compute_units,
-            ))
+            .with_priority_fee(priority_fee)
             .with_compute_unit_limit(compute_units)
             .with_loaded_accounts_data_size_limit(accounts_size_budget)
-    }
-
-    fn priority_fee_lamports(
-        compute_unit_price: u64,
-        compute_units: u32,
-    ) -> u64 {
-        let fee = (compute_unit_price as u128)
-            .saturating_mul(u128::from(compute_units))
-            .saturating_add(
-                u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT).saturating_sub(1),
-            )
-            / u128::from(Self::MICRO_LAMPORTS_PER_LAMPORT);
-        u64::try_from(fee).unwrap_or(u64::MAX)
     }
 
     pub fn budget_instructions(
@@ -405,24 +395,5 @@ impl TransactionUtils {
                 compute_unit_price,
             ),
         ]
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TransactionUtils;
-
-    #[test]
-    fn v1_priority_fee_matches_compute_budget_rounding() {
-        assert_eq!(TransactionUtils::priority_fee_lamports(0, 100), 0);
-        assert_eq!(TransactionUtils::priority_fee_lamports(1, 1), 1);
-        assert_eq!(
-            TransactionUtils::priority_fee_lamports(1_000_000, 345),
-            345
-        );
-        assert_eq!(
-            TransactionUtils::priority_fee_lamports(u64::MAX, u32::MAX),
-            u64::MAX
-        );
     }
 }
