@@ -43,7 +43,7 @@ struct State {
     closed: bool,
 }
 
-/// Whether to start a delegation clone, wait for it, or reuse its result.
+/// Whether to start a delegation clone, wait, or return a historical result.
 pub(super) enum DedupDecision {
     /// Own a new delegation clone. Move `guard` into a task whose lifetime is
     /// independent of this caller, and finish it with the clone result.
@@ -53,13 +53,16 @@ pub(super) enum DedupDecision {
         guard: DelegationCloneGuard,
         completion: CompletionReceiver,
     },
+
     /// Another caller owns this delegation clone. Receive that owner's result
     /// without starting another clone or rescue attempt.
     Wait(CompletionReceiver),
-    /// Return a completed clone's retained success or failure without new work.
-    /// A retained success does not mean the target still exists or is usable;
+
+    /// A retained success or failure from an earlier clone of this delegation.
+    /// Returning this historical result starts no new work. A retained success
+    /// does not mean the target still exists or is usable;
     /// the caller must check its current state in the bank.
-    Reuse(DelegationCloneResult),
+    HistoricalResult(DelegationCloneResult),
 }
 
 /// Prevents duplicate delegation clones across the validator's clone paths.
@@ -165,7 +168,7 @@ impl DelegationDeduplicator {
                     DedupDecision::Wait(sender.subscribe())
                 }
                 Entry::Finished { result, .. } => {
-                    DedupDecision::Reuse(result.clone())
+                    DedupDecision::HistoricalResult(result.clone())
                 }
             });
         }
