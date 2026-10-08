@@ -55,7 +55,7 @@ pub(crate) const FETCH_CLONE_OPERATION_TIMEOUT: Duration =
 
 mod ata_projection;
 mod delegation;
-mod delegation_admission;
+mod delegation_dedup;
 mod pending_clone_guard;
 mod pending_operation;
 mod pipeline;
@@ -65,11 +65,11 @@ mod subscription;
 mod tests;
 mod types;
 
-pub(super) use delegation_admission::DelegationAdmissionCache;
+pub(super) use delegation_dedup::DelegationDeduplicator;
 
 pub use self::types::FetchAndCloneResult;
 use self::{
-    delegation_admission::Admission,
+    delegation_dedup::Admission,
     pending_clone_guard::{CloneClaim, CloneCompletion, PendingCloneGuard},
     pending_operation::{
         claim_or_join_pending, finish_pending, Pending, PendingClaim,
@@ -181,7 +181,7 @@ where
 
     pending_undelegations: Arc<Mutex<HashSet<Pubkey>>>,
 
-    delegation_admissions: Arc<DelegationAdmissionCache>,
+    delegation_dedup: Arc<DelegationDeduplicator>,
 
     pending_operation_timeout_ms: Arc<AtomicU64>,
 
@@ -437,7 +437,7 @@ where
             dlp_collision_tracker: self.dlp_collision_tracker.clone(),
             pending_clones: self.pending_clones.clone(),
             pending_undelegations: self.pending_undelegations.clone(),
-            delegation_admissions: self.delegation_admissions.clone(),
+            delegation_dedup: self.delegation_dedup.clone(),
             pending_operation_timeout_ms: self
                 .pending_operation_timeout_ms
                 .clone(),
@@ -558,7 +558,7 @@ where
             ObservedUndelegationRequest,
         >,
     ) -> Arc<Self> {
-        Self::new_with_delegation_admissions(
+        Self::new_with_delegation_dedup(
             remote_account_provider,
             accounts_bank,
             cloner,
@@ -567,13 +567,13 @@ where
             allowed_programs,
             risk_service,
             undelegation_request_sender,
-            DelegationAdmissionCache::new(Default::default())
+            DelegationDeduplicator::new(Default::default())
                 .expect("default delegation dedup configuration is valid"),
         )
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new_with_delegation_admissions(
+    pub(super) fn new_with_delegation_dedup(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         accounts_bank: &Arc<V>,
         cloner: &Arc<C>,
@@ -584,7 +584,7 @@ where
         undelegation_request_sender: broadcast::Sender<
             ObservedUndelegationRequest,
         >,
-        delegation_admissions: Arc<DelegationAdmissionCache>,
+        delegation_dedup: Arc<DelegationDeduplicator>,
     ) -> Arc<Self> {
         let validator_pubkey = validator_keypair.pubkey();
         let blacklisted_accounts = blacklisted_accounts(&validator_pubkey);
@@ -621,7 +621,7 @@ where
             )),
             pending_clones: Arc::new(Mutex::new(hash_map::HashMap::new())),
             pending_undelegations: Arc::new(Mutex::new(HashSet::new())),
-            delegation_admissions,
+            delegation_dedup,
             pending_operation_timeout_ms: Arc::new(AtomicU64::new(
                 FETCH_CLONE_OPERATION_TIMEOUT.as_millis() as u64,
             )),
@@ -869,12 +869,12 @@ where
     /// `ClusterMaintenance` and is retried. Shutdown calls this before the
     /// scheduler is cancelled so the pipeline is already dry by then.
     pub async fn shutdown(&self) {
-        self.delegation_admissions.close();
+        self.delegation_dedup.close();
         if let Err(err) = self.remote_account_provider.shutdown().await {
             warn!(error = ?err, "Failed to shut down chain subscriptions");
         }
         self.cancel_all_pending();
-        self.delegation_admissions.drain().await;
+        self.delegation_dedup.drain().await;
     }
 
     /// Check if a program is allowed to be cloned.
@@ -1932,10 +1932,8 @@ where
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<Signature> {
         let clone_target = request.pubkey;
-        let admission = self
-            .delegation_admissions
-            .claim(identity)
-            .inspect_err(|err| {
+        let admission =
+            self.delegation_dedup.claim(identity).inspect_err(|err| {
                 warn!(
                     delegated_account = %identity.delegated_account,
                     delegation_slot = identity.delegation_slot,
@@ -1957,7 +1955,7 @@ where
                     "Delegation admitted"
                 );
                 let this = self.clone();
-                // The cache owns this workflow, not the requesting RPC or
+                // The deduplicator owns this workflow, not the requesting RPC or
                 // subscription task. Its guard also participates in shutdown
                 // draining, including when the caller times out or disappears.
                 tokio::spawn(async move {
@@ -1992,7 +1990,7 @@ where
                     }
                     guard.finish(result.map_err(Arc::new));
                 });
-                return delegation_admission::wait(completion, identity)
+                return delegation_dedup::wait(completion, identity)
                     .await
                     .map_err(|source| {
                         ChainlinkError::DelegationActivationFailed {
@@ -2010,7 +2008,7 @@ where
                     origin_reason = %fetch_context.reason(),
                     "Joining running delegation activation"
                 );
-                delegation_admission::wait(completion, identity).await
+                delegation_dedup::wait(completion, identity).await
             }
             Admission::Finished(result) => {
                 debug!(

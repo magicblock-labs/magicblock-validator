@@ -41,8 +41,45 @@ struct State {
     closed: bool,
 }
 
-/// Shared across every clone path; independent of bank and pending-clone lifetimes.
-pub(crate) struct DelegationAdmissionCache {
+/// Prevents duplicate delegation activation across the validator's clone paths.
+/// Activation means cloning a delegated account into the local bank and running
+/// its post-delegation actions, or taking the terminal rescue-undelegation path
+/// when those actions cannot execute safely.
+///
+/// Post-delegation actions can immediately schedule commit and undelegation,
+/// after which the account may be closed and removed locally. At that point,
+/// neither the bank nor `pending_clones` remembers the completed activation:
+/// the account is gone and the pending-clone entry was removed on completion.
+/// A delayed request that already resolved the old delegation could otherwise
+/// clone it again and repeat its actions. This type retains that history
+/// independently of both the account and the pending-clone entry.
+///
+/// One instance is shared by all copies of `FetchCloner`, covering on-demand
+/// fetches, account/program subscriptions, discovery, and ATA projection. Its
+/// key is [`DelegationIdentity`]: the original delegated account and the
+/// delegation record's slot, never a fetch or notification slot. Projected
+/// ATAs use their underlying eATA identity, so discovery through either address
+/// reaches the same record. A new delegation slot is a different identity.
+///
+/// [`Self::claim`] atomically assigns one owner. `FetchCloner` runs that owner's
+/// dependency checks, clone, and possible rescue in a task that survives caller
+/// cancellation. Duplicates join the running result or read the retained result;
+/// they must not start another activation or rescue. The owner guard tracks the
+/// task for shutdown draining and records failure if the owner disappears.
+///
+/// Running entries never expire. Completed successes and failures are retained
+/// for the configured duration starting at completion; duplicate hits do not
+/// extend it. A successful local-state skip that submitted no transaction is
+/// not retained: a different authoritative delegation must not mark this one
+/// as processed. Capacity limits reject new work rather than evicting running
+/// or unexpired entries.
+///
+/// This is bounded, process-local protection: expiry or restart loses the
+/// history, so it does not provide unconditional exactly-once execution. It
+/// supplements the existing authority, freshness, and clone-serialization
+/// checks. A retained success also does not imply that the account still exists
+/// or is usable; callers must check the bank before reporting availability.
+pub(crate) struct DelegationDeduplicator {
     config: DelegationDedupConfig,
     state: Mutex<State>,
     tasks: TaskTracker,
@@ -58,7 +95,7 @@ pub(super) enum Admission {
     Finished(AdmissionResult),
 }
 
-impl DelegationAdmissionCache {
+impl DelegationDeduplicator {
     pub(crate) fn new(
         config: DelegationDedupConfig,
     ) -> ChainlinkResult<Arc<Self>> {
@@ -74,26 +111,26 @@ impl DelegationAdmissionCache {
                 "max-entries and max-active must be positive",
             ));
         }
-        let cache = Arc::new(Self {
+        let deduplicator = Arc::new(Self {
             config,
             state: Mutex::new(State::default()),
             tasks: TaskTracker::new(),
             stop_cleanup: CancellationToken::new(),
         });
-        let weak = Arc::downgrade(&cache);
-        let stop = cache.stop_cleanup.clone();
+        let weak = Arc::downgrade(&deduplicator);
+        let stop = deduplicator.stop_cleanup.clone();
         tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = stop.cancelled() => break,
                     _ = tokio::time::sleep(CLEANUP_INTERVAL) => {
-                        let Some(cache) = weak.upgrade() else { break };
-                        cache.state.lock().prune(Instant::now());
+                        let Some(deduplicator) = weak.upgrade() else { break };
+                        deduplicator.state.lock().prune(Instant::now());
                     }
                 }
             }
         });
-        Ok(cache)
+        Ok(deduplicator)
     }
 
     /// Atomically joins an existing admission or reserves one owned workflow.
@@ -150,7 +187,7 @@ impl DelegationAdmissionCache {
         metrics::add_delegation_admission_entries(1, 0);
         Ok(Admission::Owner {
             guard: AdmissionGuard {
-                cache: self.clone(),
+                deduplicator: self.clone(),
                 identity,
                 finished: false,
                 _task: self.tasks.token(),
@@ -225,7 +262,7 @@ impl State {
     }
 }
 
-impl Drop for DelegationAdmissionCache {
+impl Drop for DelegationDeduplicator {
     fn drop(&mut self) {
         self.stop_cleanup.cancel();
         let state = self.state.get_mut();
@@ -237,7 +274,7 @@ impl Drop for DelegationAdmissionCache {
 }
 
 pub(super) struct AdmissionGuard {
-    cache: Arc<DelegationAdmissionCache>,
+    deduplicator: Arc<DelegationDeduplicator>,
     identity: DelegationIdentity,
     finished: bool,
     _task: TaskTrackerToken,
@@ -245,7 +282,7 @@ pub(super) struct AdmissionGuard {
 
 impl AdmissionGuard {
     pub(super) fn finish(mut self, result: AdmissionResult) {
-        self.cache.finish(self.identity, result);
+        self.deduplicator.finish(self.identity, result);
         self.finished = true;
     }
 }
@@ -258,7 +295,7 @@ impl Drop for AdmissionGuard {
                 delegation_slot = self.identity.delegation_slot,
                 "Delegation activation owner terminated without a result"
             );
-            self.cache.finish(
+            self.deduplicator.finish(
                 self.identity,
                 Err(Arc::new(ChainlinkError::DelegationActivationAbandoned(
                     self.identity,
