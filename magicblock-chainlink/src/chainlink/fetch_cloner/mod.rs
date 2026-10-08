@@ -520,7 +520,8 @@ where
     V: AccountsBank,
     C: Cloner,
 {
-    /// Create FetchCloner with subscription updates properly connected
+    /// Creates a test FetchCloner with its own default delegation dedup cache.
+    #[cfg(any(test, feature = "dev-context"))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
@@ -532,32 +533,6 @@ where
         risk_service: Option<Arc<RiskService>>,
     ) -> Arc<Self> {
         let (undelegation_request_sender, _) = broadcast::channel(1024);
-        Self::new_with_undelegation_request_sender(
-            remote_account_provider,
-            accounts_bank,
-            cloner,
-            validator_keypair,
-            subscription_updates_rx,
-            allowed_programs,
-            risk_service,
-            undelegation_request_sender,
-        )
-    }
-
-    /// Create FetchCloner with subscription updates and request notifications connected.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_undelegation_request_sender(
-        remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
-        accounts_bank: &Arc<V>,
-        cloner: &Arc<C>,
-        validator_keypair: Keypair,
-        subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
-        allowed_programs: Option<Vec<AllowedProgram>>,
-        risk_service: Option<Arc<RiskService>>,
-        undelegation_request_sender: broadcast::Sender<
-            ObservedUndelegationRequest,
-        >,
-    ) -> Arc<Self> {
         Self::new_with_delegation_dedup(
             remote_account_provider,
             accounts_bank,
