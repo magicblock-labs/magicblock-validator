@@ -1011,15 +1011,17 @@ where
                         } else {
                             PendingFailure::OwnerFailed(owner_msg.clone())
                         };
-                        let terminal = PendingTerminal::Failed(failure);
-                        op.owner.finish(Self::pending_terminal_owner_outcome(
-                            &terminal,
-                        ));
+                        op.owner.finish(match failure {
+                            PendingFailure::Cancelled => {
+                                ChainlinkPendingFetchOutcome::OwnerCancelled
+                            }
+                            _ => ChainlinkPendingFetchOutcome::OwnerFailed,
+                        });
                         finish_pending(
                             &pending,
                             op.pubkey,
                             op.generation,
-                            terminal,
+                            PendingTerminal::Failed(failure),
                         );
                     }
                     return;
@@ -1946,14 +1948,6 @@ where
             })?;
         let duplicate_result = match admission {
             Admission::Owner { guard, completion } => {
-                debug!(
-                    delegated_account = %identity.delegated_account,
-                    delegation_slot = identity.delegation_slot,
-                    clone_target = %clone_target,
-                    origin_entrypoint = %fetch_context.entrypoint(),
-                    origin_reason = %fetch_context.reason(),
-                    "Delegation admitted"
-                );
                 let this = self.clone();
                 // The deduplicator owns this workflow, not the requesting RPC or
                 // subscription task. Its guard also participates in shutdown
@@ -2000,14 +1994,6 @@ where
                     });
             }
             Admission::Running(completion) => {
-                debug!(
-                    delegated_account = %identity.delegated_account,
-                    delegation_slot = identity.delegation_slot,
-                    clone_target = %clone_target,
-                    origin_entrypoint = %fetch_context.entrypoint(),
-                    origin_reason = %fetch_context.reason(),
-                    "Joining running delegation activation"
-                );
                 delegation_dedup::wait(completion, identity).await
             }
             Admission::Finished(result) => {

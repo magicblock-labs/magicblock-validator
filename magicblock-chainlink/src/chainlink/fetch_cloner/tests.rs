@@ -376,6 +376,7 @@ fn account_clone_request(account: AccountSharedData) -> AccountCloneRequest {
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
         source_slots: None,
+        delegation_identity: None,
     }
 }
 
@@ -8302,6 +8303,7 @@ async fn test_post_delegation_actions_reject_non_delegated_clone_target() {
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8355,6 +8357,7 @@ async fn test_dlp_owned_clone_without_actions_clears_stale_delegated_flag() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8408,6 +8411,10 @@ async fn test_dlp_owned_magic_fee_vault_without_actions_remains_delegated() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: account_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8457,6 +8464,13 @@ async fn test_delegated_native_token_clone_uses_data_only_amount() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: derive_eata(
+                        &wallet_owner,
+                        &spl_token::native_mint::id(),
+                    ),
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8520,6 +8534,10 @@ async fn test_delegated_malformed_ata_clone_is_rejected() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: derive_eata(&wallet_owner, &mint),
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8577,6 +8595,10 @@ async fn test_delegated_non_ata_native_token_clone_preserves_wrapped_sol_layout(
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: account_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8629,6 +8651,7 @@ async fn test_plain_native_token_clone_preserves_wrapped_sol_layout() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: None,
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8722,6 +8745,10 @@ async fn test_post_delegation_actions_refresh_writable_dependency_before_target(
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: target_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8844,6 +8871,10 @@ async fn test_undelegating_action_dependency_stays_locked_and_target_is_rescued(
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: target_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -8928,6 +8959,10 @@ async fn test_post_delegation_actions_execute_once_across_remote_slots() {
                     ),
                     delegated_to_other: None,
                     source_slots: None,
+                    delegation_identity: Some(DelegationIdentity {
+                        delegated_account: target_pubkey,
+                        delegation_slot: CURRENT_SLOT,
+                    }),
                 },
                 AccountFetchContext::rpc_get_account(),
             )
@@ -8996,6 +9031,10 @@ async fn test_post_delegation_action_clone_failure_schedules_undelegation_rescue
                 post_delegation_mode: ClonePostDelegationMode::from(actions),
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: target_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -9058,6 +9097,10 @@ async fn test_delegated_clone_does_not_override_active_local_target() {
                 post_delegation_mode: ClonePostDelegationMode::None,
                 delegated_to_other: None,
                 source_slots: None,
+                delegation_identity: Some(DelegationIdentity {
+                    delegated_account: target_pubkey,
+                    delegation_slot: CURRENT_SLOT,
+                }),
             },
             AccountFetchContext::rpc_get_account(),
         )
@@ -12531,6 +12574,10 @@ async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
         source_slots: None,
+        delegation_identity: Some(DelegationIdentity {
+            delegated_account: derive_eata(&wallet_owner, &mint),
+            delegation_slot: CURRENT_SLOT,
+        }),
     };
 
     insert_magic_ata_in_bank(
