@@ -187,6 +187,18 @@ lazy_static::lazy_static! {
         panic!("failed to create inflight_subscription_updates_gauge: {err}")
     });
 
+    static ref CHAINLINK_DELEGATION_ADMISSIONS_TOTAL: IntCounterVec =
+        IntCounterVec::new(
+            Opts::new("chainlink_delegation_admissions_total", "Delegation admission decisions"),
+            &["outcome"],
+        ).unwrap();
+
+    static ref CHAINLINK_DELEGATION_ADMISSIONS_GAUGE: IntGaugeVec =
+        IntGaugeVec::new(
+            Opts::new("chainlink_delegation_admissions", "Running and retained delegation admissions"),
+            &["state"],
+        ).unwrap();
+
     static ref EVICTED_ACCOUNTS_COUNT: IntCounter = IntCounter::new(
         "evicted_accounts_count", "Total cumulative number of accounts forcefully removed from monitored list and database (monotonically increasing)",
     ).unwrap();
@@ -819,6 +831,8 @@ pub(crate) fn register() {
         register!(ACCOUNT_FETCHES_FOUND_COUNT);
         register!(ACCOUNT_FETCHES_NOT_FOUND_COUNT);
         register!(CHAINLINK_CLONE_ACCOUNTS_TOTAL);
+        register!(CHAINLINK_DELEGATION_ADMISSIONS_TOTAL);
+        register!(CHAINLINK_DELEGATION_ADMISSIONS_GAUGE);
         register!(CHAINLINK_CLONE_MATERIALIZATION_ACCOUNTS_TOTAL);
         register!(CHAINLINK_EMPTY_PLACEHOLDER_ACCOUNTS_TOTAL);
         register!(PER_PROGRAM_ACCOUNT_UPDATES_COUNT);
@@ -1161,6 +1175,35 @@ pub fn inc_account_fetches_not_found_with_context(
             context.reason().value(),
         ])
         .inc_by(count);
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DelegationAdmissionOutcome {
+    Admitted,
+    DuplicateRunning,
+    DuplicateRetained,
+    CapacityRejected,
+}
+
+pub fn inc_delegation_admission(outcome: DelegationAdmissionOutcome) {
+    let label = match outcome {
+        DelegationAdmissionOutcome::Admitted => "admitted",
+        DelegationAdmissionOutcome::DuplicateRunning => "duplicate_running",
+        DelegationAdmissionOutcome::DuplicateRetained => "duplicate_retained",
+        DelegationAdmissionOutcome::CapacityRejected => "capacity_rejected",
+    };
+    CHAINLINK_DELEGATION_ADMISSIONS_TOTAL
+        .with_label_values(&[label])
+        .inc();
+}
+
+pub fn add_delegation_admission_entries(running: i64, retained: i64) {
+    CHAINLINK_DELEGATION_ADMISSIONS_GAUGE
+        .with_label_values(&["running"])
+        .add(running);
+    CHAINLINK_DELEGATION_ADMISSIONS_GAUGE
+        .with_label_values(&["retained"])
+        .add(retained);
 }
 
 pub fn inc_chainlink_clone_accounts_total_with_context(
