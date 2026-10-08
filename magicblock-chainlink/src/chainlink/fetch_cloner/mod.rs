@@ -1921,7 +1921,7 @@ where
                     "Delegation admission rejected"
                 );
             })?;
-        let duplicate_result = match admission {
+        let result = match admission {
             Admission::Owner { guard, completion } => {
                 let this = self.clone();
                 // The deduplicator owns this workflow, not the requesting RPC or
@@ -1959,14 +1959,7 @@ where
                     }
                     guard.finish(result.map_err(Arc::new));
                 });
-                return delegation_dedup::wait(completion, identity)
-                    .await
-                    .map_err(|source| {
-                        ChainlinkError::DelegationActivationFailed {
-                            identity,
-                            source,
-                        }
-                    });
+                delegation_dedup::wait(completion, identity).await
             }
             Admission::Running(completion) => {
                 delegation_dedup::wait(completion, identity).await
@@ -1983,11 +1976,11 @@ where
                 result
             }
         };
-        let signature = duplicate_result.map_err(|source| {
+        let signature = result.map_err(|source| {
             ChainlinkError::DelegationActivationFailed { identity, source }
         })?;
-        // Successful processing can close or undelegate the target. Suppression
-        // must not tell an account-ensure caller that it is usable in the bank.
+        // Successful processing can close or undelegate the target. Neither
+        // owners nor duplicates may report it as usable in the bank then.
         let target_available = self
             .accounts_bank
             .get_account(&clone_target)
