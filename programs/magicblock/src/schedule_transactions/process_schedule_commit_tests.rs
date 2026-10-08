@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use magicblock_core::{
+    intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
+    tls::ExecutionTlsStash,
+};
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, AddActionCallbackArgs, BaseActionArgs,
@@ -298,6 +301,7 @@ fn assert_non_accepted_actions<'a>(
         expected_non_accepted_commits
     );
     assert_eq!(accepted_scheduled_actions.len(), 0);
+    assert!(ExecutionTlsStash::take_scheduled_intent_bundles().is_empty());
 
     magic_context_acc
 }
@@ -312,11 +316,16 @@ fn assert_accepted_actions(
     let magic_context =
         bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
 
-    let scheduled_actions =
-        TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
+    let scheduled_actions = ExecutionTlsStash::take_scheduled_intent_bundles();
 
     assert_eq!(magic_context.scheduled_base_intents.len(), 0);
     assert_eq!(scheduled_actions.len(), expected_scheduled_actions);
+    assert!(scheduled_actions
+        .iter()
+        .all(|bundle| bundle.payer == *payer));
+    assert!(TransactionScheduler::default()
+        .get_scheduled_actions_by_payer(payer)
+        .is_empty());
 
     scheduled_actions
 }
@@ -513,7 +522,7 @@ mod tests {
                 Ok(()),
             );
 
-            // At this point the intended commits were accepted and moved to the global
+            // The instruction provisionally accepted the intents into execution TLS
             let scheduled_intents = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
@@ -737,7 +746,7 @@ mod tests {
                 Ok(()),
             );
 
-            // At this point the intended commits were accepted and moved to the global
+            // The instruction provisionally accepted the intents into execution TLS
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
@@ -1121,7 +1130,7 @@ mod tests {
                 Ok(()),
             );
 
-            // At this point the intended commits were accepted and moved to the global
+            // The instruction provisionally accepted the intents into execution TLS
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
@@ -1236,7 +1245,7 @@ mod tests {
                 Ok(()),
             );
 
-            // At this point the intended commits were accepted and moved to the global
+            // The instruction provisionally accepted the intents into execution TLS
             let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),

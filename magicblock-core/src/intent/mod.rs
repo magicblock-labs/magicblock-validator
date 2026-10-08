@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
 use magicblock_magic_program_api::args::{ActionArgs, ShortAccountMeta};
+pub use scheduled::ScheduledIntentBundle;
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
+mod scheduled;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs
