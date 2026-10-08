@@ -3831,6 +3831,7 @@ dependencies = [
  "magicblock-table-mania",
  "rand 0.9.4",
  "rusqlite",
+ "serde",
  "solana-account 3.4.0",
  "solana-account-decoder",
  "solana-commitment-config",
@@ -4140,7 +4141,6 @@ name = "magicblock-rpc-client"
 version = "1.0.0"
 dependencies = [
  "async-trait",
- "base64 0.21.7",
  "futures-util",
  "magicblock-metrics",
  "serde_json",

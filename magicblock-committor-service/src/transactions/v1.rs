@@ -1,5 +1,6 @@
 use std::mem::size_of;
 
+use serde::{ser::SerializeTuple, Serialize, Serializer};
 use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -7,6 +8,7 @@ use solana_message::{
     compiled_instruction::CompiledInstruction, v0, CompileError, MessageHeader,
 };
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::{Signer, SignerError};
 
@@ -266,20 +268,36 @@ impl Transaction {
         })
     }
 
-    pub(crate) fn signature(&self) -> Signature {
-        self.signature
+    pub(crate) fn serialized_size(&self) -> usize {
+        self.serialized.len()
+    }
+}
+
+impl Serialize for Transaction {
+    fn serialize<S: Serializer>(
+        &self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        // A tuple makes bincode emit the existing wire bytes without a length prefix.
+        let mut tuple = serializer.serialize_tuple(self.serialized.len())?;
+        for byte in &self.serialized {
+            tuple.serialize_element(byte)?;
+        }
+        tuple.end()
+    }
+}
+
+impl SerializableTransaction for Transaction {
+    fn get_signature(&self) -> &Signature {
+        &self.signature
     }
 
-    pub(crate) fn recent_blockhash(&self) -> &Hash {
+    fn get_recent_blockhash(&self) -> &Hash {
         &self.recent_blockhash
     }
 
-    pub(crate) fn serialized(&self) -> &[u8] {
-        &self.serialized
-    }
-
-    pub(crate) fn serialized_size(&self) -> usize {
-        self.serialized.len()
+    fn uses_durable_nonce(&self) -> bool {
+        false
     }
 }
 
