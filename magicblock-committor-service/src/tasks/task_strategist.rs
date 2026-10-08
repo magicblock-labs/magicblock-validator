@@ -95,9 +95,13 @@ impl TransactionStrategy {
             .any(BaseActionTask::has_callback)
     }
 
-    /// V0 prepends compute-budget instructions; V1 carries budgets in config.
+    /// Task transactions use v0 with ALTs and v1 without them; see
+    /// [`TaskStrategist::build_strategy`]. V0 prepends compute-budget
+    /// instructions, while v1 stores budgets in its configuration.
     pub(crate) fn task_instruction_offset(&self) -> u8 {
         if self.uses_alts() {
+            // In our design, ALTS implies transaction v0 which in turn implies
+            // compute-budget instructions are passed explicitly
             TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
         } else {
             0
@@ -241,8 +245,18 @@ impl TaskStrategist {
         })
     }
 
-    /// Returns [`TransactionStrategy`] for tasks
-    /// Returns Error if all optimizations weren't enough
+    /// Builds a task transaction strategy, trying these options in order:
+    ///
+    /// - V1 without ALTs, without buffer-accounts.
+    /// - V1 without ALTs, with buffer-accounts.
+    /// - V0 with ALTs, without buffer-accounts.
+    /// - V0 with ALTs, with buffer-accounts.
+    ///
+    /// The task preparator follows this choice: no ALTs means v1;
+    /// ALTs means v0. Buffer preparation and cleanup are separate
+    /// paths that use v0 without ALTs.
+    ///
+    /// Returns an error if the tasks cannot fit within transaction limits.
     pub fn build_strategy<P: IntentPersister>(
         tasks: Vec<BaseTaskImpl>,
         validator: &Pubkey,
