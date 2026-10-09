@@ -365,6 +365,7 @@ where
                 commit_signature: _,
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty()
+                && single_stage_executor.has_tasks_after_commit()
                 && err.is_recoverable_by_two_stage() =>
             {
                 err
