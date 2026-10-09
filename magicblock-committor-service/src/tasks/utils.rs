@@ -227,11 +227,7 @@ impl TransactionUtils {
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<v1::Message> {
         let compute_units = Self::tasks_compute_units(tasks);
-        let config = Self::v1_config(
-            compute_units,
-            compute_unit_price,
-            Self::tasks_accounts_size_budget(tasks),
-        );
+        let config = Self::v1_config(compute_units, compute_unit_price);
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
@@ -370,18 +366,22 @@ impl TransactionUtils {
     fn v1_config(
         compute_units: u32,
         compute_unit_price: u64,
-        accounts_size_budget: u32,
     ) -> v1::TransactionConfig {
-        let priority_fee = ComputeBudgetLimits {
+        let limits = ComputeBudgetLimits {
             compute_unit_limit: compute_units,
             compute_unit_price,
             ..ComputeBudgetLimits::default()
-        }
-        .get_prioritization_fee();
+        };
+        // Task estimates don't know actual base-chain account or program sizes.
+        // Use the runtime default explicitly; omitting the v1 limit means zero.
+        // TODO: Use a better estimate of loaded account and program data, with
+        // headroom, instead of the maximum to reduce scheduler cost.
         v1::TransactionConfig::empty()
-            .with_priority_fee(priority_fee)
+            .with_priority_fee(limits.get_prioritization_fee())
             .with_compute_unit_limit(compute_units)
-            .with_loaded_accounts_data_size_limit(accounts_size_budget)
+            .with_loaded_accounts_data_size_limit(
+                limits.loaded_accounts_bytes.get(),
+            )
     }
 
     pub fn budget_instructions(

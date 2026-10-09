@@ -67,6 +67,7 @@ use solana_sdk::{
     transaction::{Transaction, TransactionError},
 };
 use solana_sdk_ids::system_program;
+use solana_system_interface::instruction::create_account;
 
 use crate::{
     common::{MockActionsCallbackExecutor, TestFixture},
@@ -1361,6 +1362,7 @@ async fn test_action_callback_fired_on_timeout() {
 #[tokio::test]
 async fn test_callbacks_fired_in_two_stage() {
     const COUNTER_SIZE: u64 = 70;
+    const DESTINATION_SIZE: usize = 2 * 1024 * 1024;
 
     let TestEnv {
         fixture,
@@ -1380,9 +1382,35 @@ async fn test_callbacks_fired_in_two_stage() {
         remote_slot: Default::default(),
     };
 
+    // The action's destination is larger than the task's loaded-data estimate.
+    let rpc_client = fixture.rpc_client.get_inner();
+    let destination = Keypair::new();
+    let destination_rent = rpc_client
+        .get_minimum_balance_for_rent_exemption(DESTINATION_SIZE)
+        .await
+        .unwrap();
+    let create_destination = Transaction::new_signed_with_payer(
+        &[create_account(
+            &fixture.authority.pubkey(),
+            &destination.pubkey(),
+            destination_rent,
+            DESTINATION_SIZE as u64,
+            &system_program::id(),
+        )],
+        Some(&fixture.authority.pubkey()),
+        &[&fixture.authority, &destination],
+        rpc_client.get_latest_blockhash().await.unwrap(),
+    );
+    rpc_client
+        .send_and_confirm_transaction(&create_destination)
+        .await
+        .unwrap();
+
     // commit-stage action: goes into standalone_actions → commit strategy
-    let commit_base_action =
+    let mut commit_base_action =
         succeeding_commit_action(payer.pubkey(), counter_pubkey);
+    commit_base_action.account_metas_per_program[1].pubkey =
+        destination.pubkey();
     let expected_commit_callback = commit_base_action.callback.clone().unwrap();
 
     // finalize-stage action: goes into UndelegateType::WithBaseActions → finalize strategy
@@ -1436,6 +1464,10 @@ async fn test_callbacks_fired_in_two_stage() {
     );
     assert_eq!(calls[0].0[0], expected_commit_callback);
     assert!(calls[0].1.is_ok());
+    assert_eq!(
+        rpc_client.get_balance(&destination.pubkey()).await.unwrap(),
+        destination_rent + 900_000,
+    );
 
     // Execute finalize stage
     let mut finalize_executor = executor.done(commit_sig);
