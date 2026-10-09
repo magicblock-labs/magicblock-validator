@@ -163,8 +163,8 @@ impl EventProcessor {
             tokio::select! {
                 biased;
 
-                // Keep Closed unmatched: it resolves on every poll and would spin this
-                // loop; select! disables the branch instead and the cancel token stops us.
+                // Retry after lag: an unmatched result disables this branch until another
+                // branch completes. Leave Closed unmatched and wait for cancellation.
                 received @ (Ok(_) | Err(RecvError::Lagged(_))) = block_update_rx.recv() => {
                     let latest = match received {
                         Ok(latest) => latest,

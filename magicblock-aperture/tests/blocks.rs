@@ -1,4 +1,4 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
@@ -30,18 +30,19 @@ async fn test_get_slot() {
 async fn test_get_slot_catches_up_after_block_updates_lag() {
     const LAGGING_BLOCKS: usize = 64;
     let env = RpcTestEnv::new_manual_slots().await;
-    let latest = (0..LAGGING_BLOCKS)
-        .map(|_| env.execution.advance_slot())
-        .last()
-        .unwrap();
+    // Overflow the 32-entry broadcast without yielding to the event processors.
+    env.advance_slots(LAGGING_BLOCKS);
+    let latest = env.block.load().slot;
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let mut slot = env.rpc.get_slot().await.expect("get_slot request failed");
-    while slot < latest && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(10)).await;
-        slot = env.rpc.get_slot().await.expect("get_slot request failed");
-    }
-    assert_eq!(slot, latest, "RPC slot stopped behind the ledger");
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while env.rpc.get_slot().await.expect("get_slot request failed")
+            < latest
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("RPC slot stopped behind the ledger");
 }
 
 /// Verifies `get_block_height` returns a valid block height.
