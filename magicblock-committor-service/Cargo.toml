@@ -33,9 +33,11 @@ magicblock-program = { workspace = true }
 magicblock-rpc-client = { workspace = true }
 magicblock-table-mania = { workspace = true }
 rusqlite = { workspace = true }
+serde = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-commitment-config = { workspace = true }
+solana-compute-budget = { workspace = true }
 solana-compute-budget-interface = { workspace = true }
 solana-hash = { workspace = true }
 solana-instruction = { workspace = true }

@@ -14,7 +14,7 @@ use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     intent_executor::{
@@ -24,7 +24,11 @@ use crate::{
         },
         ExecutionOutput,
     },
-    tasks::BaseTaskImpl,
+    tasks::{utils::TransactionUtils, BaseTaskImpl},
+    transactions::{
+        serialized_transaction_size, v1, PreparedMessage,
+        MAX_TRANSACTION_V1_WIRE_SIZE, MAX_TRANSACTION_WIRE_SIZE,
+    },
 };
 
 #[derive(Clone)]
@@ -44,7 +48,7 @@ impl IntentExecutionClient {
     pub(in crate::intent_executor) async fn execute_message_with_retries(
         &self,
         authority: &Keypair,
-        prepared_message: VersionedMessage,
+        prepared_message: PreparedMessage,
         tasks: &[BaseTaskImpl],
     ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError>
     {
@@ -108,7 +112,15 @@ impl IntentExecutionClient {
 
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
-            transaction_error_mapper: IntentTransactionErrorMapper { tasks },
+            transaction_error_mapper: IntentTransactionErrorMapper {
+                tasks,
+                task_instruction_offset: match &prepared_message {
+                    PreparedMessage::V1(_) => 0,
+                    PreparedMessage::Versioned(_) => {
+                        TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
+                    }
+                },
+            },
             has_dedup_guard: tasks
                 .iter()
                 .any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
@@ -129,29 +141,60 @@ impl IntentExecutionClient {
     async fn send_prepared_message(
         &self,
         authority: &Keypair,
-        mut prepared_message: VersionedMessage,
+        mut prepared_message: PreparedMessage,
     ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError>
     {
         let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
-        match &mut prepared_message {
-            VersionedMessage::V0(value) => {
-                value.recent_blockhash = latest_blockhash;
+        let result = match &mut prepared_message {
+            PreparedMessage::Versioned(message) => {
+                let version = match message {
+                    VersionedMessage::V0(value) => {
+                        value.recent_blockhash = latest_blockhash;
+                        "v0"
+                    }
+                    VersionedMessage::Legacy(value) => {
+                        warn!("Legacy message not expected");
+                        value.recent_blockhash = latest_blockhash;
+                        "legacy"
+                    }
+                };
+
+                let transaction = VersionedTransaction::try_new(
+                    message.clone(),
+                    &[&authority],
+                )?;
+                info!(
+                    transaction_version = version,
+                    transaction_size_bytes =
+                        serialized_transaction_size(&transaction),
+                    transaction_size_limit_bytes = MAX_TRANSACTION_WIRE_SIZE,
+                    "Sending intent transaction"
+                );
+                self.rpc_client
+                    .send_transaction(
+                        &transaction,
+                        &MagicBlockSendTransactionConfig::ensure_committed(),
+                    )
+                    .await?
             }
-            VersionedMessage::Legacy(value) => {
-                warn!("Legacy message not expected");
-                value.recent_blockhash = latest_blockhash;
+            PreparedMessage::V1(message) => {
+                message.set_recent_blockhash(latest_blockhash);
+                let transaction =
+                    v1::Transaction::try_new(message.clone(), authority)?;
+                info!(
+                    transaction_version = "v1",
+                    transaction_size_bytes = transaction.serialized_size(),
+                    transaction_size_limit_bytes = MAX_TRANSACTION_V1_WIRE_SIZE,
+                    "Sending intent transaction"
+                );
+                self.rpc_client
+                    .send_transaction(
+                        &transaction,
+                        &MagicBlockSendTransactionConfig::ensure_committed(),
+                    )
+                    .await?
             }
         };
-
-        let transaction =
-            VersionedTransaction::try_new(prepared_message, &[&authority])?;
-        let result = self
-            .rpc_client
-            .send_transaction(
-                &transaction,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
-            )
-            .await?;
 
         Ok(result)
     }
@@ -165,7 +208,7 @@ impl IntentExecutionClient {
 
         let config = RpcTransactionConfig {
             commitment: Some(self.rpc_client.commitment()),
-            max_supported_transaction_version: Some(0),
+            max_supported_transaction_version: Some(1),
             ..Default::default()
         };
         let cu_metrics = || async {
