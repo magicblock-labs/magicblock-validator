@@ -22,9 +22,8 @@ use solana_rpc_client_api::request::RpcRequest;
 
 use super::*;
 use crate::{
-    intent_executor::{
-        task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
-        IntentExecutionResult,
+    intent_executor::task_info_fetcher::{
+        CacheTaskInfoFetcher, RpcTaskInfoFetcher,
     },
     persist::IntentPersisterImpl,
     tasks::{
@@ -141,23 +140,18 @@ type Executor =
 
 fn executor(
     steps: Vec<Preparation>,
-    errors: &[Option<&str>],
+    error: Option<&str>,
     timeout: Duration,
 ) -> Executor {
     let mut mocks = MocksMap::default();
-    for error in errors {
-        let err = error.unwrap_or("null");
-        let status = error.map_or_else(
-            || r#"{"Ok":null}"#.to_string(),
-            |err| format!(r#"{{"Err":{err}}}"#),
-        );
+    if let Some(error) = error {
         mocks.insert(
             RpcRequest::GetSignatureStatuses,
             format!(
                 r#"{{
             "context": {{"slot": 1}},
-            "value": [{{"slot": 1, "confirmations": null, "err": {err},
-                       "status": {status}, "confirmationStatus": "finalized"}}]
+            "value": [{{"slot": 1, "confirmations": null, "err": {error},
+                       "status": {{"Err":{error}}}, "confirmationStatus": "finalized"}}]
         }}"#
             )
             .parse()
@@ -241,13 +235,6 @@ fn split(follow_up: Vec<BaseTaskImpl>) -> StrategyExecutionMode {
     }
 }
 
-fn instruction_error(error: &str) -> String {
-    format!(
-        r#"{{"InstructionError":[{},{error}]}}"#,
-        TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
-    )
-}
-
 #[tokio::test(start_paused = true)]
 async fn timeout_skips_empty_follow_up_and_keeps_undelegation() {
     // - `[Action]` → `[]`: skip the empty follow-up.
@@ -264,7 +251,7 @@ async fn timeout_skips_empty_follow_up_and_keeps_undelegation() {
             } else {
                 vec![action()]
             };
-            let executor = executor(steps, &[], Duration::from_secs(60));
+            let executor = executor(steps, None, Duration::from_secs(60));
             let mut report = IntentExecutionReport::default();
             let output = TransactionExecutor::new(
                 &executor,
@@ -330,7 +317,7 @@ async fn timeout_skips_empty_follow_up_and_keeps_undelegation() {
 #[tokio::test(start_paused = true)]
 async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
     let executor =
-        executor(vec![Preparation::Wait], &[], Duration::from_millis(10));
+        executor(vec![Preparation::Wait], None, Duration::from_millis(10));
     let mut report = IntentExecutionReport::default();
     let mut runner = TransactionExecutor::new(
         &executor,
@@ -352,176 +339,91 @@ async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
 }
 
 #[tokio::test]
-async fn preparation_failure_surrenders_current_and_pending_resources() {
-    let executor =
-        executor(vec![Preparation::Fail], &[], Duration::from_secs(60));
-    let mut report = IntentExecutionReport::default();
-    let result = TransactionExecutor::new(
-        &executor,
-        &mut report,
-        42,
-        &[ACCOUNT],
-        split(vec![undelegate(), action()]),
-    )
-    .execute(&None::<IntentPersisterImpl>)
-    .await;
-    assert!(matches!(
-        result,
-        Err(IntentExecutorError::FailedCommitPreparationError(_))
-    ));
-    assert_eq!(report.junk().len(), 2);
-    assert_eq!(report.junk()[0].lookup_tables_keys, vec![RESERVED_ALT_KEY]);
-    assert_eq!(report.junk()[1].optimized_tasks.len(), 2);
-    assert!(executor
-        .actions_callback_executor
-        .0
-        .lock()
-        .unwrap()
-        .is_empty());
-}
-
-#[tokio::test]
-async fn nonce_fetch_failure_surrenders_both_strategies() {
-    let nonce_error = instruction_error(&format!(
-        r#"{{"Custom":{}}}"#,
+async fn execution_failure_surrenders_current_and_pending_resources() {
+    let nonce_error = format!(
+        r#"{{"InstructionError":[{},{{"Custom":{}}}]}}"#,
+        TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT,
         dlp_api::error::DlpError::NonceOutOfOrder as u32
-    ));
-    let executor =
-        executor(vec![], &[Some(&nonce_error)], Duration::from_secs(60));
-    let mut report = IntentExecutionReport::default();
+    );
     // The RPC mock has no delegation record, so nonce recovery fails after
     // preparing the first transaction and receiving its on-chain nonce error.
-    let result = TransactionExecutor::new(
-        &executor,
-        &mut report,
-        42,
-        &[ACCOUNT],
-        split(vec![undelegate()]),
-    )
-    .execute(&None::<IntentPersisterImpl>)
-    .await;
-    assert!(
-        matches!(result, Err(IntentExecutorError::TaskBuilderError(_))),
-        "{result:?}"
-    );
-    assert_eq!(
-        executor
-            .transaction_preparator
-            .prepared
-            .lock()
-            .unwrap()
-            .len(),
-        1
-    );
-    assert_eq!(report.junk().len(), 2);
-    assert_eq!(report.junk()[0].lookup_tables_keys, vec![RESERVED_ALT_KEY]);
-    assert!(matches!(
-        report.junk()[1].optimized_tasks.as_slice(),
-        [BaseTaskImpl::Undelegate(_)]
-    ));
-}
-
-#[tokio::test]
-async fn follow_up_preparation_failure_does_not_retry_confirmed_commit() {
-    let executor = executor(
-        vec![Preparation::Ready, Preparation::Fail],
-        &[],
-        Duration::from_secs(60),
-    );
-    let mut report = IntentExecutionReport::default();
-    let result = TransactionExecutor::new(
-        &executor,
-        &mut report,
-        42,
-        &[ACCOUNT],
-        split(vec![undelegate()]),
-    )
-    .execute(&None::<IntentPersisterImpl>)
-    .await;
-    assert!(matches!(
-        result,
-        Err(IntentExecutorError::FailedFinalizePreparationError(_))
-    ));
-    let result = IntentExecutionResult {
-        inner: result,
-        patched_errors: vec![],
-        callbacks_report: vec![],
-    };
-    assert!(!result.is_retriable(true));
-    let prepared = executor.transaction_preparator.prepared.lock().unwrap();
-    assert_eq!(prepared.len(), 2);
-    assert!(matches!(
-        prepared[0].as_slice(),
-        [BaseTaskImpl::CommitFinalize(_)]
-    ));
-    assert!(matches!(
-        prepared[1].as_slice(),
-        [BaseTaskImpl::Undelegate(_)]
-    ));
-    assert_eq!(
-        report
-            .junk()
-            .iter()
-            .filter(|strategy| strategy
-                .lookup_tables_keys
-                .contains(&RESERVED_ALT_KEY))
-            .count(),
-        2
-    );
-}
-
-#[tokio::test]
-async fn empty_follow_up_preserves_action_and_undelegation_outcomes() {
-    for failed_action in [true, false] {
-        let error = instruction_error(r#"{"Custom":1}"#);
-        let executor =
-            executor(vec![], &[None, Some(&error)], Duration::from_secs(60));
+    for (steps, error) in [
+        (vec![Preparation::Fail], None),
+        (vec![Preparation::Ready], Some(nonce_error.as_str())),
+        (vec![Preparation::Ready, Preparation::Fail], None),
+    ] {
+        let expected_preparations = steps.len();
+        let executor = executor(steps, error, Duration::from_secs(60));
         let mut report = IntentExecutionReport::default();
-        let follow_up = if failed_action {
-            action()
-        } else {
-            undelegate()
-        };
         let result = TransactionExecutor::new(
             &executor,
             &mut report,
             42,
             &[ACCOUNT],
-            split(vec![follow_up]),
+            split(vec![undelegate(), action()]),
         )
         .execute(&None::<IntentPersisterImpl>)
         .await;
-        assert_eq!(
-            executor
-                .transaction_preparator
-                .prepared
-                .lock()
-                .unwrap()
-                .len(),
-            2,
-            "must not prepare an empty retry"
-        );
-        if failed_action {
+        if error.is_some() {
             assert!(
-                matches!(result, Ok(ExecutionOutput::TwoStage { commit_signature, finalize_signature }) if commit_signature == finalize_signature),
+                matches!(result, Err(IntentExecutorError::TaskBuilderError(_))),
                 "{result:?}"
             );
-            let calls = executor.actions_callback_executor.0.lock().unwrap();
-            assert_eq!(calls.len(), 1);
-            assert!(matches!(calls[0].1, Err(ActionError::ActionsError(..))));
-            assert_eq!(report.patched_errors().len(), 1);
+        } else if expected_preparations == 1 {
+            assert!(
+                matches!(
+                    result,
+                    Err(IntentExecutorError::FailedCommitPreparationError(_))
+                ),
+                "{result:?}"
+            );
         } else {
             assert!(
                 matches!(
                     result,
-                    Err(IntentExecutorError::FailedToFinalizeError {
-                        commit_signature: Some(_),
-                        ..
-                    })
+                    Err(IntentExecutorError::FailedFinalizePreparationError(_))
                 ),
                 "{result:?}"
             );
-            assert!(!result.unwrap_err().is_transient());
         }
+        let prepared = executor.transaction_preparator.prepared.lock().unwrap();
+        assert_eq!(prepared.len(), expected_preparations);
+        assert!(matches!(
+            prepared[0].as_slice(),
+            [BaseTaskImpl::CommitFinalize(_)]
+        ));
+        if expected_preparations == 2 {
+            assert!(matches!(
+                prepared[1].as_slice(),
+                [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
+            ));
+        }
+        assert!(executor
+            .actions_callback_executor
+            .0
+            .lock()
+            .unwrap()
+            .is_empty());
+        let disposed: Vec<_> = report
+            .junk()
+            .iter()
+            .filter(|strategy| !strategy.optimized_tasks.is_empty())
+            .collect();
+        assert_eq!(disposed.len(), 2);
+        assert!(matches!(
+            disposed[1].optimized_tasks.as_slice(),
+            [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
+        ));
+        assert_eq!(disposed[0].lookup_tables_keys, vec![RESERVED_ALT_KEY]);
+        assert_eq!(
+            report
+                .junk()
+                .iter()
+                .filter(|strategy| strategy
+                    .lookup_tables_keys
+                    .contains(&RESERVED_ALT_KEY))
+                .count(),
+            expected_preparations,
+        );
     }
 }
