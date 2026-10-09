@@ -16,6 +16,7 @@ use magicblock_core::{
 use magicblock_metrics::metrics::{
     FAILED_TRANSACTIONS_COUNT, TRANSACTION_COUNT,
 };
+use magicblock_program::TransactionScheduler;
 use solana_account::AccountSharedData;
 use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
 use solana_feature_set::raise_cpi_nesting_limit_to_8;
@@ -90,9 +91,14 @@ impl super::TransactionExecutor {
 
         let status = processed.status();
 
-        // 3. Post-Processing (Tasks & Ledger)
-        // Only process scheduled tasks for successful transactions in Execution mode
+        // 3. Post-Processing (Intents, Tasks & Ledger)
+        // Publish side effects only after successful account commit in Execution mode.
         if status.is_ok() && persist.is_none() {
+            let intents = ExecutionTlsStash::take_scheduled_intent_bundles();
+            if !intents.is_empty() {
+                TransactionScheduler::default()
+                    .accept_scheduled_base_intent(intents);
+            }
             self.process_scheduled_tasks();
         }
         let tx = if let TransactionProcessingMode::Execution(ref mut tx) =
