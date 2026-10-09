@@ -187,6 +187,14 @@ where
         persister: &Option<P>,
     ) -> IntentExecutorResult<Signature> {
         const ATTEMPT_LIMIT: u8 = 10;
+
+        // A timeout can remove every follow-up action after a confirmed commit.
+        if let Some(signature) = self.commit_signature {
+            if self.current.optimized_tasks.is_empty() {
+                return Ok(signature);
+            }
+        }
+
         let result = loop {
             self.current_attempt += 1;
             let result = prepare_and_execute_strategy(

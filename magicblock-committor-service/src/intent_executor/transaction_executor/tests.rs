@@ -249,37 +249,82 @@ fn instruction_error(error: &str) -> String {
 }
 
 #[tokio::test(start_paused = true)]
-async fn pending_callbacks_time_out_while_first_transaction_is_preparing() {
-    let executor =
-        executor(vec![Preparation::Wait], &[], Duration::from_millis(10));
-    let mut report = IntentExecutionReport::default();
-    let output = TransactionExecutor::new(
-        &executor,
-        &mut report,
-        42,
-        &[ACCOUNT],
-        split(vec![undelegate(), action()]),
-    )
-    .execute(&None::<IntentPersisterImpl>)
-    .await
-    .unwrap();
-    assert!(matches!(output, ExecutionOutput::TwoStage { .. }));
-    let calls = executor.actions_callback_executor.0.lock().unwrap();
-    assert_eq!(calls.len(), 1);
-    assert!(matches!(calls[0], (None, Err(ActionError::TimeoutError))));
-    let prepared = executor.transaction_preparator.prepared.lock().unwrap();
-    assert_eq!(
-        prepared.len(),
-        3,
-        "cancelled preparation, commit retry, then undelegation"
-    );
-    assert!(matches!(
-        prepared[2].as_slice(),
-        [BaseTaskImpl::Undelegate(_)]
-    ));
-    assert!(report.junk().iter().any(|strategy| strategy
-        .lookup_tables_keys
-        .contains(&RESERVED_ALT_KEY)));
+async fn timeout_skips_empty_follow_up_and_keeps_undelegation() {
+    // - `[Action]` → `[]`: skip the empty follow-up.
+    // - `[Undelegate, Action]` → `[Undelegate]`: execute the undelegation.
+    for timeout_during_commit in [true, false] {
+        for has_undelegation in [false, true] {
+            let steps = if timeout_during_commit {
+                vec![Preparation::Wait]
+            } else {
+                vec![Preparation::Ready, Preparation::Wait]
+            };
+            let follow_up = if has_undelegation {
+                vec![undelegate(), action()]
+            } else {
+                vec![action()]
+            };
+            let executor = executor(steps, &[], Duration::from_secs(60));
+            let mut report = IntentExecutionReport::default();
+            let output = TransactionExecutor::new(
+                &executor,
+                &mut report,
+                42,
+                &[ACCOUNT],
+                split(follow_up),
+            )
+            .execute(&None::<IntentPersisterImpl>)
+            .await
+            .unwrap();
+            let ExecutionOutput::TwoStage {
+                commit_signature,
+                finalize_signature,
+            } = output
+            else {
+                panic!("expected two-stage output");
+            };
+            let calls = executor.actions_callback_executor.0.lock().unwrap();
+            assert_eq!(calls.len(), 1);
+            assert!(matches!(calls[0], (None, Err(ActionError::TimeoutError))));
+            let prepared =
+                executor.transaction_preparator.prepared.lock().unwrap();
+            assert!(
+                prepared.iter().all(|tasks| !tasks.is_empty()),
+                "must not prepare an empty follow-up"
+            );
+            assert_eq!(prepared.len(), 2 + usize::from(has_undelegation));
+            assert_eq!(
+                prepared
+                    .iter()
+                    .filter(|tasks| matches!(
+                        tasks.as_slice(),
+                        [BaseTaskImpl::CommitFinalize(_)]
+                    ))
+                    .count(),
+                if timeout_during_commit { 2 } else { 1 },
+                "only a cancelled commit preparation may be retried"
+            );
+            if has_undelegation {
+                assert!(matches!(
+                    prepared.last().unwrap().as_slice(),
+                    [BaseTaskImpl::Undelegate(_)]
+                ));
+            } else {
+                assert_eq!(commit_signature, finalize_signature);
+            }
+            assert_eq!(
+                report
+                    .junk()
+                    .iter()
+                    .filter(|strategy| strategy
+                        .lookup_tables_keys
+                        .contains(&RESERVED_ALT_KEY))
+                    .count(),
+                prepared.len(),
+                "every preparation's ALT reservation must be surrendered"
+            );
+        }
+    }
 }
 
 #[tokio::test(start_paused = true)]
