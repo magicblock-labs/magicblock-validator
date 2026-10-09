@@ -1190,7 +1190,13 @@ async fn test_action_callback_fired_on_timeout() {
 }
 
 #[tokio::test]
-async fn test_two_stage_action_failure_keeps_combined_commit() {
+async fn test_two_stage_follow_up_failure_keeps_combined_commit() {
+    for fail_undelegation in [false, true] {
+        check_two_stage_follow_up_failure(fail_undelegation).await;
+    }
+}
+
+async fn check_two_stage_follow_up_failure(fail_undelegation: bool) {
     let TestEnv {
         fixture,
         mut intent_executor,
@@ -1199,25 +1205,33 @@ async fn test_two_stage_action_failure_keeps_combined_commit() {
         ..
     } = TestEnv::setup().await;
     let payer = setup_payer(fixture.rpc_client.get_inner()).await;
+    let label = fail_undelegation.then(|| FAIL_UNDELEGATION_LABEL.to_string());
     let (pubkey, mut account) =
-        init_and_delegate_account_on_chain(&payer, 70, None).await;
+        init_and_delegate_account_on_chain(&payer, 70, label).await;
     account.owner = program_flexi_counter::id();
     let committed_account = CommittedAccount {
         pubkey,
         account,
         remote_slot: 0,
     };
-    let UndelegateType::WithBaseActions(actions) =
-        failing_undelegate_action(payer.pubkey(), pubkey)
-    else {
-        panic!("expected failing action");
-    };
-    let intent = create_scheduled_intent(MagicBaseIntent::Commit(
-        CommitType::WithBaseActions {
+    let intent = create_scheduled_intent(if fail_undelegation {
+        MagicBaseIntent::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(vec![
+                committed_account.clone()
+            ]),
+            undelegate_action: UndelegateType::Standalone,
+        })
+    } else {
+        let UndelegateType::WithBaseActions(actions) =
+            failing_undelegate_action(payer.pubkey(), pubkey)
+        else {
+            panic!("expected failing action");
+        };
+        MagicBaseIntent::Commit(CommitType::WithBaseActions {
             committed_accounts: vec![committed_account.clone()],
             base_actions: actions,
-        },
-    ));
+        })
+    });
     let mut report = IntentExecutionReport::default();
     let strategy =
         create_two_transaction_strategy(&fixture, &intent, &task_info_fetcher)
@@ -1230,26 +1244,42 @@ async fn test_two_stage_action_failure_keeps_combined_commit() {
             &mut report,
             &None::<IntentPersisterImpl>,
         )
-        .await
-        .unwrap();
-    let ExecutionOutput::TwoStage {
-        commit_signature,
-        finalize_signature,
-    } = result
-    else {
-        panic!("expected two-transaction execution");
-    };
-    assert_eq!(
-        finalize_signature, commit_signature,
-        "no empty follow-up transaction should be sent"
-    );
-    assert!(matches!(
-        report.patched_errors().as_slice(),
-        [TransactionStrategyExecutionError::ActionsError(_, _)]
-    ));
+        .await;
     let calls = callback_executor.calls();
-    assert_eq!(calls.len(), 1);
-    assert!(matches!(calls[0].1, Err(ActionError::ActionsError(_, _))));
+    if fail_undelegation {
+        assert!(
+            matches!(
+                result,
+                Err(IntentExecutorError::FailedToFinalizeError {
+                    err: TransactionStrategyExecutionError::UndelegationError(
+                        ..
+                    ),
+                    commit_signature: Some(_),
+                    ..
+                })
+            ),
+            "{result:?}"
+        );
+        assert!(calls.is_empty());
+    } else {
+        let ExecutionOutput::TwoStage {
+            commit_signature,
+            finalize_signature,
+        } = result.unwrap()
+        else {
+            panic!("expected two-transaction execution");
+        };
+        assert_eq!(
+            finalize_signature, commit_signature,
+            "no empty follow-up transaction should be sent"
+        );
+        assert!(matches!(
+            report.patched_errors().as_slice(),
+            [TransactionStrategyExecutionError::ActionsError(_, _)]
+        ));
+        assert_eq!(calls.len(), 1);
+        assert!(matches!(calls[0].1, Err(ActionError::ActionsError(_, _))));
+    }
     verify_committed_accounts_state(
         fixture.rpc_client.get_inner(),
         &[committed_account],
