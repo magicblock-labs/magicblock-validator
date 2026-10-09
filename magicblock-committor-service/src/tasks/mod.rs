@@ -4,9 +4,9 @@ use magicblock_metrics::metrics::LabelValue;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod commit_delivery;
 pub mod commit_finalize_task;
 pub mod commit_stage_task;
-pub mod commit_task;
 pub mod intent_size_validator;
 pub mod task_builder;
 pub mod task_strategist;
@@ -14,44 +14,19 @@ pub mod utils;
 
 pub use task_builder::TaskBuilderImpl;
 
-use crate::tasks::{
-    commit_finalize_task::CommitFinalizeTask, commit_task::CommitTask,
-};
-
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TaskType {
-    Commit,
-    CommitFinalize,
-    Finalize,
-    Undelegate,
-    Action,
-}
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum TaskStrategy {
-    Args,
-    Buffer,
-}
+use crate::tasks::commit_finalize_task::CommitFinalizeTask;
 
 #[derive(Clone, Debug)]
 pub enum BaseTaskImpl {
-    Commit(CommitTask),
     CommitFinalize(CommitFinalizeTask),
-    Finalize(FinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
 }
 
 impl BaseTask for BaseTaskImpl {
-    fn program_id(&self) -> Pubkey {
-        dlp_api::id()
-    }
-
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
-            Self::Commit(value) => value.instruction(validator),
             Self::CommitFinalize(value) => value.instruction(validator),
-            Self::Finalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
             Self::BaseAction(value) => value.instruction(validator),
         }
@@ -59,7 +34,6 @@ impl BaseTask for BaseTaskImpl {
 
     fn try_optimize_tx_size(&mut self) -> bool {
         match self {
-            Self::Commit(value) => value.try_optimize_tx_size(),
             Self::CommitFinalize(value) => value.try_optimize_tx_size(),
             _ => false,
         }
@@ -67,24 +41,16 @@ impl BaseTask for BaseTaskImpl {
 
     fn compute_units(&self) -> u32 {
         match self {
-            Self::Commit(value) => value.compute_units(),
             Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
-            Self::Finalize(_) => 120_000,
             Self::Undelegate(_) => 120_000,
         }
     }
 
     fn accounts_size_budget(&self) -> u32 {
         match self {
-            Self::Commit(value) => value.accounts_size_budget(),
             Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
-            Self::Finalize(_) => {
-                dlp_api::instruction_builder::finalize_size_budget(
-                    AccountSizeClass::Huge,
-                )
-            }
             Self::Undelegate(value) => {
                 if value.include_undelegation_request {
                     dlp_api::instruction_builder::undelegate_with_request_size_budget(
@@ -100,28 +66,9 @@ impl BaseTask for BaseTaskImpl {
     }
 }
 
-impl BaseTaskImpl {
-    pub fn strategy(&self) -> TaskStrategy {
-        match self {
-            Self::Commit(task) if task.is_buffer() => TaskStrategy::Buffer,
-            Self::CommitFinalize(task) if task.is_buffer() => {
-                TaskStrategy::Buffer
-            }
-            _ => TaskStrategy::Args,
-        }
-    }
-}
-
 impl LabelValue for BaseTaskImpl {
     fn value(&self) -> &str {
         match self {
-            Self::Commit(task) => {
-                if task.is_buffer() {
-                    "buffer_commit"
-                } else {
-                    "args_commit"
-                }
-            }
             Self::CommitFinalize(task) => {
                 if task.is_buffer() {
                     "buffer_commit_finalize"
@@ -129,7 +76,6 @@ impl LabelValue for BaseTaskImpl {
                     "args_commit_finalize"
                 }
             }
-            Self::Finalize(_) => "args_finalize",
             Self::Undelegate(_) => "args_undelegate",
             Self::BaseAction(BaseActionTask::V1(_)) => "args_action",
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
@@ -147,9 +93,6 @@ pub trait BaseTask: Send + Sync + Clone {
             .map(|meta| meta.pubkey)
             .collect()
     }
-
-    /// Gets target program for task execution
-    fn program_id(&self) -> Pubkey;
 
     /// Gets instruction for task execution
     fn instruction(&self, validator: &Pubkey) -> Instruction;
@@ -199,26 +142,6 @@ impl UndelegateTask {
 impl From<UndelegateTask> for BaseTaskImpl {
     fn from(value: UndelegateTask) -> Self {
         Self::Undelegate(value)
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct FinalizeTask {
-    pub delegated_account: Pubkey,
-}
-
-impl FinalizeTask {
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        dlp_api::instruction_builder::finalize(
-            *validator,
-            self.delegated_account,
-        )
-    }
-}
-
-impl From<FinalizeTask> for BaseTaskImpl {
-    fn from(value: FinalizeTask) -> Self {
-        Self::Finalize(value)
     }
 }
 
@@ -294,35 +217,14 @@ pub struct BaseActionTaskV1 {
 impl BaseActionTaskV1 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
-        let account_metas = action
-            .account_metas_per_program
-            .iter()
-            .map(|short_meta| AccountMeta {
-                pubkey: short_meta.pubkey,
-                is_writable: short_meta.is_writable,
-                is_signer: false,
-            })
-            .collect();
-
         #[allow(deprecated)]
         dlp_api::instruction_builder::call_handler(
             *validator,
             action.destination_program,
             action.escrow_authority,
-            account_metas,
-            CallHandlerArgs {
-                data: action.data_per_program.data.clone(),
-                escrow_index: action.data_per_program.escrow_index,
-            },
+            Self::account_metas_static(action),
+            Self::call_handler_args_static(action),
         )
-    }
-
-    pub fn account_metas(&self) -> Vec<AccountMeta> {
-        BaseActionTaskV1::account_metas_static(&self.action)
-    }
-
-    pub fn call_handler_args(&self) -> CallHandlerArgs {
-        BaseActionTaskV1::call_handler_args_static(&self.action)
     }
 
     fn account_metas_static(action: &BaseAction) -> Vec<AccountMeta> {
@@ -392,126 +294,14 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 }
 
 #[cfg(test)]
-mod serialization_safety_test {
-
+mod tests {
     use dlp_api::{
         discriminator::DlpDiscriminator,
         pda::undelegation_request_pda_from_delegated_account,
     };
-    use magicblock_core::intent::{types::CommittedAccount, ProgramArgs};
-    use magicblock_program::args::ShortAccountMeta;
-    use solana_account::Account;
+    use solana_pubkey::Pubkey;
 
-    use crate::{
-        tasks::{
-            commit_stage_task::PreparationTask,
-            commit_task::{CommitDelivery, CommitTask},
-            *,
-        },
-        test_utils,
-    };
-
-    fn setup() {
-        test_utils::init_test_logger();
-    }
-
-    fn make_commit_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        data: Vec<u8>,
-        lamports: u64,
-    ) -> CommitTask {
-        CommitTask {
-            commit_id,
-            allow_undelegation,
-            committed_account: CommittedAccount {
-                pubkey: Pubkey::new_unique(),
-                account: Account {
-                    lamports,
-                    data,
-                    owner: Pubkey::new_unique(),
-                    executable: false,
-                    rent_epoch: 0,
-                },
-                remote_slot: Default::default(),
-            },
-            delivery_details: CommitDelivery::StateInArgs,
-        }
-    }
-
-    #[test]
-    fn test_args_task_instruction_serialization() {
-        setup();
-        let validator = Pubkey::new_unique();
-
-        // Test Commit variant (StateInArgs)
-        let commit_task: BaseTaskImpl =
-            make_commit_task(123, true, vec![1, 2, 3], 1000).into();
-        assert_serializable(&commit_task.instruction(&validator));
-
-        // Test Finalize variant
-        let finalize_task: BaseTaskImpl = FinalizeTask {
-            delegated_account: Pubkey::new_unique(),
-        }
-        .into();
-        assert_serializable(&finalize_task.instruction(&validator));
-
-        // Test Undelegate variant
-        let undelegate_task: BaseTaskImpl = UndelegateTask {
-            delegated_account: Pubkey::new_unique(),
-            owner_program: Pubkey::new_unique(),
-            rent_reimbursement: Pubkey::new_unique(),
-            include_undelegation_request: false,
-        }
-        .into();
-        assert_serializable(&undelegate_task.instruction(&validator));
-
-        // Test BaseAction V1 variant
-        let base_action: BaseTaskImpl = BaseActionTask::V1(BaseActionTaskV1 {
-            action: BaseAction {
-                id: 0,
-                destination_program: Pubkey::new_unique(),
-                source_program: None,
-                escrow_authority: Pubkey::new_unique(),
-                account_metas_per_program: vec![ShortAccountMeta {
-                    pubkey: Pubkey::new_unique(),
-                    is_writable: true,
-                }],
-                data_per_program: ProgramArgs {
-                    data: vec![4, 5, 6],
-                    escrow_index: 1,
-                },
-                compute_units: 10_000,
-                callback: None,
-            },
-        })
-        .into();
-        assert_serializable(&base_action.instruction(&validator));
-
-        // Test BaseAction V2 variant
-        let base_action_v2: BaseTaskImpl =
-            BaseActionTask::V2(BaseActionTaskV2 {
-                action: BaseAction {
-                    id: 0,
-                    destination_program: Pubkey::new_unique(),
-                    source_program: Some(Pubkey::new_unique()),
-                    escrow_authority: Pubkey::new_unique(),
-                    account_metas_per_program: vec![ShortAccountMeta {
-                        pubkey: Pubkey::new_unique(),
-                        is_writable: true,
-                    }],
-                    data_per_program: ProgramArgs {
-                        data: vec![7, 8, 9],
-                        escrow_index: 2,
-                    },
-                    compute_units: 15_000,
-                    callback: None,
-                },
-                source_program: Pubkey::new_unique(),
-            })
-            .into();
-        assert_serializable(&base_action_v2.instruction(&validator));
-    }
+    use super::UndelegateTask;
 
     #[test]
     fn test_undelegate_task_uses_request_account_when_included() {
@@ -534,57 +324,6 @@ mod serialization_safety_test {
         );
         assert!(ix.accounts[12].is_writable);
         assert!(!ix.accounts[12].is_signer);
-    }
-
-    fn make_buffer_commit_task(
-        commit_id: u64,
-        allow_undelegation: bool,
-        data: Vec<u8>,
-        lamports: u64,
-    ) -> CommitTask {
-        let task =
-            make_commit_task(commit_id, allow_undelegation, data, lamports);
-        CommitTask {
-            delivery_details: CommitDelivery::StateInBuffer { prepared: false },
-            ..task
-        }
-    }
-
-    #[test]
-    fn test_buffer_task_instruction_serialization() {
-        let validator = Pubkey::new_unique();
-
-        let commit_task =
-            make_buffer_commit_task(456, false, vec![7, 8, 9], 2000);
-        assert!(commit_task.is_buffer());
-        assert_serializable(&commit_task.instruction(&validator));
-    }
-
-    #[test]
-    fn test_preparation_instructions_serialization() {
-        let authority = Pubkey::new_unique();
-
-        let mut commit_task =
-            make_buffer_commit_task(789, true, vec![0; 1024], 3000);
-
-        let Some(preparation_task) =
-            PreparationTask::from_commit(&mut commit_task)
-        else {
-            panic!("invalid preparation state on creation!");
-        };
-        assert_serializable(&preparation_task.init_instruction(&authority));
-        for ix in preparation_task.realloc_instructions(&authority) {
-            assert_serializable(&ix);
-        }
-        for ix in preparation_task.write_instructions(&authority) {
-            assert_serializable(&ix);
-        }
-    }
-
-    fn assert_serializable(ix: &Instruction) {
-        bincode::serialize(ix).unwrap_or_else(|e| {
-            panic!("Failed to serialize instruction {:?}: {}", ix, e)
-        });
     }
 }
 

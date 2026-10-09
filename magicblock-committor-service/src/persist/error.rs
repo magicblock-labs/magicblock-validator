@@ -25,17 +25,6 @@ pub enum CommitPersistError {
     #[error("Invalid Commit Strategy: '{0}' ({0:?})")]
     InvalidCommitStrategy(String),
 
-    #[error(
-        "Commit Status update requires status with bundle id: '{0}' ({0:?})"
-    )]
-    CommitStatusUpdateRequiresStatusWithBundleId(String),
-
-    #[error("Commit Status needs bundle id: '{0}' ({0:?})")]
-    CommitStatusNeedsBundleId(String),
-
     #[error("Commit Status needs signatures: '{0}' ({0:?})")]
     CommitStatusNeedsSignatures(String),
-
-    #[error("Commit Status needs commit strategy: '{0}' ({0:?})")]
-    CommitStatusNeedsStrategy(String),
 }

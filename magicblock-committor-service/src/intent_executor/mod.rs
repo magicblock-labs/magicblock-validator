@@ -45,7 +45,7 @@ use crate::{
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::TaskBuilderImpl,
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
@@ -443,10 +443,9 @@ where
         )
         .await?;
 
-        let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.commit_signature,
-            finalize_signature: finalized_stage.finalize_signature,
+            commit_signature,
+            finalize_signature,
         })
     }
 
@@ -654,7 +653,6 @@ where
 /// alias its signature. Such intents must carry a per-intent uniqueness noop.
 fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
     commit_tasks.iter().any(|task| match task {
-        BaseTaskImpl::Commit(task) => task.commit_id <= 1,
         BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
         _ => false,
     })
@@ -666,10 +664,10 @@ mod tests {
     use solana_account::Account;
 
     use super::*;
-    use crate::tasks::{utils::create_commit_task, FinalizeTask};
+    use crate::tasks::{utils::create_commit_finalize_task, UndelegateTask};
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
-        create_commit_task(
+        create_commit_finalize_task(
             commit_id,
             false,
             CommittedAccount {
@@ -684,14 +682,17 @@ mod tests {
 
     #[test]
     fn test_requires_uniqueness_nonce_on_first_commit_only() {
-        let finalize = BaseTaskImpl::Finalize(FinalizeTask {
+        let undelegate = BaseTaskImpl::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         });
 
         assert!(requires_uniqueness_nonce(&[commit_task(1)]));
         assert!(requires_uniqueness_nonce(&[commit_task(5), commit_task(1)]));
         assert!(!requires_uniqueness_nonce(&[commit_task(2)]));
-        assert!(!requires_uniqueness_nonce(&[finalize]));
+        assert!(!requires_uniqueness_nonce(&[undelegate]));
         assert!(!requires_uniqueness_nonce(&[]));
     }
 }

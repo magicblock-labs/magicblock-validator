@@ -110,9 +110,6 @@ impl DeliveryPreparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
-            BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
-            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                 PreparationTask::from_commit_finalize(commit_finalize_task)
             }
@@ -195,9 +192,6 @@ impl DeliveryPreparator {
 
         // Preparation failed due to buffer existing - cleanup and retry
         let preparation_task = match task {
-            BaseTaskImpl::Commit(commit_task) => {
-                PreparationTask::from_commit(commit_task)
-            }
             BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                 PreparationTask::from_commit_finalize(commit_finalize_task)
             }

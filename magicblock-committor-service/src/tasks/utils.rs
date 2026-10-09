@@ -17,21 +17,16 @@ use solana_transaction::versioned::VersionedTransaction;
 
 use crate::{
     tasks::{
+        commit_delivery::CommitDelivery,
         commit_finalize_task::CommitFinalizeTask,
-        commit_task::{CommitDelivery, CommitTask},
-        task_strategist::TaskStrategistResult,
-        BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask,
-        BaseTaskImpl,
+        task_strategist::TaskStrategistResult, BaseActionTask,
+        BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
     },
     transactions::v1,
 };
 
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
-// reduce instruction size. Below this threshold, the commit is sent
-// as CommitState. The value (256) is chosen because it is sufficient
-// for small accounts, which typically could hold up to 8 u32 fields or
-// 4 u64 fields. These integers are expected to be on the hot path
-// and updated continuously.
+// Small accounts send full state in CommitFinalize. Above this threshold,
+// compute a diff when a base account is available to reduce the payload.
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
 /// Builds a [`BaseTaskImpl`] for each `action`, used by both
@@ -59,8 +54,6 @@ pub fn create_action_tasks(
 /// Decides how a commit's data should be delivered based on account size:
 /// accounts larger than `COMMIT_STATE_SIZE_THRESHOLD` diff against
 /// `base_account` (when available), everything else is sent as full state.
-/// Shared by [`create_commit_task`] and [`create_commit_finalize_task`] so
-/// the two never drift apart.
 fn commit_delivery(
     account: &CommittedAccount,
     base_account: Option<Account>,
@@ -79,25 +72,7 @@ fn commit_delivery(
     }
 }
 
-/// Builds a legacy [`CommitTask`] for `account`. Intent execution and admission
-/// use [`create_commit_finalize_task`]; this helper remains for legacy tasks.
-pub fn create_commit_task(
-    commit_id: u64,
-    allow_undelegation: bool,
-    account: CommittedAccount,
-    base_account: Option<Account>,
-) -> CommitTask {
-    let delivery_details = commit_delivery(&account, base_account);
-
-    CommitTask {
-        commit_id,
-        allow_undelegation,
-        committed_account: account,
-        delivery_details,
-    }
-}
-
-/// Same as [`create_commit_task`] but for [`CommitFinalizeTask`].
+/// Builds a combined commit and finalization task for `account`.
 pub fn create_commit_finalize_task(
     commit_id: u64,
     allow_undelegation: bool,
@@ -163,21 +138,6 @@ impl TransactionUtils {
             .iter()
             .map(|task| task.instruction(validator))
             .collect()
-    }
-
-    pub fn assemble_tasks_tx(
-        authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        compute_unit_price: u64,
-        lookup_tables: &[AddressLookupTableAccount],
-    ) -> TaskStrategistResult<VersionedTransaction> {
-        Self::assemble_tasks_tx_with_uniqueness_nonce(
-            authority,
-            tasks,
-            compute_unit_price,
-            lookup_tables,
-            None,
-        )
     }
 
     pub fn assemble_tasks_tx_with_uniqueness_nonce(
@@ -342,27 +302,19 @@ impl TransactionUtils {
         let total_budget: u32 =
             tasks.iter().map(|task| task.accounts_size_budget()).sum();
 
-        let dlp_task_count: u32 = tasks
-            .iter()
-            .filter(|task| task.program_id() == dlp_api::id())
-            .count() as u32;
-
-        if dlp_task_count > 0 {
-            let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
-            let deduction = dlp_task_count
-                .saturating_sub(1)
-                .saturating_mul(dlp_program_budget);
-            // The API's 350 KiB estimate is smaller than the deployed DLP.
-            // Reserve at least 1 MiB for its program data, counted only once.
-            let program_headroom = AccountSizeClass::Huge
-                .size_budget()
-                .saturating_sub(dlp_program_budget);
-            total_budget
-                .saturating_sub(deduction)
-                .saturating_add(program_headroom)
-        } else {
-            total_budget
-        }
+        // All tasks target DLP, so count its program data only once.
+        let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
+        let deduction = (tasks.len() as u32)
+            .saturating_sub(1)
+            .saturating_mul(dlp_program_budget);
+        // The API's 350 KiB estimate is smaller than the deployed DLP.
+        // Reserve at least 1 MiB for its program data, counted only once.
+        let program_headroom = AccountSizeClass::Huge
+            .size_budget()
+            .saturating_sub(dlp_program_budget);
+        total_budget
+            .saturating_sub(deduction)
+            .saturating_add(program_headroom)
     }
 
     fn tasks_accounts_size_budget_with_uniqueness_nonce(

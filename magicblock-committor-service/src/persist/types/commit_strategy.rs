@@ -36,16 +36,6 @@ impl CommitStrategy {
             DiffBufferWithLookupTable => "DiffBufferWithLookupTable",
         }
     }
-
-    pub fn uses_lookup(&self) -> bool {
-        matches!(
-            self,
-            CommitStrategy::StateArgsWithLookupTable
-                | CommitStrategy::StateBufferWithLookupTable
-                | CommitStrategy::DiffArgsWithLookupTable
-                | CommitStrategy::DiffBufferWithLookupTable
-        )
-    }
 }
 
 impl TryFrom<&str> for CommitStrategy {
