@@ -7,6 +7,7 @@ use magicblock_core::link::{
     transactions::TransactionStatusRx,
     DispatchEndpoints,
 };
+use tokio::sync::broadcast::error::RecvError;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, instrument, warn};
 
@@ -162,11 +163,16 @@ impl EventProcessor {
             tokio::select! {
                 biased;
 
-                // Process a new block. We use `recv()` which returns `Ok(())` on
-                // success or `Err(Lagged)` if we fell behind. In either case, we
-                // want to update with the latest block. Only `Err(Closed)` should
-                // stop us, but that's handled by the cancel token.
-                Ok(latest) = block_update_rx.recv() => {
+                // Retry after lag: an unmatched result disables this branch until another
+                // branch completes. Leave Closed unmatched and wait for cancellation.
+                received @ (Ok(_) | Err(RecvError::Lagged(_))) = block_update_rx.recv() => {
+                    let latest = match received {
+                        Ok(latest) => latest,
+                        Err(error) => {
+                            warn!(error = ?error, "Block updates lagged");
+                            continue;
+                        }
+                    };
                     // Notify subscribers waiting on slot updates.
                     self.subscriptions.send_slot(latest.slot);
                     // Notify registered geyser plugins (if any) of the latest slot.
