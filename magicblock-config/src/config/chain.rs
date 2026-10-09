@@ -81,6 +81,9 @@ pub struct ChainLinkConfig {
 
     /// AML/Risk checks for post-delegation actions via Range API.
     pub risk: RiskConfig,
+
+    /// Retains delegation admission history independently of local accounts.
+    pub delegation_dedup: DelegationDedupConfig,
 }
 
 impl Default for ChainLinkConfig {
@@ -99,6 +102,30 @@ impl Default for ChainLinkConfig {
             ),
             ws_subs_per_connection: None,
             risk: RiskConfig::default(),
+            delegation_dedup: DelegationDedupConfig::default(),
+        }
+    }
+}
+
+/// Process-local protection against delayed duplicate delegation activation.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+#[serde(default, rename_all = "kebab-case", deny_unknown_fields)]
+pub struct DelegationDedupConfig {
+    /// Retention after the admitted workflow finishes; running work never expires.
+    #[serde(with = "humantime")]
+    pub retention: Duration,
+    /// Maximum running and retained entries. Unexpired entries are not evicted.
+    pub max_entries: usize,
+    /// Maximum independently owned activation workflows.
+    pub max_active: usize,
+}
+
+impl Default for DelegationDedupConfig {
+    fn default() -> Self {
+        Self {
+            retention: Duration::from_secs(3 * 60 * 60),
+            max_entries: 1_000_000,
+            max_active: 5_000,
         }
     }
 }

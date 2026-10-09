@@ -109,7 +109,7 @@ magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-aml = { path = "./magicblock-aml" }
 magicblock-aperture = { path = "./magicblock-aperture" }
 magicblock-api = { path = "./magicblock-api" }
-magicblock-chainlink = { path = "./magicblock-chainlink", features = ["dev-context"] }
+magicblock-chainlink = { path = "./magicblock-chainlink" }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
     "no-entrypoint"
 ] }

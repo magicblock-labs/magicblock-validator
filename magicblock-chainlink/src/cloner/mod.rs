@@ -91,6 +91,13 @@ impl From<DelegationActions> for ClonePostDelegationMode {
     }
 }
 
+/// The base-chain delegation, independent of fetch slots and local projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct DelegationIdentity {
+    pub delegated_account: Pubkey,
+    pub delegation_slot: u64,
+}
+
 /// An account snapshot and the activation work to submit with its clone.
 ///
 /// Source freshness is separate from the account's delegation stamp so a later
@@ -108,6 +115,9 @@ pub struct AccountCloneRequest {
     /// Chain views a delegated request was derived from, kept apart from the
     /// delegation slot stamped on `account`. `None` means the account slot.
     pub source_slots: Option<CloneSourceSlots>,
+    /// Original base-chain identity. For an ATA projection this identifies the
+    /// eATA, not `pubkey`. Never derive this from the mutable account stamp.
+    pub delegation_identity: Option<DelegationIdentity>,
 }
 
 impl AccountCloneRequest {

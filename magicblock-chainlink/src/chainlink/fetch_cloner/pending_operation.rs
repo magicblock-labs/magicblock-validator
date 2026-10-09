@@ -12,6 +12,7 @@ use tokio::{
 };
 
 use super::{super::errors::ChainlinkError, types::FetchAndCloneResult};
+use crate::cloner::DelegationIdentity;
 
 pub(super) type PendingGeneration = u64;
 pub(super) type WaiterId = u64;
@@ -32,6 +33,10 @@ pub(super) enum PendingTerminal {
 #[derive(Debug, Clone)]
 pub(super) enum PendingFailure {
     OwnerFailed(String),
+    DelegationTargetUnavailable {
+        identity: DelegationIdentity,
+        clone_target: Pubkey,
+    },
     TimedOut,
     Cancelled,
 }
@@ -42,8 +47,30 @@ impl PendingFailure {
             Self::OwnerFailed(msg) => {
                 ChainlinkError::PendingRequestOwnerFailed(pubkey, msg)
             }
+            Self::DelegationTargetUnavailable {
+                identity,
+                clone_target,
+            } => ChainlinkError::DelegationTargetUnavailable {
+                identity,
+                clone_target,
+            },
             Self::TimedOut => ChainlinkError::PendingRequestTimeout(pubkey),
             Self::Cancelled => ChainlinkError::PendingRequestCancelled(pubkey),
+        }
+    }
+}
+
+impl From<ChainlinkError> for PendingFailure {
+    fn from(err: ChainlinkError) -> Self {
+        match err {
+            ChainlinkError::DelegationTargetUnavailable {
+                identity,
+                clone_target,
+            } => Self::DelegationTargetUnavailable {
+                identity,
+                clone_target,
+            },
+            err => Self::OwnerFailed(err.to_string()),
         }
     }
 }
