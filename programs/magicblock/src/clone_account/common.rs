@@ -138,7 +138,9 @@ pub fn validate_clone_target(
 /// Folds a funded Magic ATA's balance into the eATA projection replacing it,
 /// so the two never coexist. Only an eATA projection reaches an ATA address
 /// as a delegated clone, and its amount is the wallet's base eATA balance.
-/// A frozen Magic ATA keeps blocking. Returns whether the balances merged.
+/// It merges only where a transfer between the two could, without dropping
+/// local state: neither side is frozen and the Magic ATA has no approval.
+/// Otherwise the Magic ATA keeps blocking. Returns whether they merged.
 pub fn merge_magic_ata_into_projection(
     invoke_context: &InvokeContext,
     account: &TransactionAccountViewMut,
@@ -146,13 +148,16 @@ pub fn merge_magic_ata_into_projection(
     fields: &AccountCloneFields,
     data: &mut [u8],
 ) -> Result<bool, InstructionError> {
+    // Flag checks first, so ordinary clones skip copying the account.
+    if !fields.delegated
+        || !account.delegated()
+        || account.owner() != &fields.owner
+    {
+        return Ok(false);
+    }
     let local = account.to_account_shared_data();
     let Some(magic_ata) =
-        try_get_magic_ata_info(pubkey, &local).filter(|info| {
-            info.amount > 0
-                && fields.delegated
-                && fields.owner == info.token_program
-        })
+        try_get_magic_ata_info(pubkey, &local).filter(|info| info.amount > 0)
     else {
         return Ok(false);
     };
@@ -167,6 +172,8 @@ pub fn merge_magic_ata_into_projection(
         return Ok(false);
     };
     if local_token.is_frozen()
+        || local_token.delegate.is_some()
+        || projection.is_frozen()
         || projection.mint != magic_ata.mint
         || projection.owner != magic_ata.wallet_owner
     {
