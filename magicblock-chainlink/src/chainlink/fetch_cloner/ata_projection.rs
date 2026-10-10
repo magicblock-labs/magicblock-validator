@@ -775,9 +775,10 @@ where
     accounts_to_clone
 }
 
-/// A Magic ATA never blocks the eATA projection of the same ATA: the clone
-/// folds its balance into the projection, so a freshly delegated eATA never
-/// clobbers it. Any other delegated or undelegating ATA does block.
+/// A Magic ATA never blocks the eATA projection of the same ATA here: the
+/// clone program decides whether to fold its balance into the projection or
+/// keep it, so a freshly delegated eATA never clobbers it. Any other delegated
+/// or undelegating ATA does block.
 fn ata_blocks_projection(ata_pubkey: &Pubkey, ata: &AccountSharedData) -> bool {
     ata.undelegating()
         || (ata.delegated()
