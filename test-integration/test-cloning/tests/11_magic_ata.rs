@@ -669,6 +669,19 @@ fn test_magic_ata_overlays_existing_base_ata() {
 /// it with the projected balance instead of being deduplicated away.
 #[test]
 fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
+    assert_eata_projection_replaces_magic_ata(0);
+}
+
+/// A later eATA delegation folds a funded Magic ATA's balance into the
+/// projection, so the wallet ends up with one committable balance.
+#[test]
+fn test_funded_magic_ata_merges_into_eata_projection() {
+    assert_eata_projection_replaces_magic_ata(RECEIVE_AMOUNT);
+}
+
+/// Leaves `kept` tokens in a Magic ATA, then delegates an eATA deposit for
+/// the same wallet and waits for the projection to hold both balances.
+fn assert_eata_projection_replaces_magic_ata(kept: u64) {
     init_logger!();
     let ctx = IntegrationTestContext::try_new().unwrap();
 
@@ -694,14 +707,14 @@ fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
         RECEIVE_AMOUNT,
     );
 
-    // Drain with a plain transfer and leave the Magic ATA open.
+    // Drain down to `kept` with a plain transfer and leave the Magic ATA open.
     let drain_ix = spl_token_ix::transfer(
         &spl_token::id(),
         &destination_ata,
         &source_ata,
         &destination.pubkey(),
         &[],
-        RECEIVE_AMOUNT,
+        RECEIVE_AMOUNT - kept,
     )
     .unwrap();
     let mut tx =
@@ -713,7 +726,7 @@ fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
         )
         .unwrap();
     assert!(confirmed, "drain transaction failed");
-    assert_eq!(token_balance_ephem(&ctx, &destination_ata), Some(0));
+    assert_eq!(token_balance_ephem(&ctx, &destination_ata), Some(kept));
     assert!(ephem_account_is_magic_ata(&ctx, &destination_ata));
 
     // Give the destination a real base ATA and a delegated eATA deposit.
@@ -757,12 +770,13 @@ fn test_magic_ata_drained_without_close_is_replaced_by_eata_projection() {
         .unwrap();
     assert!(confirmed, "base eATA delegation transaction failed");
 
-    // The eATA projection must replace the drained Magic ATA in the ER.
+    // The eATA projection must replace the Magic ATA, keeping its balance.
     let deadline = Instant::now() + Duration::from_secs(20);
-    while token_balance_ephem(&ctx, &destination_ata) != Some(EATA_DEPOSIT) {
+    let merged = Some(EATA_DEPOSIT + kept);
+    while token_balance_ephem(&ctx, &destination_ata) != merged {
         assert!(
             Instant::now() < deadline,
-            "drained Magic ATA was not replaced by the eATA projection"
+            "Magic ATA was not replaced by the eATA projection"
         );
         sleep(Duration::from_millis(250));
     }
@@ -843,9 +857,9 @@ fn test_magic_ata_full_withdrawal() {
 
 /// The SDK's default (non-Magic-ATA-aware) withdrawal shape — ATA create +
 /// eATA init/delegate + ix 26 in one transaction — must also work over a
-/// Magic ATA source: the freshly delegated 0-amount eATA cannot clobber the
-/// funded balance (the projection is deferred until it is drained), so callers
-/// never need to distinguish the two source kinds.
+/// Magic ATA source: the freshly delegated 0-amount eATA projection takes
+/// over the funded balance instead of clobbering it, so callers never need to
+/// distinguish the two source kinds.
 #[test]
 fn test_magic_ata_transparent_withdrawal() {
     init_logger!();

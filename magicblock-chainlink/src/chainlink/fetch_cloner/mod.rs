@@ -20,7 +20,8 @@ use magicblock_accounts_db::traits::AccountsBank;
 use magicblock_aml::RiskService;
 use magicblock_config::config::AllowedProgram;
 use magicblock_core::token_programs::{
-    is_ata, normalize_native_token_account_for_local_clone, EATA_PROGRAM_ID,
+    is_ata, normalize_native_token_account_for_local_clone,
+    try_get_magic_ata_info, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, BankPrecheckOutcome,
@@ -1080,24 +1081,31 @@ where
             .fetch_add(1, Ordering::Relaxed)
     }
 
-    /// Whether a local delegation is authoritative for `pubkey`. A drained
-    /// Magic ATA is delegated but replaceable: its eATA projection must never
-    /// be deduplicated away, or the stale zero balance would hide later eATA
-    /// deposits. Every clone deduper must go through this check.
+    /// Whether a local delegation is authoritative for `pubkey` against an
+    /// incoming clone. A Magic ATA is delegated but replaceable: its eATA
+    /// projection, the only delegated clone of an ATA, folds its balance in,
+    /// and a drained one yields to any clone. Deduplicating either away would
+    /// hide the eATA balance. Every clone deduper must go through this check.
     fn local_delegation_is_authoritative(
         pubkey: &Pubkey,
         account: &AccountSharedData,
+        incoming_delegated: bool,
     ) -> bool {
         account.delegated()
-            && !ata_projection::is_drained_magic_ata(pubkey, account)
+            && !try_get_magic_ata_info(pubkey, account)
+                .is_some_and(|info| incoming_delegated || info.amount == 0)
     }
 
     fn account_is_actively_delegated(
         pubkey: &Pubkey,
         account: &AccountSharedData,
+        incoming_delegated: bool,
     ) -> bool {
-        Self::local_delegation_is_authoritative(pubkey, account)
-            && !account.undelegating()
+        Self::local_delegation_is_authoritative(
+            pubkey,
+            account,
+            incoming_delegated,
+        ) && !account.undelegating()
     }
 
     /// Whether local state makes submission unnecessary: it is authoritative,
@@ -1118,7 +1126,11 @@ where
                 && request.delegated_to_other.is_none()
                 && !request.post_delegation_mode.is_rescue_undelegate();
         if active_delegation_satisfies_request
-            && Self::account_is_actively_delegated(&request.pubkey, &account)
+            && Self::account_is_actively_delegated(
+                &request.pubkey,
+                &account,
+                request.account.delegated(),
+            )
         {
             return true;
         }
@@ -1591,6 +1603,7 @@ where
                             && !owned_request
                                 .post_delegation_mode
                                 .is_rescue_undelegate();
+                    let request_delegated = owned_request.account.delegated();
                     let is_empty_placeholder =
                         Self::is_empty_placeholder_account(
                             &owned_request.account,
@@ -1608,7 +1621,9 @@ where
                         && self.accounts_bank.get_account(&pubkey).is_some_and(
                             |account| {
                                 Self::account_is_actively_delegated(
-                                    &pubkey, &account,
+                                    &pubkey,
+                                    &account,
+                                    request_delegated,
                                 )
                             },
                         );
@@ -2139,7 +2154,7 @@ where
         self.accounts_bank
             .get_account(&pubkey)
             .is_some_and(|account| {
-                Self::local_delegation_is_authoritative(&pubkey, &account)
+                Self::local_delegation_is_authoritative(&pubkey, &account, true)
             })
     }
 

@@ -522,6 +522,76 @@ fn test_clone_account_replaces_drained_magic_ata() {
 }
 
 #[test]
+fn test_clone_account_merges_funded_magic_ata_into_projection() {
+    use magicblock_core::token_programs::{
+        derive_ata, try_get_magic_ata_info, MAGIC_ATA_CLOSE_AUTHORITY,
+        TOKEN_PROGRAM_ID,
+    };
+    use solana_program::{program_option::COption, program_pack::Pack};
+    use spl_token::state::{Account as SplAccount, AccountState};
+
+    init_logger!();
+    let wallet_owner = Pubkey::new_unique();
+    let mint = Pubkey::new_unique();
+    let pubkey = derive_ata(&wallet_owner, &mint);
+    let token = |amount, state, close_authority| {
+        let mut data = vec![0u8; SplAccount::LEN];
+        let account = SplAccount {
+            mint,
+            owner: wallet_owner,
+            amount,
+            state,
+            close_authority,
+            ..SplAccount::default()
+        };
+        SplAccount::pack(account, &mut data).unwrap();
+        data
+    };
+    // Clones an eATA projection of 5 over a Magic ATA holding 7.
+    let clone = |magic_ata_state, delegated, expected| {
+        let mut magic_ata = AccountSharedData::new(0, 0, &TOKEN_PROGRAM_ID);
+        magic_ata.set_data_from_slice(&token(
+            7,
+            magic_ata_state,
+            COption::Some(MAGIC_ATA_CLOSE_AUTHORITY),
+        ));
+        magic_ata.set_delegated(true);
+        let mut accounts = HashMap::from([(pubkey, magic_ata)]);
+        ensure_started_validator(&mut accounts, None);
+        let fields = AccountCloneFields {
+            owner: TOKEN_PROGRAM_ID,
+            delegated,
+            ..clone_fields(200, 1)
+        };
+        let projection = token(5, AccountState::Initialized, COption::None);
+        let ix = InstructionUtils::clone_account_instruction(
+            pubkey,
+            projection,
+            fields,
+            Vec::new(),
+        );
+        process_instruction(
+            &ix.data,
+            tx_accounts(accounts, &ix.accounts),
+            ix.accounts,
+            expected,
+        )
+    };
+
+    let accounts = clone(AccountState::Initialized, true, Ok(()));
+    let merged = &accounts[1];
+    assert!(merged.delegated());
+    assert!(try_get_magic_ata_info(&pubkey, merged).is_none());
+    assert_eq!(SplAccount::unpack(merged.data()).unwrap().amount, 12);
+
+    // A plain copy never clobbers the balance, nor does a projection
+    // unfreeze it.
+    let delegated_err = Err(MagicBlockProgramError::AccountIsDelegated.into());
+    clone(AccountState::Initialized, false, delegated_err.clone());
+    clone(AccountState::Frozen, true, delegated_err);
+}
+
+#[test]
 fn test_clone_account_rejects_ephemeral_account() {
     init_logger!();
     let pubkey = Pubkey::new_unique();

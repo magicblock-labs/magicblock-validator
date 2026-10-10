@@ -215,11 +215,11 @@ where
 
     // eATA updates only carry the projected balance fields. The ATA itself is
     // required so the clone preserves the actual token program owner and any
-    // Token-2022 account layout extensions. A drained Magic ATA is only a
-    // layout of last resort: the base ATA, when it exists, is the source of
-    // truth for rent, state and extensions.
+    // Token-2022 account layout extensions. A Magic ATA is only a layout of
+    // last resort: the base ATA, when it exists, is the source of truth for
+    // rent, state and extensions.
     let mut ata = None;
-    let mut drained_magic_ata = None;
+    let mut magic_ata = None;
     for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
@@ -227,8 +227,10 @@ where
             if is_ata(&candidate_pubkey, &candidate_account).is_none() {
                 continue;
             }
-            if is_drained_magic_ata(&candidate_pubkey, &candidate_account) {
-                drained_magic_ata = Some((candidate_pubkey, candidate_account));
+            if try_get_magic_ata_info(&candidate_pubkey, &candidate_account)
+                .is_some()
+            {
+                magic_ata = Some((candidate_pubkey, candidate_account));
                 continue;
             }
             ata = Some((candidate_pubkey, candidate_account));
@@ -248,23 +250,14 @@ where
             {
                 RemoteAtaLookup::Found(ata) => ata,
                 // Only a confirmed absence may fall back to the local layout;
-                // a failed fetch keeps the drained account until the next update.
-                RemoteAtaLookup::NotFound => drained_magic_ata?,
+                // a failed fetch keeps the Magic ATA until the next update.
+                RemoteAtaLookup::NotFound => magic_ata?,
                 RemoteAtaLookup::Unavailable => return None,
             }
         }
     };
 
     if ata_blocks_projection(&ata_pubkey, &ata) {
-        if try_get_magic_ata_info(&ata_pubkey, &ata).is_some() {
-            warn!(
-                ata = %ata_pubkey,
-                eata = %eata_pubkey,
-                "Funded Magic ATA takes precedence over its base delegation; \
-                 the eATA projection applies once the Magic ATA is drained \
-                 through the shuttle flow"
-            );
-        }
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
@@ -782,23 +775,13 @@ where
     accounts_to_clone
 }
 
-/// A funded Magic ATA takes precedence over a base delegation of the same
-/// ATA: its balance must never be clobbered by a freshly delegated eATA. The
-/// two merge only once the Magic ATA is drained to zero through the shuttle
-/// flow, after which the eATA projection replaces it.
+/// A Magic ATA never blocks the eATA projection of the same ATA: the clone
+/// folds its balance into the projection, so a freshly delegated eATA never
+/// clobbers it. Any other delegated or undelegating ATA does block.
 fn ata_blocks_projection(ata_pubkey: &Pubkey, ata: &AccountSharedData) -> bool {
     ata.undelegating()
-        || (ata.delegated() && !is_drained_magic_ata(ata_pubkey, ata))
-}
-
-/// A Magic ATA that holds no tokens. It stays delegated until closed,
-/// so it must not be mistaken for live delegated state.
-pub(crate) fn is_drained_magic_ata(
-    ata_pubkey: &Pubkey,
-    account: &AccountSharedData,
-) -> bool {
-    try_get_magic_ata_info(ata_pubkey, account)
-        .is_some_and(|info| info.amount == 0)
+        || (ata.delegated()
+            && try_get_magic_ata_info(ata_pubkey, ata).is_none())
 }
 
 #[cfg(test)]
@@ -844,25 +827,12 @@ mod guard_tests {
     }
 
     #[test]
-    fn drained_magic_ata_is_not_live_delegated_state() {
-        let wallet_owner = Pubkey::new_unique();
-        let mint = Pubkey::new_unique();
-        let ata = derive_ata(&wallet_owner, &mint);
-
-        let drained = magic_ata(&wallet_owner, &mint, 0);
-        assert!(is_drained_magic_ata(&ata, &drained));
-
-        let funded = magic_ata(&wallet_owner, &mint, 7);
-        assert!(!is_drained_magic_ata(&ata, &funded));
-    }
-
-    #[test]
-    fn funded_magic_ata_blocks_projection() {
+    fn funded_magic_ata_allows_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
         let account = magic_ata(&wallet_owner, &mint, 7);
-        assert!(ata_blocks_projection(&ata, &account));
+        assert!(!ata_blocks_projection(&ata, &account));
     }
 
     #[test]

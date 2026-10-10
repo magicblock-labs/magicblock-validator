@@ -12499,10 +12499,10 @@ fn insert_magic_ata_in_bank(
     accounts_bank.insert(ata_pubkey, account);
 }
 
-/// A drained Magic ATA is delegated locally but must not deduplicate the eATA
+/// A Magic ATA is delegated locally but must not deduplicate the eATA
 /// projection that replaces it, in any of the clone dedupers.
 #[tokio::test]
-async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
+async fn test_magic_ata_does_not_satisfy_projection_clone_request() {
     let validator_keypair = Keypair::new();
     let wallet_owner = random_pubkey();
     let mint = random_pubkey();
@@ -12524,7 +12524,7 @@ async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
         AccountSharedData::from(create_ata_account(&wallet_owner, &mint));
     projected_ata.set_delegated(true);
     projected_ata.set_remote_slot(CURRENT_SLOT);
-    let request = AccountCloneRequest {
+    let mut request = AccountCloneRequest {
         pubkey: ata_pubkey,
         account: projected_ata,
         commit_frequency_ms: None,
@@ -12554,10 +12554,16 @@ async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
         7,
     );
     assert!(
-        fetch_cloner.local_account_satisfies_clone_request(&request),
-        "funded Magic ATA stays authoritative"
+        !fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA must not deduplicate its eATA projection"
     );
-    assert!(fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+    assert!(!fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+
+    request.account.set_delegated(false);
+    assert!(
+        fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA stays authoritative over plain copies"
+    );
 }
 
 /// The projection that replaces a drained Magic ATA must take its layout from

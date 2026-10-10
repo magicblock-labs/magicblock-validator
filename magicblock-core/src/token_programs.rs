@@ -37,8 +37,8 @@ const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 
 /// A validator-created ER-only token account at the canonical ATA address,
 /// letting a wallet receive tokens before its ATA exists anywhere.
-/// While funded it takes precedence over a base delegation of the same ATA;
-/// the two merge only once it is drained to zero through the shuttle flow.
+/// A base delegation of the same ATA replaces it with the eATA projection,
+/// which takes over its balance.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MagicAtaInfo {
     pub ata_pubkey: Pubkey,
