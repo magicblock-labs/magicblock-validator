@@ -830,3 +830,5 @@ impl MagicblockRpcClient {
         &self.client
     }
 }
+
+mod metrics;

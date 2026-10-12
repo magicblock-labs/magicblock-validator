@@ -1,8 +1,8 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
-use committor_interface::{Chunks, instruction_chunks::chunk_realloc_ixs};
+use crate::metrics;
 use futures_util::future::{join, join_all, try_join_all};
-use metrics::metrics;
+use committor_interface::{Chunks, instruction_chunks::chunk_realloc_ixs};
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,
@@ -62,13 +62,13 @@ impl DeliveryPreparator {
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let uniqueness_nonce = strategy.uniqueness_nonce;
         let preparation_futures = strategy.optimized_tasks.iter_mut().map(|task| async move {
-            let _timer = metrics::observe_committor_intent_task_preparation_time(&*task);
+            let _timer = metrics::time_task(task);
             self.prepare_task_handling_errors(authority, task, uniqueness_nonce).await
         });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations = async {
-            let _timer = metrics::observe_committor_intent_alt_preparation_time();
+            let _timer = metrics::time_alt();
             self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys).await
         };
 

@@ -1,5 +1,6 @@
 use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
+use crate::metrics;
 use async_trait::async_trait;
 use delegation_program_api::{
     delegation_metadata_seeds_from_delegated_account,
@@ -7,7 +8,6 @@ use delegation_program_api::{
     state::{DelegationMetadata, DelegationRecord},
 };
 use lru::LruCache;
-use metrics::metrics;
 use parking_lot::Mutex;
 use rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
@@ -205,7 +205,7 @@ impl RpcTaskInfoFetcher {
             return Ok(Vec::new());
         }
 
-        metrics::inc_task_info_fetcher_a_count();
+        metrics::account_fetch();
         let commitment = rpc_client.commitment();
         let mut accounts = rpc_client
             .get_multiple_accounts_with_config(
@@ -330,6 +330,12 @@ struct CacheInner {
     retiring: HashMap<Pubkey, NonceLock>,
 }
 
+impl Drop for CacheInner {
+    fn drop(&mut self) {
+        metrics::retiring(self.retiring.len(), 0);
+    }
+}
+
 impl CacheInner {
     fn new(capacity: NonZeroUsize) -> Self {
         Self {
@@ -365,6 +371,7 @@ impl<'a> CacheInnerGuard<'a> {
 impl<'a> Drop for CacheInnerGuard<'a> {
     fn drop(&mut self) {
         let mut inner = self.inner.lock();
+        let retiring = inner.retiring.len();
         let nonce_locks = mem::take(&mut self.nonce_locks);
         for (pubkey, lock) in nonce_locks {
             // Drop our clone first so strong_count reflects only other
@@ -377,7 +384,7 @@ impl<'a> Drop for CacheInnerGuard<'a> {
             }
         }
 
-        metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
+        metrics::retiring(retiring, inner.retiring.len());
     }
 }
 
@@ -425,6 +432,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
     /// Resets cache for some or all accounts
     pub fn reset(&self, reset_type: ResetType<'_>) {
         let mut cache = self.cache.lock();
+        let retiring = cache.retiring.len();
         match reset_type {
             ResetType::All => {
                 cache.active.clear();
@@ -437,6 +445,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
                 }
             }
         }
+        metrics::retiring(retiring, cache.retiring.len());
     }
 
     /// Ensures a [`NonceLock`] exists in the cache for each pubkey and returns
@@ -451,6 +460,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
         let mut nonce_locks = vec![];
         {
             let mut inner = self.cache.lock();
+            let retiring = inner.retiring.len();
             for pubkey in pubkeys {
                 let (lock, evicted) = if let Some(val) = inner.active.get(&pubkey) {
                     (val.clone(), None)
@@ -492,7 +502,7 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
 
                 nonce_locks.push((pubkey, lock));
             }
-            metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
+            metrics::retiring(retiring, inner.retiring.len());
         }
 
         CacheInnerGuard { inner: &self.cache, nonce_locks }

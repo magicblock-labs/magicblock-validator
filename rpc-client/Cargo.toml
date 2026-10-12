@@ -12,7 +12,7 @@ doctest = false
 
 [dependencies]
 futures-util = { workspace = true }
-metrics = { workspace = true }
+nucleus = { workspace = true, features = ["metrics"] }
 serde_json = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }

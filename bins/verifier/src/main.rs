@@ -31,7 +31,7 @@ async fn run() -> Result<ShutdownReason> {
     };
     info!(config = ?config, "starting verifier");
 
-    let metrics = metrics::MetricsService::bind(config.metrics.address.0)
+    let metrics = aperture::MetricsService::bind(config.metrics.address.0)
         .await
         .context("failed to bind metrics service")?;
     let mut metrics_shutdown = ShutdownManager::default();

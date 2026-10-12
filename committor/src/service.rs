@@ -1,8 +1,8 @@
 use std::{sync::Arc, time::Duration};
 
+use crate::metrics;
 use engine::Engine;
 use mbv_core::intent::outbox::outbox_intent_pda_with_bump;
-use metrics::metrics;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::AccountMode;
@@ -153,7 +153,7 @@ where
             return Ok(());
         }
 
-        metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
+        metrics::scheduled(intent_bundles.len());
 
         self.processor.schedule_intent_bundles(intent_bundles).await
     }

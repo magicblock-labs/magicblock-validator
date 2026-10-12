@@ -206,13 +206,6 @@ where
             }
         }
 
-        // Gather metrics in separate task
-        let intent_client = self.ctx.intent_client.clone();
-        let result = result.inspect(|output| {
-            let output_copy = *output;
-            tokio::spawn(async move { intent_client.intent_metrics(output_copy).await });
-        });
-
         let close_buffers = result.is_ok();
         let junk = execution_report.junk;
         let result = IntentExecutionResult {

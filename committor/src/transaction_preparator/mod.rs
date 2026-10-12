@@ -1,5 +1,5 @@
+use crate::metrics;
 use async_trait::async_trait;
-use metrics::metrics;
 use rpc_client::MagicblockRpcClient;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
@@ -112,7 +112,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables =
             self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
-        metrics::observe_committor_intent_alt_count(lookup_tables.len());
+        metrics::lookup_tables(lookup_tables.len());
 
         let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             authority,

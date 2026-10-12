@@ -1,7 +1,6 @@
 use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
 use engine::Engine;
 use json::{Deserialize, Serialize};
-use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
 use serde::{Deserializer, de::Error as _};
 use solana_account::{AccountMode, AccountSharedData};
@@ -72,7 +71,6 @@ impl Accounts {
         fetches: &mut u64,
     ) -> RpcResult<TransactionView> {
         let transaction = decode_transaction(transaction, encoding)?;
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["transaction"]).start_timer();
         *fetches += self
             .chainsync
             .ensure_transaction_accounts(&transaction)
@@ -92,7 +90,6 @@ impl Accounts {
 
     /// Account for successful synchronization before any later projection or admission error.
     async fn fetch(&self, pubkeys: &[Pubkey], fetches: &mut u64) -> ChainSyncResult<()> {
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["account"]).start_timer();
         let requests = pubkeys.iter().map(|&pubkey| ChainSyncAccount {
             pubkey,
             property: AccountProperty::Readonly,

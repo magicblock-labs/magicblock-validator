@@ -12,7 +12,6 @@ members = [
     "bins/validator-tui",
     "bins/verifier",
     "aperture",
-    "metrics",
     "chainsync",
     "programs/committor-interface",
     "programs/committor-program",
@@ -62,7 +61,6 @@ unwrap_used = "warn"
 wildcard_dependencies = "deny"
 
 [workspace.dependencies]
-metrics = { package = "magicblock-metrics", path = "metrics" }
 aperture = { package = "magicblock-aperture", path = "aperture" }
 chainsync = { package = "magicblock-chainsync", path = "chainsync" }
 committor-interface = { package = "magicblock-committor-interface", path = "programs/committor-interface" }

@@ -18,3 +18,4 @@ pub(crate) mod utils;
 pub use committor_interface::{ChangedAccount, Changeset, ChangesetMeta};
 pub use compute_budget::ComputeBudgetConfig;
 pub use config::DEFAULT_ACTIONS_TIMEOUT;
+mod metrics;

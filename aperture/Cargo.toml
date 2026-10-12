@@ -18,7 +18,7 @@ hyper-util = { workspace = true, features = ["http1", "http2", "server"] }
 futures = { workspace = true }
 libloading = { workspace = true }
 num_cpus = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 tokio-util = { workspace = true }
 
 # magicblock
@@ -28,8 +28,8 @@ chainsync = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
 ledger-deprecated = { workspace = true }
-metrics = { workspace = true }
-nucleus = { workspace = true, features = ["runtime"] }
+prometheus = { workspace = true }
+nucleus = { workspace = true, features = ["metrics", "runtime"] }
 
 # solana
 agave-geyser-plugin-interface = { workspace = true }

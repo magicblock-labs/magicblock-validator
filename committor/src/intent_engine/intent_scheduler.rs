@@ -1,3 +1,4 @@
+use crate::metrics;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque, hash_map::Entry};
 
 use program::outbox_intent_bundles::OutboxIntentBundle;
@@ -84,7 +85,19 @@ pub(crate) struct IntentScheduler {
     poisoned_keys: HashSet<Pubkey>,
 }
 
+impl Drop for IntentScheduler {
+    fn drop(&mut self) {
+        metrics::poisoned_removed(self.poisoned_keys.len());
+    }
+}
+
 impl IntentScheduler {
+    fn poison(&mut self, pubkeys: impl IntoIterator<Item = Pubkey>) {
+        let before = self.poisoned_keys.len();
+        self.poisoned_keys.extend(pubkeys);
+        metrics::poisoned_added(self.poisoned_keys.len() - before);
+    }
+
     pub(crate) fn new() -> Self {
         Self {
             blocked_keys: HashMap::new(),
@@ -126,7 +139,7 @@ impl IntentScheduler {
                 pubkeys = ?pubkeys,
                 "Intent got poisoned"
             );
-            self.poisoned_keys.extend(pubkeys);
+            self.poison(pubkeys);
             return None;
         }
 
@@ -432,7 +445,7 @@ impl IntentScheduler {
         // Poison intents
         let mut worklist = BTreeSet::new();
         for pubkey in pubkeys {
-            self.poisoned_keys.insert(pubkey);
+            self.poison([pubkey]);
             let Some(queue) = self.blocked_keys.remove(&pubkey) else {
                 return Err(IntentSchedulerError::CorruptedIntentError);
             };
@@ -463,7 +476,7 @@ impl IntentScheduler {
                 }
             }
 
-            self.poisoned_keys.extend(pubkeys);
+            self.poison(pubkeys);
             poisoned.push(meta.intent);
         }
 
@@ -514,10 +527,6 @@ impl IntentScheduler {
     /// Note: this doesn't include "executing" intents
     pub(crate) fn intents_blocked(&self) -> usize {
         self.blocked_intents.len()
-    }
-
-    pub(crate) fn poisoned_keys_count(&self) -> usize {
-        self.poisoned_keys.len()
     }
 }
 
