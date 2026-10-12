@@ -52,6 +52,3 @@ pub const DEFAULT_LEDGER_BLOCK_CACHE_SIZE: u64 = 512 * 1024 * 1024;
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
 pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
-
-/// Default frequency of metrics collection in seconds
-pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
