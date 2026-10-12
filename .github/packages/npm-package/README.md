@@ -36,13 +36,14 @@ services too.
 | `MB_STACK_PUBLIC_PORT` | Application RPC port | `6699` |
 | `MB_STACK_ER_PORT` | Ephemeral validator RPC port | `7799` |
 | `MB_STACK_BASE_PORT` | Base-chain test validator RPC port | `8899` |
-| `MB_STACK_ER_REMOTES` | External base-chain remotes, comma-separated | Local test validator |
+| `MBV_CHAINSYNC__HTTP` | External base-chain HTTP URLs as an array, e.g. `'["https://api.devnet.solana.com"]'` | Local test validator |
 | `MB_STACK_CRANKER_PORT` | hydra-cranker Prometheus/health port (`--cranker`) | `9797` |
 | `MB_STACK_CRANKER_KEYPAIR` | Funded keypair the cranker signs `Trigger` txs with | required with `--cranker` |
 
-Each WebSocket port is its RPC port plus one. Setting `MB_STACK_ER_REMOTES`
+Each WebSocket port is its RPC port plus one. Setting `MBV_CHAINSYNC__HTTP`
 skips the local base-chain validator; the external chain must have the required
-MagicBlock programs and accounts.
+MagicBlock programs and accounts. Configure explicit WebSocket providers and gRPC
+streams through `MBV_CHAINSYNC__WEBSOCKET__PROVIDERS` and `MBV_CHAINSYNC__GRPC`.
 
 Extra arguments go to the base-chain test validator, for example:
 

@@ -1,6 +1,6 @@
-use ::metrics::metrics::{AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME};
-use chainlink::{ProdChainlink, errors::ChainlinkResult};
 use engine::Engine;
+use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
+use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
 use serde::{Deserialize, Deserializer, de::Error as _};
 use solana_account::AccountSharedData;
@@ -21,23 +21,22 @@ pub(crate) mod encoding;
 /// Account synchronization and scoped reads used by fetch-capable RPCs.
 pub(crate) struct Accounts {
     engine: Engine,
-    chainlink: Arc<ProdChainlink>,
+    chainsync: Arc<ChainSync>,
 }
 
 impl Accounts {
-    pub(crate) fn new(engine: Engine, chainlink: Arc<ProdChainlink>) -> Self {
-        Self { engine, chainlink }
+    pub(crate) fn new(engine: Engine, chainsync: Arc<ChainSync>) -> Self {
+        Self { engine, chainsync }
     }
 
     /// Ensure best-effort, then project the account while its borrowed image is scoped.
     pub(crate) async fn read<R>(
         &self,
         pubkey: &Pubkey,
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
+        fetches: &mut u64,
         reader: impl Fn(&AccountSharedData) -> R,
     ) -> Option<R> {
-        self.ensure_one(pubkey, origin, claims).await;
+        self.ensure_one(pubkey, fetches).await;
         self.engine.accounts().loader().read(pubkey, reader).ok().flatten()
     }
 
@@ -45,10 +44,9 @@ impl Accounts {
     pub(crate) async fn ensure_one(
         &self,
         pubkey: &Pubkey,
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) {
-        let _ = self.fetch(&[*pubkey], origin, "account", claims).await;
+        let _ = self.fetch(&[*pubkey], fetches).await;
     }
 
     /// Decode and synchronize transaction keys; unlike account reads, fetch errors reject admission.
@@ -56,50 +54,35 @@ impl Accounts {
         &self,
         transaction: &str,
         encoding: UiTransactionEncoding,
-        kind: TransactionKind,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> RpcResult<TransactionView> {
         let transaction = decode_transaction(transaction, encoding)?;
-        let signature = transaction.signatures()[0];
-        let origin = match kind {
-            TransactionKind::Send => AccountFetchEntrypoint::SendTransaction(signature),
-            TransactionKind::Simulate => AccountFetchEntrypoint::SimulateTransaction(signature),
-        };
-        self.fetch(
-            transaction.static_account_keys(),
-            origin,
-            "transaction",
-            claims,
-        )
-        .await
-        .inspect_err(|error| warn!(?error, "failed to ensure transaction accounts"))
-        .map_err(RpcError::transaction_verification)?;
+        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["transaction"]).start_timer();
+        *fetches += self
+            .chainsync
+            .ensure_transaction_accounts(&transaction)
+            .await
+            .inspect_err(|error| warn!(?error, "failed to ensure transaction accounts"))
+            .map_err(RpcError::transaction_verification)?;
         Ok(transaction)
     }
 
     /// Multi-account RPCs log ensure failures but continue with locally available images.
-    pub(crate) async fn ensure(
-        &self,
-        pubkeys: &[Pubkey],
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
-    ) {
+    pub(crate) async fn ensure(&self, pubkeys: &[Pubkey], fetches: &mut u64) {
         let _ = self
-            .fetch(pubkeys, origin, "multi-account", claims)
+            .fetch(pubkeys, fetches)
             .await
             .inspect_err(|error| warn!(?error, "failed to ensure accounts"));
     }
 
     /// Account for successful synchronization before any later projection or admission error.
-    async fn fetch(
-        &self,
-        pubkeys: &[Pubkey],
-        origin: AccountFetchEntrypoint,
-        scope: &'static str,
-        claims: &mut u64,
-    ) -> ChainlinkResult<()> {
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&[scope]).start_timer();
-        *claims += self.chainlink.ensure_accounts(pubkeys, origin).await?;
+    async fn fetch(&self, pubkeys: &[Pubkey], fetches: &mut u64) -> ChainSyncResult<()> {
+        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["account"]).start_timer();
+        let requests = pubkeys.iter().map(|&pubkey| ChainSyncAccount {
+            pubkey,
+            property: AccountProperty::Readonly,
+        });
+        *fetches += self.chainsync.ensure(requests).await?;
         Ok(())
     }
 }
@@ -164,11 +147,4 @@ impl<'de> Deserialize<'de> for PreparedFilter {
         filter.verify().map_err(D::Error::custom)?;
         Ok(Self(filter))
     }
-}
-
-/// Selects the transaction-specific synchronization origin used for metrics and fetches.
-#[derive(Clone, Copy)]
-pub(crate) enum TransactionKind {
-    Send,
-    Simulate,
 }

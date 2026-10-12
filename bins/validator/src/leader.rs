@@ -4,11 +4,7 @@ use std::{
 };
 
 use aperture::Aperture;
-use chainlink::{
-    ProdChainlink,
-    errors::ChainlinkError,
-    remote_account_provider::{Endpoints, config::RemoteAccountProviderConfig},
-};
+use chainsync::ChainSync;
 use committor::{CommittorConfig, CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT};
 use config::LeaderParams;
 use engine::Engine;
@@ -19,10 +15,7 @@ use nucleus::{
 };
 use replicator::ReplicationDispatcher;
 use runtime::keeper_builder;
-use services::{
-    actions_callback_service::ActionsCallbackService,
-    undelegation_request_service::UndelegationRequestService,
-};
+use services::actions_callback_service::ActionsCallbackService;
 use solana_commitment_config::CommitmentConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_program::{rent::Rent, sysvar};
@@ -41,7 +34,6 @@ use crate::{
 // Leader
 // -----------------
 pub(crate) struct Leader {
-    chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
 }
 
@@ -86,12 +78,10 @@ impl Leader {
 
         let shared_chain_slot = Arc::<AtomicU64>::default();
 
-        let chainlink =
-            Arc::new(Self::init_chainlink(&config, &engine, shared_chain_slot.clone()).await?);
-        timer.record("Chainlink initialized");
+        let chainsync = ChainSync::new(engine.clone(), config.chainsync.clone(), &mut shutdown)?;
 
         let committor =
-            Self::init_committor(&config, &engine, chainlink.clone(), shared_chain_slot);
+            Self::init_committor(&config, &engine, shared_chain_slot);
         timer.record("Committor service initialized");
 
         let metrics = MetricsService::bind(config.metrics.address.0)
@@ -99,16 +89,11 @@ impl Leader {
             .map_err(ApiError::FailedToStartMetricsService)?;
         timer.record("Metrics service bound");
 
-        let undelegation_request_service = UndelegationRequestService::new(
-            chainlink.clone(),
-            engine.clone(),
-            config.chainlink.undelegation_request_poll_interval,
-        );
         let mut rpc_shutdown = shutdown.handle(Service::Rpc);
         let rpc = Aperture::bind(
             &config.aperture,
             engine.clone(),
-            chainlink.clone(),
+            chainsync,
             Arc::new(ledger),
             config.engine.blockstore.blocktime,
             rpc_shutdown.child(),
@@ -143,10 +128,6 @@ impl Leader {
             shutdown.handle(Service::OnchainSetup),
         );
 
-        tokio::spawn(
-            undelegation_request_service.run(shutdown.handle(Service::UndelegationRequests)),
-        );
-        timer.record("Undelegation request service started");
         tokio::spawn(committor.run(shutdown.handle(Service::IntentExecution)));
         timer.record("Intent execution service started");
         tokio::spawn(task_scheduler.run(shutdown.handle(Service::TaskScheduler)));
@@ -156,14 +137,13 @@ impl Leader {
         drop(timer);
 
         info!(%rpc_bind, %ws_bind, "Leader services started");
-        Ok(Self { chainlink, shutdown })
+        Ok(Self { shutdown })
     }
 
     fn init_committor(
         config: &LeaderParams,
         engine: &Engine,
-        chainlink: Arc<ProdChainlink>,
-        chain_slot: Arc<AtomicU64>,
+            chain_slot: Arc<AtomicU64>,
     ) -> CommittorService {
         let er_rpc = Arc::new(RpcClient::new(config.aperture.listen.http()));
         let callbacks = Arc::new(ActionsCallbackService::new(er_rpc, engine.clone()));
@@ -178,34 +158,8 @@ impl Leader {
             },
             chain_slot,
             engine.clone(),
-            chainlink,
             callbacks,
         )
-    }
-
-    #[instrument(skip_all)]
-    async fn init_chainlink(
-        config: &LeaderParams,
-        engine: &Engine,
-        chain_slot: Arc<AtomicU64>,
-    ) -> ApiResult<ProdChainlink> {
-        let endpoints =
-            Endpoints::try_from(config.remotes.as_slice()).map_err(ChainlinkError::from)?;
-
-        let provider_config = RemoteAccountProviderConfig::default()
-            .with_resubscription_delay(config.chainlink.resubscription_delay)
-            .map_err(ChainlinkError::from)?
-            .with_grpc(config.grpc.clone());
-        ProdChainlink::try_new_from_endpoints(
-            &endpoints,
-            CommitmentConfig::confirmed(),
-            engine.clone(),
-            provider_config,
-            &config.chainlink,
-            chain_slot,
-        )
-        .await
-        .map_err(ApiError::from)
     }
 
     // -----------------
@@ -402,7 +356,6 @@ impl Leader {
     #[instrument(skip(self))]
     pub(crate) async fn wait(mut self) -> ShutdownReason {
         let reason = self.shutdown.wait().await;
-        self.chainlink.shutdown().await;
         reason.combine(self.shutdown.terminate().await)
     }
 }

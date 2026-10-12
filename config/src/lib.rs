@@ -10,7 +10,7 @@ use std::{
 use clap::{Error as CliError, Parser};
 use config::{
     EngineConfig, FollowerReplication, LeaderReplication, aperture::ApertureConfig, cli::CliParams,
-    grpc::GrpcConfig, metrics::MetricsConfig,
+    metrics::MetricsConfig,
 };
 use figment::{
     Error as FigmentError, Figment, Profile,
@@ -28,10 +28,10 @@ pub mod consts;
 mod tests;
 pub mod types;
 
-use crate::{
-    config::{ChainLinkConfig, CommittorConfig, LedgerConfig, LoadableProgram},
-    types::Remote,
+use crate::config::{
+    ChainSyncConfig, CommittorConfig, LedgerConfig, LoadableProgram, WebSocketProvider,
 };
+use crate::types::network::websocket_url;
 
 const VERIFIER_ENV_VAR_PREFIX: &str = "MBV_VERIFIER_";
 
@@ -53,15 +53,8 @@ pub struct LeaderParams {
     /// Path to the TOML configuration file (overrides CLI args).
     pub config: Option<PathBuf>,
 
-    /// Remote endpoints for syncing with the base chain.
-    /// Can include HTTP (for JSON-RPC), WebSocket (for PubSub), and gRPC (for streaming) connections.
-    pub remotes: Vec<Remote>,
-
     /// Listen address for the metrics endpoint.
     pub metrics: MetricsConfig,
-
-    /// Global configuration for gRPC-based providers.
-    pub grpc: GrpcConfig,
 
     /// Engine storage, execution, identity, and replication configuration.
     pub engine: EngineConfig<LeaderReplication>,
@@ -72,7 +65,8 @@ pub struct LeaderParams {
     // --- File-Only Configuration ---
     pub commit: CommittorConfig,
     pub ledger: LedgerConfig,
-    pub chainlink: ChainLinkConfig,
+    /// Provider capacities, lifecycle streams, and signer assessment for account synchronization.
+    pub chainsync: ChainSyncConfig,
     pub programs: Vec<LoadableProgram>,
 }
 
@@ -137,8 +131,7 @@ impl LeaderParams {
                 "engine.authority.remote is reserved for follower validators",
             )));
         }
-        self.ensure_http();
-        self.ensure_websocket();
+        self.ensure_providers();
         self.ensure_valid_aperture_listen()?;
         Ok(self)
     }
@@ -157,69 +150,31 @@ impl LeaderParams {
         Ok(())
     }
 
-    /// Ensures at least one HTTP endpoint is configured.
-    /// If no HTTP remote is present, adds the default HTTP remote (devnet).
-    // The built-in devnet URL is a fixed, validated constant.
+    /// Fills omitted HTTP and WebSocket providers directly in the synchronization config.
     #[allow(clippy::unwrap_used)]
-    fn ensure_http(&mut self) {
-        let mut remotes = self.remotes.iter();
-        if remotes.any(|r| matches!(r, Remote::Http(_))) {
-            return;
+    fn ensure_providers(&mut self) {
+        if self.chainsync.http.is_empty() {
+            self.chainsync.http.push(consts::DEFAULT_REMOTE.parse().unwrap());
         }
-        self.remotes.push(Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap()));
-    }
-
-    /// Ensures at least one WebSocket endpoint is configured.
-    /// If no WebSocket remote is present, derives one from the first HTTP remote.
-    /// This satisfies the requirement for a subscription-capable endpoint.
-    #[allow(clippy::unwrap_used)]
-    fn ensure_websocket(&mut self) {
-        // Check if a websocket remote already exists
-        if self.remotes.iter().any(|r| matches!(r, Remote::Websocket(..))) {
-            return;
-        }
-
-        // Find the first HTTP remote and convert it to WebSocket
-        if let Some(websocket) = self
-            .remotes
-            .iter()
-            .find(|r| matches!(r, Remote::Http(_)))
-            .and_then(|r| r.to_websocket())
-        {
-            self.remotes.push(websocket);
-        } else {
-            // Fallback: if no HTTP remote exists (unexpected, since ensure_http() was called first),
-            // create a default WebSocket remote from the default HTTP remote.
-            let default_http = Remote::Http(consts::DEFAULT_REMOTE.parse().unwrap());
-            if let Some(default_websocket) = default_http.to_websocket() {
-                self.remotes.push(default_websocket);
-            }
+        if self.chainsync.websocket.0.is_empty() {
+            let url = websocket_url(self.chainsync.http[0].clone());
+            self.chainsync.websocket.0.push(WebSocketProvider {
+                url,
+                max_connections: 4,
+                subs_per_connection: 900,
+            });
         }
     }
 
     /// Returns the first HTTP remote URL for JSON-RPC calls.
     /// Falls back to the default remote if none is configured.
     pub fn rpc_url(&self) -> &str {
-        self.remotes
-            .iter()
-            .find_map(|r| matches!(r, Remote::Http(_)).then(|| r.url_str()))
-            .unwrap_or(consts::DEFAULT_REMOTE)
+        self.chainsync.http.first().map_or(consts::DEFAULT_REMOTE, |url| url.as_str())
     }
 
-    /// Returns an iterator over all WebSocket remote URLs.
+    /// Returns configured WebSocket URLs.
     pub fn websocket_urls(&self) -> impl Iterator<Item = &str> + '_ {
-        self.remotes
-            .iter()
-            .filter(|r| matches!(r, Remote::Websocket(..)))
-            .map(|r| r.url_str())
-    }
-
-    /// Returns an iterator over all gRPC remote URLs for streaming subscriptions.
-    pub fn grpc_urls(&self) -> impl Iterator<Item = &str> + '_ {
-        self.remotes
-            .iter()
-            .filter(|r| matches!(r, Remote::Grpc(_)))
-            .map(|r| r.url_str())
+        self.chainsync.websocket.0.iter().map(|provider| provider.url.as_str())
     }
 }
 
@@ -268,16 +223,14 @@ impl fmt::Display for LeaderParams {
             engine.replication.allowed_followers.len(),
             self.metrics.address,
             self.aperture.geyser_plugins.len(),
-            self.chainlink.risk.enabled,
+            self.chainsync.aml.is_some(),
         )?;
         let mut upstreams = f.debug_list();
-        for remote in &self.remotes {
-            let (protocol, url) = match remote {
-                Remote::Http(url) => ("HTTP", url),
-                Remote::Websocket(url, _) => ("WS", url),
-                Remote::Grpc(url) => ("gRPC", url),
-            };
-            let host = &url.0[Position::BeforeHost..Position::AfterPort];
+        let remotes = self.chainsync.http.iter().map(|url| ("HTTP", url))
+            .chain(self.chainsync.websocket.0.iter().map(|provider| ("WS", &provider.url)))
+            .chain(self.chainsync.grpc.iter().map(|stream| ("gRPC", &stream.endpoint)));
+        for (protocol, url) in remotes {
+            let host = &url[Position::BeforeHost..Position::AfterPort];
             upstreams.entry(&format_args!("{protocol}:{host}"));
         }
         upstreams.finish()?;

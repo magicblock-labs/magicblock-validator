@@ -1,4 +1,3 @@
-use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     parse_account_data::SplTokenAdditionalDataV2,
@@ -20,7 +19,7 @@ impl RpcHandlers {
     pub(crate) async fn get_token_account_balance(
         &self,
         request: &JsonRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
         let reader = |account: &AccountSharedData| {
@@ -35,15 +34,7 @@ impl RpcHandlers {
             Ok((*account.owner(), token.base.mint, token.base.amount))
         };
 
-        let token_account = self
-            .accounts
-            .read(
-                &pubkey,
-                AccountFetchEntrypoint::RpcGetAccount,
-                claims,
-                reader,
-            )
-            .await;
+        let token_account = self.accounts.read(&pubkey, fetches, reader).await;
         let (token_owner, mint, amount) =
             token_account.ok_or_else(|| RpcError::invalid_params("token account not found"))??;
         let reader = |account: &AccountSharedData| {
@@ -58,10 +49,7 @@ impl RpcHandlers {
             Ok(mint.base.decimals)
         };
 
-        let mint_account = self
-            .accounts
-            .read(&mint, AccountFetchEntrypoint::RpcGetAccount, claims, reader)
-            .await;
+        let mint_account = self.accounts.read(&mint, fetches, reader).await;
         let decimals =
             mint_account.ok_or_else(|| RpcError::invalid_params("mint account not found"))??;
 
