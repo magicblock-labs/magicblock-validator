@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod http;
+pub(crate) mod websocket;
 use base64::{Engine, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use solana_account::{AccountBuilder, StateFlags};
