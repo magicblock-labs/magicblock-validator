@@ -17,7 +17,6 @@ members = [
     "config",
     "core",
     "ledger",
-    "metrics",
     "programs/committor-interface",
     "programs/committor-program",
     "programs/magic-interface",
@@ -62,7 +61,6 @@ unwrap_used = "warn"
 wildcard_dependencies = "deny"
 
 [workspace.dependencies]
-metrics = { package = "magicblock-metrics", path = "metrics" }
 aperture = { package = "magicblock-aperture", path = "aperture" }
 chainsync = { package = "magicblock-chainsync", path = "chainsync" }
 committor = { package = "magicblock-committor-service", path = "committor" }

@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
+use crate::metrics;
 use futures_util::StreamExt;
-use metrics::metrics;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -115,7 +115,7 @@ impl SignatureConfirmer {
         let pubsub_client = match timeout(fallback_delay, self.pubsub_client()).await {
             Ok(Some(pubsub_client)) => pubsub_client,
             Ok(None) => {
-                metrics::inc_rpc_client_signature_ws_fallback_count();
+                metrics::fallback();
                 return self
                     .wait_with_batched_polling(
                         signature,
@@ -130,7 +130,7 @@ impl SignatureConfirmer {
                     signature = %signature,
                     "Signature confirmation websocket connection timed out; falling back to batched polling"
                 );
-                metrics::inc_rpc_client_signature_ws_fallback_count();
+                metrics::fallback();
                 return self
                     .wait_with_batched_polling(
                         signature,
@@ -160,7 +160,7 @@ impl SignatureConfirmer {
                     error = ?err,
                     "Signature confirmation websocket subscription failed; falling back to batched polling"
                 );
-                metrics::inc_rpc_client_signature_ws_fallback_count();
+                metrics::fallback();
                 self.clear_pubsub_client().await;
                 return self
                     .wait_with_batched_polling(
@@ -176,7 +176,7 @@ impl SignatureConfirmer {
                     signature = %signature,
                     "Signature confirmation websocket subscription timed out; falling back to batched polling"
                 );
-                metrics::inc_rpc_client_signature_ws_fallback_count();
+                metrics::fallback();
                 return self
                     .wait_with_batched_polling(
                         signature,
@@ -188,12 +188,12 @@ impl SignatureConfirmer {
             }
         };
         let mut unsubscribe = Some(unsubscribe);
-        metrics::inc_rpc_client_signature_ws_subscribe_count();
+        metrics::subscribe();
 
         let fallback_delay = fallback_delay.saturating_sub(start.elapsed());
         let fallback = async {
             sleep(fallback_delay).await;
-            metrics::inc_rpc_client_signature_ws_fallback_count();
+            metrics::fallback();
             let remaining = timeout_duration.saturating_sub(start.elapsed());
             self.wait_with_batched_polling(signature, commitment, remaining, poll_interval)
                 .await
@@ -209,7 +209,7 @@ impl SignatureConfirmer {
                                 if let Some(unsubscribe) = unsubscribe.take() {
                                     unsubscribe().await;
                                 }
-                                metrics::inc_rpc_client_signature_ws_notification_count();
+                                metrics::notification();
                                 return Some(status);
                             }
                         }
@@ -376,8 +376,7 @@ impl SignatureConfirmer {
     ) -> Vec<(Signature, TransactionStatus)> {
         let mut fetched = Vec::new();
         for chunk in signatures.chunks(self.config.batch_size) {
-            metrics::inc_rpc_client_signature_status_batch_count();
-            metrics::inc_rpc_client_signature_status_batch_signatures_count(chunk.len() as u64);
+            metrics::status_batch(chunk.len());
             match self.rpc_client.get_signature_statuses(chunk).await {
                 Ok(response) => {
                     fetched.extend(chunk.iter().copied().zip(response.value).filter_map(
