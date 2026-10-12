@@ -8,7 +8,20 @@
 mod account;
 #[cfg_attr(
     not(test),
-    expect(dead_code, reason = "Service assembly consumes HTTP fetches in a later layer")
+    expect(
+        dead_code,
+        reason = "Service assembly consumes restored delegations in a later layer"
+    )
+)]
+mod delegation;
+#[expect(
+    dead_code,
+    reason = "Service assembly consumes this private component in a later stack layer"
+)]
+mod grpc;
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "Service assembly consumes HTTP snapshots in a later layer")
 )]
 mod http;
 #[expect(
@@ -23,6 +36,7 @@ mod rpc;
 )]
 mod websocket;
 use account::AccountSubscription;
+pub use grpc::{Error as GrpcError, StreamConfig as GrpcStreamConfig};
 pub use http::Error as HttpError;
 pub use rpc::{DecodeError, Error as RpcError};
 pub use websocket::{

@@ -256,6 +256,12 @@ webpki-roots = "1"
 
 ahash = "0.8"
 
+smallvec = "1"
+yellowstone-grpc-client = "13.5.1"
+yellowstone-grpc-proto = "12.7.0"
+yellowstone-grpc-geyser = { git = "https://github.com/rpcpool/yellowstone-grpc.git", rev = "5e76c224f693ddb71ee442aa55372a9c4a5f9cee" }
+yellowstone-plugin-proto = { package = "yellowstone-grpc-proto", git = "https://github.com/rpcpool/yellowstone-grpc.git", rev = "5e76c224f693ddb71ee442aa55372a9c4a5f9cee", features = ["account-data-as-bytes"] }
+
 [patch.crates-io]
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 
