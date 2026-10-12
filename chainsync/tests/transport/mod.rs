@@ -2,10 +2,14 @@
 
 pub(crate) mod http;
 pub(crate) mod websocket;
+pub(crate) mod yellowstone;
 use base64::{Engine, engine::general_purpose::STANDARD};
+use dlp_api::{pda::delegation_record_pda_from_delegated_account, state::DelegationRecord};
 use serde_json::{Value, json};
 use solana_account::{AccountBuilder, StateFlags};
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
+use std::sync::Arc;
 use std::{future::Future, time::Duration};
 use tokio::time;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -40,6 +44,7 @@ fn rpc_result(id: &Value, result: impl Into<Value>) -> Value {
     json!({"jsonrpc": RPC_VERSION, "id": id, "result": result.into()})
 }
 
+use yellowstone_grpc_geyser::plugin::message::{Message, MessageAccount, MessageAccountInfo};
 /// Bounds a scenario's event-driven handshakes, including cleanup.
 pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 
@@ -107,6 +112,26 @@ impl Account {
         json!({"owner": self.owner.to_string(), "lamports": self.lamports,
             "executable": self.executable, "data": [STANDARD.encode(compressed), "base64+zstd"]})
     }
+
+    /// Plugin input image with a transaction signature, eligible for DLP account filters.
+    pub(crate) fn geyser(&self, slot: u64) -> Message {
+        Message::Account(Arc::new(MessageAccount {
+            account: MessageAccountInfo {
+                pubkey: self.key,
+                owner: self.owner,
+                lamports: self.lamports,
+                data: self.data.clone().into(),
+                executable: self.executable,
+                rent_epoch: 0,
+                write_version: slot,
+                txn_signature: Some(Default::default()),
+                pre_encoded: Default::default(),
+            },
+            slot,
+            is_startup: false,
+            created_at: Default::default(),
+        }))
+    }
 }
 
 /// Fails a stalled handshake instead of relying on sleeps or yield counts.
@@ -122,4 +147,39 @@ pub(crate) async fn scripted<T>(
     script: impl Future<Output = ()>,
 ) -> T {
     within(async { tokio::join!(operation, script).0 }).await
+}
+
+/// Application and canonical record images shared by all provider encoders.
+pub(crate) fn delegation(
+    key: Pubkey,
+    owner: Pubkey,
+    authority: Pubkey,
+    slot: u64,
+    actions: &[Instruction],
+) -> (Account, Account) {
+    use dlp_api::compact::ClearText;
+    let mut account = Account::new(key);
+    account.owner = dlp_api::id();
+    account.data = V42_INITIAL.to_le_bytes().to_vec();
+    let metadata = DelegationRecord {
+        owner,
+        authority,
+        delegation_slot: slot,
+        lamports: account.lamports,
+        commit_frequency_ms: 1,
+    };
+    let mut record = Account::new(delegation_record_pda_from_delegated_account(&key));
+    record.owner = dlp_api::id();
+    record.data = encode_record(&metadata);
+    if !actions.is_empty() {
+        record.data.extend(borsh::to_vec(&actions.to_vec().cleartext()).unwrap());
+    }
+    (account, record)
+}
+
+/// Canonical record header shared by ordinary and eATA delegation fixtures.
+fn encode_record(metadata: &DelegationRecord) -> Vec<u8> {
+    let mut data = vec![0; DelegationRecord::size_with_discriminator()];
+    metadata.to_bytes_with_discriminator(&mut data).unwrap();
+    data
 }
