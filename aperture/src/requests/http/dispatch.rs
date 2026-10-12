@@ -8,7 +8,7 @@ impl RpcHandlers {
     pub(crate) async fn process(
         &self,
         request: &JsonHttpRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
@@ -17,8 +17,8 @@ impl RpcHandlers {
         let _timer = RPC_REQUEST_HANDLING_TIME.with_label_values(&[method]).start_timer();
 
         match request.method {
-            GetAccountInfo => self.get_account_info(request, claims).await,
-            GetBalance => self.get_balance(request, claims).await,
+            GetAccountInfo => self.get_account_info(request, fetches).await,
+            GetBalance => self.get_balance(request, fetches).await,
             GetBlock => self.get_block(request).await,
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_slot(request),
@@ -36,7 +36,7 @@ impl RpcHandlers {
             GetIdentity => self.get_identity(request),
             GetLargestAccounts => self.mock_empty_context(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
-            GetMultipleAccounts => self.get_multiple_accounts(request, claims).await,
+            GetMultipleAccounts => self.get_multiple_accounts(request, fetches).await,
             GetProgramAccounts => self.get_program_accounts(request),
             GetRecentPerformanceSamples => self.get_recent_performance_samples(request),
             GetSignatureStatuses => self.get_signature_statuses(request).await,
@@ -45,7 +45,7 @@ impl RpcHandlers {
             GetSlotLeader => self.get_slot_leader(request),
             GetSlotLeaders => self.get_slot_leaders(request),
             GetSupply => self.get_supply(request),
-            GetTokenAccountBalance => self.get_token_account_balance(request, claims).await,
+            GetTokenAccountBalance => self.get_token_account_balance(request, fetches).await,
             GetTokenAccountsByDelegate => {
                 self.get_token_accounts(request, TokenAccountAuthority::Delegate)
             }
@@ -61,12 +61,12 @@ impl RpcHandlers {
             IsBlockhashValid => self.is_blockhash_valid(request),
             MinimumLedgerSlot => self.mock_zero(request),
             RequestAirdrop => self.request_airdrop(request).await,
-            SendTransaction => self.send_transaction(request, claims).await,
-            SimulateTransaction => self.simulate_transaction(request, claims).await,
+            SendTransaction => self.send_transaction(request, fetches).await,
+            SimulateTransaction => self.simulate_transaction(request, fetches).await,
             GetRoutes => self.mock_empty(request),
             // Alias for getLatestBlockhash; exists for Magic Router SDK compatibility.
             GetBlockhashForAccounts => self.get_latest_blockhash(request),
-            GetDelegationStatus => self.get_delegation_status(request, claims).await,
+            GetDelegationStatus => self.get_delegation_status(request, fetches).await,
             MethodNotFound => Err(RpcError::method_not_found()),
         }
     }

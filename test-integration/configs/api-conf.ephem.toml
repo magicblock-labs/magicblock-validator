@@ -1,4 +1,3 @@
-remotes = ["http://127.0.0.1:7799", "ws://127.0.0.1:7800"]
 
 [aperture]
 listen = "0.0.0.0:8899"
@@ -17,3 +16,11 @@ blocktime = "50ms"
 
 [metrics]
 address = "0.0.0.0:9000"
+
+[chainsync]
+http = ["http://127.0.0.1:7799"]
+
+[[chainsync.websocket]]
+url = "ws://127.0.0.1:7800"
+max-connections = 4
+subs-per-connection = 900

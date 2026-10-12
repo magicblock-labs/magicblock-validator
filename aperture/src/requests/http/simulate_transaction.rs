@@ -1,8 +1,6 @@
-use crate::account::TransactionKind;
 use crate::transaction::{live_inner_instructions, replace_blockhash};
 use std::{collections::HashMap, sync::Arc};
 
-use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -22,7 +20,7 @@ impl RpcHandlers {
     pub(crate) async fn simulate_transaction(
         &self,
         request: &JsonRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         let transaction_str = request.required::<&str>(0)?;
         let config = request.optional::<RpcSimulateTransactionConfig>(1)?.unwrap_or_default();
@@ -33,10 +31,8 @@ impl RpcHandlers {
         }
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let mut transaction = self
-            .accounts
-            .prepare_transaction(transaction_str, encoding, TransactionKind::Simulate, claims)
-            .await?;
+        let mut transaction =
+            self.accounts.prepare_transaction(transaction_str, encoding, fetches).await?;
         let number_of_accounts = transaction.static_account_keys().len();
 
         let replacement_blockhash = if config.replace_recent_blockhash {
@@ -95,13 +91,7 @@ impl RpcHandlers {
                     .map(|address| address.parse::<Pubkey>().map_err(RpcError::invalid_params))
                     .collect::<Result<Vec<_>, _>>()?;
                 // Keep synchronization and claim accounting even for simulated images.
-                self.accounts
-                    .ensure(
-                        &pubkeys,
-                        AccountFetchEntrypoint::RpcGetMultipleAccounts,
-                        claims,
-                    )
-                    .await;
+                self.accounts.ensure(&pubkeys, fetches).await;
                 let post_accounts = post_accounts.into_iter().collect::<HashMap<_, _>>();
                 let accessor = self.engine.accounts();
                 let loader = accessor.loader();

@@ -1,4 +1,3 @@
-use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 
@@ -11,19 +10,11 @@ impl RpcHandlers {
     pub(crate) async fn get_balance(
         &self,
         request: &JsonRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
 
-        let account = self
-            .accounts
-            .read(
-                &pubkey,
-                AccountFetchEntrypoint::RpcGetAccount,
-                claims,
-                |account| account.lamports(),
-            )
-            .await;
+        let account = self.accounts.read(&pubkey, fetches, |account| account.lamports()).await;
         let balance = account.unwrap_or_default();
 
         let slot = self.engine.blocks().latest().slot;

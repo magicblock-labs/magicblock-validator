@@ -20,76 +20,11 @@
 
 # --- Core Settings ---
 
-# Remote endpoints for syncing with the base chain.
-# You can specify multiple remotes of different types.
-# The first HTTP/HTTPS remote will be used for JSON-RPC calls.
-# Each WebSocket/gRPC remote creates a subscription client.
-#
-# Supported URL schemes:
-# - "http", "https":  JSON-RPC HTTP connections
-# - "ws", "wss":      WebSocket connections for PubSub
-# - "grpc", "grpcs":  gRPC connections for streaming
-#
-# URL Aliases (resolved during parsing):
-# - "mainnet":   resolves to https://api.mainnet-beta.solana.com/
-# - "devnet":    resolves to https://api.devnet.solana.com/
-# - "testnet":   resolves to https://api.testnet.solana.com/
-# - "localhost": resolves to http://localhost:8899/ (only for http/https schemes)
-#
-# Examples:
-# remotes = ["devnet"]                                    # Single devnet HTTP endpoint
-# remotes = ["mainnet", "wss://mainnet-beta.solana.com"] # Mainnet with explicit WebSocket
-# remotes = ["http://localhost:8899", "ws://localhost:8900"] # Local endpoints
-#
-# If no remotes are specified, defaults to ["devnet"] with an auto-added WebSocket endpoint.
-# Default: ["https://api.devnet.solana.com/"]
-# Env: Not supported (must be configured via TOML or CLI)
-# Note: gRPC remote requires a Helius API key/token.
-# Example format: grpcs://<network>.helius-rpc.com?api-key=<YOUR_API_KEY>
-# See Helius gRPC docs for available network endpoints.
-#
-# A WebSocket remote may also be written as a table to cap subscriptions
-# per connection for that endpoint (overrides chainlink.ws-subs-per-connection):
-# remotes = [{ url = "wss://api.devnet.solana.com", ws-subs-per-connection = 100 }]
-remotes = [
-    "grpcs://laserstream-devnet-ewr.helius-rpc.com?api-key=YOUR_API_KEY",
-    "https://api.devnet.solana.com",
-    "wss://api.devnet.solana.com"
-]
-
 [metrics]
 # Network address to bind the metrics service to.
 # Default: "127.0.0.1:9090"
 # Env: MBV_METRICS__ADDRESS
 address = "127.0.0.1:9090"
-
-# Frequency at which to collect metrics. Supports humantime (e.g. "30s", "1m").
-# Default: "30s"
-# Env: MBV_METRICS__COLLECT_FREQUENCY
-collect-frequency = "30s"
-
-# ==============================================================================
-# gRPC (applies to all gRPC providers)
-# ==============================================================================
-[grpc]
-# The maximum number of subscriptions that are added to a single optimized stream
-# Default: 5000
-# Env: MBV_GRPC__MAX_SUBS_IN_OLD_OPTIMIZED
-max-subs-in-old-optimized = 5000
-# The maximum number of old unoptimized subscriptions streams allowed until optimization is triggered
-# Default: 5
-# Env: MBV_GRPC__MAX_OLD_UNOPTIMIZED
-max-old-unoptimized = 5
-# The maximum number of subscriptions held in the current new stream which is updated frequently
-# Default: 400
-# Env: MBV_GRPC__MAX_SUBS_IN_NEW
-max-subs-in-new = 400
-
-# Maximum time without optimization before triggering optimization (in seconds)
-# if not triggered by exceeding max-old-unoptimized.
-# If not provided it defaults to 60 seconds.
-# Env: MBV_GRPC__MAX_TIME_WITHOUT_OPTIMIZATION_SECS
-max-time-without-optimization-secs = 60
 
 # ==============================================================================
 # Engine
@@ -165,64 +100,30 @@ reset = false
 
 
 # ==============================================================================
-# Chainlink (cloning pipeline)
+# ChainSync (base-chain account acquisition and lifecycle updates)
 # ==============================================================================
-[chainlink]
-# Maximum number of accounts to monitor for price updates.
-# Default: 5000
-# Env: MBV_CHAINLINK__MAX_MONITORED_ACCOUNTS
+[chainsync]
+# All providers must serve the same base chain. The first HTTP URL also serves
+# settlement and operator RPC calls. Omitted HTTP defaults to devnet; omitted
+# WebSocket providers are derived from the first HTTP URL.
+http = ["https://api.devnet.solana.com"]
 
-# Delay between resubscribing to accounts after a pubsub reconnection.
-# This throttles the rate at which we resubscribe to prevent overwhelming the RPC provider.
-# Supports humantime format (e.g. "50ms", "200ms", "1s").
-# For example, with 50ms delay, resubscribing to 1000 accounts would take ~50 seconds.
-# Default: "50ms"
-# Env: MBV_CHAINLINK__RESUBSCRIPTION_DELAY
-# resubscription-delay = "50ms"
+[[chainsync.websocket]]
+url = "wss://api.devnet.solana.com"
+max-connections = 4
+subs-per-connection = 900
+# Every stream monitors delegation lifecycle events and Clock.
+# Duplication delay must be nonzero and is configured per stream.
+[[chainsync.grpc]]
+endpoint = "https://laserstream-devnet-ewr.helius-rpc.com"
+token = "YOUR_API_KEY"
+duplication-delay = "30m"
 
-# Period for polling DLP-owned UndelegationRequest accounts as a backfill for
-# missed subscription updates. Set to "0s" to disable polling.
-# Default: "5m"
-# Env: MBV_CHAINLINK__UNDELEGATION_REQUEST_POLL_INTERVAL
-# undelegation-request-poll-interval = "5m"
-
-# Maximum subscriptions per websocket connection.
-# Default: 900
-# Env: MBV_CHAINLINK__WS_SUBS_PER_CONNECTION
-# ws-subs-per-connection = 900
-
-# ------------------------------------------------------------------------------
-# Optional: Range Risk API validation for post-delegation actions signers
-# ------------------------------------------------------------------------------
-# When enabled, all signers referenced by post-delegation actions are checked
-# against Range API before actions are allowed to execute.
-[chainlink.risk]
-# Enables/disables address risk checks against the risk server.
-# Default: false
-# Env: MBV_CHAINLINK__RISK__ENABLED
-enabled = false
-
-# Base URL of the risk server that performs address risk assessments.
-# The risk server owns the upstream provider credentials, cache, and threshold.
-# Default: "http://127.0.0.1:3001"
-# Env: MBV_CHAINLINK__RISK__RISK_SERVER_URL
-risk-server-url = "http://127.0.0.1:3001"
-
-# HTTP timeout for risk server calls.
-# Default: "5s"
-# Env: MBV_CHAINLINK__RISK__REQUEST_TIMEOUT
-request-timeout = "5s"
-
-# Which post-delegation action signers to risk check.
-#   "all-signers":       check every signer of every action (conservative).
-#   "relevant-programs": only check when an action involves a value
-#                        transferring program: SPL Token (legacy and 2022),
-#                        ephemeral SPL (eATA/ESPL), Magic, or the (ephemeral)
-#                        system program. Actions touching none of these
-#                        activate without any risk server call.
-# Default: "all-signers"
-# Env: MBV_CHAINLINK__RISK__CHECK_STRATEGY
-check-strategy = "all-signers"
+# Optional signer assessment; all distinct post-delegation action signers are checked.
+# Supply the full /risk endpoint. HTTPS is required except for loopback HTTP.
+# [chainsync.aml]
+# endpoint = "http://127.0.0.1:3001/risk"
+# timeout = "5s"
 
 # ==============================================================================
 # Pre-loaded Programs

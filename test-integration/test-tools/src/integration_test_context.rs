@@ -1199,24 +1199,17 @@ impl IntegrationTestContext {
             .into_string()
             .map_err(|e| anyhow::anyhow!("Failed to read metrics response: {}", e))?;
 
+        let mut count = 0;
         for line in response.lines() {
-            if line.starts_with("mbv_monitored_accounts ") {
-                let value_str = line
+            if line.starts_with("engine_chainsync_coverage{") {
+                let value = line
                     .split_whitespace()
                     .nth(1)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to parse monitored_accounts metric"))?;
-                return value_str.parse::<usize>().map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to parse monitored_accounts value '{}': {}",
-                        value_str,
-                        e
-                    )
-                });
+                    .ok_or_else(|| anyhow::anyhow!("missing ChainSync coverage value"))?;
+                count += value.parse::<usize>()?;
             }
         }
-
-        Err(anyhow::anyhow!(
-            "monitored_accounts metric not found in Prometheus response"
-        ))
+        // No series means no subscriptions have activated yet.
+        Ok(count)
     }
 }

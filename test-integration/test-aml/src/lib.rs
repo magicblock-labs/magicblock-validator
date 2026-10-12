@@ -4,7 +4,6 @@ use std::{
     net::TcpListener,
     path::Path,
     process::Child,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -15,16 +14,15 @@ use std::{
 
 use parking_lot::RwLock;
 
-use config::{
-    config::{AmlCheckStrategy, ChainLinkConfig, LoadableProgram, RiskConfig},
-    types::Remote,
-    LeaderParams,
-};
 use integration_test_tools::{
     expect,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     validator::{cleanup, resolve_programs, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
+};
+use config::{
+    config::{AmlConfig, ChainSyncConfig, LoadableProgram, WebSocketConfig, WebSocketProvider},
+    LeaderParams,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -165,20 +163,19 @@ pub fn setup_validator_with_local_remote(
 
     let mut config = LeaderParams {
         programs,
-        remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
-        ],
-        chainlink: ChainLinkConfig {
-            risk: RiskConfig {
-                enabled: true,
-                risk_server_url,
-                // Pinned rather than defaulted: the suite asserts that risky
-                // signers are blocked, which is only meaningful if we know
-                // which strategy decided to check them.
-                check_strategy: AmlCheckStrategy::AllSigners,
-                ..Default::default()
-            },
+        chainsync: ChainSyncConfig {
+            http: vec![IntegrationTestContext::url_chain().parse().unwrap()],
+            websocket: WebSocketConfig(vec![WebSocketProvider {
+                url: IntegrationTestContext::ws_url_chain().parse().unwrap(),
+                max_connections: 4,
+                subs_per_connection: 900,
+            }]),
+            aml: Some(AmlConfig {
+                endpoint: format!("{}/risk", risk_server_url.trim_end_matches('/'))
+                    .parse()
+                    .unwrap(),
+                timeout: Duration::from_secs(5),
+            }),
             ..Default::default()
         },
         ..Default::default()

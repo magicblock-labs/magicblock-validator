@@ -103,14 +103,14 @@ pub(super) async fn dispatch(
             return Ok(response);
         }
     };
-    let (mut response, claims) = match request {
+    let (mut response, fetches) = match request {
         RpcRequest::Single(r) => {
-            let mut claims = 0;
-            let response = match handlers.process(&r, &mut claims).await {
+            let mut fetches = 0;
+            let response = match handlers.process(&r, &mut fetches).await {
                 Ok(body) => Response::new(body),
                 Err(error) => error_response(Some(&r.id), error),
             };
-            (response, claims)
+            (response, fetches)
         }
         RpcRequest::Multi(requests) => {
             // Poll calls concurrently while assembling responses in request order.
@@ -118,16 +118,16 @@ pub(super) async fn dispatch(
             for r in requests {
                 let handlers = handlers.clone();
                 jobs.push_back(async move {
-                    let mut claims = 0;
-                    let result = handlers.process(&r, &mut claims).await;
-                    (result, claims, r.id)
+                    let mut fetches = 0;
+                    let result = handlers.process(&r, &mut fetches).await;
+                    (result, fetches, r.id)
                 });
             }
             let mut body = vec![b'['];
-            let mut claims = 0;
+            let mut fetches = 0;
             while let Some((result, count, id)) = jobs.next().await {
                 // Claims remain observable even when a later operation fails.
-                claims += count;
+                fetches += count;
                 if body.len() != 1 {
                     body.push(b',');
                 }
@@ -136,10 +136,10 @@ pub(super) async fn dispatch(
                 body.extend_from_slice(&payload.0);
             }
             body.push(b']');
-            (Response::new(JsonBody(body)), claims)
+            (Response::new(JsonBody(body)), fetches)
         }
     };
-    set_headers(&mut response, claims);
+    set_headers(&mut response, fetches);
     Ok(response)
 }
 
@@ -158,14 +158,14 @@ fn error_response(id: Option<&Value>, error: RpcError) -> Response<JsonBody> {
 
 /// Set CORS/Access control related headers (required by explorers/web apps)
 /// and the custom header to count the number of remote account requests
-fn set_headers(response: &mut Response<JsonBody>, claims: u64) {
+fn set_headers(response: &mut Response<JsonBody>, fetches: u64) {
     /// Converts static header values without parsing or allocating.
     const fn hv(v: &'static str) -> HeaderValue {
         HeaderValue::from_static(v)
     }
 
     let headers = response.headers_mut();
-    if let Ok(val) = HeaderValue::from_str(&claims.to_string()) {
+    if let Ok(val) = HeaderValue::from_str(&fetches.to_string()) {
         headers.insert(REMOTE_ACCOUNT_CLAIMS_HEADER, val);
     }
 

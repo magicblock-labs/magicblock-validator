@@ -1,16 +1,10 @@
 use std::{
     path::PathBuf,
     process::Child,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
 use cleanass::assert;
-use config::{
-    config::LoadableProgram,
-    types::{network::Remote, SerdePubkey},
-    LeaderParams,
-};
 use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
@@ -20,6 +14,11 @@ use integration_test_tools::{
         cleanup, start_magicblock_validator_with_config_struct_and_temp_dir, TMP_DIR_CONFIG,
     },
     IntegrationTestContext,
+};
+use config::{
+    config::{ChainSyncConfig, LoadableProgram, WebSocketConfig, WebSocketProvider},
+    types::SerdePubkey,
+    LeaderParams,
 };
 use program::{args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey};
 use program_schedulecommit::MainAccount;
@@ -44,10 +43,15 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Pubkey) {
     let sponsor = loaded_accounts.validator_authority();
 
     let config = LeaderParams {
-        remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
-        ],
+        chainsync: ChainSyncConfig {
+            http: vec![IntegrationTestContext::url_chain().parse().unwrap()],
+            websocket: WebSocketConfig(vec![WebSocketProvider {
+                url: IntegrationTestContext::ws_url_chain().parse().unwrap(),
+                max_connections: 4,
+                subs_per_connection: 900,
+            }]),
+            ..Default::default()
+        },
         // `eHyd5…` is the *ephemeral* hydra program: it executes cranks inside
         // the ER, so it is preloaded here rather than cloned from the base
         // chain (which only hosts hydra's base-chain counterpart).

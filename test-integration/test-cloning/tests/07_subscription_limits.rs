@@ -89,10 +89,18 @@ async fn test_large_number_of_account_subscriptions() {
 
     debug!("✅ Airdropped and fetched all {NUM_PUBKEYS} accounts from ephemeral RPC");
 
-    // Wait for metrics update
-    tokio::time::sleep(Duration::from_secs(5)).await;
-
-    let monitored_accounts_after = ctx.get_monitored_accounts_count(PORT).unwrap();
+    // Coverage changes when subscriptions activate, not on a metrics collection ticker.
+    let monitored_accounts_after = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let count = ctx.get_monitored_accounts_count(PORT).unwrap();
+            if count >= monitored_accounts_before + EXTRA_MONITORED_ACCOUNTS {
+                break count;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("subscriptions did not activate");
     let diff = monitored_accounts_after - monitored_accounts_before;
     debug!("Monitored accounts count total: {monitored_accounts_after}, diff: {diff}");
 

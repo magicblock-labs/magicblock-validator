@@ -4,11 +4,7 @@ use std::{
 };
 
 use aperture::Aperture;
-use chainlink::{
-    ProdChainlink,
-    errors::ChainlinkError,
-    remote_account_provider::{Endpoints, config::RemoteAccountProviderConfig},
-};
+use chainsync::ChainSync;
 use committor::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT, committor_processor::CommittorProcessor,
     config::ChainConfig, intent_engine::db::AccountsDbIntentBacklog,
@@ -24,10 +20,7 @@ use nucleus::{
 use program::{init_magic_sys, validator::init_validator_authority};
 use replicator::ReplicationDispatcher;
 use runtime::keeper_builder;
-use services::{
-    actions_callback_service::ActionsCallbackService,
-    undelegation_request_service::UndelegationRequestService,
-};
+use services::actions_callback_service::ActionsCallbackService;
 use solana_commitment_config::CommitmentConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_program::{rent::Rent, sysvar};
@@ -54,16 +47,13 @@ type IntentExecutionServiceImpl =
 pub(crate) struct Leader {
     config: LeaderParams,
     engine: Engine,
-    chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
     intent_execution_service: IntentExecutionServiceImpl,
-    undelegation_request_service: UndelegationRequestService,
     metrics: MetricsService,
     task_scheduler: TaskSchedulerService,
 }
 
 pub(crate) struct RunningLeader {
-    chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
 }
 
@@ -112,9 +102,8 @@ impl Leader {
 
         let shared_chain_slot = Arc::<AtomicU64>::default();
 
-        let chainlink =
-            Arc::new(Self::init_chainlink(&config, &engine, shared_chain_slot.clone()).await?);
-        timer.record("Chainlink initialized");
+        let chainsync = ChainSync::new(engine.clone(), config.chainsync.clone(), &mut shutdown)?;
+        timer.record("ChainSync initialized");
 
         let outbox_client = Arc::new(Self::init_outbox_client(&config, &engine));
         let committor_processor = {
@@ -126,10 +115,10 @@ impl Leader {
             );
             Arc::new(processor)
         };
-        let intent_execution_service = Self::init_intent_execution_service(
-            &chainlink,
-            &outbox_client,
-            &committor_processor,
+        let intent_execution_service = IntentExecutionServiceImpl::new(
+            engine.clone(),
+            outbox_client.clone(),
+            committor_processor.clone(),
             config.engine.blockstore.blocktime,
         );
         timer.record("Committor service initialized");
@@ -144,16 +133,11 @@ impl Leader {
             .map_err(ApiError::FailedToStartMetricsService)?;
         timer.record("Metrics service bound");
 
-        let undelegation_request_service = UndelegationRequestService::new(
-            chainlink.clone(),
-            engine.clone(),
-            config.chainlink.undelegation_request_poll_interval,
-        );
         let mut rpc_shutdown = shutdown.handle(Service::Rpc);
         let rpc = Aperture::bind(
             &config.aperture,
             engine.clone(),
-            chainlink.clone(),
+            chainsync.clone(),
             ledger.clone(),
             config.engine.blockstore.blocktime,
             rpc_shutdown.child(),
@@ -181,10 +165,8 @@ impl Leader {
         Ok(Self {
             config,
             engine,
-            chainlink,
             shutdown,
             intent_execution_service,
-            undelegation_request_service,
             metrics,
             task_scheduler,
         })
@@ -210,7 +192,6 @@ impl Leader {
             actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
         };
 
-        // TODO(thlorenz): if startup roles change, revisit whether this service is needed for that role.
         let actions_callback_executor = ActionsCallbackService::new(
             Arc::new(RpcClient::new(config.aperture.listen.http())),
             config.engine.authority.local.insecure_clone(),
@@ -224,46 +205,6 @@ impl Leader {
             outbox_client.clone(),
             actions_callback_executor,
         )
-    }
-
-    fn init_intent_execution_service(
-        chainlink: &Arc<ProdChainlink>,
-        outbox_client: &Arc<InternalOutboxClient>,
-        committor_processor: &Arc<CommittorProcessorImpl>,
-        slot_interval: Duration,
-    ) -> IntentExecutionServiceImpl {
-        IntentExecutionServiceImpl::new(
-            chainlink.clone(),
-            outbox_client.clone(),
-            committor_processor.clone(),
-            slot_interval,
-        )
-    }
-
-    #[instrument(skip_all)]
-    async fn init_chainlink(
-        config: &LeaderParams,
-        engine: &Engine,
-        chain_slot: Arc<AtomicU64>,
-    ) -> ApiResult<ProdChainlink> {
-        let endpoints =
-            Endpoints::try_from(config.remotes.as_slice()).map_err(ChainlinkError::from)?;
-
-        let provider_config = RemoteAccountProviderConfig::default()
-            .with_resubscription_delay(config.chainlink.resubscription_delay)
-            .map_err(ChainlinkError::from)?
-            .with_grpc(config.grpc.clone());
-        ProdChainlink::try_new_from_endpoints(
-            &endpoints,
-            CommitmentConfig::confirmed(),
-            engine.clone(),
-            config.engine.authority.local.insecure_clone(),
-            provider_config,
-            &config.chainlink,
-            chain_slot,
-        )
-        .await
-        .map_err(ApiError::from)
     }
 
     // -----------------
@@ -466,10 +407,6 @@ impl Leader {
         let mut timer = EventTimer::new("startup");
         self.spawn_primary_onchain_setup();
 
-        let shutdown = self.shutdown.handle(Service::UndelegationRequests);
-        tokio::spawn(self.undelegation_request_service.run(shutdown));
-        timer.record("Undelegation request service started");
-
         let shutdown = self.shutdown.handle(Service::IntentExecution);
         tokio::spawn(self.intent_execution_service.run(shutdown));
         timer.record("Intent execution service started");
@@ -482,10 +419,7 @@ impl Leader {
         tokio::spawn(self.metrics.run(shutdown));
         timer.record("Metrics service started");
 
-        RunningLeader {
-            chainlink: self.chainlink,
-            shutdown: self.shutdown,
-        }
+        RunningLeader { shutdown: self.shutdown }
     }
 }
 
@@ -493,7 +427,6 @@ impl RunningLeader {
     #[instrument(skip(self))]
     pub(crate) async fn wait(mut self) -> ShutdownReason {
         let reason = self.shutdown.wait().await;
-        self.chainlink.shutdown().await;
         reason.combine(self.shutdown.terminate().await)
     }
 }

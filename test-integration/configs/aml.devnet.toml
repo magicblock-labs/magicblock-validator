@@ -1,4 +1,3 @@
-remotes = ["devnet"]
 
 [aperture]
 listen = "0.0.0.0:7799"
@@ -21,3 +20,6 @@ address = "0.0.0.0:9000"
 [[programs]]
 id = "noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV"
 path = "../schedulecommit/elfs/noop.so"
+
+[chainsync]
+http = ["https://api.devnet.solana.com"]

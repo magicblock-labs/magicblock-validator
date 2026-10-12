@@ -18,7 +18,7 @@ borsh = { workspace = true }
 engine = { workspace = true }
 futures-util = { workspace = true }
 lru = { workspace = true }
-chainlink = { workspace = true }
+
 committor-interface = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }

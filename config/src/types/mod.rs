@@ -3,4 +3,4 @@ pub mod network;
 
 // Re-export types for easy access
 pub use crypto::SerdePubkey;
-pub use network::{BindAddress, Remote};
+pub use network::{BindAddress, ResolvedUrl};

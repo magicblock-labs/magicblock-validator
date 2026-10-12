@@ -6,12 +6,12 @@ use std::{
     time::Duration,
 };
 
-use chainlink::ProdChainlink;
+use chainsync::{ChainSync, ChainSyncConfig};
 use config::config::aperture::ApertureConfig;
-use engine::{Engine, testkit::TestEngine};
+use engine::testkit::TestEngine;
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
 use ledger_deprecated::Ledger;
-use magicblock_aperture::Aperture;
+use aperture::Aperture;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::Instruction;
 use solana_program_pack::Pack;
@@ -65,8 +65,9 @@ fn shared_ledger() -> Arc<Ledger> {
         .clone()
 }
 
-fn chainlink(engine: &Engine) -> Arc<ProdChainlink> {
-    Arc::new(ProdChainlink::try_new(engine.clone(), None).expect("create chainlink"))
+fn chainsync(engine: &mut TestEngine) -> Arc<ChainSync> {
+    let handle = engine.clone();
+    ChainSync::new(handle, ChainSyncConfig::default(), engine.shutdown()).expect("create chainsync")
 }
 
 impl RpcTestEnv {
@@ -77,7 +78,7 @@ impl RpcTestEnv {
         Self::with_engine(TestEngine::new().await).await
     }
 
-    pub(crate) async fn with_engine(engine: TestEngine) -> Self {
+    pub(crate) async fn with_engine(mut engine: TestEngine) -> Self {
         let cancel = CancellationToken::new();
         let server = Aperture::bind(
             &ApertureConfig {
@@ -85,7 +86,7 @@ impl RpcTestEnv {
                 ..Default::default()
             },
             (*engine).clone(),
-            chainlink(&engine),
+            chainsync(&mut engine),
             shared_ledger(),
             Duration::from_millis(100),
             cancel.clone(),
