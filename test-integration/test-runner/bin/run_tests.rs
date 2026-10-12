@@ -463,8 +463,6 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
         exact_name_filters: &[
             "test_commit_id_and_action_errors_recovery",
             "test_commit_id_actions_cpi_limit_errors_recovery",
-            "test_commit_unfinalized_account_recovery",
-            "test_commit_unfinalized_account_recovery_two_stage",
         ],
         extra_files: &[],
     };
@@ -477,6 +475,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
             "test_action_callback_fired_on_failure",
             "test_action_callback_fired_on_timeout",
             "test_callbacks_fired_in_two_stage",
+            "test_two_stage_action_failure_keeps_combined_commit",
         ],
         extra_files: &[],
     };
