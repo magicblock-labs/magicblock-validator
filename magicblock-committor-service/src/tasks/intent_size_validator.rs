@@ -9,7 +9,7 @@ use solana_signer::Signer;
 
 use crate::{
     tasks::{
-        commit_task::CommitDelivery,
+        commit_delivery::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{
             create_action_tasks, create_commit_finalize_task, TransactionUtils,
@@ -25,7 +25,7 @@ use crate::{
 /// Estimates whether an intent's commit and finalize stages fit the supported
 /// transaction formats without fetching base-layer state or commit metadata.
 ///
-/// Unlike [`crate::tasks::task_builder::TasksBuilder`], admission cannot compute
+/// Unlike [`crate::tasks::task_builder::TaskBuilderImpl`], admission cannot compute
 /// the actual account diff. It estimates larger accounts using buffers, reserves
 /// distinct keys for unknown rent payers, and includes a uniqueness noop in each
 /// stage. Each stage is checked against v1, then v0 with full ALT coverage.
@@ -78,7 +78,7 @@ impl IntentSizeValidator {
     }
 
     /// Builds the finalize-stage tasks used for the size estimate, mirroring
-    /// [`crate::tasks::task_builder::TasksBuilder::finalize_tasks`] but
+    /// [`crate::tasks::task_builder::TaskBuilderImpl::finalize_tasks`] but
     /// without fetching rent payers. [`Self::tasks_fit`] assigns distinct
     /// placeholder keys before compiling these tasks, accounting for each
     /// unknown payer's contribution to the transaction size and account count.
@@ -160,20 +160,6 @@ impl IntentSizeValidator {
     /// value we pass here doesn't matter. What actually differs between a
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
     /// built in [`Self::finalize_tasks`].
-    fn commit_task(account: &CommittedAccount) -> BaseTaskImpl {
-        let mut task = create_commit_finalize_task(
-            0,
-            false,
-            account.clone(),
-            Some(account.account.clone()),
-        );
-        if matches!(task.delivery, CommitDelivery::DiffInArgs { .. }) {
-            task.try_optimize_tx_size();
-        }
-        task.into()
-    }
-
-    /// Same as [`Self::commit_task`] but for `CommitFinalizeTask`.
     fn commit_finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
         let mut task = create_commit_finalize_task(
             0,
@@ -194,7 +180,7 @@ impl IntentSizeValidator {
         commit_type
             .get_committed_accounts()
             .iter()
-            .map(Self::commit_task)
+            .map(Self::commit_finalize_task)
             .collect()
     }
 
@@ -409,12 +395,6 @@ mod tests {
                         finalizes.len(),
                         usize::from(!combined) + usize::from(undelegate)
                     );
-                    assert!(commits.iter().chain(&finalizes).all(
-                        |task| !matches!(
-                            task,
-                            BaseTaskImpl::Commit(_) | BaseTaskImpl::Finalize(_)
-                        )
-                    ));
                     assert!(IntentSizeValidator::fits(&intent));
                 }
             }
@@ -544,7 +524,7 @@ mod tests {
                 Some(0),
             );
             known_keys.push(authority.pubkey());
-            known_keys.extend(original.iter().map(BaseTask::program_id));
+            known_keys.push(dlp_api::id());
             assert!(payers.iter().all(|payer| !known_keys.contains(payer)));
             assert_eq!(wire_size(&estimated), wire_size(&actual));
 
