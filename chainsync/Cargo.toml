@@ -10,11 +10,12 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-solana-sdk-ids = { workspace = true }
-solana-instruction = { workspace = true, features = ["wincode"] }
+mbv-core = { workspace = true }
 humantime = { workspace = true }
 ahash = { workspace = true }
 base64 = { workspace = true }
+bincode = { workspace = true }
+borsh = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "display", "error"] }
 fastwebsockets = { workspace = true, features = ["unstable-split", "upgrade"] }
 futures = { workspace = true }
@@ -25,13 +26,22 @@ json = { workspace = true }
 engine = { workspace = true }
 nucleus = { workspace = true, features = ["metrics", "runtime"] }
 delegation-program-api = { workspace = true, features = ["encryption", "instruction"] }
+magic-program-api = { workspace = true }
 reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 sha1 = { workspace = true }
 smallvec = { workspace = true }
 solana-account = { workspace = true }
+solana-instruction = { workspace = true, features = ["wincode"] }
 solana-loader-v3-interface = { workspace = true }
+solana-loader-v4-interface = { workspace = true }
+solana-program-option = { workspace = true }
+solana-program-pack = { workspace = true }
 solana-pubkey = { workspace = true }
+solana-rent = { workspace = true }
+solana-sdk-ids = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
 tokio-rustls = { workspace = true }
@@ -41,17 +51,24 @@ webpki-roots = { workspace = true }
 yellowstone-grpc-client = { workspace = true }
 yellowstone-grpc-proto = { workspace = true }
 zstd = { workspace = true }
+
 [dev-dependencies]
-borsh = { workspace = true }
+spl-associated-token-account-interface = { workspace = true }
 hyper = { workspace = true, features = ["server"] }
 serde_json = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
 tokio-tungstenite = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
+keeper = { workspace = true, features = ["testkit"] }
+program = { workspace = true }
+solana-keypair = { workspace = true }
+solana-program-runtime = { workspace = true }
 nucleus = { workspace = true, features = ["testkit"] }
 solana-account = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["test-util"] }
 yellowstone-grpc-geyser = { workspace = true }
 yellowstone-plugin-proto = { workspace = true }
+v42-calculator-interface = { workspace = true, features = ["builder"] }
+
 [lints]
 workspace = true
