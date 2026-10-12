@@ -1,5 +1,5 @@
 use super::{HandlerResult, RpcHandlers};
-use crate::account::{AccountWithPubkey, ProgramConfig, matches_filters};
+use crate::account::{AccountWithPubkey, ProgramConfig};
 use crate::{
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
@@ -21,7 +21,9 @@ impl RpcHandlers {
         let accounts = self.engine.accounts();
         let accounts = accounts
             .program(&program, |pubkey, account| {
-                matches_filters(&filters, account.data())
+                filters
+                    .iter()
+                    .all(|filter| filter.matches(account.data()))
                     .then(|| AccountWithPubkey::new(*pubkey, account, encoding, slice))
             })
             .map_err(RpcError::internal)?
