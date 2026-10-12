@@ -123,6 +123,9 @@ impl TransactionUtils {
     pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
+    // The per-intent uniqueness instruction loads the spl-noop program.
+    // Reserve 42 KiB for its roughly 40 KiB of program data.
+    const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
 
     pub fn dummy_lookup_table(
         pubkeys: &[Pubkey],
@@ -191,7 +194,10 @@ impl TransactionUtils {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(tasks),
             compute_unit_price,
-            Self::tasks_accounts_size_budget(tasks),
+            Self::tasks_accounts_size_budget_with_uniqueness_nonce(
+                tasks,
+                uniqueness_nonce,
+            ),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
@@ -360,6 +366,19 @@ impl TransactionUtils {
                 .saturating_add(program_headroom)
         } else {
             total_budget
+        }
+    }
+
+    fn tasks_accounts_size_budget_with_uniqueness_nonce(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> u32 {
+        let budget = Self::tasks_accounts_size_budget(tasks);
+        if uniqueness_nonce.is_some() {
+            budget
+                .saturating_add(Self::UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET)
+        } else {
+            budget
         }
     }
 
