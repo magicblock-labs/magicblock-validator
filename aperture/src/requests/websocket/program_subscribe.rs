@@ -2,7 +2,7 @@ use solana_account::ReadableAccount;
 
 use super::prelude::*;
 use crate::{
-    account::{ProgramConfig, encoding::AccountEncoder, matches_filters},
+    account::{ProgramConfig, encoding::AccountEncoder},
     requests::payload::NotificationPayload,
 };
 
@@ -21,7 +21,7 @@ impl WsDispatcher {
         let rx = self.engine.accounts().subscribe_program(pubkey).await;
         let engine = self.engine.clone();
         Ok(self.forward(rx, move |id, (pubkey, account)| {
-            if !matches_filters(&filters, account.data()) {
+            if !filters.iter().all(|filter| filter.matches(account.data())) {
                 return Ok(None);
             }
             let block = engine.blocks().latest();

@@ -40,7 +40,11 @@ impl Accounts {
     }
 
     /// Single-account RPCs tolerate ensure failures and read any existing image.
-    pub(crate) async fn ensure_one(&self, pubkey: &Pubkey, fetches: &mut u64) {
+    pub(crate) async fn ensure_one(
+        &self,
+        pubkey: &Pubkey,
+        fetches: &mut u64,
+    ) {
         let _ = self.fetch(&[*pubkey], fetches).await;
     }
 
@@ -78,15 +82,6 @@ impl Accounts {
         *fetches += self.chainsync.ensure(requests).await?;
         Ok(())
     }
-}
-
-/// Match validated filters without decoding their bytes for each account.
-pub(crate) fn matches_filters(filters: &[PreparedFilter], data: &[u8]) -> bool {
-    filters.iter().all(|filter| match &filter.0 {
-        RpcFilterType::DataSize(size) => data.len() as u64 == *size,
-        RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
-        RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
-    })
 }
 
 /// The upstream program config, with filters decoded during parameter parsing.
