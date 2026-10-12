@@ -248,6 +248,15 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 
 zstd = "0.13"
 
+sha1 = "0.10"
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+tokio-tungstenite = "0.28"
+webpki-roots = "1"
+
+
+
+ahash = "0.8"
+
 [patch.crates-io]
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 
