@@ -219,8 +219,10 @@ where
             ) => {
                 let optimized_tasks =
                     self.transaction_strategy.optimized_tasks.as_slice();
-                if let Some(delegated_account) = err
-                    .task_index()
+                let task_index = err.task_index(
+                    self.transaction_strategy.task_instruction_offset(),
+                );
+                if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
                         BaseTaskImpl::Commit(task) => {
@@ -240,7 +242,7 @@ where
                     .await
                 } else {
                     error!(
-                        task_index = err.task_index(),
+                        task_index = ?task_index,
                         optimized_tasks_len = optimized_tasks.len(),
                         error = ?err,
                         "RPC returned unexpected task index"

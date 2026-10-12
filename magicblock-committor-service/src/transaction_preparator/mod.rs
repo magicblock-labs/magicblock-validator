@@ -3,7 +3,6 @@ use magicblock_metrics::metrics;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_keypair::Keypair;
-use solana_message::VersionedMessage;
 
 use crate::{
     persist::IntentPersister,
@@ -17,6 +16,7 @@ use crate::{
         },
         error::PreparatorResult,
     },
+    transactions::PreparedMessage,
     ComputeBudgetConfig,
 };
 
@@ -25,14 +25,14 @@ pub mod error;
 
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
-    /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
+    /// Return [`PreparedMessage`] corresponding to [`TransactionStrategy`]
     /// Handles all necessary preparation needed for successful [`BaseTask`] execution
     async fn prepare_for_strategy<P: IntentPersister>(
         &self,
         authority: &Keypair,
         transaction_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-    ) -> PreparatorResult<VersionedMessage>;
+    ) -> PreparatorResult<PreparedMessage>;
 
     /// Cleans up after strategy.
     /// `close_buffers`: if false, only ALT reservations are released.
@@ -78,20 +78,31 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
         intent_persister: &Option<P>,
-    ) -> PreparatorResult<VersionedMessage> {
+    ) -> PreparatorResult<PreparedMessage> {
         // If message won't fit, there's no reason to prepare anything
         // Fail early
         {
             let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
                 &tx_strategy.lookup_tables_keys,
             );
-            let _ = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-                authority,
-                &tx_strategy.optimized_tasks,
-                self.compute_budget_config.compute_unit_price,
-                &dummy_lookup_tables,
-                tx_strategy.uniqueness_nonce,
-            )?;
+            if dummy_lookup_tables.is_empty() {
+                let _ =
+                    TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+                        authority,
+                        &tx_strategy.optimized_tasks,
+                        self.compute_budget_config.compute_unit_price,
+                        tx_strategy.uniqueness_nonce,
+                    )?;
+            } else {
+                let _ =
+                    TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+                        authority,
+                        &tx_strategy.optimized_tasks,
+                        self.compute_budget_config.compute_unit_price,
+                        &dummy_lookup_tables,
+                        tx_strategy.uniqueness_nonce,
+                    )?;
+            }
         }
 
         // Pre tx preparations. Create buffer accs + lookup tables
@@ -101,16 +112,27 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .await?;
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
-        let message =
-            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-                authority,
-                &tx_strategy.optimized_tasks,
-                self.compute_budget_config.compute_unit_price,
-                &lookup_tables,
-                tx_strategy.uniqueness_nonce,
+        let message = if lookup_tables.is_empty() {
+            PreparedMessage::V1(
+                TransactionUtils::assemble_tasks_v1_message_with_uniqueness_nonce(
+                    authority,
+                    &tx_strategy.optimized_tasks,
+                    self.compute_budget_config.compute_unit_price,
+                    tx_strategy.uniqueness_nonce,
+                )?,
             )
-            .expect("Possibility to assemble checked above")
-            .message;
+        } else {
+            PreparedMessage::Versioned(
+                TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+                    authority,
+                    &tx_strategy.optimized_tasks,
+                    self.compute_budget_config.compute_unit_price,
+                    &lookup_tables,
+                    tx_strategy.uniqueness_nonce,
+                )?
+                .message,
+            )
+        };
 
         Ok(message)
     }

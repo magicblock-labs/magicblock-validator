@@ -35,7 +35,7 @@ list-programs:
 programs: $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning),'; then \
+	if [ -z "$(RUN_TESTS)" ] || printf ',%s,' "$(RUN_TESTS)" | grep -Eq ',(chainlink|cloning|cloning_programs),'; then \
 		$(MAKE) chainlink-prep-programs -C ./test-chainlink; \
 	fi && \
 	if [ -n "$(INTEGRATION_TEST_RUNNER_BIN)" ] && [ -x "$(INTEGRATION_TEST_RUNNER_BIN)" ]; then \
