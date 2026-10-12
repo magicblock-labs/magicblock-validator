@@ -9,7 +9,7 @@ changing that boundary.
 - `bins/validator` owns leader orchestration;
   `bins/verifier` owns follower lifecycle. Only the leader starts
   application services.
-- `runtime` owns the shared runtime image; `chainlink`
+- `runtime` owns the shared runtime image; `chainsync`
   owns account synchronization/materialization; `aperture` owns RPC;
   committor crates own settlement; `task-scheduler` owns repeated tasks.
 - Keep operator work in `bins/magicblock` and `bins/validator-tui`,

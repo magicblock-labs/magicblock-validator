@@ -1,5 +1,4 @@
 use crate::account::Accounts;
-use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -14,7 +13,7 @@ impl RpcHandlers {
     pub(crate) async fn get_account_info(
         &self,
         request: &JsonRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         let pubkey: Pubkey = request.required::<Serde32Bytes>(0)?.into();
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
@@ -25,15 +24,7 @@ impl RpcHandlers {
                 .then(|| encode_ui_account(&pubkey, account, encoding, None, slice))
         };
 
-        let account = self
-            .accounts
-            .read(
-                &pubkey,
-                AccountFetchEntrypoint::RpcGetAccount,
-                claims,
-                reader,
-            )
-            .await;
+        let account = self.accounts.read(&pubkey, fetches, reader).await;
         let account = account.flatten();
 
         let slot = self.engine.blocks().latest().slot;

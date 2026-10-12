@@ -6,9 +6,14 @@ mod expression;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
-use config::{consts::HEALTHCHECK_ACCOUNT_PUBKEY, types::Remote};
 use futures_util::Stream;
 use humantime::re::humantime as ht;
+use config::{
+    consts::HEALTHCHECK_ACCOUNT_PUBKEY,
+    types::{ResolvedUrl, network::websocket_url},
+};
+use nucleus::metrics::EventTimer;
+use serde::Deserialize;
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
@@ -24,9 +29,9 @@ use self::{deadline::Deadline, expression::random};
 /// Target validator and the total budget for its end-to-end execution probe.
 #[derive(clap::Args)]
 pub(crate) struct Args {
-    /// Validator HTTP RPC URL.
+    /// Validator HTTP RPC URL or cluster alias (mainnet, testnet, devnet, localhost, dev).
     #[arg(long)]
-    url: Remote,
+    url: ResolvedUrl,
     /// End-to-end deadline, such as 5s or 1m.
     #[arg(long, value_parser = ht::parse_duration)]
     timeout: Duration,
@@ -37,9 +42,14 @@ impl Args {
     /// status and an account notification under the same end-to-end deadline.
     pub(crate) async fn run(self) -> Result<()> {
         let deadline = Deadline::new(self.timeout);
-        let rpc_url = self.url.url_str();
-        let ws_url = self.url.to_websocket().context("healthcheck requires an HTTP RPC URL")?;
+        ensure!(
+            matches!(self.url.scheme(), "http" | "https"),
+            "healthcheck requires an HTTP RPC URL"
+        );
+        let ws_url = websocket_url(self.url.0.clone());
+        let rpc_url = self.url.as_str();
         let rpc = RpcClient::new_with_commitment(rpc_url.to_owned(), CommitmentConfig::processed());
+        info!(rpc = %rpc_url, websocket = %ws_url, timeout = ?self.timeout, "Starting healthcheck");
 
         let signer = Keypair::new();
         let blockhash = deadline
@@ -58,7 +68,7 @@ impl Args {
         let pubsub = deadline
             .run(
                 "connecting to WebSocket RPC",
-                PubsubClient::new(ws_url.url_str()),
+                PubsubClient::new(ws_url.as_str()),
             )
             .await
             .with_context(|| format!("WebSocket {ws_url}"))?;
