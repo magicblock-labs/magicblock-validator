@@ -39,10 +39,6 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[expect(
-    unused_imports,
-    reason = "Service assembly consumes this private component in a later layer"
-)]
 pub(super) use fetcher::{FetchedAccounts, Fetcher};
 
 impl Error {

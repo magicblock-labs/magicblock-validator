@@ -1,20 +1,28 @@
 #![allow(dead_code)]
 
+mod account;
 pub(crate) mod http;
+pub(crate) mod magic;
 pub(crate) mod websocket;
 pub(crate) mod yellowstone;
-use base64::{Engine, engine::general_purpose::STANDARD};
-use delegation_program_api::{
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
-};
+
+use std::{future::Future, sync::Arc, time::Duration};
+
+use engine::testkit::TestEngine;
 use serde_json::{Value, json};
-use solana_account::{AccountBuilder, StateFlags};
-use solana_instruction::Instruction;
-use solana_pubkey::Pubkey;
-use std::sync::Arc;
-use std::{future::Future, time::Duration};
 use tokio::time;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
+use url::Url;
+
+// Each test target uses a different subset of these shared fixtures.
+#[allow(unused_imports)]
+pub(crate) use account::{Account, Ata, delegation, encode_record, undelegation_request};
+
+use super::chainsync::{
+    ChainSync, ChainSyncAccount, ChainSyncConfig, Error, GrpcStreamConfig, Result, WebSocketConfig,
+    WebSocketError, WebSocketProvider,
+};
+
 /// Owns fixture tasks and cancels their entire I/O flow, including held replies.
 /// Cleanup joins all tasks, so none outlive the scenario or its plugin guard.
 #[derive(Clone, Default)]
@@ -46,7 +54,6 @@ fn rpc_result(id: &Value, result: impl Into<Value>) -> Value {
     json!({"jsonrpc": RPC_VERSION, "id": id, "result": result.into()})
 }
 
-use yellowstone_grpc_geyser::plugin::message::{Message, MessageAccount, MessageAccountInfo};
 /// Bounds a scenario's event-driven handshakes, including cleanup.
 pub(crate) const DEADLINE: Duration = Duration::from_secs(30);
 
@@ -74,66 +81,45 @@ pub(crate) const DELEGATED_TOKEN_BALANCE: u64 = 42;
 pub(crate) const TOKEN_LAMPORTS: u64 = 1000;
 pub(crate) const NATIVE_RESERVE: u64 = 500;
 
-/// One provider-independent account image for snapshots, notifications, and Geyser messages.
-#[derive(Clone)]
-pub(crate) struct Account {
-    pub(crate) key: Pubkey,
-    pub(crate) owner: Pubkey,
-    pub(crate) lamports: u64,
-    pub(crate) data: Vec<u8>,
-    pub(crate) executable: bool,
+/// Ordinary ChainSync configuration for controlled endpoints; scenarios set replay, tracking delay, and AML.
+pub(crate) fn config(http: &Url, ws: Option<&websocket::Server>, grpc: &[&Url]) -> ChainSyncConfig {
+    ChainSyncConfig {
+        aml: None,
+        http: vec![http.clone()],
+        websocket: WebSocketConfig(
+            ws.into_iter()
+                .map(|server| WebSocketProvider {
+                    url: server.endpoint.clone(),
+                    max_connections: 1,
+                    subs_per_connection: 128,
+                })
+                .collect(),
+        ),
+        grpc: grpc
+            .iter()
+            .map(|endpoint| GrpcStreamConfig {
+                endpoint: (*endpoint).clone(),
+                token: None,
+                duplication_delay: Duration::from_secs(30 * 60),
+            })
+            .collect(),
+    }
 }
 
-impl Account {
-    /// Non-executable, rent-funded image with one byte of recognizable data.
-    pub(crate) fn new(key: Pubkey) -> Self {
-        Self {
-            key,
-            owner: Pubkey::default(),
-            lamports: 1_000_000,
-            data: ACCOUNT_DATA.to_vec(),
-            executable: false,
-        }
-    }
+/// Constructs ChainSync for direct handler tests; only the optional HTTP provider runs.
+pub(crate) fn start_handler_sync(
+    engine: &mut TestEngine,
+    http: Option<&http::Server>,
+) -> Arc<ChainSync> {
+    let unavailable = UNAVAILABLE.parse().unwrap();
+    let endpoint = http.map_or(&unavailable, |server| &server.endpoint);
+    let config = config(endpoint, None, &[&unavailable]);
+    start(engine, config)
+}
 
-    /// Shares an Engine testkit image across the HTTP, WebSocket, and plugin encoders.
-    pub(crate) fn from_builder(key: Pubkey, image: &AccountBuilder) -> Self {
-        let image = image.read();
-        Self {
-            key,
-            owner: image.owner(),
-            lamports: image.lamports(),
-            data: image.data().to_vec(),
-            executable: image.flags().contains(StateFlags::EXECUTABLE),
-        }
-    }
-
-    /// Confirmed RPC account encoding shared by HTTP snapshots and WebSocket notifications.
-    pub(crate) fn rpc(&self) -> Value {
-        let compressed = zstd::stream::encode_all(self.data.as_slice(), 0).unwrap();
-        json!({"owner": self.owner.to_string(), "lamports": self.lamports,
-            "executable": self.executable, "data": [STANDARD.encode(compressed), "base64+zstd"]})
-    }
-
-    /// Plugin input image with a transaction signature, eligible for DLP account filters.
-    pub(crate) fn geyser(&self, slot: u64) -> Message {
-        Message::Account(Arc::new(MessageAccount {
-            account: MessageAccountInfo {
-                pubkey: self.key,
-                owner: self.owner,
-                lamports: self.lamports,
-                data: self.data.clone().into(),
-                executable: self.executable,
-                rent_epoch: 0,
-                write_version: slot,
-                txn_signature: Some(Default::default()),
-                pre_encoded: Default::default(),
-            },
-            slot,
-            is_startup: false,
-            created_at: Default::default(),
-        }))
-    }
+/// Starts the real service with the scenario's configuration and Engine shutdown owner.
+pub(crate) fn start(engine: &mut TestEngine, config: ChainSyncConfig) -> Arc<ChainSync> {
+    ChainSync::new(engine.clone(), config, engine.shutdown()).unwrap()
 }
 
 /// Fails a stalled handshake instead of relying on sleeps or yield counts.
@@ -151,37 +137,24 @@ pub(crate) async fn scripted<T>(
     within(async { tokio::join!(operation, script).0 }).await
 }
 
-/// Application and canonical record images shared by all provider encoders.
-pub(crate) fn delegation(
-    key: Pubkey,
-    owner: Pubkey,
-    authority: Pubkey,
-    slot: u64,
-    actions: &[Instruction],
-) -> (Account, Account) {
-    use delegation_program_api::compact::ClearText;
-    let mut account = Account::new(key);
-    account.owner = delegation_program_api::id();
-    account.data = V42_INITIAL.to_le_bytes().to_vec();
-    let metadata = DelegationRecord {
-        owner,
-        authority,
-        delegation_slot: slot,
-        lamports: account.lamports,
-        commit_frequency_ms: 1,
-    };
-    let mut record = Account::new(delegation_record_pda_from_delegated_account(&key));
-    record.owner = delegation_program_api::id();
-    record.data = encode_record(&metadata);
-    if !actions.is_empty() {
-        record.data.extend(borsh::to_vec(&actions.to_vec().cleartext()).unwrap());
-    }
-    (account, record)
+/// Opens from the fixture's replayable slot one, with HTTP freshness starting at slot three.
+pub(crate) fn start_chain_sync(
+    engine: &mut TestEngine,
+    http: &http::Server,
+    ws: Option<&websocket::Server>,
+    grpc: &yellowstone::Server,
+) -> Arc<ChainSync> {
+    engine.accounts().advance_chain_slot(START_SLOT);
+    let config = config(&http.endpoint, ws, &[&grpc.endpoint]);
+    start(engine, config)
 }
 
-/// Canonical record header shared by ordinary and eATA delegation fixtures.
-fn encode_record(metadata: &DelegationRecord) -> Vec<u8> {
-    let mut data = vec![0; DelegationRecord::size_with_discriminator()];
-    metadata.to_bytes_with_discriminator(&mut data).unwrap();
-    data
+/// Initial connection admission is retried through the public API, not timing-based readiness guesses.
+pub(crate) async fn acquire(chain_sync: &ChainSync, accounts: &[ChainSyncAccount]) -> Result<()> {
+    loop {
+        match chain_sync.ensure(accounts).await {
+            Err(Error::Subscribe(WebSocketError::Unavailable)) => continue,
+            result => return result.map(|_| ()),
+        }
+    }
 }
