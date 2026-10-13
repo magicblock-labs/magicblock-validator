@@ -184,7 +184,7 @@ impl Session {
 
     /// Forwards DLP releases from the stream's successful-transaction filter, including CPI.
     /// Ordinary releases must name this Engine's authority; timeout rollbacks are unfiltered.
-    /// Account indices include the provider-resolved lookup-table keys.
+    /// Account indices use static message keys; lookup-table keys are unsupported.
     async fn transaction(&mut self, update: SubscribeUpdateTransaction) -> Result<()> {
         self.matcher.set_slot(update.slot);
         let transaction = update.transaction.ok_or(Error::Protocol("missing transaction"))?;
