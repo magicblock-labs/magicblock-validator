@@ -1,9 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 pub use magicblock_core::intent::{
     calculate_commit_fee, BaseAction, CommitAndUndelegate, CommitType,
-    MagicBaseIntent, MagicIntentBundle, ProgramArgs, UndelegateType,
-    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
+    MagicBaseIntent, MagicIntentBundle, ProgramArgs, ScheduledIntentBundle,
+    UndelegateType, ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS,
     COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
 };
 use magicblock_core::{
@@ -18,17 +18,14 @@ use magicblock_magic_program_api::args::{
     BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs,
     MagicBaseIntentArgs, MagicIntentBundleArgs, UndelegateTypeArgs,
 };
-use serde::{Deserialize, Serialize};
 use solana_account::ReadableAccount;
 use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
-use solana_hash::Hash;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::{
     __private::{InstructionError, TransactionContext},
     invoke_context::InvokeContext,
 };
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 
 use crate::{
     instruction_utils::InstructionUtils,
@@ -85,127 +82,26 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
 type CommitAccountRef<'a, 'ix_data> =
     (Pubkey, InstructionAccount<'a, 'ix_data>);
 
-/// Scheduled action to be executed on base layer
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledIntentBundle {
-    pub id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub sent_transaction: Transaction,
-    pub payer: Pubkey,
-    /// Scheduled intent bundle
-    pub intent_bundle: MagicIntentBundle,
-}
+pub fn try_new_scheduled_intent_bundle(
+    args: MagicIntentBundleArgs,
+    commit_id: u64,
+    slot: Slot,
+    payer_pubkey: &Pubkey,
+    context: &mut ConstructionContext<'_, '_, '_>,
+) -> Result<ScheduledIntentBundle, InstructionError> {
+    let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
+    let blockhash = context.invoke_context.environment_config.blockhash;
+    let intent_bundle_sent_transaction =
+        InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
 
-impl ScheduledIntentBundle {
-    pub fn try_new(
-        args: MagicIntentBundleArgs,
-        commit_id: u64,
-        slot: Slot,
-        payer_pubkey: &Pubkey,
-        context: &mut ConstructionContext<'_, '_, '_>,
-    ) -> Result<ScheduledIntentBundle, InstructionError> {
-        let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
-        let blockhash = context.invoke_context.environment_config.blockhash;
-        let intent_bundle_sent_transaction =
-            InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-
-        Ok(ScheduledIntentBundle {
-            id: commit_id,
-            slot,
-            blockhash,
-            payer: *payer_pubkey,
-            sent_transaction: intent_bundle_sent_transaction,
-            intent_bundle,
-        })
-    }
-
-    /// Calculates fee for intent
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
-        const SCHEDULING_FEE: u64 = 0;
-
-        Ok({
-            SCHEDULING_FEE + self.intent_bundle.calculate_fee(commit_nonces)?
-        })
-    }
-
-    /// Returns all accounts that will be committed on Base layer,
-    /// including the one scheduled for undelegation
-    pub fn get_all_committed_accounts(&self) -> Vec<CommittedAccount> {
-        self.intent_bundle.get_all_committed_accounts()
-    }
-
-    /// Returns pubkeys of all accounts that will be committed on Base layer,
-    /// including the one scheduled for undelegation
-    pub fn get_all_committed_pubkeys(&self) -> Vec<Pubkey> {
-        self.intent_bundle.get_all_committed_pubkeys()
-    }
-
-    /// Return `true` if there're account that will be committed on Base layer
-    pub fn has_committed_accounts(&self) -> bool {
-        self.intent_bundle.has_committed_accounts()
-    }
-
-    /// Returns `[CommitAndUndelegate]` intent's accounts
-    pub fn get_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle.get_undelegate_intent_accounts()
-    }
-
-    /// Returns `Commit` intent's accounts
-    pub fn get_commit_intent_accounts(&self) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle.get_commit_intent_accounts()
-    }
-
-    /// Returns `[CommitFinalizeAndUndelegate]` intent's accounts
-    pub fn get_commit_finalize_and_undelegate_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle
-            .get_commit_finalize_and_undelegate_intent_accounts()
-    }
-
-    /// Returns `CommitFinalize` intent's accounts
-    pub fn get_commit_finalize_intent_accounts(
-        &self,
-    ) -> Option<&Vec<CommittedAccount>> {
-        self.intent_bundle.get_commit_finalize_intent_accounts()
-    }
-
-    /// Returns `Commit` intent's accounts
-    pub fn get_commit_intent_accounts_mut(
-        &mut self,
-    ) -> Option<&mut Vec<CommittedAccount>> {
-        self.intent_bundle.get_commit_intent_accounts_mut()
-    }
-
-    pub fn get_commit_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.intent_bundle.get_commit_intent_pubkeys()
-    }
-
-    pub fn get_undelegate_intent_pubkeys(&self) -> Option<Vec<Pubkey>> {
-        self.intent_bundle.get_undelegate_intent_pubkeys()
-    }
-
-    pub fn has_undelegate_intent(&self) -> bool {
-        self.intent_bundle.has_undelegate_intent()
-    }
-
-    pub fn has_callbacks(&self) -> bool {
-        self.intent_bundle.has_callbacks()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.intent_bundle.is_empty()
-    }
-
-    pub fn standalone_actions(&self) -> &Vec<BaseAction> {
-        &self.intent_bundle.standalone_actions
-    }
+    Ok(ScheduledIntentBundle {
+        id: commit_id,
+        slot,
+        blockhash,
+        payer: *payer_pubkey,
+        sent_transaction: intent_bundle_sent_transaction,
+        intent_bundle,
+    })
 }
 
 /// Constructs a type from its wire [`Args`] representation.
