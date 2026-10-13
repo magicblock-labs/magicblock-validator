@@ -5,7 +5,7 @@ use tracing::warn;
 
 use super::coverage::Coverage;
 use crate::{
-    AccountProperty, ChainSync, Error, Result, SyncTarget, ata,
+    AccountProperty, ChainSync, ChainSyncAccount, Error, Result, SyncTarget, ata,
     delegation::{self, Delegation},
     metrics::{self, Op},
 };
@@ -43,11 +43,19 @@ impl ChainSync {
         self.materialize_delegation(prepared).await
     }
 
-    /// Projects a gRPC eATA delegation onto a matching ATA already present in Engine.
-    async fn project_delegation(&self, delegation: Delegation) -> Result<Option<Delegation>> {
-        let Some(candidates) = ata::candidates(delegation.pubkey, &delegation.account) else {
-            return Ok(None);
-        };
+    /// Projects onto a resident ATA, acquiring unknown ATAs only for action-bearing delegations.
+    async fn project_delegation(
+        &self,
+        delegation: Delegation,
+        candidates: [Pubkey; 2],
+    ) -> Result<Option<Delegation>> {
+        let Delegation {
+            pubkey: eata,
+            account: raw,
+            record,
+            source_program,
+        } = delegation;
+        let mut projection = None;
         for ata in candidates {
             let accessor = self.engine.account(ata).await?;
             let Some(base) =
@@ -80,6 +88,16 @@ impl ChainSync {
                 record,
                 source_program,
             }));
+        }
+        if delegation::appended(&record).is_some_and(|actions| !actions.is_empty()) {
+            // Shuttle actions must run even when nobody has requested their ATA yet.
+            // Ordinary acquisition resolves the projection and activates its actions;
+            // no lease is held here; acquisition also installs the readonly raw eATA.
+            self.ensure(candidates.map(|pubkey| ChainSyncAccount {
+                pubkey,
+                property: AccountProperty::Readonly,
+            }))
+            .await?;
         }
         Ok(None)
     }
