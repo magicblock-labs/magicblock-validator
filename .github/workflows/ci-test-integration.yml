@@ -21,6 +21,7 @@ on:
       - '.github/workflows/build-er.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
+      - '.github/actions/setup-yellowstone/**'
   pull_request:
     types: [opened, reopened, synchronize]
     paths:
@@ -37,6 +38,7 @@ on:
       - '.github/workflows/build-er.yml'
       - '.github/actions/setup-build-env/**'
       - '.github/actions/setup-solana/**'
+      - '.github/actions/setup-yellowstone/**'
 
 jobs:
   # These producer jobs exist purely to produce reusable artifacts so matrix
@@ -373,6 +375,8 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-solana
         with:
           solana_version: ${{ matrix.solana_version || 'v4.2.0' }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-yellowstone
 
       - name: Download prebuilt ER binaries
         uses: actions/download-artifact@v8

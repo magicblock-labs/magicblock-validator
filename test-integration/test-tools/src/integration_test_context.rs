@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use magicblock_config::config::{ChainSyncConfig, GrpcStreamConfig, WebSocketConfig, WebSocketProvider};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
@@ -1180,6 +1181,25 @@ impl IntegrationTestContext {
     }
     pub fn ws_url_chain() -> &'static str {
         WS_URL_CHAIN
+    }
+
+    /// Provider configuration shared by programmatically launched leader fixtures.
+    /// The test-validator launcher serves Yellowstone on port 7801.
+    pub fn chainsync_config() -> ChainSyncConfig {
+        ChainSyncConfig {
+            http: vec![Self::url_chain().parse().unwrap()],
+            websocket: WebSocketConfig(vec![WebSocketProvider {
+                url: Self::ws_url_chain().parse().unwrap(),
+                max_connections: 4,
+                subs_per_connection: 900,
+            }]),
+            grpc: vec![GrpcStreamConfig {
+                endpoint: "http://127.0.0.1:7801".parse().unwrap(),
+                token: None,
+                duplication_delay: Duration::from_secs(30 * 60),
+            }],
+            ..Default::default()
+        }
     }
 
     // -----------------

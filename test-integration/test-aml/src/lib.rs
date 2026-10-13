@@ -21,7 +21,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use config::{
-    config::{AmlConfig, ChainSyncConfig, LoadableProgram, WebSocketConfig, WebSocketProvider},
+    config::{AmlConfig, ChainSyncConfig, LoadableProgram},
     LeaderParams,
 };
 use solana_sdk::{
@@ -164,19 +164,13 @@ pub fn setup_validator_with_local_remote(
     let mut config = LeaderParams {
         programs,
         chainsync: ChainSyncConfig {
-            http: vec![IntegrationTestContext::url_chain().parse().unwrap()],
-            websocket: WebSocketConfig(vec![WebSocketProvider {
-                url: IntegrationTestContext::ws_url_chain().parse().unwrap(),
-                max_connections: 4,
-                subs_per_connection: 900,
-            }]),
             aml: Some(AmlConfig {
                 endpoint: format!("{}/risk", risk_server_url.trim_end_matches('/'))
                     .parse()
                     .unwrap(),
                 timeout: Duration::from_secs(5),
             }),
-            ..Default::default()
+            ..IntegrationTestContext::chainsync_config()
         },
         ..Default::default()
     };

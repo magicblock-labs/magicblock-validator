@@ -29,3 +29,7 @@ http = ["http://0.0.0.0:7799"]
 url = "ws://0.0.0.0:7800"
 max-connections = 4
 subs-per-connection = 900
+
+[[chainsync.grpc]]
+endpoint = "http://127.0.0.1:7801"
+duplication-delay = "30m"

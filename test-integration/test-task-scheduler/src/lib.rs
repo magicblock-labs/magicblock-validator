@@ -16,7 +16,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use config::{
-    config::{ChainSyncConfig, LoadableProgram, WebSocketConfig, WebSocketProvider},
+    config::LoadableProgram,
     types::SerdePubkey,
     LeaderParams,
 };
@@ -43,15 +43,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Pubkey) {
     let sponsor = loaded_accounts.validator_authority();
 
     let config = LeaderParams {
-        chainsync: ChainSyncConfig {
-            http: vec![IntegrationTestContext::url_chain().parse().unwrap()],
-            websocket: WebSocketConfig(vec![WebSocketProvider {
-                url: IntegrationTestContext::ws_url_chain().parse().unwrap(),
-                max_connections: 4,
-                subs_per_connection: 900,
-            }]),
-            ..Default::default()
-        },
+        chainsync: IntegrationTestContext::chainsync_config(),
         // `eHyd5…` is the *ephemeral* hydra program: it executes cranks inside
         // the ER, so it is preloaded here rather than cloned from the base
         // chain (which only hosts hydra's base-chain counterpart).

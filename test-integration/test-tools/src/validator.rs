@@ -112,6 +112,12 @@ pub fn start_test_validator_with_config(
     let port = rpc_port_from_config(config_path);
     let mut args = config_to_args(config_path, program_loader);
 
+    // All leader fixtures consume the base's lifecycle feed on port 7801.
+    // CI provides this config; local runs use a host-compatible Yellowstone plugin.
+    let geyser_config = std::env::var("YELLOWSTONE_GRPC_CONFIG")
+        .expect("set YELLOWSTONE_GRPC_CONFIG to a Yellowstone config listening on 127.0.0.1:7801");
+    args.extend(["--geyser-plugin-config".into(), geyser_config]);
+
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [
         (
