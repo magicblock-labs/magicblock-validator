@@ -129,20 +129,7 @@ impl IntentExecutorError {
             finalize_signature,
         }
     }
-}
 
-/// Maps a single-stage execution failure to [`IntentExecutorError`].
-///
-/// `commit_signature` stays `None` so retry semantics remain unchanged for
-/// transient send failures. The failed transaction signature is still exposed
-/// via [`IntentExecutorError::signatures`].
-pub(crate) fn single_stage_finalize_execution_error(
-    err: TransactionStrategyExecutionError,
-) -> IntentExecutorError {
-    IntentExecutorError::from_finalize_execution_error(err, None)
-}
-
-impl IntentExecutorError {
     /// True when re-executing the whole intent from scratch may succeed:
     /// the failure was transport/RPC-side rather than deterministic.
     /// Once a commit landed (two-stage finalize failures) re-execution would
@@ -704,7 +691,9 @@ mod tests {
             )),
         );
 
-        let wrapped = super::single_stage_finalize_execution_error(err);
+        let wrapped = super::IntentExecutorError::from_finalize_execution_error(
+            err, None,
+        );
         assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
         assert!(!wrapped.is_transient());
     }
@@ -721,7 +710,9 @@ mod tests {
             )),
         );
 
-        let wrapped = super::single_stage_finalize_execution_error(err);
+        let wrapped = super::IntentExecutorError::from_finalize_execution_error(
+            err, None,
+        );
         assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
         assert!(wrapped.is_transient());
     }
