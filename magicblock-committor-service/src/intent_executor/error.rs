@@ -653,68 +653,31 @@ mod tests {
 
     #[test]
     fn finalize_failure_after_landed_commit_is_not_transient() {
+        let signature = solana_signature::Signature::new_unique();
         let transient_err = || {
-            TransactionStrategyExecutionError::InternalError(
-                make_send_transaction_error("connection reset"),
+            MagicBlockRpcClientError::SentTransactionError(
+                solana_transaction_error::TransactionError::BlockhashNotFound,
+                signature,
             )
+            .into()
         };
 
         // Single-stage: nothing landed, safe to re-execute
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: None,
-            finalize_signature: None,
-        };
+        let err = super::IntentExecutorError::from_finalize_execution_error(
+            transient_err(),
+            None,
+        );
+        assert_eq!(err.signatures(), Some((signature, Some(signature))));
         assert!(err.is_transient());
 
         // Two-stage: commit landed, re-execution would commit again
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: Some(solana_signature::Signature::default()),
-            finalize_signature: None,
-        };
+        let commit_signature = solana_signature::Signature::new_unique();
+        let err = super::IntentExecutorError::from_finalize_execution_error(
+            transient_err(),
+            Some(commit_signature),
+        );
+        assert_eq!(err.signatures(), Some((commit_signature, Some(signature))));
         assert!(!err.is_transient());
-    }
-
-    #[test]
-    fn single_stage_finalize_failure_reports_shared_signature() {
-        let signature = solana_signature::Signature::new_unique();
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::SentTransactionError(
-                    solana_transaction_error::TransactionError::InstructionError(
-                        0,
-                        solana_instruction::error::InstructionError::Custom(1),
-                    ),
-                    signature,
-                ),
-            )),
-        );
-
-        let wrapped = super::IntentExecutorError::from_finalize_execution_error(
-            err, None,
-        );
-        assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
-        assert!(!wrapped.is_transient());
-    }
-
-    #[test]
-    fn single_stage_blockhash_not_found_failure_stays_transient() {
-        let signature = solana_signature::Signature::new_unique();
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::SentTransactionError(
-                    solana_transaction_error::TransactionError::BlockhashNotFound,
-                    signature,
-                ),
-            )),
-        );
-
-        let wrapped = super::IntentExecutorError::from_finalize_execution_error(
-            err, None,
-        );
-        assert_eq!(wrapped.signatures(), Some((signature, Some(signature))));
-        assert!(wrapped.is_transient());
     }
 
     #[test]
