@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use chainsync::{ChainSync, ChainSyncConfig};
+use chainsync::{ChainSync, ChainSyncConfig, GrpcStreamConfig};
 use config::config::aperture::ApertureConfig;
 use engine::testkit::TestEngine;
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
@@ -67,7 +67,16 @@ fn shared_ledger() -> Arc<Ledger> {
 
 fn chainsync(engine: &mut TestEngine) -> Arc<ChainSync> {
     let handle = engine.clone();
-    ChainSync::new(handle, ChainSyncConfig::default(), engine.shutdown()).expect("create chainsync")
+    // RPC tests seed resident Engine state; no live provider observations are needed.
+    let config = ChainSyncConfig {
+        grpc: vec![GrpcStreamConfig {
+            endpoint: "http://127.0.0.1:9".parse().unwrap(),
+            token: None,
+            duplication_delay: Duration::from_secs(30 * 60),
+        }],
+        ..Default::default()
+    };
+    ChainSync::new(handle, config, engine.shutdown()).expect("create chainsync")
 }
 
 impl RpcTestEnv {
