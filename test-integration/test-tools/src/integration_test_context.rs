@@ -4,7 +4,9 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
-use magicblock_config::config::{ChainSyncConfig, GrpcStreamConfig, WebSocketConfig, WebSocketProvider};
+use magicblock_config::config::{
+    ChainSyncConfig, GrpcStreamConfig, WebSocketConfig, WebSocketProvider,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
