@@ -43,25 +43,30 @@ struct State {
     closed: bool,
 }
 
-/// Whether to start a delegation clone, wait, or return a historical result.
+/// Tells a caller of [`DelegationDeduplicator::claim`] how to handle one
+/// delegation identity. Only [`Self::Start`] permits starting clone work.
+///
+/// [`Self::Start`] and [`Self::Wait`] receive the owner's result through
+/// [`wait_for_completion`]; [`Self::HistoricalResult`] already contains it.
+/// A success from any variant does not guarantee that the target still exists
+/// or is usable. Check its current bank state before reporting availability.
 pub(super) enum DedupDecision {
-    /// Own a new delegation clone. Move `guard` into a task whose lifetime is
-    /// independent of this caller, and finish it with the clone result.
-    /// Dropping it unfinished records abandonment. Use `completion` to wait
-    /// for the same result.
+    /// Own a new delegation clone. Move `guard` into a task independent of this
+    /// caller and call [`DelegationCloneGuard::finish`] with its outcome, including
+    /// errors. Dropping the guard unfinished records abandonment.
+    /// Await `completion` with [`wait_for_completion`] to obtain the result.
     Start {
         guard: DelegationCloneGuard,
         completion: CompletionReceiver,
     },
 
-    /// Another caller owns this delegation clone. Receive that owner's result
-    /// without starting another clone or rescue attempt.
+    /// A clone for this identity is already running. Pass this receiver to
+    /// [`wait_for_completion`]; do not start another clone or rescue attempt.
     Wait(CompletionReceiver),
 
-    /// A retained success or failure from an earlier clone of this delegation.
-    /// Returning this historical result starts no new work. A retained success
-    /// does not mean the target still exists or is usable;
-    /// the caller must check its current state in the bank.
+    /// A retained success or failure for this identity. Handle it immediately
+    /// without starting new work. This is the earlier attempt's outcome, even if
+    /// the account has since been undelegated or removed.
     HistoricalResult(DelegationCloneResult),
 }
 
@@ -111,6 +116,8 @@ pub(crate) struct DelegationDeduplicator {
 }
 
 impl DelegationDeduplicator {
+    /// Creates the shared deduplicator at Chainlink startup, validates its limits,
+    /// and starts periodic cleanup. Clones of the returned `Arc` share its state.
     pub(crate) fn new(
         config: DelegationDedupConfig,
     ) -> ChainlinkResult<Arc<Self>> {
@@ -148,9 +155,11 @@ impl DelegationDeduplicator {
         Ok(deduplicator)
     }
 
-    /// Atomically reserves a new delegation clone, or returns a decision to wait
-    /// for or reuse an existing result. Its tracker token is acquired under the
-    /// same lock as shutdown, so draining cannot miss a reserved owner task.
+    /// Before cloning, atomically reserves this identity, joins its running owner,
+    /// or returns its retained result. Closed/full caches reject only new work.
+    ///
+    /// The tracker token is acquired under the same lock as shutdown, so draining
+    /// cannot miss a reserved owner task.
     pub(super) fn claim(
         self: &Arc<Self>,
         identity: DelegationIdentity,
@@ -199,6 +208,8 @@ impl DelegationDeduplicator {
         })
     }
 
+    /// Called by the owner guard to publish completion and retain its success or
+    /// failure for the configured duration, except successful default-signature skips.
     fn finish(
         &self,
         identity: DelegationIdentity,
@@ -235,6 +246,8 @@ impl DelegationDeduplicator {
         sender.send_replace(Some(result));
     }
 
+    /// Begins shutdown: rejects new identities and stops background cleanup.
+    /// Existing work can still finish, be joined, or return retained history.
     pub(super) fn close(&self) {
         let mut state = self.state.lock();
         state.closed = true;
@@ -242,12 +255,16 @@ impl DelegationDeduplicator {
         self.stop_cleanup.cancel();
     }
 
+    /// After [`Self::close`], waits for every owner guard to be released.
+    /// Keep the transaction scheduler running until this returns.
     pub(super) async fn drain(&self) {
         self.tasks.wait().await;
     }
 }
 
 impl State {
+    /// Called by claims and periodic cleanup to remove a bounded batch of expired
+    /// history, preserving running entries and newer entries for the same identity.
     fn remove_expired(&mut self, now: Instant) {
         for _ in 0..CLEANUP_BATCH {
             let Some(&(expires_at, identity)) = self.expiry_queue.front()
@@ -269,6 +286,7 @@ impl State {
 }
 
 impl Drop for DelegationDeduplicator {
+    /// Stops background cleanup when the last shared reference is dropped.
     fn drop(&mut self) {
         self.stop_cleanup.cancel();
     }
@@ -282,6 +300,8 @@ pub(super) struct DelegationCloneGuard {
 }
 
 impl DelegationCloneGuard {
+    /// Called by the owner when its attempt ends to publish success or failure.
+    /// Marks completion before releasing the guard's shutdown-tracking token.
     pub(super) fn finish(mut self, result: DelegationCloneResult) {
         self.deduplicator.finish(self.identity, result);
         self.finished = true;
@@ -289,6 +309,8 @@ impl DelegationCloneGuard {
 }
 
 impl Drop for DelegationCloneGuard {
+    /// Records abandonment if the owner exits without calling [`Self::finish`],
+    /// publishing the error to waiters and retaining it as history.
     fn drop(&mut self) {
         if !self.finished {
             tracing::error!(
@@ -306,6 +328,8 @@ impl Drop for DelegationCloneGuard {
     }
 }
 
+/// Used by the original caller and concurrent duplicates to await the owner's
+/// result; returns abandonment if the result channel closes before completion.
 pub(super) async fn wait_for_completion(
     mut completion: CompletionReceiver,
     identity: DelegationIdentity,
