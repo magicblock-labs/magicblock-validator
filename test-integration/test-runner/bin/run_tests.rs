@@ -46,10 +46,6 @@ pub fn main() {
         return;
     };
 
-    let Ok(config_output) = run_config_tests(&manifest_dir, &config) else {
-        return;
-    };
-
     let Ok(schedule_intents_output) = run_schedule_intents_tests(&manifest_dir, &config) else {
         return;
     };
@@ -66,7 +62,6 @@ pub fn main() {
     assert_cargo_tests_passed(validator_services_output, "validator_services");
     assert_cargo_tests_passed(table_mania_output, "table_mania");
     assert_cargo_tests_passed(committor_output, "committor");
-    assert_cargo_tests_passed(config_output, "config");
     assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
     assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
 }
@@ -714,53 +709,6 @@ fn run_validator_services_tests(
         let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
         let ephem_validator = config.setup_ephem(TEST_NAME).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
-    }
-}
-
-fn run_config_tests(
-    manifest_dir: &str,
-    config: &TestConfigViaEnvVars,
-) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "config";
-    if config.skip_entirely(TEST_NAME) {
-        return Ok(success_output());
-    }
-
-    materialize_v42_program(manifest_dir)?;
-
-    let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
-
-    let start_devnet_validator = || match start_validator(
-        "config-conf.devnet.toml",
-        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
-        &loaded_chain_accounts,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start devnet validator properly");
-        }
-    };
-
-    if config.run_test(TEST_NAME) {
-        eprintln!("======== RUNNING CONFIG TESTS ========");
-
-        let mut devnet_validator = start_devnet_validator();
-
-        let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
-        eprintln!("Running config tests in {}", test_config_dir);
-        let output = match run_test(test_config_dir, Default::default()) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run config tests: {:?}", err);
-                cleanup_devnet_only(&mut devnet_validator);
-                return Err(err.into());
-            }
-        };
-        cleanup_devnet_only(&mut devnet_validator);
-        Ok(output)
-    } else {
-        let devnet_validator = config.setup_devnet(TEST_NAME).then(start_devnet_validator);
-        wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
 

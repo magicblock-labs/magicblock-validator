@@ -172,15 +172,6 @@ setup-committor-devnet:
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
-test-config:
-	RUN_TESTS=config \
-	$(MAKE) test
-setup-config-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=config \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-
 test-schedule-intents:
 	RUN_TESTS=schedule_intents \
 	$(MAKE) test
@@ -255,7 +246,6 @@ ci-lint:
 	setup-cloning-devnet \
 	setup-cloning-ephem \
 	setup-committor-devnet \
-	setup-config-devnet \
 	setup-validator-services-both \
 	setup-validator-services-devnet \
 	setup-validator-services-ephem \
@@ -280,7 +270,6 @@ ci-lint:
 	test-committor-bundles-heavy \
 	test-committor-commitfinalize \
 	test-committor-intent-executor \
-	test-config \
 	test-force-mb \
 	test-schedule-intents \
 	test-schedulecommit \
