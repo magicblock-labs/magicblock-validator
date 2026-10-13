@@ -20,6 +20,11 @@ pub(super) fn undelegated_accounts(
         .message
         .as_ref()
         .ok_or(Error::Protocol("missing transaction message"))?;
+    // Lookup-table transactions are outside the supported contract. Ignore
+    // them without attempting partial lifecycle decoding or stopping the feed.
+    if !message.address_table_lookups.is_empty() {
+        return Ok(SmallVec::new());
+    }
     let key = |index: usize| {
         let bytes = message
             .account_keys
