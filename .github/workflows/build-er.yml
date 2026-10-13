@@ -75,6 +75,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y lld
         shell: bash
 
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
       - name: Build validator and verifier debug binaries
         run: |
           CARGO_PROFILE_DEV_DEBUG=line-tables-only \
@@ -82,8 +84,6 @@ jobs:
             cargo build --locked --bin magicblock-validator --bin magicblock-verifier
         shell: bash
         working-directory: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Build committor program
         run: |
