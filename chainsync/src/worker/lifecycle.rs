@@ -17,8 +17,12 @@ impl ChainSync {
         mut delegation: Delegation,
         coverage: &mut Coverage,
     ) -> Result<()> {
-        if ata::is_eata(&delegation.account) {
-            let Some(projection) = self.project_delegation(delegation).await? else {
+        // The eATA program also owns noncanonical shuttle accounts. Only a
+        // validated canonical eATA is projected; other delegations activate normally.
+        let image = delegation.account.read();
+        if let Some(candidates) = ata::candidates(delegation.pubkey, image.owner(), image.data()) {
+            self.unsubscribe_account(delegation.pubkey, coverage).await?;
+            let Some(projection) = self.project_delegation(delegation, candidates).await? else {
                 return Ok(());
             };
             delegation = projection;

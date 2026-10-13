@@ -9,11 +9,6 @@ use spl_token_2022::{extension::StateWithExtensions, state::Account as TokenAcco
 
 use crate::delegation;
 
-/// Identifies restored eATA ownership; raw DLP-owned images require address/layout validation instead.
-pub(crate) fn is_eata(account: &AccountBuilder) -> bool {
-    account.read().owner() == EATA_PROGRAM_ID
-}
-
 /// Recognizes valid eATA data at its derived address, including while DLP-owned.
 pub(crate) fn is_raw_eata(pubkey: Pubkey, account: &AccountBuilder) -> bool {
     let image = account.read();
