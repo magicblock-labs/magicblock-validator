@@ -121,15 +121,6 @@ setup-validator-services-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-table-mania:
-	RUN_TESTS=table_mania \
-	$(MAKE) test
-setup-table-mania-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=table_mania \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-
 test-committor:
 	RUN_TESTS=$(COMMITTOR_TESTS) \
 	$(MAKE) test
@@ -255,7 +246,6 @@ ci-lint:
 	setup-schedulecommit-both \
 	setup-schedulecommit-devnet \
 	setup-schedulecommit-ephem \
-	setup-table-mania-devnet \
 	setup-task-scheduler-devnet \
 	test \
 	test-aml \
@@ -273,6 +263,5 @@ ci-lint:
 	test-force-mb \
 	test-schedule-intents \
 	test-schedulecommit \
-	test-table-mania \
 	test-task-scheduler \
 	test-validator-services

@@ -13,7 +13,6 @@ members = [
     "test-config",
     "test-runner",
     "test-schedule-intent",
-    "test-table-mania",
     "test-task-scheduler",
     "test-tools",
     "test-validator-services",

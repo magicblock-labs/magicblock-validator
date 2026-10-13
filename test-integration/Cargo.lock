@@ -9929,23 +9929,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "test-table-mania"
-version = "0.0.0"
-dependencies = [
- "integration-solana-sdk",
- "integration-test-tools",
- "magicblock-rpc-client",
- "magicblock-table-mania",
- "paste",
- "solana-address-lookup-table-interface 3.1.0",
- "solana-commitment-config",
- "solana-pubkey 4.2.0",
- "solana-rpc-client",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "test-task-scheduler"
 version = "0.1.0"
 dependencies = [

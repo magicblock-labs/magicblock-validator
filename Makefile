@@ -2,10 +2,12 @@ DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 TUI_RPC_URL ?= http://127.0.0.1:7799
 TUI_WS_URL ?= ws://127.0.0.1:7800
 
-CARGO_TEST=nextest run --no-fail-fast
-CARGO_TEST_NOCAP=nextest run --nocapture
-$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test --no-fail-fast))
-$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test --no-fail-fast -- --nocapture))
+# Committor retains TableMania temporarily; lookup-table coverage is unsupported.
+TEST_PACKAGES=--workspace --exclude magicblock-table-mania
+CARGO_TEST=nextest run $(TEST_PACKAGES) --no-fail-fast
+CARGO_TEST_NOCAP=nextest run $(TEST_PACKAGES) --nocapture
+$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test $(TEST_PACKAGES) --no-fail-fast))
+$(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test $(TEST_PACKAGES) --no-fail-fast -- --nocapture))
 
 test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST)

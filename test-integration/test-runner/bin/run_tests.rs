@@ -40,9 +40,7 @@ pub fn main() {
         return;
     };
 
-    let Ok((table_mania_output, committor_output)) =
-        run_table_mania_and_committor_tests(&manifest_dir, &config)
-    else {
+    let Ok(committor_output) = run_committor_tests(&manifest_dir, &config) else {
         return;
     };
 
@@ -60,7 +58,6 @@ pub fn main() {
     assert_cargo_tests_passed(aml_output, "aml");
     assert_cargo_tests_passed(cloning_output, "cloning");
     assert_cargo_tests_passed(validator_services_output, "validator_services");
-    assert_cargo_tests_passed(table_mania_output, "table_mania");
     assert_cargo_tests_passed(committor_output, "committor");
     assert_cargo_tests_passed(schedule_intents_output, "schedule_intents");
     assert_cargo_tests_passed(task_scheduler_output, "task_scheduler");
@@ -325,11 +322,10 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset = CommittorSub
     extra_files: &[],
 };
 
-fn run_table_mania_and_committor_tests(
+fn run_committor_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
-) -> Result<(Output, Output), Box<dyn Error>> {
-    const TABLE_MANIA_TEST: &str = "table_mania";
+) -> Result<Output, Box<dyn Error>> {
     // Each entry is one CI shard / RUN_TESTS value paired with the subset of
     // committor tests it owns.
     let committor_shards: &[(&str, &CommittorSubset)] = &[
@@ -371,9 +367,9 @@ fn run_table_mania_and_committor_tests(
 
     let any_committor_active = committor_shards.iter().any(|(name, _)| !config.skip_entirely(name));
 
-    if config.skip_entirely(TABLE_MANIA_TEST) && !any_committor_active {
-        eprintln!("Skipping table mania and committor tests");
-        return Ok((success_output(), success_output()));
+    if !any_committor_active {
+        eprintln!("Skipping committor tests");
+        return Ok(success_output());
     }
 
     let loaded_chain_accounts = LoadedAccounts::with_delegation_program_test_authority();
@@ -389,38 +385,21 @@ fn run_table_mania_and_committor_tests(
         }
     };
 
-    let run_table_mania = config.run_test(TABLE_MANIA_TEST);
     let active_committor_subsets: Vec<&CommittorSubset> = committor_shards
         .iter()
         .filter(|(name, _)| config.run_test(name))
         .map(|(_, subset)| *subset)
         .collect();
 
-    if run_table_mania || !active_committor_subsets.is_empty() {
-        eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
+    if !active_committor_subsets.is_empty() {
+        eprintln!("======== Starting DEVNET Validator for Committor ========");
 
         let mut devnet_validator = start_devnet_validator();
 
-        // NOTE: the table mania and committor tests run directly against
+        // NOTE: the committor tests run directly against
         // a chain validator therefore no ephemeral validator needs to be started
 
-        let table_mania_test_output = if run_table_mania {
-            let test_table_mania_dir = format!("{}/../{}", manifest_dir, "test-table-mania");
-
-            match run_test(test_table_mania_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run table-mania: {:?}", err);
-                    cleanup_devnet_only(&mut devnet_validator);
-                    return Err(err.into());
-                }
-            }
-        } else {
-            eprintln!("Skipping table mania tests");
-            success_output()
-        };
-
-        let committor_test_output = if !active_committor_subsets.is_empty() {
+        let committor_test_output = {
             let test_committor_dir = format!("{}/../{}", manifest_dir, "test-committor-service");
             let mut combined_status_ok = true;
             let mut combined_stdout = Vec::new();
@@ -488,22 +467,15 @@ fn run_table_mania_and_committor_tests(
                 stdout: combined_stdout,
                 stderr: combined_stderr,
             }
-        } else {
-            eprintln!("Skipping committor tests");
-            success_output()
         };
 
         cleanup_devnet_only(&mut devnet_validator);
 
-        Ok((table_mania_test_output, committor_test_output))
+        Ok(committor_test_output)
     } else {
-        let setup_needed = config.setup_devnet(TABLE_MANIA_TEST)
-            || committor_shards.iter().any(|(name, _)| config.setup_devnet(name));
+        let setup_needed = committor_shards.iter().any(|(name, _)| config.setup_devnet(name));
         let devnet_validator = setup_needed.then(start_devnet_validator);
-        Ok((
-            wait_for_ctrlc(devnet_validator, None, success_output())?,
-            success_output(),
-        ))
+        wait_for_ctrlc(devnet_validator, None, success_output())
     }
 }
 
