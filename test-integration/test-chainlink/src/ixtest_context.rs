@@ -105,6 +105,7 @@ impl IxtestContext {
                         post_delegation_mode: ClonePostDelegationMode::None,
                         delegated_to_other: None,
                         source_slots: None,
+                        delegation_identity: None,
                     })
                     .await
                     .unwrap();

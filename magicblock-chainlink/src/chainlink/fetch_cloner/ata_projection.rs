@@ -22,7 +22,7 @@ use super::{
 use crate::{
     cloner::{
         AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots, Cloner,
-        DelegationActions,
+        DelegationActions, DelegationIdentity,
     },
     remote_account_provider::{
         pubsub_common::SubscriptionSource, ChainPubsubClient, ChainRpcClient,
@@ -286,6 +286,10 @@ where
             ata.remote_slot(),
             eata_account.remote_slot(),
         )),
+        delegation_identity: Some(DelegationIdentity {
+            delegated_account: eata_pubkey,
+            delegation_slot: deleg_record.delegation_slot,
+        }),
     })
 }
 
@@ -465,6 +469,7 @@ where
         account: ata_account,
         delegation: Some((deleg_record, actions)),
         source_slots: None,
+        delegation_identity: None,
     };
     if let Some(projected_ata) = maybe_project_delegated_ata_from_eata(
         this,
@@ -477,6 +482,10 @@ where
             eata_account.remote_slot(),
         );
         resolved.source_slots = Some(source_slots);
+        resolved.delegation_identity = Some(DelegationIdentity {
+            delegated_account: eata_pubkey,
+            delegation_slot: deleg_record.delegation_slot,
+        });
         resolved.account = projected_ata;
     }
     resolved
@@ -721,6 +730,7 @@ where
         let mut delegated_to_other = None;
         let mut actions = None;
         let mut source_slots = None;
+        let mut delegation_identity = None;
 
         if let Some(eata_shared) = &input.eata_shared {
             if let Some(Some(deleg)) = deleg_iter.next() {
@@ -745,6 +755,10 @@ where
                     ));
                     account_to_clone = projected_ata;
                     actions = delegation_actions;
+                    delegation_identity = Some(DelegationIdentity {
+                        delegated_account: input.eata_pubkey,
+                        delegation_slot: deleg_record.delegation_slot,
+                    });
                 }
             }
         }
@@ -758,6 +772,7 @@ where
             ),
             delegated_to_other,
             source_slots,
+            delegation_identity,
         });
     }
 
