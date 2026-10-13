@@ -20,15 +20,24 @@ pub(super) fn undelegated_accounts(
         .message
         .as_ref()
         .ok_or(Error::Protocol("missing transaction message"))?;
-    let key = |index: usize| {
-        let bytes = message
-            .account_keys
-            .get(index)
-            .ok_or(Error::Protocol("invalid account index"))?;
-        pubkey(bytes)
+    // Base-chain versioned transactions index static, loaded writable, then
+    // loaded readonly keys. Decoding them does not enable local ALT execution.
+    let keys = [
+        message.account_keys.as_slice(),
+        meta.loaded_writable_addresses.as_slice(),
+        meta.loaded_readonly_addresses.as_slice(),
+    ];
+    let key = |mut index: usize| {
+        for keys in keys {
+            if let Some(bytes) = keys.get(index) {
+                return pubkey(bytes);
+            }
+            index -= keys.len();
+        }
+        Err(Error::Protocol("invalid account index"))
     };
     let dlp = dlp_api::id();
-    // Resolve both instruction kinds against static keys only; lookup-table keys are unsupported.
+    // Outer and inner instructions share the resolved transaction key order.
     let outer = message
         .instructions
         .iter()
