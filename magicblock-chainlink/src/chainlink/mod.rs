@@ -8,7 +8,7 @@ use std::{
 
 use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
-use fetch_cloner::FetchCloner;
+use fetch_cloner::{DelegationDeduplicator, FetchCloner};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
 use magicblock_aml::RiskService;
 use magicblock_config::config::ChainLinkConfig;
@@ -413,6 +413,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
     > {
         // Extract accounts provider and create fetch cloner while connecting
         // the subscription channel
+        let delegation_dedup = DelegationDeduplicator::new(
+            chainlink_config.delegation_dedup.clone(),
+        )?;
         let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIPTION_UPDATE_LIMIT);
         let account_provider = RemoteAccountProvider::try_from_urls_and_config(
             endpoints,
@@ -430,17 +433,17 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
                 ledger_path,
             )?
             .map(Arc::new);
-            let fetch_cloner =
-                FetchCloner::new_with_undelegation_request_sender(
-                    &provider,
-                    accounts_bank,
-                    cloner,
-                    validator_keypair,
-                    rx,
-                    chainlink_config.allowed_programs.clone(),
-                    risk_service,
-                    undelegation_request_sender.clone(),
-                );
+            let fetch_cloner = FetchCloner::new_with_delegation_dedup(
+                &provider,
+                accounts_bank,
+                cloner,
+                validator_keypair,
+                rx,
+                chainlink_config.allowed_programs.clone(),
+                risk_service,
+                undelegation_request_sender.clone(),
+                delegation_dedup,
+            );
             Some(fetch_cloner)
         } else {
             None

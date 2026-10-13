@@ -25,7 +25,7 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{
         errors::ClonerResult, AccountCloneRequest, ClonePostDelegationMode,
-        CloneSourceSlots, Cloner, DelegationActions,
+        CloneSourceSlots, Cloner, DelegationActions, DelegationIdentity,
     },
     remote_account_provider::{
         program_account::{
@@ -142,6 +142,7 @@ fn classify_single_account(
                             post_delegation_mode: ClonePostDelegationMode::None,
                             delegated_to_other: None,
                             source_slots: None,
+                            delegation_identity: None,
                         });
                     }
                 }
@@ -308,6 +309,7 @@ where
                 delegated_to_other,
                 delegation_actions,
                 source_slots,
+                delegation_identity,
             ) = if let Some(delegation_record_data) = delegation_record {
                 // NOTE: failing here is fine when resolving all accounts for a transaction
                 // since if something is off we better not run it anyways
@@ -355,6 +357,13 @@ where
                     &mut account,
                     &delegation_record,
                 );
+                let delegation_identity = (account.delegated()
+                    && !account.confined()
+                    && delegation_record.authority == this.validator_pubkey)
+                    .then_some(DelegationIdentity {
+                        delegated_account: pubkey,
+                        delegation_slot: delegation_record.delegation_slot,
+                    });
 
                 // Skip high-cardinality owner programs such as SPL Token.
                 if account.delegated()
@@ -376,12 +385,13 @@ where
                     delegated_to_other,
                     delegation_actions,
                     source_slots,
+                    delegation_identity,
                 )
             } else if is_internal_dlp_account_data(account.data()) {
-                (None, None, DelegationActions::default(), None)
+                (None, None, DelegationActions::default(), None, None)
             } else {
                 missing_delegation_record.push((pubkey, account.remote_slot()));
-                (None, None, DelegationActions::default(), None)
+                (None, None, DelegationActions::default(), None, None)
             };
             let cleanup_delegated_subscription = account.delegated();
             let cleanup_undelegation_tracking = cleanup_delegated_subscription
@@ -397,6 +407,7 @@ where
                 ),
                 delegated_to_other,
                 source_slots,
+                delegation_identity,
             });
             if cleanup_delegated_subscription {
                 if cleanup_undelegation_tracking {
