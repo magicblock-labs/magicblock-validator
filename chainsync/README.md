@@ -157,8 +157,14 @@ On a matched delegation, ChainSync retires ordinary mirror coverage before
 activation. A local delegation restores ownership, acquires action dependencies,
 then materializes the account and executes its actions in one Engine transaction.
 A confined account is materialized directly, without dependencies, actions, or
-rescue. An eATA delegation activates only through a matching resident ATA; it does
-not create an ATA that was never acquired.
+rescue. An ordinary eATA delegation activates only through a matching resident
+ATA. An eATA with post-delegation actions also acquires its matching ATA through
+the normal HTTP projection flow, so shuttle actions do not depend on an earlier
+RPC request. Each projection retains a readonly raw eATA with eSPL ownership
+restored, no actions, and no ordinary mirror subscriptions. Its balance is not
+the live ER token balance, and it can be evicted independently of the projection.
+Explicit raw acquisition uses the same policy; undelegated raw accounts are
+ordinary subscribed mirrors.
 
 Optional AML assessment checks distinct post-delegation action signers. Rejected
 signers, invalid actions, and activation failures enter rescue undelegation unless
