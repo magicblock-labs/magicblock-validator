@@ -61,6 +61,8 @@ pub(super) enum Notice {
 /// Connection and RPC acknowledgement budget.
 const TIMEOUT: Duration = Duration::from_secs(10);
 pub(super) const COMMAND_CAP: usize = 256;
+/// Fixed-size subscribe/unsubscribe RPCs fit Solana PubSub's default 4 KiB frame limit.
+const RPC_BATCH: usize = 16;
 /// Ping cadence; a missing pong invalidates the connection.
 const HEARTBEAT: Duration = Duration::from_secs(15);
 
@@ -138,7 +140,7 @@ impl Session {
         let mut heartbeat = time::interval_at(Instant::now() + HEARTBEAT, HEARTBEAT);
         heartbeat.set_missed_tick_behavior(MissedTickBehavior::Skip);
         let mut awaiting_pong = false;
-        let mut batch = Vec::with_capacity(COMMAND_CAP);
+        let mut batch = Vec::with_capacity(RPC_BATCH);
         // Keep the in-flight read pinned across select branches so framing survives cancellation.
         let frames = stream::unfold(reader, |mut reader| async {
             // Automatic replies are disabled; all writes stay on the session's writer.
@@ -153,7 +155,7 @@ impl Session {
         loop {
             tokio::select! {
                 biased;
-                count = commands.recv_many(&mut batch, COMMAND_CAP) => {
+                count = commands.recv_many(&mut batch, RPC_BATCH) => {
                     if count == 0 {
                         return Ok(());
                     }
