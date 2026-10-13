@@ -1928,6 +1928,9 @@ where
                 // RPC or subscription task. Its guard participates in shutdown
                 // draining, including when the caller times out or disappears.
                 tokio::spawn(async move {
+                    // TODO: If retries are needed, keep them in this task under the same
+                    // guard; never reclaim the identity or finish between attempts.
+                    // Reconcile uncertain execution outcomes before resubmitting.
                     let result = this
                         .execute_delegation_clone(
                             request,
@@ -1967,7 +1970,7 @@ where
                     .await
             }
             DedupDecision::HistoricalResult(result) => {
-                debug!(
+                info!(
                     delegated_account = %identity.delegated_account,
                     delegation_slot = identity.delegation_slot,
                     clone_target = %clone_target,
