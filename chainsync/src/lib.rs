@@ -68,6 +68,8 @@ pub struct ChainSync {
 /// Failure to acquire or apply base-chain account state.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("at least one gRPC lifecycle stream is required")]
+    MissingGrpc,
     #[error("HTTP account fetch failed: {0}")]
     Fetch(#[from] HttpError),
     #[error("WebSocket subscription failed: {0}")]
@@ -105,6 +107,9 @@ impl ChainSync {
         config: ChainSyncConfig,
         shutdown: &mut ShutdownManager,
     ) -> Result<Arc<Self>> {
+        if config.grpc.is_empty() {
+            return Err(Error::MissingGrpc);
+        }
         metrics::init();
         let aml = config.aml.map(aml::Client::new).transpose()?;
         let (websocket, websocket_rx) = Pool::new(config.websocket, shutdown);
