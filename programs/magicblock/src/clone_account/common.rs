@@ -207,7 +207,7 @@ fn merge_approvals(
             .checked_add(spendable(b))
             .map(|amount| (da, amount))
             .ok_or(InstructionError::ArithmeticOverflow),
-        _ => Err(MagicBlockProgramError::AccountIsDelegated.into()),
+        _ => Err(MagicBlockProgramError::SplDelegatesMismatch.into()),
     }
 }
 

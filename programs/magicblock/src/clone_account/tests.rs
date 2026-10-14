@@ -608,8 +608,8 @@ fn test_clone_account_merges_funded_magic_ata_into_projection() {
         assert_eq!((token.amount, token.delegated_amount), expected);
     }
 
-    // A plain copy never clobbers the balance, a merge that a transfer could
-    // not make keeps it blocked, and so do distinct delegates at any balance.
+    // A plain copy never clobbers the balance, and a merge that a transfer
+    // could not make keeps it blocked.
     let frozen = AccountState::Frozen;
     for (magic_ata, projection, delegated) in [
         (magic_ata, projection, false),
@@ -629,11 +629,15 @@ fn test_clone_account_merges_funded_magic_ata_into_projection() {
             },
             true,
         ),
-        (approved, approve(projection, other, 1), true),
-        (drained, approve(projection, other, 1), true),
     ] {
         let err = MagicBlockProgramError::AccountIsDelegated.into();
         clone(magic_ata, projection, delegated, Err(err));
+    }
+
+    // Distinct delegates block at any balance.
+    for magic_ata in [approved, drained] {
+        let err = MagicBlockProgramError::SplDelegatesMismatch.into();
+        clone(magic_ata, approve(projection, other, 1), true, Err(err));
     }
 }
 
