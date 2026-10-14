@@ -12771,7 +12771,8 @@ async fn test_drained_magic_ata_projection_uses_base_ata_layout() {
 }
 
 /// When the base ATA is confirmed absent on chain, the projection that
-/// replaces a drained Magic ATA falls back to the local layout.
+/// replaces a drained Magic ATA falls back to the local layout, minus its
+/// approval: the clone merges the live one.
 #[tokio::test]
 async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_ata_absent(
 ) {
@@ -12805,6 +12806,12 @@ async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_
         &mint,
         0,
     );
+    let mut magic_ata = accounts_bank.get_account(&ata_pubkey).unwrap();
+    let mut token = SplAccount::unpack(magic_ata.data()).unwrap();
+    token.delegate = COption::Some(random_pubkey());
+    token.delegated_amount = 1;
+    SplAccount::pack(token, magic_ata.data_as_mut_slice()).unwrap();
+    accounts_bank.insert(ata_pubkey, magic_ata);
     add_delegation_record_for(
         &rpc_client,
         eata_pubkey,
@@ -12843,6 +12850,7 @@ async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_
     let token = SplAccount::unpack(projected.data()).unwrap();
     assert!(projected.delegated());
     assert_eq!(token.amount, AMOUNT);
+    assert_eq!((token.delegate, token.delegated_amount), (COption::None, 0));
     assert_eq!(projected.lamports(), 0, "local Magic ATA layout kept");
     assert_ne!(
         token.close_authority,

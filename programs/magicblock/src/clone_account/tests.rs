@@ -583,14 +583,34 @@ fn test_clone_account_merges_funded_magic_ata_into_projection() {
     assert!(try_get_magic_ata_info(&pubkey, merged).is_none());
     assert_eq!(SplAccount::unpack(merged.data()).unwrap().amount, 12);
 
-    // A plain copy never clobbers the balance, and a merge that a transfer
-    // could not make, or that would drop an approval, keeps it blocked.
-    let frozen = AccountState::Frozen;
-    let approved = SplAccount {
-        delegate: COption::Some(Pubkey::new_unique()),
-        delegated_amount: 1,
-        ..magic_ata
+    // A sole approval is kept, even at zero balance over a frozen Magic ATA;
+    // a delegate approved on both sides keeps what it could spend from each.
+    let (delegate, other) = (Pubkey::new_unique(), Pubkey::new_unique());
+    let approve = |token: SplAccount, to, delegated_amount| SplAccount {
+        delegate: COption::Some(to),
+        delegated_amount,
+        ..token
     };
+    let approved = approve(magic_ata, delegate, 2);
+    let drained = SplAccount {
+        amount: 0,
+        state: AccountState::Frozen,
+        ..approved
+    };
+    for (magic_ata, projection, expected) in [
+        (approved, projection, (12, 2)),
+        (drained, projection, (5, 2)),
+        (approved, approve(projection, delegate, 9), (12, 7)),
+    ] {
+        let accounts = clone(magic_ata, projection, true, Ok(()));
+        let token = SplAccount::unpack(accounts[1].data()).unwrap();
+        assert_eq!(token.delegate, COption::Some(delegate));
+        assert_eq!((token.amount, token.delegated_amount), expected);
+    }
+
+    // A plain copy never clobbers the balance, a merge that a transfer could
+    // not make keeps it blocked, and so do distinct delegates at any balance.
+    let frozen = AccountState::Frozen;
     for (magic_ata, projection, delegated) in [
         (magic_ata, projection, false),
         (
@@ -609,7 +629,8 @@ fn test_clone_account_merges_funded_magic_ata_into_projection() {
             },
             true,
         ),
-        (approved, projection, true),
+        (approved, approve(projection, other, 1), true),
+        (drained, approve(projection, other, 1), true),
     ] {
         let err = MagicBlockProgramError::AccountIsDelegated.into();
         clone(magic_ata, projection, delegated, Err(err));

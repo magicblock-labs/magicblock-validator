@@ -8,8 +8,10 @@ use magicblock_core::token_programs::{
     try_get_magic_ata_info, AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
+use spl_token::state::Account as SplAccount;
 use tokio::task::JoinSet;
 use tracing::*;
 
@@ -230,7 +232,8 @@ where
             if try_get_magic_ata_info(&candidate_pubkey, &candidate_account)
                 .is_some()
             {
-                magic_ata = Some((candidate_pubkey, candidate_account));
+                magic_ata = layout_without_approval(candidate_account)
+                    .map(|layout| (candidate_pubkey, layout));
                 continue;
             }
             ata = Some((candidate_pubkey, candidate_account));
@@ -798,6 +801,23 @@ fn ata_blocks_projection(ata_pubkey: &Pubkey, ata: &AccountSharedData) -> bool {
     ata.undelegating()
         || (ata.delegated()
             && try_get_magic_ata_info(ata_pubkey, ata).is_none())
+}
+
+/// An owned copy of a Magic ATA to project from, without its approval. Owned,
+/// so writes never reach AccountsDb through an mmap view held across the base
+/// ATA fetch; without approval, so the clone merges the live one instead and
+/// a revoke landing meanwhile is never undone.
+fn layout_without_approval(
+    mut account: AccountSharedData,
+) -> Option<AccountSharedData> {
+    account.ensure_owned();
+    // Token-2022 shares the legacy layout for the base account fields.
+    let base = account.data_as_mut_slice().get_mut(..SplAccount::LEN)?;
+    let mut token = SplAccount::unpack(base).ok()?;
+    token.delegate = COption::None;
+    token.delegated_amount = 0;
+    SplAccount::pack(token, base).ok()?;
+    Some(account)
 }
 
 #[cfg(test)]

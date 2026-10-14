@@ -15,7 +15,7 @@ use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::{error::InstructionError, Instruction};
 use solana_loader_v4_interface::state::LoaderV4State;
 use solana_log_collector::ic_msg;
-use solana_program::program_pack::Pack;
+use solana_program::{program_option::COption, program_pack::Pack};
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_transaction_context::{
@@ -135,12 +135,11 @@ pub fn validate_clone_target(
     validate_not_delegated(account, pubkey, invoke_context)
 }
 
-/// Folds a funded Magic ATA's balance into the eATA projection replacing it,
-/// so the two never coexist. Only an eATA projection reaches an ATA address
-/// as a delegated clone, and its amount is the wallet's base eATA balance.
-/// It merges only where a transfer between the two could, without dropping
-/// local state: neither side is frozen and the Magic ATA has no approval.
-/// Otherwise the Magic ATA keeps blocking. Returns whether they merged.
+/// Folds a Magic ATA into the eATA projection replacing it, so the two never
+/// coexist. Only an eATA projection reaches an ATA address as a delegated
+/// clone, and its amount is the wallet's base eATA balance. A funded Magic
+/// ATA merges only where a transfer could, so neither side may be frozen;
+/// otherwise it keeps blocking. Returns whether they merged.
 pub fn merge_magic_ata_into_projection(
     invoke_context: &InvokeContext,
     account: &TransactionAccountViewMut,
@@ -156,9 +155,7 @@ pub fn merge_magic_ata_into_projection(
         return Ok(false);
     }
     let local = account.to_account_shared_data();
-    let Some(magic_ata) =
-        try_get_magic_ata_info(pubkey, &local).filter(|info| info.amount > 0)
-    else {
+    let Some(magic_ata) = try_get_magic_ata_info(pubkey, &local) else {
         return Ok(false);
     };
     // Token-2022 shares the legacy layout for the base account fields.
@@ -171,14 +168,15 @@ pub fn merge_magic_ata_into_projection(
     else {
         return Ok(false);
     };
-    if local_token.is_frozen()
-        || local_token.delegate.is_some()
-        || projection.is_frozen()
-        || projection.mint != magic_ata.mint
+    if projection.mint != magic_ata.mint
         || projection.owner != magic_ata.wallet_owner
+        || (magic_ata.amount > 0
+            && (local_token.is_frozen() || projection.is_frozen()))
     {
         return Ok(false);
     }
+    (projection.delegate, projection.delegated_amount) =
+        merge_approvals(&local_token, &projection)?;
     projection.amount = projection
         .amount
         .checked_add(magic_ata.amount)
@@ -192,6 +190,25 @@ pub fn merge_magic_ata_into_projection(
         magic_ata.amount
     );
     Ok(true)
+}
+
+/// Merges the two approvals: a sole one is kept as is, and a delegate
+/// approved on both sides keeps what it could spend from each. Distinct
+/// delegates conflict, so the Magic ATA keeps blocking at any balance.
+fn merge_approvals(
+    a: &SplAccount,
+    b: &SplAccount,
+) -> Result<(COption<Pubkey>, u64), InstructionError> {
+    let spendable = |t: &SplAccount| t.amount.min(t.delegated_amount);
+    match (a.delegate, b.delegate) {
+        (COption::None, _) => Ok((b.delegate, b.delegated_amount)),
+        (_, COption::None) => Ok((a.delegate, a.delegated_amount)),
+        (da, db) if da == db => spendable(a)
+            .checked_add(spendable(b))
+            .map(|amount| (da, amount))
+            .ok_or(InstructionError::ArithmeticOverflow),
+        _ => Err(MagicBlockProgramError::AccountIsDelegated.into()),
+    }
 }
 
 /// Validates that incoming remote_slot is not older than current.
