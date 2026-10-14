@@ -42,9 +42,13 @@ fn canonical_projection_preserves_extensions_and_native_reserve_for_both_token_p
                 image.lamports(),
                 if native { NATIVE_RESERVE } else { TOKEN_LAMPORTS }
             );
-            assert_eq!(&result.read().data()[TokenAccount::LEN..], extensions);
-            assert!(is_projection_of(ata, eata, &result));
-            let transient = result.mode(AccountMode::Transient);
+            assert_eq!(&image.data()[TokenAccount::LEN..], extensions);
+            let projected = result.build();
+            assert!(is_projection_of(ata, eata, &projected));
+            let transient = AccountBuilder::from(projected)
+                .owner(dlp_api::id())
+                .mode(AccountMode::Transient)
+                .build();
             assert!(is_projection_of(ata, eata, &transient));
         }
     }
