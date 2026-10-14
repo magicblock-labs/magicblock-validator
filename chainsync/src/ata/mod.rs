@@ -77,18 +77,29 @@ pub(crate) fn project(
 }
 
 /// Recognizes an initialized token account at its canonical ATA address.
-fn token_account(pubkey: Pubkey, account: &AccountBuilder) -> Option<TokenAccount> {
-    let image = account.read();
-    let program = image.owner();
+fn token_account(
+    pubkey: Pubkey,
+    program: Pubkey,
+    mode: AccountMode,
+    data: &[u8],
+) -> Option<TokenAccount> {
+    // Scheduling undelegation changes the owner to DLP but retains the token layout.
+    let transient = program == dlp_api::id() && mode == AccountMode::Transient;
     let token = if program == spl_token::id() {
-        TokenAccount::unpack(image.data()).ok()?
-    } else if program == spl_token_2022::id() {
-        StateWithExtensions::<TokenAccount>::unpack(image.data()).ok()?.base
+        TokenAccount::unpack(data).ok()?
+    } else if program == spl_token_2022::id() || transient {
+        StateWithExtensions::<TokenAccount>::unpack(data).ok()?.base
     } else {
         return None;
     };
-    let canonical = derive_ata_with_token_program(&token.owner, &token.mint, &program);
-    (canonical == pubkey).then_some(token)
+    let canonical =
+        |program| derive_ata_with_token_program(&token.owner, &token.mint, &program) == pubkey;
+    let canonical = if transient {
+        [spl_token::id(), spl_token_2022::id()].into_iter().any(canonical)
+    } else {
+        canonical(program)
+    };
+    canonical.then_some(token)
 }
 
 /// An eATA is trusted only when its owner and derived address agree with its data.
