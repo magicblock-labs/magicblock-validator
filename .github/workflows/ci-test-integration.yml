@@ -347,8 +347,6 @@ jobs:
           - batch_tests: "aml"
             test_bins_artifact: "aml"
             needs_build_env: true
-            # AML retains loader-v4 coverage, removed from newer Agave runtimes.
-            solana_version: v4.0.3
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
             needs_build_env: true

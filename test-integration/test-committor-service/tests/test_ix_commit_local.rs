@@ -234,10 +234,8 @@ async fn test_ix_commit_order_book_change_636_bytes() {
 
 #[tokio::test]
 async fn test_ix_commit_order_book_change_637_bytes() {
-    // 636 bytes still produces a raw tx within the 1232-byte packet limit
-    // (including the first-commit uniqueness noop). 637 bytes crosses it
-    // by one byte.
-    commit_book_order_account(637, CommitStrategy::DiffBuffer, CommitIntentKind::Commit).await;
+    // This exceeded the v0 packet limit but fits inline in a native v1 transaction.
+    commit_book_order_account(637, CommitStrategy::DiffArgs, CommitIntentKind::Commit).await;
 }
 
 #[tokio::test]
@@ -501,10 +499,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_3() {
 async fn test_commit_5_accounts_1kb_bundle_size_3_undelegate_all() {
     commit_5_accounts_1kb(
         3,
-        expect_strategies(&[
-            // Intent fits in 1 TX only with ALT, see IntentExecutorImpl::try_unite_tasks
-            (CommitStrategy::DiffArgs, 5),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         CommitIntentKind::CommitAndUndelegate,
     )
     .await;
@@ -524,10 +519,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4() {
 async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
     commit_5_accounts_1kb(
         4,
-        expect_strategies(&[
-            (CommitStrategy::DiffBufferWithLookupTable, 4),
-            (CommitStrategy::DiffArgs, 1),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         CommitIntentKind::CommitAndUndelegate,
     )
     .await;
@@ -537,7 +529,7 @@ async fn test_commit_5_accounts_1kb_bundle_size_4_undelegate_all() {
 async fn test_commit_5_accounts_1kb_bundle_size_5_undelegate_all() {
     commit_5_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 5)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 5)]),
         CommitIntentKind::CommitAndUndelegate,
     )
     .await;
@@ -567,11 +559,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_4() {
 async fn test_commit_20_accounts_1kb_bundle_size_6() {
     commit_20_accounts_1kb(
         6,
-        expect_strategies(&[
-            (CommitStrategy::DiffBufferWithLookupTable, 18),
-            // Two accounts don't make it into the bundles of size 6
-            (CommitStrategy::DiffArgs, 2),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -581,7 +569,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_6() {
 async fn test_commit_20_accounts_1kb_bundle_size_5() {
     commit_20_accounts_1kb(
         5,
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 20)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -591,11 +579,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_5() {
 async fn test_commit_8_accounts_1kb_bundle_size_8() {
     commit_8_accounts_1kb(
         8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 8),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 8)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -605,11 +589,7 @@ async fn test_commit_8_accounts_1kb_bundle_size_8() {
 async fn test_commitfinalize_8_accounts_1kb_bundle_size_8() {
     commit_8_accounts_1kb(
         8,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 8),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 8)]),
         CommitIntentKind::CommitFinalize,
     )
     .await;
@@ -619,10 +599,7 @@ async fn test_commitfinalize_8_accounts_1kb_bundle_size_8() {
 async fn test_commit_20_accounts_1kb_bundle_size_8() {
     commit_20_accounts_1kb(
         8,
-        expect_strategies(&[
-            (CommitStrategy::DiffBufferWithLookupTable, 16),
-            (CommitStrategy::DiffArgs, 4),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::Commit,
     )
     .await;
@@ -632,11 +609,7 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
 async fn test_commitfinalize_and_undelefate_20_accounts_1kb_bundle_size_11() {
     commit_20_accounts_1kb(
         11,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 20),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::CommitFinalizeAndUndelegate,
     )
     .await;
@@ -646,11 +619,7 @@ async fn test_commitfinalize_and_undelefate_20_accounts_1kb_bundle_size_11() {
 async fn test_commitfinalize_20_accounts_1kb_bundle_size_11() {
     commit_20_accounts_1kb(
         11,
-        expect_strategies(&[
-            // Four accounts don't make it into the bundles of size 8, but
-            // that bundle also needs lookup tables
-            (CommitStrategy::DiffBufferWithLookupTable, 20),
-        ]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::CommitFinalize,
     )
     .await;
@@ -662,7 +631,7 @@ async fn test_ix_execute_intent_bundle_commit_and_cau_simultaneously_union_of_ac
         &[1024, 2048],
         &[],
         &[1024, 2048],
-        expect_strategies(&[(CommitStrategy::DiffBufferWithLookupTable, 4)]),
+        expect_strategies(&[(CommitStrategy::DiffArgs, 4)]),
     )
     .await;
 }

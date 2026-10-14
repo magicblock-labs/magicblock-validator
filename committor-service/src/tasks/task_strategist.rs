@@ -230,7 +230,7 @@ impl TaskStrategist {
         validator: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
-        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
+        if TransactionUtils::tasks_compute_units(&tasks, uniqueness_nonce) > 1_400_000 {
             return Err(TaskStrategistError::FailedToFitError);
         }
         let mut optimized_tasks = tasks.clone();
@@ -263,7 +263,7 @@ impl TaskStrategist {
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub fn attempt_lookup_tables(tasks: &[BaseTaskImpl], uniqueness_nonce: Option<u64>) -> bool {
-        if TransactionUtils::tasks_compute_units(tasks) > 1_400_000 {
+        if TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce) > 1_400_000 {
             return false;
         }
         let placeholder = Keypair::new();
@@ -291,7 +291,7 @@ impl TaskStrategist {
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
     ) -> Vec<Pubkey> {
-        let budgets = TransactionUtils::tasks_compute_units(tasks);
+        let budgets = TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce);
         let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
         let mut service_instructions =
             TransactionUtils::budget_instructions(budgets, u64::default(), size_budgets).to_vec();
@@ -789,12 +789,15 @@ mod tests {
         assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
+    /// Proves uniqueness no-ops have distinct data and a budget even without settlement tasks.
     #[test]
     fn test_uniqueness_nonce_renders_distinct_noop_instruction() {
         use solana_transaction::versioned::VersionedTransaction;
 
         let noop_program = solana_pubkey::pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
         let authority = Keypair::new();
+        assert_eq!(TransactionUtils::tasks_compute_units(&[], None), 0);
+        assert!(TransactionUtils::tasks_compute_units(&[], Some(1)) > 0);
         let assemble = |nonce: Option<u64>| {
             TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 &authority,

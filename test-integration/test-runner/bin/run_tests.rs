@@ -233,7 +233,7 @@ const COMMITTOR_SUBSET_BUNDLES_HEAVY_TAIL: CommittorSubset = CommittorSubset {
     exact_name_filters: &[
         "test_commit_20_accounts_1kb_bundle_size_6",
         "test_commit_20_accounts_1kb_bundle_size_8",
-        "test_commit_20_accounts_1kb_bundle_size_20",
+        "test_commit_20_accounts_1kb_bundle_size_5",
     ],
     extra_files: &[],
 };
@@ -290,7 +290,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_ERRORS: CommittorSubset = CommittorSubset
     exact_name_filters: &[
         "test_commit_id_error_parsing",
         "test_action_error_parsing",
-        "test_cpi_limits_error_parsing",
+        "test_combined_compute_budget_rejection",
         "test_min_context_slot_not_reached_error_parsing",
     ],
     extra_files: &[],
@@ -302,7 +302,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_BASIC_RECOVERY: CommittorSubset = Committ
     exact_name_filters: &[
         "test_commit_id_error_recovery",
         "test_action_error_recovery",
-        "test_cpi_limits_error_recovery",
+        "test_compute_budget_two_stage_execution",
     ],
     extra_files: &[],
 };
@@ -312,7 +312,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset = CommittorSubs
     name_filters: &[],
     exact_name_filters: &[
         "test_commit_id_and_action_errors_recovery",
-        "test_commit_id_actions_cpi_limit_errors_recovery",
+        "test_two_stage_commit_id_and_action_errors_recovery",
         "test_commit_unfinalized_account_recovery",
         "test_commit_unfinalized_account_recovery_two_stage",
     ],

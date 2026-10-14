@@ -172,7 +172,7 @@ impl IntentSizeValidator {
     /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any) fit through
     /// either v1 or the v0 + ALT fallback.
     fn tasks_fit(mut tasks: Vec<BaseTaskImpl>, uniqueness_nonce: Option<u64>) -> bool {
-        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
+        if TransactionUtils::tasks_compute_units(&tasks, uniqueness_nonce) > 1_400_000 {
             return false;
         }
 

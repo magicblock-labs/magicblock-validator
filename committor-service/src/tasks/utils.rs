@@ -81,6 +81,7 @@ pub struct TransactionUtils;
 impl TransactionUtils {
     pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
+    const UNIQUENESS_NOOP_COMPUTE_UNITS: u32 = 1_000;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
@@ -147,7 +148,7 @@ impl TransactionUtils {
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<VersionedTransaction> {
         let budget_instructions = Self::budget_instructions(
-            Self::tasks_compute_units(tasks),
+            Self::tasks_compute_units(tasks, uniqueness_nonce),
             compute_unit_price,
             Self::tasks_accounts_size_budget_with_uniqueness_nonce(tasks, uniqueness_nonce),
         );
@@ -165,7 +166,10 @@ impl TransactionUtils {
         compute_unit_price: u64,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<VersionedTransaction> {
-        let config = Self::v1_config(Self::tasks_compute_units(tasks), compute_unit_price);
+        let config = Self::v1_config(
+            Self::tasks_compute_units(tasks, uniqueness_nonce),
+            compute_unit_price,
+        );
         let mut instructions = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
             instructions.push(Self::uniqueness_noop_instruction(nonce));
@@ -228,8 +232,12 @@ impl TransactionUtils {
         }
     }
 
-    pub fn tasks_compute_units(tasks: &[BaseTaskImpl]) -> u32 {
-        tasks.iter().fold(0, |sum, task| sum.saturating_add(task.compute_units()))
+    pub fn tasks_compute_units(tasks: &[BaseTaskImpl], uniqueness_nonce: Option<u64>) -> u32 {
+        // Empty recovery stages can still execute the uniqueness no-op.
+        let overhead = uniqueness_nonce.map_or(0, |_| Self::UNIQUENESS_NOOP_COMPUTE_UNITS);
+        tasks.iter().fold(overhead, |sum, task| {
+            sum.saturating_add(task.compute_units())
+        })
     }
 
     pub fn tasks_accounts_size_budget(tasks: &[BaseTaskImpl]) -> u32 {
