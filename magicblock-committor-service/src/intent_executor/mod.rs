@@ -1,9 +1,8 @@
 pub mod error;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
-pub mod single_stage_executor;
 pub mod task_info_fetcher;
-pub mod two_stage_executor;
+mod transaction_executor;
 pub mod utils;
 
 use std::{
@@ -26,7 +25,6 @@ use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
-use tracing::trace;
 
 use crate::{
     intent_executor::{
@@ -35,13 +33,8 @@ use crate::{
             TransactionStrategyExecutionError,
         },
         intent_execution_client::IntentExecutionClient,
-        single_stage_executor::SingleStageExecutor,
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
-        two_stage_executor::TwoStageExecutor,
-        utils::{
-            execute_with_timeout, handle_cpi_limit_error, CommitStage,
-            FinalizeStage, SingleStage,
-        },
+        transaction_executor::TransactionExecutor,
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
@@ -60,14 +53,12 @@ use crate::{
 
 #[derive(Clone, Copy, Debug)]
 pub enum ExecutionOutput {
-    // TODO: with arrival of challenge window remove SingleStage
-    // Protocol requires 2 stage: Commit, Finalize
-    // SingleStage - optimization for timebeing
+    /// All tasks completed in one transaction.
     SingleStage(Signature),
     TwoStage {
-        /// Commit stage signature
+        /// Signature of the transaction containing the combined commits.
         commit_signature: Signature,
-        /// Finalize stage signature
+        /// Signature of the subsequent actions or undelegations.
         finalize_signature: Signature,
     },
 }
@@ -238,9 +229,7 @@ where
         }
 
         if all_committed_pubkeys.is_empty() {
-            // Build tasks for commit stage
-            // TODO (snawaz): it's actually MagicBaseIntent::BaseActions scenario, not Commit
-            // scenario, so the related code needs little bit of refactoring and proper renaming.
+            // Action-only intents use one transaction.
             let commit_tasks = TaskBuilderImpl::commit_tasks(
                 &self.task_info_fetcher,
                 &intent_bundle,
@@ -256,9 +245,10 @@ where
                 Some(intent_bundle.id),
             )?;
             return self
-                .single_stage_execution_flow(
-                    intent_bundle,
-                    strategy,
+                .execute_strategy(
+                    intent_bundle.id,
+                    &all_committed_pubkeys,
+                    StrategyExecutionMode::SingleStage(strategy),
                     execution_report,
                     persister,
                 )
@@ -285,168 +275,45 @@ where
         let uniqueness_nonce = requires_uniqueness_nonce(&commit_tasks)
             .then_some(intent_bundle.id);
 
-        // Build execution strategy
-        match TaskStrategist::build_execution_strategy(
+        let strategy = TaskStrategist::build_execution_strategy(
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
             persister,
             uniqueness_nonce,
-        )? {
-            StrategyExecutionMode::SingleStage(strategy) => {
-                trace!("Single stage execution");
-                self.single_stage_execution_flow(
-                    intent_bundle,
-                    strategy,
-                    execution_report,
-                    persister,
-                )
-                .await
-            }
-            StrategyExecutionMode::TwoStage {
-                commit_stage,
-                finalize_stage,
-            } => {
-                trace!("Two stage execution");
-                self.two_stage_execution_flow(
-                    &all_committed_pubkeys,
-                    commit_stage,
-                    finalize_stage,
-                    execution_report,
-                    persister,
-                    intent_bundle.id,
-                )
-                .await
-            }
-        }
+        )?;
+        self.execute_strategy(
+            intent_bundle.id,
+            &all_committed_pubkeys,
+            strategy,
+            execution_report,
+            persister,
+        )
+        .await
     }
 
     fn time_left(&self) -> Option<Duration> {
         self.actions_timeout.checked_sub(self.started_at.elapsed())
     }
 
-    /// Starting execution from single stage
-    pub async fn single_stage_execution_flow<P: IntentPersister>(
+    /// Executes the selected transaction plan, including recovery and callbacks.
+    pub async fn execute_strategy<P: IntentPersister>(
         &mut self,
-        base_intent: ScheduledIntentBundle,
-        transaction_strategy: TransactionStrategy,
-        execution_report: &mut IntentExecutionReport,
-        persister: &Option<P>,
-    ) -> IntentExecutorResult<ExecutionOutput> {
-        let committed_pubkeys = base_intent.get_all_committed_pubkeys();
-
-        let mut single_stage_executor = SingleStageExecutor::new(
-            self.authority.insecure_clone(),
-            self.intent_client.clone(),
-            self.task_info_fetcher.clone(),
-            transaction_strategy,
-            self.actions_callback_executor.clone(),
-            execution_report,
-            base_intent.id,
-        );
-        let res = execute_with_timeout(
-            self.time_left(),
-            SingleStage {
-                inner: &mut single_stage_executor,
-                transaction_preparator: &self.transaction_preparator,
-                committed_pubkeys: &committed_pubkeys,
-            },
-            persister,
-        )
-        .await;
-
-        // Here we continue only IF the error is a limit-type execution error
-        // We can recover that Error by splitting execution
-        // in 2 stages - commit & finalize
-        // Otherwise we return error
-        let execution_err = match res {
-            Err(IntentExecutorError::FailedToFinalizeError {
-                err,
-                commit_signature: _,
-                finalize_signature: _,
-            }) if !committed_pubkeys.is_empty()
-                && single_stage_executor.has_tasks_after_commit()
-                && err.is_recoverable_by_two_stage() =>
-            {
-                err
-            }
-            res => {
-                let signature = res.as_ref().ok().copied();
-                single_stage_executor
-                    .execute_callbacks(signature, res.as_ref().map(|_| ()));
-                let transaction_strategy =
-                    single_stage_executor.consume_strategy();
-                execution_report.dispose(transaction_strategy);
-                return res.map(ExecutionOutput::SingleStage);
-            }
-        };
-
-        // With actions, we can't predict num of CPIs
-        // If we get here we will try to switch from Single stage to Two Stage commit
-        // Note that this not necessarily will pass at the end due to the same reason
-        let strategy = single_stage_executor.consume_strategy();
-        let (commit_strategy, finalize_strategy, cleanup) =
-            handle_cpi_limit_error(&self.authority.pubkey(), strategy);
-        execution_report.dispose(cleanup);
-        execution_report.add_patched_error(execution_err);
-
-        self.two_stage_execution_flow(
-            &committed_pubkeys,
-            commit_strategy,
-            finalize_strategy,
-            execution_report,
-            persister,
-            base_intent.id,
-        )
-        .await
-    }
-
-    pub async fn two_stage_execution_flow<P: IntentPersister>(
-        &mut self,
-        committed_pubkeys: &[Pubkey],
-        commit_strategy: TransactionStrategy,
-        finalize_strategy: TransactionStrategy,
-        execution_report: &mut IntentExecutionReport,
-        persister: &Option<P>,
         intent_id: u64,
+        committed_pubkeys: &[Pubkey],
+        strategy: StrategyExecutionMode,
+        execution_report: &mut IntentExecutionReport,
+        persister: &Option<P>,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let mut executor = TwoStageExecutor::new(
-            self.authority.insecure_clone(),
-            commit_strategy,
-            finalize_strategy,
-            self.intent_client.clone(),
-            self.actions_callback_executor.clone(),
+        TransactionExecutor::new(
+            self,
             execution_report,
             intent_id,
-        );
-
-        let commit_signature = execute_with_timeout(
-            self.time_left(),
-            CommitStage {
-                inner: &mut executor,
-                transaction_preparator: &self.transaction_preparator,
-                task_info_fetcher: &self.task_info_fetcher,
-                committed_pubkeys,
-            },
-            persister,
+            committed_pubkeys,
+            strategy,
         )
-        .await?;
-
-        let mut finalize_executor = executor.done(commit_signature);
-        let finalize_signature = execute_with_timeout(
-            self.time_left(),
-            FinalizeStage {
-                inner: &mut finalize_executor,
-                transaction_preparator: &self.transaction_preparator,
-            },
-            persister,
-        )
-        .await?;
-
-        Ok(ExecutionOutput::TwoStage {
-            commit_signature,
-            finalize_signature,
-        })
+        .execute(persister)
+        .await
     }
 
     /// Flushes result into presistor
