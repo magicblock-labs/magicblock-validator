@@ -22,8 +22,8 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    persist::IntentPersister,
+    tasks::task_strategist::TransactionStrategy,
     transaction_preparator::TransactionPreparator,
 };
 
@@ -43,13 +43,6 @@ pub struct Committed {
     finalize_strategy: TransactionStrategy,
 
     current_attempt: u8,
-}
-
-pub struct Finalized {
-    /// Signature of commit stage
-    pub commit_signature: Signature,
-    /// Signature of finalize stage
-    pub finalize_signature: Signature,
 }
 
 pub struct TwoStageExecutor<'a, A, S: Sealed> {
@@ -140,7 +133,6 @@ where
                 .patch_commit_strategy(
                     &execution_err,
                     task_info_fetcher,
-                    transaction_preparator,
                     committed_pubkeys,
                 )
                 .await
@@ -186,15 +178,13 @@ where
     /// [`TransactionStrategyExecutionError`], returning either:
     /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
     /// - `Break(())` when this stage cannot be recovered.
-    pub async fn patch_commit_strategy<T, F>(
+    pub async fn patch_commit_strategy<F>(
         &mut self,
         err: &TransactionStrategyExecutionError,
         task_info_fetcher: &CacheTaskInfoFetcher<F>,
-        transaction_preparator: &T,
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>>
     where
-        T: TransactionPreparator,
         F: TaskInfoFetcher,
     {
         match err {
@@ -215,42 +205,6 @@ where
                         self.state.commit_strategy.uniqueness_nonce;
                 }
                 Ok(ControlFlow::Continue(to_cleanup))
-            }
-            err
-            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
-                let optimized_tasks =
-                    self.state.commit_strategy.optimized_tasks.as_slice();
-                let task_index = err.task_index();
-                if let Some(delegated_account) = task_index
-                    .and_then(|index| optimized_tasks.get(index as usize))
-                    .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        _ => None,
-                    })
-                {
-                    self.handle_unfinalized_account_error(
-                        signature,
-                        delegated_account,
-                        transaction_preparator,
-                    )
-                    .await
-                } else {
-                    error!(
-                        task_index = ?task_index,
-                        optimized_tasks_len = optimized_tasks.len(),
-                        error = ?err,
-                        "RPC returned unexpected task index"
-                    );
-                    Ok(ControlFlow::Break(()))
-                }
             }
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 // Intent bundles allow for actions to be in commit stage
@@ -290,41 +244,6 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
-    }
-
-    /// Handles unfinalized account error
-    /// Sends a separate tx to finalize account and then continues execution
-    async fn handle_unfinalized_account_error<T: TransactionPreparator>(
-        &self,
-        failed_signature: &Option<Signature>,
-        delegated_account: Pubkey,
-        transaction_preparator: &T,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            &self.intent_client,
-            &self.authority,
-            transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                uniqueness_nonce: None,
-            },
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToCommitError {
-            err,
-            signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        }))
     }
 
     /// Surrenders both strategies to the execution report so the engine
@@ -452,6 +371,20 @@ where
             self.intent_client.invalidate_cached_blockhash().await;
             self.execution_report.dispose(cleanup);
 
+            // Failed actions may be removed after a confirmed combined commit.
+            // If nothing remains, reuse that commit's signature. An empty
+            // strategy after an undelegation failure must retain the failure.
+            if self.state.finalize_strategy.optimized_tasks.is_empty() {
+                if matches!(
+                    execution_err,
+                    TransactionStrategyExecutionError::ActionsError(_, _)
+                ) {
+                    self.execution_report.add_patched_error(execution_err);
+                    break Ok(self.state.commit_signature);
+                }
+                break Err(execution_err);
+            }
+
             if self.state.current_attempt >= Self::RECURSION_CEILING {
                 error!("CRITICAL! Recursion ceiling reached");
                 break Err(execution_err);
@@ -516,11 +449,7 @@ where
         err: &TransactionStrategyExecutionError,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         match err {
-            TransactionStrategyExecutionError::CommitIDError(_, _)
-            | TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                _,
-            ) => {
+            TransactionStrategyExecutionError::CommitIDError(_, _) => {
                 // Unexpected error in Two Stage commit
                 error!(error = ?err, "Unexpected error in two stage finalize flow");
                 Ok(ControlFlow::Break(()))
@@ -563,14 +492,6 @@ where
             }
         }
     }
-
-    /// Transitions to next executor state
-    pub fn done(self, finalize_signature: Signature) -> Finalized {
-        Finalized {
-            commit_signature: self.state.commit_signature,
-            finalize_signature,
-        }
-    }
 }
 
 mod sealed {
@@ -578,5 +499,4 @@ mod sealed {
 
     impl Sealed for super::Initialized {}
     impl Sealed for super::Committed {}
-    impl Sealed for super::Finalized {}
 }

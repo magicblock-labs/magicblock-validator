@@ -21,8 +21,8 @@ use crate::{
         },
         IntentExecutionReport,
     },
-    persist::{IntentPersister, IntentPersisterImpl},
-    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl, FinalizeTask},
+    persist::IntentPersister,
+    tasks::{task_strategist::TransactionStrategy, BaseTaskImpl},
     transaction_preparator::TransactionPreparator,
 };
 
@@ -105,11 +105,7 @@ where
 
             // Attempt patching
             let flow = self
-                .patch_strategy(
-                    &execution_err,
-                    committed_pubkeys,
-                    transaction_preparator,
-                )
+                .patch_strategy(&execution_err, committed_pubkeys)
                 .await?;
             let cleanup = match flow {
                 ControlFlow::Continue(cleanup) => cleanup,
@@ -166,6 +162,16 @@ where
         self.transaction_strategy
     }
 
+    pub(super) fn has_tasks_after_commit(&self) -> bool {
+        self.transaction_strategy
+            .optimized_tasks
+            .iter()
+            .rposition(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)))
+            .is_some_and(|index| {
+                index + 1 < self.transaction_strategy.optimized_tasks.len()
+            })
+    }
+
     /// Patch the current `transaction_strategy` in response to a recoverable
     /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
     /// to be applied after a retry.
@@ -173,11 +179,10 @@ where
     /// [`TransactionStrategyExecutionError`], returning either:
     /// - `Continue(to_cleanup)` when a retry should be attempted with cleanup metadata, or
     /// - `Break(())` when this stage cannot be recovered here.
-    pub async fn patch_strategy<T: TransactionPreparator>(
+    pub async fn patch_strategy(
         &mut self,
         err: &TransactionStrategyExecutionError,
         committed_pubkeys: &[Pubkey],
-        transaction_preparator: &T,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
         if committed_pubkeys.is_empty() {
             // No patching is applicable if intent doesn't commit accounts
@@ -212,42 +217,6 @@ where
                     .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            err
-            @ TransactionStrategyExecutionError::UnfinalizedAccountError(
-                _,
-                signature,
-            ) => {
-                let optimized_tasks =
-                    self.transaction_strategy.optimized_tasks.as_slice();
-                if let Some(delegated_account) = err
-                    .task_index()
-                    .and_then(|index| optimized_tasks.get(index as usize))
-                    .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        BaseTaskImpl::CommitFinalize(task) => {
-                            Some(task.committed_account.pubkey)
-                        }
-                        _ => None,
-                    })
-                {
-                    self.handle_unfinalized_account_error(
-                        signature,
-                        delegated_account,
-                        transaction_preparator,
-                    )
-                    .await
-                } else {
-                    error!(
-                        task_index = err.task_index(),
-                        optimized_tasks_len = optimized_tasks.len(),
-                        error = ?err,
-                        "RPC returned unexpected task index"
-                    );
-                    Ok(ControlFlow::Break(()))
-                }
-            }
             TransactionStrategyExecutionError::UndelegationError(_, _) => {
                 // Here we patch strategy for it to be retried in next iteration
                 // & we also record data that has to be cleaned up after patch
@@ -269,41 +238,5 @@ where
                 Ok(ControlFlow::Break(()))
             }
         }
-    }
-
-    /// Handles unfinalized account error
-    /// Sends a separate tx to finalize account and then continues execution
-    async fn handle_unfinalized_account_error<T: TransactionPreparator>(
-        &self,
-        failed_signature: &Option<Signature>,
-        delegated_account: Pubkey,
-        transaction_preparator: &T,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl =
-            FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            &self.intent_client,
-            &self.authority,
-            transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                uniqueness_nonce: None,
-            },
-            &None::<IntentPersisterImpl>,
-        )
-        .await
-        .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToFinalizeError {
-            err,
-            commit_signature: None,
-            finalize_signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        }))
     }
 }

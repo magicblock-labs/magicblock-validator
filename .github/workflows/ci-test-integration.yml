@@ -406,9 +406,15 @@ jobs:
           - batch_tests: "chainlink"
             test_bins_artifact: "chainlink"
             needs_build_env: true
+            # Loader-v4 was removed in Agave 4.2; retain its test coverage.
+            solana_version: v4.0.3
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
             needs_build_env: true
+          - batch_tests: "cloning_programs"
+            test_bins_artifact: "cloning"
+            needs_build_env: true
+            solana_version: v4.0.3
           - batch_tests: "task-scheduler"
             test_bins_artifact: "task-scheduler"
             runner: "blacksmith-4vcpu-ubuntu-2404"
@@ -447,6 +453,8 @@ jobs:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ matrix.solana_version || 'v4.2.0' }}
 
       - name: Download prebuilt validator binary
         uses: actions/download-artifact@v8

@@ -45,7 +45,7 @@ use crate::{
     },
     persist::{CommitStatus, CommitStatusSignatures, IntentPersister},
     tasks::{
-        task_builder::{TaskBuilderImpl, TasksBuilder},
+        task_builder::TaskBuilderImpl,
         task_strategist::{
             StrategyExecutionMode, TaskStrategist, TransactionStrategy,
         },
@@ -365,6 +365,7 @@ where
                 commit_signature: _,
                 finalize_signature: _,
             }) if !committed_pubkeys.is_empty()
+                && single_stage_executor.has_tasks_after_commit()
                 && err.is_recoverable_by_two_stage() =>
             {
                 err
@@ -442,10 +443,9 @@ where
         )
         .await?;
 
-        let finalized_stage = finalize_executor.done(finalize_signature);
         Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.commit_signature,
-            finalize_signature: finalized_stage.finalize_signature,
+            commit_signature,
+            finalize_signature,
         })
     }
 
@@ -529,7 +529,6 @@ where
                 commit_signature,
                 finalize_signature,
             }) => {
-                // Finalize is a single TX, so if it fails, all of commited accounts marked FailedFinalize
                 let update_status =
                     if let Some(commit_signature) = commit_signature {
                         let signatures = CommitStatusSignatures {
@@ -538,7 +537,14 @@ where
                         };
                         CommitStatus::FailedFinalize(signatures)
                     } else {
-                        CommitStatus::FailedProcess(None)
+                        // Preserve the failed transaction's signature without
+                        // treating its commit as confirmed.
+                        CommitStatus::FailedProcess(finalize_signature.map(
+                            |signature| CommitStatusSignatures {
+                                commit_stage_signature: signature,
+                                finalize_stage_signature: Some(signature),
+                            },
+                        ))
                     };
 
                 Some(update_status)
@@ -653,7 +659,6 @@ where
 /// alias its signature. Such intents must carry a per-intent uniqueness noop.
 fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
     commit_tasks.iter().any(|task| match task {
-        BaseTaskImpl::Commit(task) => task.commit_id <= 1,
         BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
         _ => false,
     })
@@ -661,14 +666,28 @@ fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::types::CommittedAccount;
+    use magicblock_core::{
+        intent::{
+            types::CommittedAccount, BaseActionCallback, CommitType,
+            MagicIntentBundle,
+        },
+        traits::ActionResult,
+    };
     use solana_account::Account;
+    use solana_instruction::error::InstructionError;
+    use solana_transaction_error::TransactionError;
+    use tempfile::NamedTempFile;
 
     use super::*;
-    use crate::tasks::{utils::create_commit_task, FinalizeTask};
+    use crate::{
+        intent_executor::task_info_fetcher::RpcTaskInfoFetcher,
+        persist::IntentPersisterImpl,
+        tasks::{utils::create_commit_finalize_task, UndelegateTask},
+        transaction_preparator::TransactionPreparatorImpl,
+    };
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
-        create_commit_task(
+        create_commit_finalize_task(
             commit_id,
             false,
             CommittedAccount {
@@ -683,14 +702,111 @@ mod tests {
 
     #[test]
     fn test_requires_uniqueness_nonce_on_first_commit_only() {
-        let finalize = BaseTaskImpl::Finalize(FinalizeTask {
+        let undelegate = BaseTaskImpl::Undelegate(UndelegateTask {
             delegated_account: Pubkey::new_unique(),
+            owner_program: Pubkey::new_unique(),
+            rent_reimbursement: Pubkey::new_unique(),
+            include_undelegation_request: false,
         });
 
         assert!(requires_uniqueness_nonce(&[commit_task(1)]));
         assert!(requires_uniqueness_nonce(&[commit_task(5), commit_task(1)]));
         assert!(!requires_uniqueness_nonce(&[commit_task(2)]));
-        assert!(!requires_uniqueness_nonce(&[finalize]));
+        assert!(!requires_uniqueness_nonce(&[undelegate]));
         assert!(!requires_uniqueness_nonce(&[]));
+    }
+
+    #[test]
+    fn failed_execution_persists_available_signatures() {
+        #[derive(Clone)]
+        struct NoCallbacks;
+
+        impl ActionsCallbackScheduler for NoCallbacks {
+            fn schedule(
+                &self,
+                _: Vec<BaseActionCallback>,
+                _: Option<Signature>,
+                _: ActionResult,
+            ) -> Vec<Result<Signature, CallbackScheduleError>> {
+                unreachable!("persisting a result must not schedule callbacks")
+            }
+        }
+
+        let db_file = NamedTempFile::new().unwrap();
+        let persister = IntentPersisterImpl::try_new(db_file.path()).unwrap();
+        let pubkey = Pubkey::new_unique();
+        let intent = ScheduledIntentBundle {
+            id: 1,
+            slot: 1,
+            blockhash: Default::default(),
+            sent_transaction: Default::default(),
+            payer: Pubkey::new_unique(),
+            intent_bundle: MagicIntentBundle {
+                commit_finalize: Some(CommitType::Standalone(vec![
+                    CommittedAccount {
+                        pubkey,
+                        account: Account::default(),
+                        remote_slot: 0,
+                    },
+                ])),
+                ..Default::default()
+            },
+        };
+        persister.start_base_intent(&intent).unwrap();
+
+        let commit = Signature::new_unique();
+        let failed = Signature::new_unique();
+        let cases = [
+            (
+                None,
+                Some(failed),
+                CommitStatus::FailedProcess(Some(CommitStatusSignatures {
+                    commit_stage_signature: failed,
+                    finalize_stage_signature: Some(failed),
+                })),
+            ),
+            (None, None, CommitStatus::FailedProcess(None)),
+            (
+                Some(commit),
+                Some(failed),
+                CommitStatus::FailedFinalize(CommitStatusSignatures {
+                    commit_stage_signature: commit,
+                    finalize_stage_signature: Some(failed),
+                }),
+            ),
+            (
+                Some(commit),
+                None,
+                CommitStatus::FailedFinalize(CommitStatusSignatures {
+                    commit_stage_signature: commit,
+                    finalize_stage_signature: None,
+                }),
+            ),
+        ];
+        for (commit_signature, failed_signature, expected) in cases {
+            let error = IntentExecutorError::from_finalize_execution_error(
+                TransactionStrategyExecutionError::UndelegationError(
+                    TransactionError::InstructionError(
+                        0,
+                        InstructionError::Custom(1),
+                    ),
+                    failed_signature,
+                ),
+                commit_signature,
+            );
+            IntentExecutorImpl::<
+                TransactionPreparatorImpl,
+                RpcTaskInfoFetcher,
+                NoCallbacks,
+            >::persist_result(
+                &persister, &Err(error), intent.id, &[pubkey]
+            );
+
+            let row = persister
+                .get_commit_status_by_message(intent.id, &pubkey)
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.commit_status, expected);
+        }
     }
 }

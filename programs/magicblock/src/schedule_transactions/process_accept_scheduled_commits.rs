@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use magicblock_core::tls::ExecutionTlsStash;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -12,7 +13,7 @@ use crate::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
     validator::effective_validator_authority_id,
-    MagicContext, TransactionScheduler,
+    MagicContext,
 };
 
 pub fn process_accept_scheduled_commits(
@@ -86,12 +87,12 @@ pub fn process_accept_scheduled_commits(
         "AcceptScheduledCommits: accepted {} scheduled commit(s)",
         scheduled_commits.len()
     );
-    TransactionScheduler::default()
-        .accept_scheduled_base_intent(scheduled_commits);
-
     // 4. Serialize and store the updated `MagicContext` account
     magic_context
         .write_to(magic_context_acc.borrow_mut()?.data_as_mut_slice())?;
+
+    // Publication is deferred until the processor commits the whole transaction.
+    ExecutionTlsStash::register_scheduled_intent_bundles(scheduled_commits);
 
     Ok(())
 }

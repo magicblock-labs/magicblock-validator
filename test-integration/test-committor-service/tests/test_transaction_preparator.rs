@@ -5,11 +5,11 @@ use magicblock_committor_service::{
     tasks::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
-        utils::{create_commit_task, TransactionUtils},
-        BaseActionTask, BaseActionTaskV1, BaseTaskImpl, FinalizeTask,
-        UndelegateTask,
+        utils::create_commit_finalize_task,
+        BaseActionTask, BaseActionTaskV1, BaseTaskImpl, UndelegateTask,
     },
     transaction_preparator::TransactionPreparator,
+    transactions::PreparedMessage,
 };
 use magicblock_core::intent::{BaseAction, ProgramArgs};
 use magicblock_program::args::ShortAccountMeta;
@@ -18,8 +18,8 @@ use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;
 
 use crate::common::{
-    create_buffer_commit_task, create_committed_account, generate_random_bytes,
-    TestFixture,
+    create_buffer_commit_finalize_task, create_committed_account,
+    generate_random_bytes, TestFixture,
 };
 
 mod common;
@@ -33,13 +33,13 @@ async fn test_prepare_commit_tx_with_single_account() {
     let account_data = vec![1, 2, 3, 4, 5];
     let committed_account = create_committed_account(&account_data);
 
-    let tasks: Vec<BaseTaskImpl> = vec![
-        create_commit_task(1, true, committed_account.clone(), None).into(),
-        FinalizeTask {
-            delegated_account: committed_account.pubkey,
-        }
-        .into(),
-    ];
+    let tasks: Vec<BaseTaskImpl> = vec![create_commit_finalize_task(
+        1,
+        true,
+        committed_account.clone(),
+        None,
+    )
+    .into()];
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
         lookup_tables_keys: vec![],
@@ -57,22 +57,7 @@ async fn test_prepare_commit_tx_with_single_account() {
 
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
-    // For such strategy there's no preparation
-    // expected messsage is just assembled tx from Args task with no ALTs
-    let mut actual_message = result.unwrap();
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message)
+    assert!(matches!(result.unwrap(), PreparedMessage::V1(_)));
 }
 
 #[tokio::test]
@@ -86,24 +71,16 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     let account2_data = generate_random_bytes(12);
     let committed_account2 = create_committed_account(&account2_data);
 
-    let mut buffer_commit_task = create_buffer_commit_task(&account2_data);
+    let mut buffer_commit_task =
+        create_buffer_commit_finalize_task(&account2_data);
     buffer_commit_task.committed_account.pubkey = committed_account2.pubkey;
     // Create test data
     let tasks: Vec<BaseTaskImpl> = vec![
         // account 1
-        create_commit_task(1, true, committed_account1.clone(), None).into(),
+        create_commit_finalize_task(1, true, committed_account1.clone(), None)
+            .into(),
         // account 2
         buffer_commit_task.into(),
-        // finalize account 1
-        FinalizeTask {
-            delegated_account: committed_account1.pubkey,
-        }
-        .into(),
-        // finalize account 2
-        FinalizeTask {
-            delegated_account: committed_account2.pubkey,
-        }
-        .into(),
     ];
     let mut tx_strategy = TransactionStrategy {
         optimized_tasks: tasks,
@@ -112,7 +89,7 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
     };
 
     // Test preparation
-    let mut actual_message = preparator
+    preparator
         .prepare_for_strategy(
             &fixture.authority,
             &mut tx_strategy,
@@ -121,26 +98,13 @@ async fn test_prepare_commit_tx_with_multiple_accounts() {
         .await
         .unwrap();
 
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message);
-
     for task in &tx_strategy.optimized_tasks {
         let commit_task = match task {
-            BaseTaskImpl::Commit(ct) => ct,
+            BaseTaskImpl::CommitFinalize(ct) => ct,
             _ => continue,
         };
-        let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
+        let Some(cleanup_task) = CleanupTask::from_commit_finalize(commit_task)
+        else {
             continue;
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
@@ -181,16 +145,11 @@ async fn test_prepare_commit_tx_with_base_actions() {
     };
 
     let mut buffer_commit_task =
-        create_buffer_commit_task(&committed_account.account.data);
+        create_buffer_commit_finalize_task(&committed_account.account.data);
     buffer_commit_task.committed_account.pubkey = committed_account.pubkey;
     let tasks: Vec<BaseTaskImpl> = vec![
         // commit account
         buffer_commit_task.into(),
-        // finalize account
-        FinalizeTask {
-            delegated_account: committed_account.pubkey,
-        }
-        .into(),
         // BaseAction
         BaseActionTask::V1(BaseActionTaskV1 {
             action: base_action,
@@ -206,7 +165,7 @@ async fn test_prepare_commit_tx_with_base_actions() {
     };
 
     // Test preparation
-    let mut actual_message = preparator
+    preparator
         .prepare_for_strategy(
             &fixture.authority,
             &mut tx_strategy,
@@ -215,27 +174,14 @@ async fn test_prepare_commit_tx_with_base_actions() {
         .await
         .unwrap();
 
-    let expected_message = TransactionUtils::assemble_tasks_tx(
-        &fixture.authority,
-        &tx_strategy.optimized_tasks,
-        fixture.compute_budget_config.compute_unit_price,
-        &[],
-    )
-    .unwrap()
-    .message;
-
-    // Block hash is random in result of prepare_for_strategy
-    // should be set be caller, so here we just set value of expected for test
-    actual_message.set_recent_blockhash(*expected_message.recent_blockhash());
-    assert_eq!(actual_message, expected_message);
-
     // Now we verify that buffers were created
     for task in &tx_strategy.optimized_tasks {
         let commit_task = match task {
-            BaseTaskImpl::Commit(ct) => ct,
+            BaseTaskImpl::CommitFinalize(ct) => ct,
             _ => continue,
         };
-        let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
+        let Some(cleanup_task) = CleanupTask::from_commit_finalize(commit_task)
+        else {
             continue;
         };
         let chunks_pda = cleanup_task.chunks_pda(&fixture.authority.pubkey());
@@ -253,18 +199,13 @@ async fn test_prepare_commit_tx_with_base_actions() {
 }
 
 #[tokio::test]
-async fn test_prepare_finalize_tx_with_undelegate_with_atls() {
+async fn test_prepare_undelegate_tx_with_alts() {
     let fixture = TestFixture::new().await;
     let preparator = fixture.create_transaction_preparator();
 
     // Create test data
     let committed_account = create_committed_account(&[1, 2, 3]);
     let tasks: Vec<BaseTaskImpl> = vec![
-        // finalize account
-        FinalizeTask {
-            delegated_account: committed_account.pubkey,
-        }
-        .into(),
         // Undelegate
         UndelegateTask {
             delegated_account: committed_account.pubkey,

@@ -31,8 +31,7 @@ use crate::{
         },
     },
     persist::{
-        CommitStatusRow, IntentPersister, IntentPersisterImpl,
-        MessageSignatures, RecoveredIntent,
+        CommitStatusRow, IntentPersister, IntentPersisterImpl, RecoveredIntent,
     },
 };
 const POISONED_MUTEX_MSG: &str =
@@ -141,17 +140,6 @@ impl CommittorProcessor {
         let commit_statuses =
             self.persister.get_commit_statuses_by_message(message_id)?;
         Ok(commit_statuses)
-    }
-
-    pub fn get_commit_signature(
-        &self,
-        commit_id: u64,
-        pubkey: Pubkey,
-    ) -> CommittorServiceResult<Option<MessageSignatures>> {
-        let signatures = self
-            .persister
-            .get_signatures_by_commit(commit_id, &pubkey)?;
-        Ok(signatures)
     }
 
     fn recovery_min_created_at() -> u64 {

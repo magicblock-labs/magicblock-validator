@@ -9,7 +9,8 @@ use solana_pubkey::Pubkey;
 
 use crate::{
     magic_scheduled_base_intent::{
-        extract_commit_accounts, ConstructionContext, ScheduledIntentBundle,
+        extract_commit_accounts, try_new_scheduled_intent_bundle,
+        ConstructionContext,
     },
     magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
@@ -102,7 +103,7 @@ pub(crate) fn process_schedule_intent_bundle(
         .collect();
 
         // Recreate intent
-        let scheduled_intent = ScheduledIntentBundle::try_new(
+        let scheduled_intent = try_new_scheduled_intent_bundle(
             args,
             intent_id,
             clock.slot,

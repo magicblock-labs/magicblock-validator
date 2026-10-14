@@ -1,14 +1,15 @@
-use std::{cell::RefCell, collections::VecDeque};
+use std::{cell::RefCell, collections::VecDeque, mem};
 
 use magicblock_magic_program_api::args::TaskRequest;
 use solana_pubkey::Pubkey;
+
+use crate::intent::ScheduledIntentBundle;
 
 #[derive(Default, Debug)]
 pub struct ExecutionTlsStash {
     tasks: VecDeque<TaskRequest>,
     newly_created_magic_atas: VecDeque<Pubkey>,
-    // TODO(bmuddha/taco-paco): intents should go in here
-    intents: VecDeque<()>,
+    intents: Vec<ScheduledIntentBundle>,
 }
 
 thread_local! {
@@ -34,6 +35,24 @@ impl ExecutionTlsStash {
     pub fn pop_newly_created_magic_ata() -> Option<Pubkey> {
         EXECUTION_TLS_STASH
             .with_borrow_mut(|stash| stash.newly_created_magic_atas.pop_front())
+    }
+
+    /// Stages accepted intents until the enclosing transaction commits.
+    pub fn register_scheduled_intent_bundles(
+        intents: Vec<ScheduledIntentBundle>,
+    ) {
+        EXECUTION_TLS_STASH.with_borrow_mut(|stash| {
+            if stash.intents.is_empty() {
+                stash.intents = intents;
+            } else {
+                stash.intents.extend(intents);
+            }
+        });
+    }
+
+    pub fn take_scheduled_intent_bundles() -> Vec<ScheduledIntentBundle> {
+        EXECUTION_TLS_STASH
+            .with_borrow_mut(|stash| mem::take(&mut stash.intents))
     }
 
     pub fn clear() {

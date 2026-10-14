@@ -38,7 +38,15 @@ pub fn main() {
         return;
     };
 
-    let Ok(cloning_output) = run_cloning_tests(&manifest_dir, &config) else {
+    let Ok(cloning_output) =
+        run_cloning_tests(&manifest_dir, &config, "cloning")
+    else {
+        return;
+    };
+
+    let Ok(cloning_programs_output) =
+        run_cloning_tests(&manifest_dir, &config, "cloning_programs")
+    else {
         return;
     };
 
@@ -88,6 +96,7 @@ pub fn main() {
     assert_cargo_tests_passed(chainlink_output, "chainlink");
     assert_cargo_tests_passed(aml_output, "aml");
     assert_cargo_tests_passed(cloning_output, "cloning");
+    assert_cargo_tests_passed(cloning_programs_output, "cloning_programs");
     assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
     assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
     assert_cargo_tests_passed(table_mania_output, "table_mania");
@@ -454,8 +463,6 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_RECOVERY: CommittorSubset =
         exact_name_filters: &[
             "test_commit_id_and_action_errors_recovery",
             "test_commit_id_actions_cpi_limit_errors_recovery",
-            "test_commit_unfinalized_account_recovery",
-            "test_commit_unfinalized_account_recovery_two_stage",
         ],
         extra_files: &[],
     };
@@ -468,6 +475,7 @@ const COMMITTOR_SUBSET_INTENT_EXECUTOR_CALLBACKS: CommittorSubset =
             "test_action_callback_fired_on_failure",
             "test_action_callback_fired_on_timeout",
             "test_callbacks_fired_in_two_stage",
+            "test_two_stage_action_failure_keeps_combined_commit",
         ],
         extra_files: &[],
     };
@@ -758,9 +766,9 @@ fn run_schedule_commit_tests(
 fn run_cloning_tests(
     manifest_dir: &str,
     config: &TestConfigViaEnvVars,
+    test_name: &str,
 ) -> Result<Output, Box<dyn Error>> {
-    const TEST_NAME: &str = "cloning";
-    if config.skip_entirely(TEST_NAME) {
+    if config.skip_entirely(test_name) {
         return Ok(success_output());
     }
 
@@ -802,7 +810,7 @@ fn run_cloning_tests(
         }
     };
 
-    if config.run_test(TEST_NAME) {
+    if config.run_test(test_name) {
         eprintln!("======== RUNNING CLONING TESTS ========");
 
         let mut devnet_validator = start_devnet_validator();
@@ -813,12 +821,34 @@ fn run_cloning_tests(
         eprintln!("Running cloning tests in {}", test_cloning_dir);
         let output = match run_test(
             test_cloning_dir,
-            RunTestConfig::default(),
-            // RunTestConfig {
-            //     package: Some("test-cloning"),
-            //     test_files: &["10_post_delegation_token_transfer"],
-            //     test_fn_name: None,
-            // },
+            RunTestConfig {
+                // The default config runs every test binary in this crate,
+                // but these tests cannot all use the same base-chain runtime.
+                // CI runs `cloning_programs` on Agave 4.0.3 for loader-v4
+                // deployment tests: Agave 4.2 removed that loader. The main
+                // `cloning` shard runs the remaining tests on Agave 4.2 because
+                // Magic ATA withdrawals settle through v1 transactions,
+                // which Agave 4.0.3 cannot deserialize.
+                // Select each shard's binaries explicitly so neither runs
+                // tests unsupported by its runtime. Add new cloning test
+                // binaries to the appropriate list below.
+                test_files: if test_name == "cloning_programs" {
+                    &["01_program-deploy"]
+                } else {
+                    &[
+                        "02_get_account_info",
+                        "03_get_multiple_accounts",
+                        "04_escrow_transfer",
+                        "05_parallel-cloning",
+                        "06_escrows",
+                        "07_subscription_limits",
+                        "08_multi_program_cloning",
+                        "10_post_delegation_token_transfer",
+                        "11_magic_ata",
+                    ]
+                },
+                ..Default::default()
+            },
         ) {
             Ok(output) => output,
             Err(err) => {
@@ -831,9 +861,9 @@ fn run_cloning_tests(
         Ok(output)
     } else {
         let devnet_validator =
-            config.setup_devnet(TEST_NAME).then(start_devnet_validator);
+            config.setup_devnet(test_name).then(start_devnet_validator);
         let ephem_validator =
-            config.setup_ephem(TEST_NAME).then(start_ephem_validator);
+            config.setup_ephem(test_name).then(start_ephem_validator);
         wait_for_ctrlc(devnet_validator, ephem_validator, success_output())
     }
 }

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use magicblock_core::link::blocks::BlockHash;
 use setup::RpcTestEnv;
 use solana_rpc_client_api::config::RpcBlockConfig;
@@ -20,6 +22,27 @@ async fn test_get_slot() {
         new_slot >= initial_slot + 2,
         "slot should have progressed by at least 2: initial={initial_slot}, new={new_slot}"
     );
+}
+
+/// Verifies `get_slot` catches up after the event processors fall more than a
+/// full block channel behind, with no transaction or account update to follow.
+#[tokio::test]
+async fn test_get_slot_catches_up_after_block_updates_lag() {
+    const LAGGING_BLOCKS: usize = 64;
+    let env = RpcTestEnv::new_manual_slots().await;
+    // Overflow the 32-entry broadcast without yielding to the event processors.
+    env.advance_slots(LAGGING_BLOCKS);
+    let latest = env.block.load().slot;
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while env.rpc.get_slot().await.expect("get_slot request failed")
+            < latest
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("RPC slot stopped behind the ledger");
 }
 
 /// Verifies `get_block_height` returns a valid block height.

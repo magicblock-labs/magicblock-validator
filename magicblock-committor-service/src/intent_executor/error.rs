@@ -168,7 +168,11 @@ impl IntentExecutorError {
                 err: _,
                 commit_signature,
                 finalize_signature,
-            } => commit_signature.map(|el| (el, *finalize_signature)),
+            } => match (*commit_signature, *finalize_signature) {
+                (Some(commit), finalize) => Some((commit, finalize)),
+                (None, Some(finalize)) => Some((finalize, Some(finalize))),
+                _ => None,
+            },
             IntentExecutorError::EmptyIntentError
             | IntentExecutorError::FailedToFitError
             | IntentExecutorError::SignerError(_) => None,
@@ -208,8 +212,6 @@ pub enum TransactionStrategyExecutionError {
         #[source] TransactionError,
         Option<Signature>,
     ),
-    #[error("Unfinalized account error: {0}, {1:?}")]
-    UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("Transaction too large to send over the wire: {0}")]
     TransactionTooLargeError(#[source] InternalError),
     #[error("InternalError: {0}")]
@@ -223,10 +225,6 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 }
 
 impl TransactionStrategyExecutionError {
-    /// Number of compute budget instructions prepended to every transaction.
-    /// Used to map instruction indices back to task indices.
-    const TASK_OFFSET: u8 = 2;
-
     /// On-chain domain errors are deterministic (and already have dedicated
     /// recovery paths); only internal transport failures are transient.
     pub fn is_transient(&self) -> bool {
@@ -249,32 +247,6 @@ impl TransactionStrategyExecutionError {
             || matches!(self, Self::TransactionTooLargeError(_))
     }
 
-    pub fn task_index(&self) -> Option<u8> {
-        match self {
-            Self::CommitIDError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::ActionsError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::UndelegationError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::UnfinalizedAccountError(
-                TransactionError::InstructionError(index, _),
-                _,
-            )
-            | Self::CpiLimitError(
-                TransactionError::InstructionError(index, _),
-                _,
-            ) => index.checked_sub(Self::TASK_OFFSET),
-            _ => None,
-        }
-    }
-
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::InternalError(err) => err.signature(),
@@ -282,7 +254,6 @@ impl TransactionStrategyExecutionError {
             Self::CommitIDError(_, signature)
             | Self::ActionsError(_, signature)
             | Self::UndelegationError(_, signature)
-            | Self::UnfinalizedAccountError(_, signature)
             | Self::CpiLimitError(_, signature)
             | Self::LoadedAccountsDataSizeExceeded(_, signature) => *signature,
         }
@@ -295,20 +266,11 @@ impl TransactionStrategyExecutionError {
         err: TransactionError,
         signature: Option<Signature>,
         tasks: &[BaseTaskImpl],
+        task_instruction_offset: u8,
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 =
             dlp_api::error::DlpError::NonceOutOfOrder as u32;
-        // Errors when commit state already exists
-        const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::error::DlpError::CommitStateInvalidAccountOwner as u32;
-        const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
-            dlp_api::error::DlpError::CommitStateAlreadyInitialized as u32;
-        const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
-            dlp_api::error::DlpError::CommitRecordInvalidAccountOwner as u32;
-        const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
-            dlp_api::error::DlpError::CommitRecordAlreadyInitialized as u32;
-
         match err {
             // Some tx may use too much CPIs and we can handle it in certain cases
             transaction_err @ TransactionError::InstructionError(
@@ -329,7 +291,8 @@ impl TransactionStrategyExecutionError {
                 let tx_err_helper = |instruction_err| -> TransactionError {
                     TransactionError::InstructionError(index, instruction_err)
                 };
-                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET)
+                let Some(action_index) =
+                    index.checked_sub(task_instruction_offset)
                 else {
                     return Err(tx_err_helper(instruction_err));
                 };
@@ -340,8 +303,7 @@ impl TransactionStrategyExecutionError {
 
                 match (task, instruction_err) {
                     (
-                        BaseTaskImpl::Commit(_)
-                        | BaseTaskImpl::CommitFinalize(_),
+                        BaseTaskImpl::CommitFinalize(_),
                         instruction_err,
                     ) => match instruction_err {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => Ok(
@@ -352,23 +314,6 @@ impl TransactionStrategyExecutionError {
                                 signature,
                             ),
                         ),
-                        instruction_err @ (InstructionError::Custom(
-                            COMMIT_STATE_INVALID_ACCOUNT_OWNER,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_STATE_ALREADY_INITIALIZED,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_RECORD_INVALID_ACCOUNT_OWNER,
-                        )
-                        | InstructionError::Custom(
-                            COMMIT_RECORD_ALREADY_INITIALIZED,
-                        )) => {
-                            Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
-                                tx_err_helper(instruction_err),
-                                signature
-                            ))
-                        }
                         err => Err(tx_err_helper(err)),
                     },
                     (BaseTaskImpl::BaseAction(_), instruction_err) => {
@@ -383,7 +328,6 @@ impl TransactionStrategyExecutionError {
                             signature,
                         ),
                     ),
-                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
@@ -405,7 +349,6 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
             }
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
-            Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
             Self::TransactionTooLargeError(_) => "transaction_too_large",
             _ => "failed",
         }
@@ -414,6 +357,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
 
 pub(crate) struct IntentTransactionErrorMapper<'a> {
     pub tasks: &'a [BaseTaskImpl],
+    pub task_instruction_offset: u8,
 }
 impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
     type ExecutionError = TransactionStrategyExecutionError;
@@ -423,7 +367,10 @@ impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
         signature: Option<Signature>,
     ) -> Result<Self::ExecutionError, TransactionError> {
         TransactionStrategyExecutionError::try_from_transaction_error(
-            error, signature, self.tasks,
+            error,
+            signature,
+            self.tasks,
+            self.task_instruction_offset,
         )
     }
 }
@@ -476,6 +423,57 @@ mod tests {
     use super::{InternalError, TransactionStrategyExecutionError};
 
     const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
+
+    #[test]
+    fn combined_commit_errors_use_message_instruction_offset() {
+        use dlp_api::error::DlpError;
+        use magicblock_core::intent::types::CommittedAccount;
+        use solana_account::Account;
+        use solana_instruction::error::InstructionError;
+        use solana_pubkey::Pubkey;
+        use solana_transaction_error::TransactionError;
+
+        use crate::tasks::utils::{
+            create_commit_finalize_task, TransactionUtils,
+        };
+
+        let account = CommittedAccount {
+            pubkey: Pubkey::new_unique(),
+            account: Account::default(),
+            remote_slot: 0,
+        };
+        let combined =
+            create_commit_finalize_task(1, false, account, None).into();
+        for offset in [0, TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT] {
+            let unrelated_error = TransactionError::InstructionError(
+                offset,
+                InstructionError::InvalidAccountData,
+            );
+            let result =
+                TransactionStrategyExecutionError::try_from_transaction_error(
+                    unrelated_error.clone(),
+                    None,
+                    std::slice::from_ref(&combined),
+                    offset,
+                );
+            assert_eq!(result.unwrap_err(), unrelated_error);
+            let nonce_error = TransactionError::InstructionError(
+                offset,
+                InstructionError::Custom(DlpError::NonceOutOfOrder as u32),
+            );
+            let result =
+                TransactionStrategyExecutionError::try_from_transaction_error(
+                    nonce_error,
+                    None,
+                    std::slice::from_ref(&combined),
+                    offset,
+                );
+            assert!(matches!(
+                result,
+                Ok(TransactionStrategyExecutionError::CommitIDError(_, _))
+            ));
+        }
+    }
     const TX_TOO_LARGE_MAGICBLOCK: &str =
         "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
 
@@ -655,26 +653,30 @@ mod tests {
 
     #[test]
     fn finalize_failure_after_landed_commit_is_not_transient() {
+        let signature = solana_signature::Signature::new_unique();
         let transient_err = || {
-            TransactionStrategyExecutionError::InternalError(
-                make_send_transaction_error("connection reset"),
+            MagicBlockRpcClientError::SentTransactionError(
+                solana_transaction_error::TransactionError::BlockhashNotFound,
+                signature,
             )
+            .into()
         };
 
         // Single-stage: nothing landed, safe to re-execute
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: None,
-            finalize_signature: None,
-        };
+        let err = super::IntentExecutorError::from_finalize_execution_error(
+            transient_err(),
+            None,
+        );
+        assert_eq!(err.signatures(), Some((signature, Some(signature))));
         assert!(err.is_transient());
 
         // Two-stage: commit landed, re-execution would commit again
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: Some(solana_signature::Signature::default()),
-            finalize_signature: None,
-        };
+        let commit_signature = solana_signature::Signature::new_unique();
+        let err = super::IntentExecutorError::from_finalize_execution_error(
+            transient_err(),
+            Some(commit_signature),
+        );
+        assert_eq!(err.signatures(), Some((commit_signature, Some(signature))));
         assert!(!err.is_transient());
     }
 
