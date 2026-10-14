@@ -347,6 +347,8 @@ jobs:
           - batch_tests: "aml"
             test_bins_artifact: "aml"
             needs_build_env: true
+            # AML retains loader-v4 coverage, removed from newer Agave runtimes.
+            solana_version: v4.0.3
           - batch_tests: "cloning"
             test_bins_artifact: "cloning"
             needs_build_env: true
@@ -385,6 +387,8 @@ jobs:
           build_cache_key_name: "magicblock-validator-ci-test-integration-${{ hashFiles('magicblock-validator/Cargo.lock', 'magicblock-validator/test-integration/Cargo.lock') }}"
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          solana_version: ${{ matrix.solana_version || 'v4.2.0' }}
 
       - name: Download prebuilt ER binaries
         uses: actions/download-artifact@v8

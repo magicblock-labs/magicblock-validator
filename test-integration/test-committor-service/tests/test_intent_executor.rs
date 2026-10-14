@@ -112,7 +112,10 @@ impl TestEnv {
         let intent_executor = AcceptedIntentExecutor::new(
             IntentExecutorCtx {
                 authority: fixture.authority.insecure_clone(),
-                intent_client: IntentExecutionClient::new(fixture.rpc_client.clone()),
+                intent_client: IntentExecutionClient::new(
+                    fixture.rpc_client.clone(),
+                    fixture.compute_budget_config.compute_unit_price,
+                ),
                 transaction_preparator,
                 task_info_fetcher: task_info_fetcher.clone(),
                 outbox_client: Arc::new(MockOutboxClient),
@@ -171,7 +174,10 @@ async fn test_commit_id_error_parsing() {
     let mut transaction_strategy =
         single_flow_transaction_strategy(&fixture.authority.pubkey(), &task_info_fetcher, &intent)
             .await;
-    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let intent_client = IntentExecutionClient::new(
+        fixture.rpc_client.clone(),
+        fixture.compute_budget_config.compute_unit_price,
+    );
     let transaction_preparator = fixture.create_transaction_preparator();
     let execution_result = prepare_and_execute_strategy(
         &intent_client,
@@ -228,7 +234,10 @@ async fn test_undelegation_error_parsing() {
     let mut transaction_strategy =
         single_flow_transaction_strategy(&fixture.authority.pubkey(), &task_info_fetcher, &intent)
             .await;
-    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let intent_client = IntentExecutionClient::new(
+        fixture.rpc_client.clone(),
+        fixture.compute_budget_config.compute_unit_price,
+    );
     let transaction_preparator = fixture.create_transaction_preparator();
     let execution_result = prepare_and_execute_strategy(
         &intent_client,
@@ -295,7 +304,10 @@ async fn test_action_error_parsing() {
         &scheduled_intent,
     )
     .await;
-    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let intent_client = IntentExecutionClient::new(
+        fixture.rpc_client.clone(),
+        fixture.compute_budget_config.compute_unit_price,
+    );
     let transaction_preparator = fixture.create_transaction_preparator();
     let execution_result = prepare_and_execute_strategy(
         &intent_client,
@@ -357,7 +369,10 @@ async fn test_cpi_limits_error_parsing() {
         &scheduled_intent,
     )
     .await;
-    let intent_client = IntentExecutionClient::new(fixture.rpc_client.clone());
+    let intent_client = IntentExecutionClient::new(
+        fixture.rpc_client.clone(),
+        fixture.compute_budget_config.compute_unit_price,
+    );
     let transaction_preparator = fixture.create_transaction_preparator();
     let execution_result = prepare_and_execute_strategy(
         &intent_client,
@@ -1188,7 +1203,10 @@ async fn test_action_callback_fired_on_timeout() {
     let intent_executor = AcceptedIntentExecutor::new(
         IntentExecutorCtx {
             authority: fixture.authority.insecure_clone(),
-            intent_client: IntentExecutionClient::new(fixture.rpc_client.clone()),
+            intent_client: IntentExecutionClient::new(
+                fixture.rpc_client.clone(),
+                fixture.compute_budget_config.compute_unit_price,
+            ),
             transaction_preparator: fixture.create_transaction_preparator(),
             task_info_fetcher,
             outbox_client: Arc::new(MockOutboxClient),
@@ -1353,7 +1371,10 @@ async fn create_two_stage_executor<'a>(
         state,
         fixture.authority.insecure_clone(),
         intent.intent_id,
-        IntentExecutionClient::new(fixture.rpc_client.clone()),
+        IntentExecutionClient::new(
+            fixture.rpc_client.clone(),
+            fixture.compute_budget_config.compute_unit_price,
+        ),
         Arc::new(MockOutboxClient),
         callback_executor.clone(),
         execution_report,

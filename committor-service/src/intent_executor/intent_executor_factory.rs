@@ -66,7 +66,10 @@ where
         );
         let ctx = IntentExecutorCtx {
             authority: self.authority.insecure_clone(),
-            intent_client: IntentExecutionClient::new(self.rpc_client.clone()),
+            intent_client: IntentExecutionClient::new(
+                self.rpc_client.clone(),
+                self.executor_config.compute_budget_config.compute_unit_price,
+            ),
             transaction_preparator,
             task_info_fetcher: self.task_info_fetcher.clone(),
             outbox_client: self.outbox_client.clone(),

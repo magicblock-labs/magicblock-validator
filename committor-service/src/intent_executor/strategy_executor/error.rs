@@ -36,10 +36,6 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 }
 
 impl TransactionStrategyExecutionError {
-    /// Number of compute budget instructions prepended to every transaction.
-    /// Used to map instruction indices back to task indices.
-    const TASK_OFFSET: u8 = 2;
-
     /// On-chain domain errors are deterministic (and already have dedicated
     /// recovery paths); only internal transport failures are transient.
     pub fn is_transient(&self) -> bool {
@@ -60,14 +56,14 @@ impl TransactionStrategyExecutionError {
         self.is_cpi_limit_error() || matches!(self, Self::TransactionTooLargeError(_))
     }
 
-    pub fn task_index(&self) -> Option<u8> {
+    pub fn task_index(&self, task_instruction_offset: u8) -> Option<u8> {
         match self {
             Self::CommitIDError(TransactionError::InstructionError(index, _), _)
             | Self::ActionsError(TransactionError::InstructionError(index, _), _)
             | Self::UndelegationError(TransactionError::InstructionError(index, _), _)
             | Self::UnfinalizedAccountError(TransactionError::InstructionError(index, _), _)
             | Self::CpiLimitError(TransactionError::InstructionError(index, _), _) => {
-                index.checked_sub(Self::TASK_OFFSET)
+                index.checked_sub(task_instruction_offset)
             }
             _ => None,
         }
@@ -93,6 +89,7 @@ impl TransactionStrategyExecutionError {
         err: TransactionError,
         signature: Option<Signature>,
         tasks: &[BaseTaskImpl],
+        task_instruction_offset: u8,
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
         const NONCE_OUT_OF_ORDER: u32 = dlp_api::error::DlpError::NonceOutOfOrder as u32;
@@ -123,7 +120,7 @@ impl TransactionStrategyExecutionError {
                 let tx_err_helper = |instruction_err| -> TransactionError {
                     TransactionError::InstructionError(index, instruction_err)
                 };
-                let Some(action_index) = index.checked_sub(Self::TASK_OFFSET) else {
+                let Some(action_index) = index.checked_sub(task_instruction_offset) else {
                     return Err(tx_err_helper(instruction_err));
                 };
 
@@ -132,10 +129,7 @@ impl TransactionStrategyExecutionError {
                 };
 
                 match (task, instruction_err) {
-                    (
-                        BaseTaskImpl::Commit(_) | BaseTaskImpl::CommitFinalize(_),
-                        instruction_err,
-                    ) => match instruction_err {
+                    (BaseTaskImpl::CommitFinalize(_), instruction_err) => match instruction_err {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => {
                             Ok(TransactionStrategyExecutionError::CommitIDError(
                                 tx_err_helper(InstructionError::Custom(NONCE_OUT_OF_ORDER)),
@@ -171,7 +165,6 @@ impl TransactionStrategyExecutionError {
                             signature,
                         ))
                     }
-                    (_, instruction_err) => Err(tx_err_helper(instruction_err)),
                 }
             }
             // This means transaction failed to other reasons that we don't handle - propagate
@@ -200,6 +193,7 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
 
 pub(crate) struct IntentTransactionErrorMapper<'a> {
     pub tasks: &'a [BaseTaskImpl],
+    pub task_instruction_offset: u8,
 }
 
 impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
@@ -209,7 +203,12 @@ impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
         error: TransactionError,
         signature: Option<Signature>,
     ) -> Result<Self::ExecutionError, TransactionError> {
-        TransactionStrategyExecutionError::try_from_transaction_error(error, signature, self.tasks)
+        TransactionStrategyExecutionError::try_from_transaction_error(
+            error,
+            signature,
+            self.tasks,
+            self.task_instruction_offset,
+        )
     }
 }
 

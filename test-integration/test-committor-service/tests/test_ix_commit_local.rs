@@ -7,7 +7,7 @@ use magicblock_committor_service::{
     config::ChainConfig,
     intent_engine::db::DummyDB,
     intent_executor::{error::IntentExecutorError, ExecutionOutput},
-    tasks::{commit_task::CommitDelivery, task_strategist::TransactionStrategy, BaseTaskImpl},
+    tasks::{commit_delivery::CommitDelivery, task_strategist::TransactionStrategy, BaseTaskImpl},
     ComputeBudgetConfig,
 };
 use magicblock_core::intent::{
@@ -56,16 +56,6 @@ impl AccountCommitInfo {
         let uses_alts = strategy.uses_alts();
         strategy.optimized_tasks.iter().fold(vec![], |mut infos, task| {
             let commit_info = match task {
-                BaseTaskImpl::Commit(val) => {
-                    let info = AccountCommitInfo {
-                        commit_nonce: val.commit_id,
-                        data: val.committed_account.account.data.clone(),
-                        allow_undelegation: val.allow_undelegation,
-                        strategy: CommitStrategy::new(uses_alts, val.delivery_details.clone()),
-                    };
-
-                    Some((val.committed_account.pubkey, info))
-                }
                 BaseTaskImpl::CommitFinalize(val) => {
                     let info = AccountCommitInfo {
                         commit_nonce: val.commit_id,
@@ -76,6 +66,7 @@ impl AccountCommitInfo {
 
                     Some((val.committed_account.pubkey, info))
                 }
+
                 _ => None,
             };
 

@@ -116,6 +116,27 @@ where
         commit_signature: Signature,
         execution_report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ExecutionOutput> {
+        let accounts: Vec<AccountSnapshot> = intent
+            .get_commit_intent_accounts()
+            .into_iter()
+            .chain(intent.get_undelegate_intent_accounts())
+            .flatten()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect();
+        if !accounts.is_empty() {
+            let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
+            self.ctx
+                .task_info_fetcher
+                .fetch_delegation_metadata(&accounts, min_context_slot)
+                .await
+                .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+            let pubkeys: Vec<_> = accounts.iter().map(|(pubkey, _)| *pubkey).collect();
+            self.ctx
+                .intent_client
+                .finalize_legacy_commits(&self.authority, &pubkeys, commit_signature)
+                .await?;
+        }
+
         // Commit succeeded so we skip those tasks all together
         let finalize_tasks =
             TaskBuilderImpl::finalize_tasks(&self.ctx.task_info_fetcher, &intent).await?;

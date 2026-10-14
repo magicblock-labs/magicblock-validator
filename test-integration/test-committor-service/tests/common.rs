@@ -22,7 +22,8 @@ use magicblock_committor_service::{
         ScheduledBaseIntentMeta,
     },
     tasks::{
-        commit_task::{CommitDelivery, CommitTask},
+        commit_delivery::CommitDelivery,
+        commit_finalize_task::CommitFinalizeTask,
         task_info_fetcher::{
             AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher, TaskInfoFetcherError,
             TaskInfoFetcherResult,
@@ -146,7 +147,10 @@ impl TestFixture {
         AcceptedIntentExecutor::new(
             IntentExecutorCtx {
                 authority: self.authority.insecure_clone(),
-                intent_client: IntentExecutionClient::new(self.rpc_client.clone()),
+                intent_client: IntentExecutionClient::new(
+                    self.rpc_client.clone(),
+                    self.compute_budget_config.compute_unit_price,
+                ),
                 transaction_preparator: self.create_transaction_preparator(),
                 task_info_fetcher: self.create_task_info_fetcher(),
                 outbox_client: Arc::new(MockOutboxClient),
@@ -321,9 +325,9 @@ pub(crate) fn generate_random_bytes(length: usize) -> Vec<u8> {
 }
 
 #[allow(dead_code)]
-pub(crate) fn create_commit_task(data: &[u8]) -> CommitTask {
+pub(crate) fn create_commit_finalize_task(data: &[u8]) -> CommitFinalizeTask {
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-    CommitTask {
+    CommitFinalizeTask {
         commit_id: COMMIT_ID.fetch_add(1, Ordering::Relaxed),
         allow_undelegation: false,
         committed_account: CommittedAccount {
@@ -337,15 +341,15 @@ pub(crate) fn create_commit_task(data: &[u8]) -> CommitTask {
             },
             remote_slot: Default::default(),
         },
-        delivery_details: CommitDelivery::StateInArgs,
+        delivery: CommitDelivery::StateInArgs,
     }
 }
 
 #[allow(dead_code)]
-pub(crate) fn create_buffer_commit_task(data: &[u8]) -> CommitTask {
-    let task = create_commit_task(data);
-    CommitTask {
-        delivery_details: CommitDelivery::StateInBuffer { prepared: false },
+pub(crate) fn create_buffer_commit_finalize_task(data: &[u8]) -> CommitFinalizeTask {
+    let task = create_commit_finalize_task(data);
+    CommitFinalizeTask {
+        delivery: CommitDelivery::StateInBuffer { prepared: false },
         ..task
     }
 }

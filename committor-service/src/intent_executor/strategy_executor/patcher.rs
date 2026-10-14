@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use magicblock_core::traits::{ActionError, ActionsCallbackScheduler};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_signer::Signer;
 use tracing::{error, warn};
 
@@ -15,18 +14,14 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
             error::TransactionStrategyExecutionError,
-            utils::{
-                handle_actions_result, handle_commit_id_error, handle_undelegation_error,
-                prepare_and_execute_strategy,
-            },
+            utils::{handle_actions_result, handle_commit_id_error, handle_undelegation_error},
         },
     },
     tasks::{
-        BaseTaskImpl, FinalizeTask,
+        BaseTaskImpl,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::TransactionStrategy,
     },
-    transaction_preparator::TransactionPreparator,
 };
 
 #[async_trait]
@@ -41,60 +36,36 @@ pub(in crate::intent_executor) trait Patcher {
 
 // --- SingleStagePatcher ---
 
-pub(in crate::intent_executor) struct SingleStagePatcher<'a, F, A, T> {
+pub(in crate::intent_executor) struct SingleStagePatcher<'a, F, A> {
     pub authority: &'a Keypair,
     pub intent_id: u64,
     pub intent_client: &'a IntentExecutionClient,
     pub callback_scheduler: &'a A,
     pub task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
     pub committed_pubkeys: &'a [Pubkey],
-    pub transaction_preparator: &'a T,
 }
 
-impl<F, A, T> SingleStagePatcher<'_, F, A, T>
-where
-    T: TransactionPreparator,
-{
+impl<F, A> SingleStagePatcher<'_, F, A> {
     /// Handles unfinalized account error for single stage execution.
     /// Sends a separate tx to finalize account and then continues execution.
     async fn handle_unfinalized_account_error(
         &self,
-        failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl = FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            self.intent_client,
-            self.authority,
-            self.transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                uniqueness_nonce: None,
-            },
-        )
-        .await
-        .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToFinalizeError {
-            err,
-            commit_signature: None,
-            finalize_signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        }))
+        self.intent_client
+            .finalize_account(self.authority, delegated_account)
+            .await
+            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
+            .map_err(|err| IntentExecutorError::from_finalize_execution_error(err, None))?;
+        Ok(ControlFlow::Continue(TransactionStrategy::default()))
     }
 }
 
 #[async_trait]
-impl<F, A, T> Patcher for SingleStagePatcher<'_, F, A, T>
+impl<F, A> Patcher for SingleStagePatcher<'_, F, A>
 where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
 {
     /// Patch the current `transaction_strategy` in response to a recoverable
     /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
@@ -142,21 +113,20 @@ where
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, signature) => {
+            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, _) => {
                 let optimized_tasks = strategy.optimized_tasks.as_slice();
                 if let Some(delegated_account) = err
-                    .task_index()
+                    .task_index(strategy.task_instruction_offset())
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
                         BaseTaskImpl::CommitFinalize(task) => Some(task.committed_account.pubkey),
                         _ => None,
                     })
                 {
-                    self.handle_unfinalized_account_error(signature, delegated_account).await
+                    self.handle_unfinalized_account_error(delegated_account).await
                 } else {
                     error!(
-                        task_index = err.task_index(),
+                        task_index = err.task_index(strategy.task_instruction_offset()),
                         optimized_tasks_len = optimized_tasks.len(),
                         error = ?err,
                         "RPC returned unexpected task index"
@@ -187,59 +157,36 @@ where
 
 // --- CommitStagePatcher ---
 
-pub(in crate::intent_executor) struct CommitStagePatcher<'a, F, A, T> {
+pub(in crate::intent_executor) struct CommitStagePatcher<'a, F, A> {
     pub authority: &'a Keypair,
     pub intent_id: u64,
     pub intent_client: &'a IntentExecutionClient,
     pub callback_scheduler: &'a A,
     pub task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
     pub committed_pubkeys: &'a [Pubkey],
-    pub transaction_preparator: &'a T,
 }
 
-impl<F, A, T> CommitStagePatcher<'_, F, A, T>
-where
-    T: TransactionPreparator,
-{
+impl<F, A> CommitStagePatcher<'_, F, A> {
     /// Handles unfinalized account error for commit stage execution.
     /// Sends a separate tx to finalize account and then continues execution.
     async fn handle_unfinalized_account_error(
         &self,
-        failed_signature: &Option<Signature>,
         delegated_account: Pubkey,
     ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
-        let finalize_task: BaseTaskImpl = FinalizeTask { delegated_account }.into();
-        prepare_and_execute_strategy(
-            self.intent_client,
-            self.authority,
-            self.transaction_preparator,
-            &mut TransactionStrategy {
-                optimized_tasks: vec![finalize_task],
-                lookup_tables_keys: vec![],
-                uniqueness_nonce: None,
-            },
-        )
-        .await
-        .map_err(IntentExecutorError::FailedCommitPreparationError)?
-        .map_err(|err| IntentExecutorError::FailedToCommitError {
-            err,
-            signature: *failed_signature,
-        })?;
-
-        Ok(ControlFlow::Continue(TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        }))
+        self.intent_client
+            .finalize_account(self.authority, delegated_account)
+            .await
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?
+            .map_err(IntentExecutorError::from_commit_execution_error)?;
+        Ok(ControlFlow::Continue(TransactionStrategy::default()))
     }
 }
 
 #[async_trait]
-impl<F, A, T> Patcher for CommitStagePatcher<'_, F, A, T>
+impl<F, A> Patcher for CommitStagePatcher<'_, F, A>
 where
     F: TaskInfoFetcher,
     A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
 {
     /// Patches Commit stage `transaction_strategy` in response to a recoverable
     /// [`TransactionStrategyExecutionError`], optionally preparing cleanup data
@@ -266,18 +213,17 @@ where
                 .await?;
                 Ok(ControlFlow::Continue(to_cleanup))
             }
-            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, signature) => {
+            err @ TransactionStrategyExecutionError::UnfinalizedAccountError(_, _) => {
                 let optimized_tasks = strategy.optimized_tasks.as_slice();
-                let task_index = err.task_index();
+                let task_index = err.task_index(strategy.task_instruction_offset());
                 if let Some(delegated_account) = task_index
                     .and_then(|index| optimized_tasks.get(index as usize))
                     .and_then(|task| match task {
-                        BaseTaskImpl::Commit(task) => Some(task.committed_account.pubkey),
                         BaseTaskImpl::CommitFinalize(task) => Some(task.committed_account.pubkey),
                         _ => None,
                     })
                 {
-                    self.handle_unfinalized_account_error(signature, delegated_account).await
+                    self.handle_unfinalized_account_error(delegated_account).await
                 } else {
                     error!(
                         task_index = ?task_index,

@@ -74,6 +74,27 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         authority: &Keypair,
         tx_strategy: &mut TransactionStrategy,
     ) -> PreparatorResult<VersionedMessage> {
+        if !tx_strategy.uses_alts() {
+            // Validate the final representation before preparing buffers.
+            TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+                authority,
+                &tx_strategy.optimized_tasks,
+                self.compute_budget_config.compute_unit_price,
+                tx_strategy.uniqueness_nonce,
+            )?;
+            self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
+            metrics::observe_committor_intent_alt_count(0);
+            return Ok(
+                TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+                    authority,
+                    &tx_strategy.optimized_tasks,
+                    self.compute_budget_config.compute_unit_price,
+                    tx_strategy.uniqueness_nonce,
+                )?
+                .message,
+            );
+        }
+
         // If message won't fit, there's no reason to prepare anything
         // Fail early
         {
@@ -115,7 +136,6 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             .optimized_tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::Commit(commit_task) => CleanupTask::from_commit(commit_task),
                 BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
                     CleanupTask::from_commit_finalize(commit_finalize_task)
                 }

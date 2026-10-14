@@ -343,6 +343,17 @@ pub fn is_ata(
     }
 }
 
+/// Returns the owner and mint of an ATA held as a read-only base-chain mirror.
+pub fn try_get_base_ata_mirror_info(
+    pubkey: &Pubkey,
+    account: &AccountSharedData,
+) -> Option<AtaInfo> {
+    if !account.is(AccountMode::ReadOnly) {
+        return None;
+    }
+    is_ata(pubkey, *account.owner(), account.data())
+}
+
 /// Return the eata pubkey and EphemeralAta
 pub fn try_remap_ata_to_eata(
     pubkey: &Pubkey,

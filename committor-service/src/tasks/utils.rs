@@ -1,22 +1,23 @@
 use std::collections::HashSet;
 
-use dlp_api::DLP_PROGRAM_DATA_SIZE_CLASS;
+use dlp_api::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
 use magicblock_core::intent::{BaseAction, types::CommittedAccount};
 use solana_account::Account;
+use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
-use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message};
+use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, v0::Message, v1};
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
 use crate::tasks::{
     BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
+    commit_delivery::CommitDelivery,
     commit_finalize_task::CommitFinalizeTask,
-    commit_task::{CommitDelivery, CommitTask},
-    task_strategist::TaskStrategistResult,
+    task_strategist::{TaskStrategistError, TaskStrategistResult},
 };
 
 // Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
@@ -45,11 +46,6 @@ pub fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = BaseT
     })
 }
 
-/// Decides how a commit's data should be delivered based on account size:
-/// accounts larger than `COMMIT_STATE_SIZE_THRESHOLD` diff against
-/// `base_account` (when available), everything else is sent as full state.
-/// Shared by [`create_commit_task`] and [`create_commit_finalize_task`] so
-/// the two never drift apart.
 fn commit_delivery(account: &CommittedAccount, base_account: Option<Account>) -> CommitDelivery {
     let base_account = if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
         base_account
@@ -64,29 +60,7 @@ fn commit_delivery(account: &CommittedAccount, base_account: Option<Account>) ->
     }
 }
 
-/// Builds a [`CommitTask`] for `account`, used by both
-/// [`crate::tasks::task_builder::TaskBuilderImpl`] (real task construction,
-/// passing the real base-layer account state to diff against) and
-/// [`crate::tasks::intent_size_validator::IntentSizeValidator`] (size
-/// estimation, passing a stand-in base account purely to exercise this same
-/// `COMMIT_STATE_SIZE_THRESHOLD` check).
-pub fn create_commit_task(
-    commit_id: u64,
-    allow_undelegation: bool,
-    account: CommittedAccount,
-    base_account: Option<Account>,
-) -> CommitTask {
-    let delivery_details = commit_delivery(&account, base_account);
-
-    CommitTask {
-        commit_id,
-        allow_undelegation,
-        committed_account: account,
-        delivery_details,
-    }
-}
-
-/// Same as [`create_commit_task`] but for [`CommitFinalizeTask`].
+/// Builds a combined commit and finalization task for `account`.
 pub fn create_commit_finalize_task(
     commit_id: u64,
     allow_undelegation: bool,
@@ -105,6 +79,8 @@ pub fn create_commit_finalize_task(
 
 pub struct TransactionUtils;
 impl TransactionUtils {
+    pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
+    const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
     const UNIQUENESS_NOOP_PROGRAM_ID: Pubkey =
         pubkey!("noopb9bkMVfRPU8AsbpTUg8AQkHtKwMYZiFUjNRtMmV");
 
@@ -146,6 +122,14 @@ impl TransactionUtils {
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
     ) -> TaskStrategistResult<VersionedTransaction> {
+        if lookup_tables.is_empty() {
+            return Self::assemble_tasks_v1_tx_with_uniqueness_nonce(
+                authority,
+                tasks,
+                compute_unit_price,
+                None,
+            );
+        }
         Self::assemble_tasks_tx_with_uniqueness_nonce(
             authority,
             tasks,
@@ -165,13 +149,38 @@ impl TransactionUtils {
         let budget_instructions = Self::budget_instructions(
             Self::tasks_compute_units(tasks),
             compute_unit_price,
-            Self::tasks_accounts_size_budget(tasks),
+            Self::tasks_accounts_size_budget_with_uniqueness_nonce(tasks, uniqueness_nonce),
         );
         let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
         Self::assemble_tx_raw(authority, &ixs, &budget_instructions, lookup_tables)
+    }
+
+    /// Builds a native v1 transaction without compute-budget instructions or lookup tables.
+    pub(crate) fn assemble_tasks_v1_tx_with_uniqueness_nonce(
+        authority: &Keypair,
+        tasks: &[BaseTaskImpl],
+        compute_unit_price: u64,
+        uniqueness_nonce: Option<u64>,
+    ) -> TaskStrategistResult<VersionedTransaction> {
+        let config = Self::v1_config(Self::tasks_compute_units(tasks), compute_unit_price);
+        let mut instructions = Self::tasks_instructions(&authority.pubkey(), tasks);
+        if let Some(nonce) = uniqueness_nonce {
+            instructions.push(Self::uniqueness_noop_instruction(nonce));
+        }
+        let message = v1::Message::try_compile_with_config(
+            &authority.pubkey(),
+            &instructions,
+            Hash::new_unique(),
+            config,
+        )?;
+        message.validate().map_err(|_| TaskStrategistError::FailedToFitError)?;
+        Ok(VersionedTransaction::try_new(
+            VersionedMessage::V1(message),
+            &[authority],
+        )?)
     }
 
     pub fn assemble_tx_raw(
@@ -183,7 +192,7 @@ impl TransactionUtils {
         // This is needed because VersionedMessage::serialize uses unwrap() ¯\_(ツ)_/¯
         instructions.iter().try_for_each(|el| {
             if el.data.len() > u16::MAX as usize {
-                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
+                Err(TaskStrategistError::FailedToFitError)
             } else {
                 Ok(())
             }
@@ -198,7 +207,7 @@ impl TransactionUtils {
             Ok(message) => Ok(message),
             Err(CompileError::AccountIndexOverflow)
             | Err(CompileError::AddressTableLookupIndexOverflow) => {
-                Err(crate::tasks::task_strategist::TaskStrategistError::FailedToFitError)
+                Err(TaskStrategistError::FailedToFitError)
             }
             Err(err @ CompileError::UnknownInstructionKey(_)) => Err(err.into()),
         }?;
@@ -220,7 +229,7 @@ impl TransactionUtils {
     }
 
     pub fn tasks_compute_units(tasks: &[BaseTaskImpl]) -> u32 {
-        tasks.iter().map(|task| task.compute_units()).sum()
+        tasks.iter().fold(0, |sum, task| sum.saturating_add(task.compute_units()))
     }
 
     pub fn tasks_accounts_size_budget(tasks: &[BaseTaskImpl]) -> u32 {
@@ -230,16 +239,42 @@ impl TransactionUtils {
 
         let total_budget: u32 = tasks.iter().map(|task| task.accounts_size_budget()).sum();
 
-        let dlp_task_count: u32 =
-            tasks.iter().filter(|task| task.program_id() == dlp_api::id()).count() as u32;
+        // All tasks target DLP, so count its program data only once.
+        let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
+        let deduction = (tasks.len() as u32).saturating_sub(1).saturating_mul(dlp_program_budget);
+        // The API's 350 KiB estimate is smaller than the deployed DLP.
+        // Reserve at least 1 MiB for its program data, counted only once.
+        let program_headroom =
+            AccountSizeClass::Huge.size_budget().saturating_sub(dlp_program_budget);
+        total_budget.saturating_sub(deduction).saturating_add(program_headroom)
+    }
 
-        if dlp_task_count > 0 {
-            let dlp_program_budget = DLP_PROGRAM_DATA_SIZE_CLASS.size_budget();
-            let deduction = dlp_task_count.saturating_sub(1).saturating_mul(dlp_program_budget);
-            total_budget.saturating_sub(deduction)
+    fn tasks_accounts_size_budget_with_uniqueness_nonce(
+        tasks: &[BaseTaskImpl],
+        uniqueness_nonce: Option<u64>,
+    ) -> u32 {
+        let budget = Self::tasks_accounts_size_budget(tasks);
+        if uniqueness_nonce.is_some() {
+            budget.saturating_add(Self::UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET)
         } else {
-            total_budget
+            budget
         }
+    }
+
+    fn v1_config(compute_units: u32, compute_unit_price: u64) -> v1::TransactionConfig {
+        let limits = ComputeBudgetLimits {
+            compute_unit_limit: compute_units,
+            compute_unit_price,
+            ..ComputeBudgetLimits::default()
+        };
+        // Task estimates don't know actual base-chain account or program sizes.
+        // Use the runtime default explicitly; omitting the v1 limit means zero.
+        // TODO: Use a better estimate of loaded account and program data, with
+        // headroom, instead of the maximum to reduce scheduler cost.
+        v1::TransactionConfig::empty()
+            .with_priority_fee(limits.get_prioritization_fee())
+            .with_compute_unit_limit(compute_units)
+            .with_loaded_accounts_data_size_limit(limits.loaded_accounts_bytes.get())
     }
 
     pub fn budget_instructions(

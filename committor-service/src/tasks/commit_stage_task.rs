@@ -13,10 +13,7 @@ use magicblock_program::Pubkey;
 use solana_instruction::Instruction;
 
 use crate::{
-    tasks::{
-        commit_finalize_task::CommitFinalizeTask,
-        commit_task::{CommitDelivery, CommitTask},
-    },
+    tasks::{commit_delivery::CommitDelivery, commit_finalize_task::CommitFinalizeTask},
     utils::MAX_WRITE_CHUNK_SIZE,
 };
 
@@ -30,38 +27,6 @@ pub struct PreparationTask<'a> {
 }
 
 impl<'a> PreparationTask<'a> {
-    pub fn from_commit(task: &'a mut CommitTask) -> Option<Self> {
-        match &mut task.delivery_details {
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
-            CommitDelivery::StateInBuffer { prepared } => {
-                let buffer_data = task.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    buffer_data,
-                    chunks,
-                    prepared,
-                })
-            }
-            CommitDelivery::DiffInBuffer { base_account, prepared } => {
-                let diff = compute_diff(
-                    base_account.data.as_ref(),
-                    &task.committed_account.account.data,
-                )
-                .to_vec();
-                let chunks = Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    buffer_data: diff,
-                    chunks,
-                    prepared,
-                })
-            }
-        }
-    }
-
     pub fn from_commit_finalize(task: &'a mut CommitFinalizeTask) -> Option<Self> {
         match &mut task.delivery {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
@@ -112,11 +77,6 @@ impl<'a> PreparationTask<'a> {
         instruction
     }
 
-    /// Returns compute units required for realloc instruction
-    pub fn init_compute_units(&self) -> u32 {
-        12_000
-    }
-
     /// Returns realloc instruction required for Buffer preparation
     #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
@@ -129,11 +89,6 @@ impl<'a> PreparationTask<'a> {
         });
 
         realloc_instructions
-    }
-
-    /// Returns compute units required for realloc instruction
-    pub fn realloc_compute_units(&self) -> u32 {
-        6_000
     }
 
     /// Returns realloc instruction required for Buffer preparation
@@ -156,33 +111,6 @@ impl<'a> PreparationTask<'a> {
         write_instructions
     }
 
-    pub fn write_compute_units(&self, bytes_count: usize) -> u32 {
-        const PER_BYTE: u32 = 3;
-
-        u32::try_from(bytes_count)
-            .ok()
-            .and_then(|bytes_count| bytes_count.checked_mul(PER_BYTE))
-            .unwrap_or(u32::MAX)
-    }
-
-    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::chunks_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
-    pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::buffer_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
-
     pub fn cleanup_task(&self) -> CleanupTask {
         CleanupTask {
             pubkey: self.pubkey,
@@ -202,17 +130,6 @@ pub struct CleanupTask {
 }
 
 impl CleanupTask {
-    pub fn from_commit(task: &CommitTask) -> Option<Self> {
-        match &task.delivery_details {
-            CommitDelivery::StateInBuffer { prepared: true }
-            | CommitDelivery::DiffInBuffer { prepared: true, .. } => Some(Self {
-                commit_id: task.commit_id,
-                pubkey: task.committed_account.pubkey,
-            }),
-            _ => None,
-        }
-    }
-
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
             CommitDelivery::StateInBuffer { prepared: true }

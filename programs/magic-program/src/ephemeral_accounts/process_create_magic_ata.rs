@@ -1,8 +1,9 @@
 use magicblock_core::token_programs::{
     MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID, derive_ata_with_token_program,
-    is_supported_token_program, try_get_magic_ata_info, try_remap_ata_to_eata,
+    is_supported_token_program, try_get_base_ata_mirror_info, try_get_magic_ata_info,
+    try_remap_ata_to_eata,
 };
-use solana_account::{AccountMode, ReadableAccount, WritableAccount};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program::{program_option::COption, program_pack::Pack};
@@ -67,7 +68,16 @@ pub(crate) fn process_create_magic_ata(
     let ata = get_instruction_account_with_idx(transaction_context, ATA_IDX)?;
     {
         let ata_shared = ata.borrow()?;
-        if !is_empty_system_account(&ata_shared) {
+        if !is_empty_system_account(&ata_shared)
+            && !is_overlayable_mirror(
+                transaction_context,
+                &ata_pubkey,
+                &ata_shared,
+                &wallet_owner,
+                &mint,
+                &token_program,
+            )?
+        {
             return if matches_existing_ata(
                 &ata_pubkey,
                 &ata_shared,
@@ -92,7 +102,7 @@ pub(crate) fn process_create_magic_ata(
     };
 
     let mut acc = ata.borrow_mut()?;
-    acc.set_lamports(0);
+    // Preserve cloned rent so overlay creation stays lamport-balanced.
     acc.set_owner(token_program);
     acc.resize(token_account_shape.len, 0);
     initialize_token_data(
@@ -115,7 +125,55 @@ pub(crate) fn process_create_magic_ata(
     Ok(())
 }
 
-fn is_empty_system_account(account: &solana_account::AccountSharedData) -> bool {
+/// Whether a Magic ATA may overlay `account`: a base ATA mirror of this
+/// owner and mint that the token program has not had as writable earlier
+/// in the transaction. The overlay keeps the address and lamports (the
+/// cloned rent, dropped with the account on close), rebuilds the token data
+/// from the mint at zero amount, and leaves the base ATA untouched.
+fn is_overlayable_mirror(
+    transaction_context: &TransactionContext<'_>,
+    ata_pubkey: &Pubkey,
+    account: &AccountSharedData,
+    wallet_owner: &Pubkey,
+    mint: &Pubkey,
+    token_program: &Pubkey,
+) -> Result<bool, InstructionError> {
+    let is_mirror = account.owner() == token_program
+        && try_get_base_ata_mirror_info(ata_pubkey, account)
+            .is_some_and(|info| info.owner == *wallet_owner && info.mint == *mint);
+    Ok(is_mirror && !token_program_wrote_earlier(transaction_context, ata_pubkey, token_program)?)
+}
+
+/// Whether the token program got `ata` as writable earlier in this
+/// transaction. The trace holds only instructions pushed so far, with every
+/// CPI at any depth as its own entry (post-delegation actions included, via
+/// `native_invoke`), so writes through intermediate programs are caught.
+/// Only the token program can change a mirror's data or debit its lamports,
+/// so an unexposed mirror still holds the cloned base state. Writable metas
+/// are checked rather than actual writes, which keeps this conservative.
+fn token_program_wrote_earlier(
+    transaction_context: &TransactionContext<'_>,
+    ata: &Pubkey,
+    token_program: &Pubkey,
+) -> Result<bool, InstructionError> {
+    for index in 0..transaction_context.get_instruction_trace_length() {
+        let ix_ctx = transaction_context.get_instruction_context_at_index_in_trace(index)?;
+        if ix_ctx.get_program_key()? != token_program {
+            continue;
+        }
+        for account in 0..ix_ctx.get_number_of_instruction_accounts() {
+            let key = transaction_context.get_key_of_account_at_index(
+                ix_ctx.get_index_of_instruction_account_in_transaction(account)?,
+            )?;
+            if key == ata && ix_ctx.is_instruction_account_writable(account)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+fn is_empty_system_account(account: &AccountSharedData) -> bool {
     account.lamports() == 0 && account.owner() == &system_program::ID && account.data().is_empty()
 }
 
@@ -228,7 +286,7 @@ fn initialize_token_data(
 
 fn matches_existing_ata(
     ata_pubkey: &Pubkey,
-    account: &solana_account::AccountSharedData,
+    account: &AccountSharedData,
     wallet_owner: &Pubkey,
     mint: &Pubkey,
     token_program: &Pubkey,

@@ -94,7 +94,7 @@ impl TestEnv {
         let ephem_rpc = Arc::new(ctx.try_ephem_client_async().unwrap());
         let chain_mb_rpc = MagicblockRpcClient::new(chain_rpc);
 
-        let intent_client = IntentExecutionClient::new(chain_mb_rpc.clone());
+        let intent_client = IntentExecutionClient::new(chain_mb_rpc.clone(), 1_000_000);
         let gc_config = GarbageCollectorConfig::default();
         let table_mania =
             TableMania::new(chain_mb_rpc.clone(), &validator_authority, Some(gc_config));
@@ -147,7 +147,7 @@ impl TestEnv {
             sender,
             RpcClientConfig::with_commitment(self.ctx.commitment),
         ));
-        IntentExecutionClient::new(MagicblockRpcClient::new(rpc_client))
+        IntentExecutionClient::new(MagicblockRpcClient::new(rpc_client), 1_000_000)
     }
 }
 

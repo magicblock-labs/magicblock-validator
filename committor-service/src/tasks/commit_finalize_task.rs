@@ -9,7 +9,7 @@ use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::tasks::{BaseTask, BaseTaskImpl, commit_task::CommitDelivery};
+use crate::tasks::{BaseTask, BaseTaskImpl, commit_delivery::CommitDelivery};
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
 /// instruction.
@@ -106,10 +106,6 @@ impl CommitFinalizeTask {
 }
 
 impl BaseTask for CommitFinalizeTask {
-    fn program_id(&self) -> Pubkey {
-        dlp_api::id()
-    }
-
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery {
             CommitDelivery::StateInArgs => self.commit_finalize_ix(validator, None),
@@ -150,15 +146,14 @@ impl BaseTask for CommitFinalizeTask {
 
     fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
-            CommitDelivery::StateInArgs => commit_finalize_size_budget(AccountSizeClass::Dynamic(
-                self.committed_account.account.data.len() as u32,
-            )),
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
+                commit_finalize_size_budget(AccountSizeClass::Dynamic(
+                    self.committed_account.account.data.len() as u32,
+                ))
+            }
             CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. } => {
                 commit_finalize_from_buffer_size_budget(AccountSizeClass::Huge)
             }
-            CommitDelivery::DiffInArgs { .. } => commit_finalize_size_budget(
-                AccountSizeClass::Dynamic(self.committed_account.account.data.len() as u32),
-            ),
         }
     }
 }

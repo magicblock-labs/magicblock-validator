@@ -144,12 +144,11 @@ where
         };
         let commit_stage_patcher = CommitStagePatcher {
             authority: &self.authority,
-            intent_id: self.intent_id,
             intent_client: &self.intent_client,
+            intent_id: self.intent_id,
             callback_scheduler: &self.callback_scheduler,
             task_info_fetcher,
             committed_pubkeys,
-            transaction_preparator,
         };
 
         // Execute commit stage

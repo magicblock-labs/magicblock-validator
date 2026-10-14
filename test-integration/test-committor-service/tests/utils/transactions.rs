@@ -84,7 +84,7 @@ pub(crate) async fn fetch_tx_logs(rpc_client: &RpcClient, signature: &Signature)
                 signature,
                 RpcTransactionConfig {
                     commitment: Some(CommitmentConfig::confirmed()),
-                    max_supported_transaction_version: Some(0),
+                    max_supported_transaction_version: Some(1),
                     ..Default::default()
                 },
             )
@@ -159,7 +159,7 @@ pub(crate) async fn tx_logs_contain(
     needle: &str,
 ) -> bool {
     fetch_tx_logs(rpc_client, signature).await.iter().any(|log| {
-        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitTask
+        // Lots of existing tests pass "CommitState" as needle argument to this function, but since now CommitFinalizeTask
         // could invoke CommitState or CommitDiff depending on the size of the account, we also look for "CommitDiff"
         // in the logs when needle == CommitState. It's easier to make this little adjustment here than computing
         // the decision and passing either CommitState or CommitDiff from the tests themselves.

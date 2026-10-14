@@ -1,15 +1,16 @@
 use borsh::BorshDeserialize;
 use magicblock_committor_interface::Chunks;
 use magicblock_committor_service::tasks::{
+    commit_delivery::CommitDelivery,
     commit_stage_task::{CleanupTask, PreparationTask},
-    commit_task::CommitDelivery,
     task_strategist::{TaskStrategist, TransactionStrategy},
     BaseTaskImpl,
 };
 use solana_sdk::signer::Signer;
 
 use crate::common::{
-    create_buffer_commit_task, create_commit_task, generate_random_bytes, TestFixture,
+    create_buffer_commit_finalize_task, create_commit_finalize_task, generate_random_bytes,
+    TestFixture,
 };
 
 mod common;
@@ -21,7 +22,7 @@ async fn test_prepare_10kb_buffer() {
 
     let data = generate_random_bytes(10 * 1024);
     let mut strategy = TransactionStrategy {
-        optimized_tasks: vec![create_buffer_commit_task(&data).into()],
+        optimized_tasks: vec![create_buffer_commit_finalize_task(&data).into()],
         lookup_tables_keys: vec![],
         uniqueness_nonce: None,
     };
@@ -32,10 +33,10 @@ async fn test_prepare_10kb_buffer() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let BaseTaskImpl::Commit(ref commit_task) = strategy.optimized_tasks[0] else {
+    let BaseTaskImpl::CommitFinalize(ref commit_task) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(cleanup_task) = CleanupTask::from_commit(commit_task) else {
+    let Some(cleanup_task) = CleanupTask::from_commit_finalize(commit_task) else {
         panic!("unexpected CommitStage");
     };
 
@@ -78,8 +79,10 @@ async fn test_prepare_multiple_buffers() {
         generate_random_bytes(10),
         generate_random_bytes(500 * 1024),
     ];
-    let buffer_tasks: Vec<BaseTaskImpl> =
-        datas.iter().map(|data| create_buffer_commit_task(data).into()).collect();
+    let buffer_tasks: Vec<BaseTaskImpl> = datas
+        .iter()
+        .map(|data| create_buffer_commit_finalize_task(data).into())
+        .collect();
     let mut strategy = TransactionStrategy {
         optimized_tasks: buffer_tasks,
         lookup_tables_keys: vec![],
@@ -96,7 +99,9 @@ async fn test_prepare_multiple_buffers() {
         .optimized_tasks
         .iter()
         .filter_map(|el| match el {
-            BaseTaskImpl::Commit(commit_task) => CleanupTask::from_commit(commit_task),
+            BaseTaskImpl::CommitFinalize(commit_task) => {
+                CleanupTask::from_commit_finalize(commit_task)
+            }
             _ => None,
         })
         .collect();
@@ -142,7 +147,7 @@ async fn test_lookup_tables() {
 
     let datas = [generate_random_bytes(10), generate_random_bytes(20), generate_random_bytes(30)];
     let tasks: Vec<BaseTaskImpl> =
-        datas.iter().map(|data| create_commit_task(data).into()).collect();
+        datas.iter().map(|data| create_commit_finalize_task(data).into()).collect();
 
     let lookup_tables_keys =
         TaskStrategist::collect_lookup_table_keys(&fixture.authority.pubkey(), &tasks, None);
@@ -175,7 +180,7 @@ async fn test_already_initialized_error_handled() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(10 * 1024);
-    let mut commit_task = create_buffer_commit_task(&data);
+    let mut commit_task = create_buffer_commit_finalize_task(&data);
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.clone().into()],
         lookup_tables_keys: vec![],
@@ -187,10 +192,10 @@ async fn test_already_initialized_error_handled() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
+    let BaseTaskImpl::CommitFinalize(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
+    let Some(cleanup_task) = CleanupTask::from_commit_finalize(ct) else {
         panic!("unexpected CommitStage");
     };
     // Check buffer account exists
@@ -207,7 +212,7 @@ async fn test_already_initialized_error_handled() {
     // Keep same task with commit id, swap data
     let data = generate_random_bytes(commit_task.committed_account.account.data.len() - 2);
     commit_task.committed_account.account.data = data.clone();
-    commit_task.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
+    commit_task.delivery = CommitDelivery::StateInBuffer { prepared: false };
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![commit_task.into()],
         lookup_tables_keys: vec![],
@@ -219,10 +224,10 @@ async fn test_already_initialized_error_handled() {
     assert!(result.is_ok(), "Preparation failed: {:?}", result.err());
 
     // Verify the buffer account was created and initialized
-    let BaseTaskImpl::Commit(ref ct) = strategy.optimized_tasks[0] else {
+    let BaseTaskImpl::CommitFinalize(ref ct) = strategy.optimized_tasks[0] else {
         panic!("unexpected task type");
     };
-    let Some(cleanup_task) = CleanupTask::from_commit(ct) else {
+    let Some(cleanup_task) = CleanupTask::from_commit_finalize(ct) else {
         panic!("unexpected CommitStage");
     };
 
@@ -291,9 +296,9 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
     let preparator = fixture.create_delivery_preparator();
 
     let data = generate_random_bytes(112);
-    let mut commit_task = create_buffer_commit_task(&data);
+    let mut commit_task = create_buffer_commit_finalize_task(&data);
     commit_task.reset_commit_id(1);
-    let Some(preparation_task) = PreparationTask::from_commit(&mut commit_task) else {
+    let Some(preparation_task) = PreparationTask::from_commit_finalize(&mut commit_task) else {
         panic!("expected preparation stage");
     };
 
@@ -348,7 +353,7 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         .expect("second buffer preparation");
 
     let second_cleanup = match &second_strategy.optimized_tasks[0] {
-        BaseTaskImpl::Commit(task) => match CleanupTask::from_commit(task) {
+        BaseTaskImpl::CommitFinalize(task) => match CleanupTask::from_commit_finalize(task) {
             Some(cleanup) => cleanup.clone(),
             _ => panic!("expected cleanup stage"),
         },
@@ -408,9 +413,9 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     let buf_b_data = generate_random_bytes(64 * 1024 + 3);
 
     // Keep these around to modify data later (same commit IDs, different data)
-    let mut commit_args = create_commit_task(&args_data);
-    let mut commit_a = create_buffer_commit_task(&buf_a_data);
-    let mut commit_b = create_buffer_commit_task(&buf_b_data);
+    let mut commit_args = create_commit_finalize_task(&args_data);
+    let mut commit_a = create_buffer_commit_finalize_task(&buf_a_data);
+    let mut commit_b = create_buffer_commit_finalize_task(&buf_b_data);
 
     let mut strategy = TransactionStrategy {
         optimized_tasks: vec![
@@ -433,7 +438,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
+            BaseTaskImpl::CommitFinalize(ct) => CleanupTask::from_commit_finalize(ct),
             _ => None,
         })
         .collect();
@@ -496,8 +501,8 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
     }
 
     // Rebuild buffer stages with mutated data
-    commit_a.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
-    commit_b.delivery_details = CommitDelivery::StateInBuffer { prepared: false };
+    commit_a.delivery = CommitDelivery::StateInBuffer { prepared: false };
+    commit_b.delivery = CommitDelivery::StateInBuffer { prepared: false };
 
     // --- Step 4: re-prepare with the same logical tasks (same commit IDs, mutated data) ---
     let mut strategy2 = TransactionStrategy {
@@ -522,7 +527,7 @@ async fn test_prepare_cleanup_and_reprepare_mixed_tasks() {
         .optimized_tasks
         .iter()
         .filter_map(|t| match t {
-            BaseTaskImpl::Commit(ct) => CleanupTask::from_commit(ct),
+            BaseTaskImpl::CommitFinalize(ct) => CleanupTask::from_commit_finalize(ct),
             _ => None,
         })
         .collect();

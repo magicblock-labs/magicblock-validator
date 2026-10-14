@@ -161,7 +161,11 @@ impl IntentExecutorError {
                 err: _,
                 commit_signature,
                 finalize_signature,
-            } => commit_signature.map(|el| (el, *finalize_signature)),
+            } => match (*commit_signature, *finalize_signature) {
+                (Some(commit), finalize) => Some((commit, finalize)),
+                (None, Some(finalize)) => Some((finalize, Some(finalize))),
+                _ => None,
+            },
             IntentExecutorError::PendingSignatureResolutionError(signature) => {
                 Some((*signature, None))
             }
