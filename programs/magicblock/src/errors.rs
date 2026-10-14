@@ -76,4 +76,7 @@ pub enum MagicBlockProgramError {
 
     #[error("Post-delegation action executor must be top-level")]
     PostDelegationActionExecutorNotTopLevel,
+
+    #[error("Magic ATA and eATA projection approve different SPL delegates")]
+    SplDelegatesMismatch,
 }

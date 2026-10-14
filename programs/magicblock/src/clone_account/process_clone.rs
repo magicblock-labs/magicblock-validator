@@ -10,9 +10,10 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 use super::{
-    adjust_authority_lamports, set_account_from_fields, validate_and_get_index,
-    validate_authority, validate_clone_target,
-    validate_post_delegation_action_sibling, validate_remote_slot,
+    adjust_authority_lamports, merge_magic_ata_into_projection,
+    set_account_from_fields, validate_and_get_index, validate_authority,
+    validate_clone_target, validate_post_delegation_action_sibling,
+    validate_remote_slot,
 };
 
 /// Clones an account atomically in a single transaction.
@@ -23,7 +24,7 @@ pub(crate) fn process_clone_account(
     signers: &HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
     pubkey: Pubkey,
-    data: Vec<u8>,
+    mut data: Vec<u8>,
     fields: AccountCloneFields,
     actions: Vec<Instruction>,
 ) -> Result<(), InstructionError> {
@@ -61,7 +62,15 @@ pub(crate) fn process_clone_account(
         let mut account =
             transaction_context.accounts().try_borrow_mut(tx_idx)?;
 
-        validate_clone_target(&account, &pubkey, invoke_context)?;
+        if !merge_magic_ata_into_projection(
+            invoke_context,
+            &account,
+            &pubkey,
+            &fields,
+            &mut data,
+        )? {
+            validate_clone_target(&account, &pubkey, invoke_context)?;
+        }
         validate_remote_slot(
             &mut account,
             &pubkey,

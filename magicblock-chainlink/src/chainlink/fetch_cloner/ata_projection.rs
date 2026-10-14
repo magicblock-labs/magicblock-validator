@@ -8,8 +8,10 @@ use magicblock_core::token_programs::{
     try_get_magic_ata_info, AtaInfo, EphemeralAta, EATA_PROGRAM_ID,
 };
 use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use solana_account::{AccountSharedData, ReadableAccount};
+use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
+use spl_token::state::Account as SplAccount;
 use tokio::task::JoinSet;
 use tracing::*;
 
@@ -215,11 +217,11 @@ where
 
     // eATA updates only carry the projected balance fields. The ATA itself is
     // required so the clone preserves the actual token program owner and any
-    // Token-2022 account layout extensions. A drained Magic ATA is only a
-    // layout of last resort: the base ATA, when it exists, is the source of
-    // truth for rent, state and extensions.
+    // Token-2022 account layout extensions. A Magic ATA is only a layout of
+    // last resort: the base ATA, when it exists, is the source of truth for
+    // rent, state and extensions.
     let mut ata = None;
-    let mut drained_magic_ata = None;
+    let mut magic_ata = None;
     for candidate_pubkey in ata_pubkeys.iter().copied() {
         if let Some(candidate_account) =
             this.accounts_bank.get_account(&candidate_pubkey)
@@ -227,8 +229,11 @@ where
             if is_ata(&candidate_pubkey, &candidate_account).is_none() {
                 continue;
             }
-            if is_drained_magic_ata(&candidate_pubkey, &candidate_account) {
-                drained_magic_ata = Some((candidate_pubkey, candidate_account));
+            if try_get_magic_ata_info(&candidate_pubkey, &candidate_account)
+                .is_some()
+            {
+                magic_ata = layout_without_approval(candidate_account)
+                    .map(|layout| (candidate_pubkey, layout));
                 continue;
             }
             ata = Some((candidate_pubkey, candidate_account));
@@ -248,23 +253,14 @@ where
             {
                 RemoteAtaLookup::Found(ata) => ata,
                 // Only a confirmed absence may fall back to the local layout;
-                // a failed fetch keeps the drained account until the next update.
-                RemoteAtaLookup::NotFound => drained_magic_ata?,
+                // a failed fetch keeps the Magic ATA until the next update.
+                RemoteAtaLookup::NotFound => magic_ata?,
                 RemoteAtaLookup::Unavailable => return None,
             }
         }
     };
 
     if ata_blocks_projection(&ata_pubkey, &ata) {
-        if try_get_magic_ata_info(&ata_pubkey, &ata).is_some() {
-            warn!(
-                ata = %ata_pubkey,
-                eata = %eata_pubkey,
-                "Funded Magic ATA takes precedence over its base delegation; \
-                 the eATA projection applies once the Magic ATA is drained \
-                 through the shuttle flow"
-            );
-        }
         return None;
     }
     let projected_ata = maybe_project_delegated_ata_from_eata(
@@ -797,23 +793,31 @@ where
     accounts_to_clone
 }
 
-/// A funded Magic ATA takes precedence over a base delegation of the same
-/// ATA: its balance must never be clobbered by a freshly delegated eATA. The
-/// two merge only once the Magic ATA is drained to zero through the shuttle
-/// flow, after which the eATA projection replaces it.
+/// A Magic ATA never blocks the eATA projection of the same ATA here: the
+/// clone program decides whether to fold its balance into the projection or
+/// keep it, so a freshly delegated eATA never clobbers it. Any other delegated
+/// or undelegating ATA does block.
 fn ata_blocks_projection(ata_pubkey: &Pubkey, ata: &AccountSharedData) -> bool {
     ata.undelegating()
-        || (ata.delegated() && !is_drained_magic_ata(ata_pubkey, ata))
+        || (ata.delegated()
+            && try_get_magic_ata_info(ata_pubkey, ata).is_none())
 }
 
-/// A Magic ATA that holds no tokens. It stays delegated until closed,
-/// so it must not be mistaken for live delegated state.
-pub(crate) fn is_drained_magic_ata(
-    ata_pubkey: &Pubkey,
-    account: &AccountSharedData,
-) -> bool {
-    try_get_magic_ata_info(ata_pubkey, account)
-        .is_some_and(|info| info.amount == 0)
+/// An owned copy of a Magic ATA to project from, without its approval. Owned,
+/// so writes never reach AccountsDb through an mmap view held across the base
+/// ATA fetch; without approval, so the clone merges the live one instead and
+/// a revoke landing meanwhile is never undone.
+fn layout_without_approval(
+    mut account: AccountSharedData,
+) -> Option<AccountSharedData> {
+    account.ensure_owned();
+    // Token-2022 shares the legacy layout for the base account fields.
+    let base = account.data_as_mut_slice().get_mut(..SplAccount::LEN)?;
+    let mut token = SplAccount::unpack(base).ok()?;
+    token.delegate = COption::None;
+    token.delegated_amount = 0;
+    SplAccount::pack(token, base).ok()?;
+    Some(account)
 }
 
 #[cfg(test)]
@@ -859,25 +863,12 @@ mod guard_tests {
     }
 
     #[test]
-    fn drained_magic_ata_is_not_live_delegated_state() {
-        let wallet_owner = Pubkey::new_unique();
-        let mint = Pubkey::new_unique();
-        let ata = derive_ata(&wallet_owner, &mint);
-
-        let drained = magic_ata(&wallet_owner, &mint, 0);
-        assert!(is_drained_magic_ata(&ata, &drained));
-
-        let funded = magic_ata(&wallet_owner, &mint, 7);
-        assert!(!is_drained_magic_ata(&ata, &funded));
-    }
-
-    #[test]
-    fn funded_magic_ata_blocks_projection() {
+    fn funded_magic_ata_allows_projection() {
         let wallet_owner = Pubkey::new_unique();
         let mint = Pubkey::new_unique();
         let ata = derive_ata(&wallet_owner, &mint);
         let account = magic_ata(&wallet_owner, &mint, 7);
-        assert!(ata_blocks_projection(&ata, &account));
+        assert!(!ata_blocks_projection(&ata, &account));
     }
 
     #[test]

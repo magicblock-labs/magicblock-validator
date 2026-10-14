@@ -12605,10 +12605,10 @@ fn insert_magic_ata_in_bank(
     accounts_bank.insert(ata_pubkey, account);
 }
 
-/// A drained Magic ATA is delegated locally but must not deduplicate the eATA
+/// A Magic ATA is delegated locally but must not deduplicate the eATA
 /// projection that replaces it, in any of the clone dedupers.
 #[tokio::test]
-async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
+async fn test_magic_ata_does_not_satisfy_projection_clone_request() {
     let validator_keypair = Keypair::new();
     let wallet_owner = random_pubkey();
     let mint = random_pubkey();
@@ -12630,7 +12630,7 @@ async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
         AccountSharedData::from(create_ata_account(&wallet_owner, &mint));
     projected_ata.set_delegated(true);
     projected_ata.set_remote_slot(CURRENT_SLOT);
-    let request = AccountCloneRequest {
+    let mut request = AccountCloneRequest {
         pubkey: ata_pubkey,
         account: projected_ata,
         commit_frequency_ms: None,
@@ -12664,10 +12664,16 @@ async fn test_drained_magic_ata_does_not_satisfy_projection_clone_request() {
         7,
     );
     assert!(
-        fetch_cloner.local_account_satisfies_clone_request(&request),
-        "funded Magic ATA stays authoritative"
+        !fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA must not deduplicate its eATA projection"
     );
-    assert!(fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+    assert!(!fetch_cloner.local_delegated_clone_target_active(ata_pubkey));
+
+    request.account.set_delegated(false);
+    assert!(
+        fetch_cloner.local_account_satisfies_clone_request(&request),
+        "funded Magic ATA stays authoritative over plain copies"
+    );
 }
 
 /// The projection that replaces a drained Magic ATA must take its layout from
@@ -12765,7 +12771,8 @@ async fn test_drained_magic_ata_projection_uses_base_ata_layout() {
 }
 
 /// When the base ATA is confirmed absent on chain, the projection that
-/// replaces a drained Magic ATA falls back to the local layout.
+/// replaces a drained Magic ATA falls back to the local layout, minus its
+/// approval: the clone merges the live one.
 #[tokio::test]
 async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_ata_absent(
 ) {
@@ -12799,6 +12806,12 @@ async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_
         &mint,
         0,
     );
+    let mut magic_ata = accounts_bank.get_account(&ata_pubkey).unwrap();
+    let mut token = SplAccount::unpack(magic_ata.data()).unwrap();
+    token.delegate = COption::Some(random_pubkey());
+    token.delegated_amount = 1;
+    SplAccount::pack(token, magic_ata.data_as_mut_slice()).unwrap();
+    accounts_bank.insert(ata_pubkey, magic_ata);
     add_delegation_record_for(
         &rpc_client,
         eata_pubkey,
@@ -12837,6 +12850,7 @@ async fn test_drained_magic_ata_projection_falls_back_to_local_layout_when_base_
     let token = SplAccount::unpack(projected.data()).unwrap();
     assert!(projected.delegated());
     assert_eq!(token.amount, AMOUNT);
+    assert_eq!((token.delegate, token.delegated_amount), (COption::None, 0));
     assert_eq!(projected.lamports(), 0, "local Magic ATA layout kept");
     assert_ne!(
         token.close_authority,
