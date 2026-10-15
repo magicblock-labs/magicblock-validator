@@ -11,8 +11,8 @@ use magicblock_program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_signature::Signature;
 use tokio::{
     sync::{
-        broadcast, mpsc, mpsc::error::TryRecvError, OwnedSemaphorePermit,
-        Semaphore,
+        broadcast, mpsc, mpsc::error::TryRecvError, Notify,
+        OwnedSemaphorePermit, Semaphore,
     },
     task::JoinHandle,
     time::sleep,
@@ -40,6 +40,12 @@ use crate::{
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
+/// Normal blocked-intent limit, with extra admission while executors are free.
+const SCHEDULER_CAPACITY: usize = 3_000;
+/// Stop admitting new intents at this limit even when executors are free.
+const SCHEDULER_HARD_CAPACITY: usize = 6_000;
+/// Yield between batches, including when the in-memory backlog is always ready.
+const SCHEDULING_BATCH_SIZE: usize = 64;
 /// Max intents concurrently sleeping in retry backoff. Retries release their
 /// executor slot while sleeping; this cap keeps the total task population
 /// bounded when many intents fail together
@@ -53,6 +59,7 @@ const INTENT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 struct ExecutionLimits {
     executors: Arc<Semaphore>,
     retries: Arc<Semaphore>,
+    capacity_changed: Arc<Notify>,
 }
 
 pub type PatchedErrors = Vec<TransactionStrategyExecutionError>;
@@ -114,6 +121,8 @@ pub(crate) struct IntentExecutionEngine<D, P, F> {
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     retries_semaphore: Arc<Semaphore>,
+    execution_capacity_changed: Arc<Notify>,
+    scheduler_needs_drain: bool,
 }
 
 impl<D, P, F, E> IntentExecutionEngine<D, P, F>
@@ -139,6 +148,8 @@ where
                 MAX_EXECUTORS as usize,
             )),
             retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
+            execution_capacity_changed: Arc::new(Notify::new()),
+            scheduler_needs_drain: false,
             inner: Arc::new(Mutex::new(IntentScheduler::new())),
         }
     }
@@ -160,7 +171,14 @@ where
         mut self,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
+        let mut iterations = 0;
         loop {
+            if iterations == SCHEDULING_BATCH_SIZE {
+                tokio::task::yield_now().await;
+                iterations = 0;
+            }
+            iterations += 1;
+
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
                 Err(IntentExecutionManagerError::ChannelClosed) => {
@@ -173,10 +191,9 @@ where
                 }
             };
             let Some(intent) = intent else {
-                // We couldn't pick up intent for execution due to:
-                // 1. All executors are currently busy
-                // 2. All intents are blocked and none could be executed at the moment
-                trace!("Could not schedule any intents");
+                // An intent was blocked, or an execution event requires us to
+                // reconsider scheduler readiness and admission capacity.
+                trace!("Scheduling event did not select an intent");
                 continue;
             };
 
@@ -195,6 +212,7 @@ where
             let limits = ExecutionLimits {
                 executors: self.executors_semaphore.clone(),
                 retries: self.retries_semaphore.clone(),
+                capacity_changed: self.execution_capacity_changed.clone(),
             };
 
             let handle = tokio::spawn(Self::execute(
@@ -214,54 +232,60 @@ where
         }
     }
 
-    /// Returns [`ScheduledIntentBundle`] or None if all intents are blocked
+    /// Processes one scheduling event, returning an intent when one is ready.
     #[instrument(skip(self))]
     async fn next_scheduled_intent(
         &mut self,
     ) -> Result<Option<ScheduledIntentBundle>, IntentExecutionManagerError>
     {
-        // Limit on number of intents that can be stored in scheduler
-        const SCHEDULER_CAPACITY: usize = 3_000;
-
-        let can_receive = || {
-            let num_blocked_intents = self
-                .inner
-                .lock()
-                .expect(POISONED_INNER_MSG)
-                .intents_blocked();
-            if num_blocked_intents < SCHEDULER_CAPACITY {
-                true
-            } else {
-                warn!(blocked_count = num_blocked_intents, "Capacity exceeded");
-                false
-            }
-        };
+        let num_blocked_intents = self
+            .inner
+            .lock()
+            .expect(POISONED_INNER_MSG)
+            .intents_blocked();
+        let can_receive = num_blocked_intents < SCHEDULER_CAPACITY
+            || (num_blocked_intents < SCHEDULER_HARD_CAPACITY
+                && self.executors_semaphore.available_permits() > 0);
+        if !can_receive {
+            warn!(
+                blocked_count = num_blocked_intents,
+                "Scheduler admission paused"
+            );
+        }
 
         let running_executors = &mut self.running_executors;
         let receiver = &mut self.receiver;
         let db = &self.db;
         let intent = tokio::select! {
-            // Notify polled first to prioritize unblocked intents over new one
+            // Reap completions and drain eligible work before admitting new work.
             biased;
             Some(result) = running_executors.next() => {
                 if let Err(err) = result {
                     error!(error = ?err, "Executor failed");
                 };
-                trace!("Worker executed intent bundle, fetching new available one");
-                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
+                self.scheduler_needs_drain = true;
+                None
             },
-            result = Self::get_new_intent(receiver, db), if can_receive() => {
+            intent = async {
+                self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_intent()
+            }, if self.scheduler_needs_drain => {
+                // Keep draining after a successful pop: one completion can make
+                // several intents ready. A failed pop ends scanning until the
+                // next completion, rather than rescanning on every arrival.
+                if intent.is_none() {
+                    self.scheduler_needs_drain = false;
+                }
+                intent
+            },
+            _ = self.execution_capacity_changed.notified() => {
+                // A retry released a permit without completing its task.
+                // Re-evaluate the admission guard on the next iteration.
+                None
+            },
+            result = Self::get_new_intent(receiver, db), if can_receive => {
                 let intent = result?;
                 self.inner.lock().expect(POISONED_INNER_MSG).schedule(intent)
             },
-            else => {
-                // Shouldn't be possible:
-                // 1. If no executors spawned -> we can receive
-                // 2. If can't receive ->  there are MAX_EXECUTORS running executors
-                // We can't receive new message as there's no available Executor
-                // that could pick up the task.
-                unreachable!("next_scheduled_intent")
-            }
         };
 
         Ok(intent)
@@ -405,6 +429,9 @@ where
             // many intents fail together during an outage
             let jitter = Duration::from_millis((intent.id % 8) * 125);
             drop(execution_permit.take());
+            // notify_one retains a notification if the engine is not yet
+            // waiting, so a release around guard evaluation cannot be missed.
+            limits.capacity_changed.notify_one();
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit =
                 match limits.executors.clone().acquire_owned().await {
@@ -455,6 +482,9 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod admission_tests;
 
 /// Worker tests
 #[cfg(test)]
