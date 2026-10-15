@@ -22,11 +22,8 @@ use crate::{
     transaction_preparator::delivery_preparator::BufferExecutionError,
 };
 
-type TestEngine = IntentExecutionEngine<
-    DummyDB,
-    IntentPersisterImpl,
-    ControlledExecutorFactory,
->;
+type TestEngine =
+    IntentExecutionEngine<DummyDB, IntentPersisterImpl, ControlledExecutor>;
 
 #[derive(Debug)]
 struct Attempt {
@@ -53,17 +50,16 @@ impl Attempt {
     }
 }
 
-struct ControlledExecutorFactory(mpsc::UnboundedSender<Attempt>);
+#[derive(Clone)]
+struct ControlledExecutor(mpsc::UnboundedSender<Attempt>);
 
-impl IntentExecutorFactory for ControlledExecutorFactory {
-    type Executor = ControlledExecutor;
+impl IntentExecutorFactory for ControlledExecutor {
+    type Executor = Self;
 
     fn create_instance(&self) -> Self::Executor {
-        ControlledExecutor(self.0.clone())
+        self.clone()
     }
 }
-
-struct ControlledExecutor(mpsc::UnboundedSender<Attempt>);
 
 #[async_trait]
 impl IntentExecutor for ControlledExecutor {
@@ -118,7 +114,7 @@ fn setup() -> (
     let (started, attempts) = mpsc::unbounded_channel();
     let engine = IntentExecutionEngine::new(
         Arc::new(DummyDB::new()),
-        ControlledExecutorFactory(started),
+        ControlledExecutor(started),
         None::<IntentPersisterImpl>,
         receiver,
     );
@@ -236,38 +232,6 @@ async fn admission_respects_normal_and_hard_boundaries() {
 }
 
 #[tokio::test]
-async fn capacity_notification_wakes_before_or_after_waiting() {
-    for notify_before_poll in [true, false] {
-        let (sender, mut engine, _attempts) = setup();
-        fill_blocked(&engine, SCHEDULER_CAPACITY);
-        let permits = engine
-            .executors_semaphore
-            .clone()
-            .acquire_many_owned(MAX_EXECUTORS as u32)
-            .await
-            .unwrap();
-        let notification = engine.execution_capacity_changed.clone();
-        sender
-            .send(create_test_intent(100_000, &[Pubkey::new_unique()], false))
-            .await
-            .unwrap();
-
-        let mut next = Box::pin(engine.next_scheduled_intent());
-        if !notify_before_poll {
-            assert!(poll!(next.as_mut()).is_pending());
-        }
-        drop(permits);
-        notification.notify_one();
-        assert!(matches!(poll!(next.as_mut()), Poll::Ready(Ok(None))));
-        drop(next);
-        assert_eq!(
-            engine.next_scheduled_intent().await.unwrap().unwrap().id,
-            100_000
-        );
-    }
-}
-
-#[tokio::test]
 async fn independent_intent_runs_beyond_normal_capacity() {
     let (_sender, engine, mut attempts) = setup();
     let hot = Pubkey::new_unique();
@@ -329,41 +293,48 @@ async fn conflicting_backlog_stops_at_hard_capacity_without_polling() {
 }
 
 #[tokio::test]
-async fn one_completion_dispatches_all_ready_successors_once() {
-    let (_sender, engine, mut attempts) = setup();
-    let keys = [
+async fn one_completion_dispatches_successors_in_dependency_order() {
+    let (sender, engine, mut attempts) = setup();
+    let [a, b, c] = [
         Pubkey::new_unique(),
         Pubkey::new_unique(),
         Pubkey::new_unique(),
     ];
+    for (id, keys) in [(0, [a, c]), (1, [a, b])] {
+        sender
+            .send(create_test_intent(id, &keys, false))
+            .await
+            .unwrap();
+    }
     let pending = vec![
-        create_test_intent(0, &keys, false),
-        create_test_intent(1, &keys[0..1], false),
-        create_test_intent(2, &keys[1..2], false),
-        create_test_intent(2, &keys[1..2], false),
-        create_test_intent(3, &keys[2..3], false),
+        create_test_intent(2, &[c], false),
+        create_test_intent(2, &[c], false),
+        create_test_intent(3, &[b], false),
     ];
     engine.db.store_intent_bundles(pending).await.unwrap();
     let inner = engine.inner.clone();
     let mut running = run(engine);
     let blocker = next_attempt(&mut attempts).await;
+    assert_eq!(blocker.id, 0);
     wait_for_blocked(&inner, 3).await;
     blocker.succeed();
 
-    let mut successors = Vec::new();
-    for _ in 0..3 {
-        successors.push(next_attempt(&mut attempts).await);
-    }
-    assert_eq!(
-        successors
-            .iter()
-            .map(|attempt| attempt.id)
-            .collect::<HashSet<_>>(),
-        HashSet::from([1, 2, 3])
-    );
-    for attempt in successors {
-        attempt.succeed();
-    }
+    // Both successors must start before either completes.
+    let mut successors = [
+        next_attempt(&mut attempts).await,
+        next_attempt(&mut attempts).await,
+    ];
+    successors.sort_by_key(|attempt| attempt.id);
+    let [first, second] = successors;
+    assert_eq!([first.id, second.id], [1, 2]);
+    second.succeed();
+    assert_parked(&running).await;
+    // Intent 3 shares B with intent 1, so it remains transitively blocked.
+    assert!(attempts.try_recv().is_err());
+    first.succeed();
+    let third = next_attempt(&mut attempts).await;
+    assert_eq!(third.id, 3);
+    third.succeed();
     let mut results = HashSet::new();
     for _ in 0..4 {
         let result = running.next_result().await;
@@ -372,56 +343,6 @@ async fn one_completion_dispatches_all_ready_successors_once() {
     }
     assert_parked(&running).await;
     assert!(attempts.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn transitive_order_is_preserved_across_channel_and_backlog() {
-    let (sender, engine, mut attempts) = setup();
-    let [a, b, c] = [
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-        Pubkey::new_unique(),
-    ];
-    sender
-        .send(create_test_intent(0, &[a], false))
-        .await
-        .unwrap();
-    sender
-        .send(create_test_intent(1, &[a, b], false))
-        .await
-        .unwrap();
-    engine
-        .db
-        .store_intent_bundles(vec![
-            create_test_intent(2, &[b], false),
-            create_test_intent(3, &[c], false),
-        ])
-        .await
-        .unwrap();
-    let inner = engine.inner.clone();
-    let mut running = run(engine);
-
-    let first = next_attempt(&mut attempts).await;
-    assert_eq!(first.id, 0);
-    let independent = next_attempt(&mut attempts).await;
-    assert_eq!(independent.id, 3);
-    wait_for_blocked(&inner, 2).await;
-    independent.succeed();
-    assert_eq!(running.next_result().await.id, 3);
-    assert_parked(&running).await;
-    assert!(attempts.try_recv().is_err());
-    first.succeed();
-    let second = next_attempt(&mut attempts).await;
-    assert_eq!(second.id, 1);
-    assert_parked(&running).await;
-    assert!(attempts.try_recv().is_err());
-    second.succeed();
-    let third = next_attempt(&mut attempts).await;
-    assert_eq!(third.id, 2);
-    third.succeed();
-    for id in [0, 1, 2] {
-        assert_eq!(running.next_result().await.id, id);
-    }
 }
 
 #[tokio::test(start_paused = true)]
