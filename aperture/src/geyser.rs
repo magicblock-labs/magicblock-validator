@@ -1,6 +1,7 @@
 use std::{
     fs,
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
@@ -37,7 +38,7 @@ pub(crate) struct GeyserPluginManager {
 
 /// Feeder-order delivery across Engine's independent transaction and block streams.
 enum GeyserEvent {
-    Transaction(FullTransaction),
+    Transaction(Arc<FullTransaction>),
     Block(Block),
 }
 
@@ -116,7 +117,7 @@ impl GeyserPluginManager {
         Ok((plugin, library))
     }
 
-    fn notify_transaction(&self, transaction: &mut FullTransaction) {
+    fn notify_transaction(&self, transaction: &FullTransaction) {
         if !self.plugins.iter().any(|plugin| plugin.transaction_notifications_enabled()) {
             return;
         }
@@ -149,21 +150,21 @@ impl GeyserPluginManager {
         }
     }
 
-    fn notify_accounts(&mut self, transaction: FullTransaction) {
+    fn notify_accounts(&mut self, transaction: &FullTransaction) {
         if !self.plugins.iter().any(|plugin| plugin.account_data_notifications_enabled()) {
             return;
         }
         let slot = transaction.execution.slot;
-        let Ok(execution) = transaction.execution.result else {
+        let Ok(execution) = &transaction.execution.result else {
             return;
         };
         // Failed executions do not publish committed account changes.
         if !execution.was_successful() {
             return;
         }
-        for (pubkey, account) in execution.loaded_transaction.accounts {
+        for (pubkey, account) in &execution.loaded_transaction.accounts {
             // Snapshot dirty images inside the scoped seqlock read.
-            let Some(account) = AccountSeqLock::new(account)
+            let Some(account) = AccountSeqLock::new(account.clone())
                 .read(|account| account.dirty().then(|| AccountSharedData::from(account.owned())))
             else {
                 continue;
@@ -263,7 +264,7 @@ impl Drop for GeyserPluginManager {
 /// Prepared Engine subscriptions; no delivery runs until Aperture::run.
 pub(crate) struct Delivery {
     manager: GeyserPluginManager,
-    transactions: mpsc::UnboundedReceiver<FullTransaction>,
+    transactions: mpsc::UnboundedReceiver<Arc<FullTransaction>>,
     blocks: mpsc::Receiver<Block>,
 }
 
@@ -317,9 +318,9 @@ impl Delivery {
                     event = rx.recv() => event,
                 };
                 match event {
-                    Some(GeyserEvent::Transaction(mut transaction)) => {
-                        manager.notify_transaction(&mut transaction);
-                        manager.notify_accounts(transaction);
+                    Some(GeyserEvent::Transaction(transaction)) => {
+                        manager.notify_transaction(&transaction);
+                        manager.notify_accounts(&transaction);
                     }
                     Some(GeyserEvent::Block(block)) => manager.notify_block(block),
                     None => break,

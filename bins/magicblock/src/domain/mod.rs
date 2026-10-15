@@ -1,3 +1,5 @@
+//! Base-chain domain records built from the leader identity and explicit operator inputs.
+
 mod client;
 
 use std::{sync::Arc, time::Duration};
@@ -18,6 +20,7 @@ use solana_signer::Signer;
 use self::client::Client;
 use crate::ConfigArgs;
 
+/// Domain operation to perform using the supplied leader configuration.
 #[derive(ClapArgs)]
 pub(crate) struct Args {
     #[command(subcommand)]
@@ -25,6 +28,7 @@ pub(crate) struct Args {
 }
 
 impl Args {
+    /// Binds each operation's record identity and transaction payer to the same leader.
     pub(crate) async fn run(self) -> Result<()> {
         match self.command {
             Command::Register(args) => {
@@ -33,7 +37,7 @@ impl Args {
             }
             Command::Sync(args) => {
                 let (operator, record) = args.load()?;
-                operator.client.sync(&operator.signer, &record).await
+                operator.client.sync(&operator.signer, record).await
             }
             Command::Unregister(args) => {
                 let operator = Operator::new(args.load()?);
@@ -43,16 +47,18 @@ impl Args {
     }
 }
 
+/// Distinct on-chain create, update, and remove operations; none is an upsert.
 #[derive(Subcommand)]
 enum Command {
     /// Create a domain record.
     Register(RecordArgs),
-    /// Replace the mutable fields of an existing domain record.
+    /// Update an existing domain record.
     Sync(RecordArgs),
     /// Remove the leader's domain record.
     Unregister(ConfigArgs),
 }
 
+/// Desired record inputs shared by creation and synchronization.
 #[derive(ClapArgs)]
 struct RecordArgs {
     #[command(flatten)]
@@ -66,6 +72,8 @@ struct RecordArgs {
 }
 
 impl RecordArgs {
+    /// Builds the desired V0 record, using defaults for fields not exposed as CLI options.
+    /// Synchronization submits those defaults too; it does not merge with a fetched record.
     fn load(self) -> Result<(Operator, ErRecord)> {
         let Self { common, country_code, fqdn } = self;
         let operator = Operator::new(common.load()?);
@@ -88,6 +96,7 @@ impl RecordArgs {
     }
 }
 
+/// Keeps record identity, signing authority, and timing tied to one leader configuration.
 struct Operator {
     client: Client,
     signer: Arc<Keypair>,
@@ -95,6 +104,7 @@ struct Operator {
 }
 
 impl Operator {
+    /// Uses the leader configuration for both RPC access and record ownership.
     fn new(config: LeaderParams) -> Self {
         Self {
             client: Client::new(config.rpc_url()),

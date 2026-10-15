@@ -7,8 +7,11 @@ Example: `feat: add state replicator crate`
 ## What changed
 <!-- Summarize the change at the immediate-parent diff boundary. -->
 
-<!-- Replace ISSUE with the dedicated issue number. -->
-Closes #ISSUE
+<!--
+Link relevant existing issues when useful. Use `Closes #<issue>` only when this
+PR completes the issue; otherwise use `Related to #<issue>`. Omit issue links
+when none apply.
+-->
 
 <!--
 Impact and Reviewer notes are optional. Include only relevant, non-obvious

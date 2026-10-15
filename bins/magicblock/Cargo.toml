@@ -9,18 +9,15 @@ version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-borsh = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 futures-util = { workspace = true }
 humantime = { workspace = true }
 isocountry = { workspace = true }
+json = { workspace = true }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "64c7c5e3", default-features = false }
 config = { workspace = true }
 delegation-program-api = { workspace = true }
-nucleus = { workspace = true, features = ["metrics"] }
 rand = { workspace = true }
-serde = { workspace = true }
-solana-account = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-instruction = { workspace = true }
 solana-keypair = { workspace = true }
@@ -32,7 +29,8 @@ solana-sdk-ids = { workspace = true }
 solana-signature = { workspace = true }
 solana-signer = { workspace = true }
 solana-transaction = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["signal"] }
+tokio-tungstenite = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }

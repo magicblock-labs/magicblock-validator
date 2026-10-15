@@ -55,8 +55,13 @@ impl WsDispatcher {
             SignatureSubscribe => self.signature_subscribe(request).await,
             SlotSubscribe => self.slot_subscribe(),
             LogsSubscribe => self.logs_subscribe(request).await,
-            AccountUnsubscribe | ProgramUnsubscribe | LogsUnsubscribe | SlotUnsubscribe
-            | SignatureUnsubscribe => self.unsubscribe(request),
+            TransactionFailureSubscribe => self.transaction_failure_subscribe(),
+            AccountUnsubscribe
+            | ProgramUnsubscribe
+            | LogsUnsubscribe
+            | SlotUnsubscribe
+            | SignatureUnsubscribe
+            | TransactionFailureUnsubscribe => self.unsubscribe(request),
             Ping => Ok(SubResult::Pong("pong")),
             MethodNotFound => Err(RpcError::method_not_found()),
         }
@@ -92,7 +97,7 @@ impl WsDispatcher {
                     }
                 };
                 if tx.send(bytes).await.is_err() {
-                    break;
+                    return;
                 }
             }
         });

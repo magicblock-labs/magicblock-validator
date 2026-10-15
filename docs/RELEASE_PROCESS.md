@@ -1,65 +1,51 @@
 # Release process
 
-Start by merging the intended release changes into `master`. Releases are cut
-from that branch, even when the repository's default branch is different;
-preparation does not bring in changes from `dev`.
+Releases come from `master`, even when the default branch differs. Merge the
+intended changes into `master` before preparing a release.
 
-## Prepare the release PR
+## Prepare
 
 Run the [Prepare release workflow](../.github/workflows/prepare-release.yml)
-from the repository's default branch. The workflow checks out `master` itself.
-Supply a version such as `0.15.4` or `v0.15.4`, or leave it empty for the next
-patch version. The version must be newer than the workspace version; existing
-release branches and tags are rejected.
+from the default branch; it checks out `master` itself. Supply `X.Y.Z` or
+`vX.Y.Z`, or leave the version empty for the next patch. The workflow rejects
+versions that are not newer, existing release branches, and existing tags.
 
-You will get a `release/vX.Y.Z` branch and a PR targeting `master`, with the
-workspace version, npm manifests, and Cargo lockfiles updated. Preparation builds
-both the root and `test-integration` workspaces and checks their lockfiles with
-full `cargo metadata --locked` resolution.
+It opens a `release/vX.Y.Z` PR targeting `master`, updates package versions and
+Cargo lockfiles, and builds and checks locked dependency resolution for both
+Cargo workspaces. These builds do not replace the PR's test gates.
 
 Review the complete diff: version alignment also refreshes selected auxiliary
-npm dependencies, so the changes may go beyond the version bump. The preparation
-builds do not replace the PR's test gates.
-
-## Version alignment
-
-For manual preparation, run the [alignment script](../.github/version-align.sh)
-from `.github`, not the repository root:
-
-```bash
-(cd .github && ./version-align.sh)
-```
-
-The script requires `jq` and npm. It reads the root workspace version and updates
-the npm package manifest and template. It also queries npm for the latest VRF
-oracle, RPC router, and query-filtering service packages; failed lookups leave
-their existing versions in place. Rust workspace members inherit the workspace
-version; the script does not generate crates or refresh Cargo lockfiles.
-
-**`--check` is not read-only.** It performs the same writes and npm queries before
-checking for manifest differences. A newly published auxiliary dependency can
-therefore cause an alignment check to fail after preparation.
+npm dependencies.
 
 ## Validate and publish
 
-Pushes to `release/v*` run version-alignment validation in the
-[package publishing workflow](../.github/workflows/publish-packages.yml), but
-skip the `publish-binaries` and `publish-wrapper-npm-package` jobs. Run the
-workflow manually (`workflow_dispatch`) for a package dry run. Publishing a
-GitHub Release enables actual package publication and release-asset uploads.
-
-1. Run the package publishing workflow manually against `release/vX.Y.Z`, with
-   `release_version` set to `vX.Y.Z`. Wait for that dry run and the release PR's
-   applicable CI checks to pass.
+1. Run the [package publishing workflow](../.github/workflows/publish-packages.yml)
+   manually against `release/vX.Y.Z`, with `release_version` set to `vX.Y.Z`.
+   This is a dry run. Wait for it and applicable PR checks to pass.
 2. Merge the release PR into `master`.
-3. Create the `vX.Y.Z` tag at the intended release commit on `master` and publish
-   its GitHub Release with notes describing changes and migration requirements.
-4. Verify the publishing workflow completed successfully, not just that the
-   GitHub Release exists.
+3. Tag the intended release commit on `master` as `vX.Y.Z` and publish its GitHub
+   Release with change and migration notes. This triggers actual publication.
+4. Verify successful jobs and expected versions in each destination: GitHub
+   binaries for the validator, verifier, operator CLI, and TUI; platform and
+   wrapper npm packages; and the `magicblock-magic-program-api` crate. A GitHub
+   Release alone does not prove that every output published.
 
-Published outputs include the validator, verifier, operator CLI, and TUI release
-binaries; platform npm packages and the wrapper package; and the
-`magicblock-magic-program-api` crate. Check the expected versions and artifacts
-in each destination. Do not assume all outputs published if a job failed.
+Pushes to `release/v*` only run version-alignment validation; they do not run the
+package dry run or publish artifacts.
 
-[Back to contributing](CONTRIBUTING.md) · [Back to workspace](../README.md)
+## Manual version alignment
+
+Run the [alignment script](../.github/version-align.sh) from `.github`:
+
+```sh
+(cd .github && ./version-align.sh)
+```
+
+It requires `jq` and npm. It reads the root workspace version, updates the npm
+manifest and template, and queries npm for the latest VRF oracle, RPC router,
+query-filtering service, and Hydra cranker packages. Failed queries retain existing versions.
+It does not generate crates or refresh Cargo lockfiles.
+
+**`--check` also writes files and queries npm** before checking manifest
+differences. A newly published auxiliary dependency can therefore cause the
+check to fail after preparation.

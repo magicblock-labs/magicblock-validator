@@ -41,4 +41,5 @@ cargo nextest run --workspace
 ```
 
 For documentation-only changes, check links, paths, and `git diff --check`;
-no Rust build is needed. Report checks run and remaining gaps.
+no Rust build is needed. Report checks run and remaining gaps in the completion
+report to the user. Do not list routine check results in PR descriptions.
