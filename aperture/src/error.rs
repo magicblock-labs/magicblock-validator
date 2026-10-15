@@ -1,6 +1,5 @@
 use std::{error::Error, fmt::Display};
 
-use agave_geyser_plugin_interface::geyser_plugin_interface::GeyserPluginError;
 use json::Serialize;
 use solana_transaction_error::TransactionError;
 
@@ -17,17 +16,13 @@ pub(crate) const PARSE_ERROR: i16 = -32700;
 pub enum ApertureError {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
-    #[error("RPC error: {0}")]
-    Rpc(#[from] RpcError),
-    #[error("Geyser error: {0}")]
-    Geyser(#[from] GeyserPluginError),
     #[error(transparent)]
     Keeper(#[from] keeper::error::KeeperError),
 }
 
 #[derive(Serialize, Debug, thiserror::Error)]
 #[error("Code: {code}. Message: {message}")]
-pub struct RpcError {
+pub(crate) struct RpcError {
     code: i16,
     message: String,
     // HTTP status to use when rendering this error. Defaults to 200 (the

@@ -1,7 +1,4 @@
-use std::{
-    sync::{Arc, PoisonError},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use solana_rpc_client_api::response::RpcPerfSample;
 use tokio::time;
@@ -17,11 +14,9 @@ const MAX_PERF_SAMPLES: usize = 720;
 impl RpcHandlers {
     pub(crate) fn get_recent_performance_samples(&self, request: &JsonRequest) -> HandlerResult {
         let count = request.optional::<usize>(0)?.unwrap_or(MAX_PERF_SAMPLES).min(MAX_PERF_SAMPLES);
-        let samples = self.samples.lock().unwrap_or_else(PoisonError::into_inner);
-        ResponsePayload::encode_no_context(
-            &request.id,
-            samples.iter().take(count).collect::<Vec<_>>(),
-        )
+        // Release the sampling lock before encoding the response.
+        let samples = self.samples.lock().iter().take(count).cloned().collect::<Vec<_>>();
+        ResponsePayload::encode_no_context(&request.id, samples)
     }
 
     /// Retains at most 720 samples, replacing the newest when its slot is unchanged.
@@ -39,7 +34,7 @@ impl RpcHandlers {
                         num_non_vote_transactions: None,
                         sample_period_secs: PERIOD_SECS as u16,
                     };
-                    let mut samples = self.samples.lock().unwrap_or_else(PoisonError::into_inner);
+                    let mut samples = self.samples.lock();
                     if samples.front().is_some_and(|sample| sample.slot == slot) {
                         samples.pop_front();
                     }
