@@ -14,6 +14,6 @@ permissions:
 jobs:
   magic-lab:
     name: Update Magic Lab
-    uses: magicblock-labs/.github/.github/workflows/magic_lab_automation.yml@0417a60a84bff30607ea604790b81a44df6d7e3b
+    uses: magicblock-labs/.github/.github/workflows/magic_lab_automation.yml@main
     secrets:
       ADD_TO_PROJECT_PAT: ${{ secrets.ADD_TO_PROJECT_PAT }}
