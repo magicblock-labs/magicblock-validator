@@ -6,7 +6,7 @@ use std::{
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
 use json::{Serialize, Value};
-use magicblock_core::Slot;
+use mbv_core::Slot;
 
 use crate::{RpcResult, error::RpcError, state::subscriptions::SubscriptionID};
 

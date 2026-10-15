@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest};
+use magic_program_api::args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest};
 use nucleus::tls::TlsManager;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -112,7 +112,7 @@ pub(crate) fn process_schedule_task(
 
 #[cfg(test)]
 mod test {
-    use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+    use magic_program_api::instruction::MagicBlockInstruction;
     use solana_account::AccountSharedData;
     use solana_instruction::{AccountMeta, Instruction};
     use solana_keypair::Keypair;

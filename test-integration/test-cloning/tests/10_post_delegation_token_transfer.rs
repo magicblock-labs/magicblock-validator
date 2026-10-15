@@ -1,6 +1,6 @@
 use std::{thread::sleep, time::Duration};
 
-use dlp_api::{
+use delegation_program_api::{
     args::DelegateArgs,
     instruction_builder::{delegate_with_actions, Encryptable, PostDelegationInstruction},
     pda::{
@@ -12,7 +12,7 @@ use dlp_api::{
 use integration_test_tools::{
     init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
-use magicblock_core::token_programs::{
+use mbv_core::token_programs::{
     derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_PROGRAM_ID,
 };
 use solana_sdk::{
@@ -135,7 +135,7 @@ fn delegate_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey, validator: Pubkey
             AccountMeta::new(delegation_buffer, false),
             AccountMeta::new(delegation_record, false),
             AccountMeta::new(delegation_metadata, false),
-            AccountMeta::new_readonly(dlp_api::id(), false),
+            AccountMeta::new_readonly(delegation_program_api::id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -314,7 +314,8 @@ fn test_post_delegation_action_executes_spl_token_transfer_100() {
         post_actions,
     );
 
-    let assign_ix = system_instruction::assign(&delegated_account.pubkey(), &dlp_api::id());
+    let assign_ix =
+        system_instruction::assign(&delegated_account.pubkey(), &delegation_program_api::id());
     let mut assign_tx = Transaction::new_with_payer(&[assign_ix], Some(&fee_payer.pubkey()));
     let (_sig, confirmed) = ctx
         .send_and_confirm_transaction_chain(&mut assign_tx, &[&fee_payer, &delegated_account])

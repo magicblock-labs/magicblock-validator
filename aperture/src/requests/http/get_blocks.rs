@@ -1,4 +1,4 @@
-use magicblock_core::Slot;
+use mbv_core::Slot;
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{

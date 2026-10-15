@@ -5,15 +5,15 @@ use std::sync::{
 
 use engine::Engine;
 use futures_util::future::join_all;
-use magicblock_core::{
-    intent::BaseActionCallback,
-    traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
-};
-use magicblock_magic_program_api::{
+use magic_program_api::{
     CALLBACK_PROGRAM_ID,
     instruction::{CallbackInstruction, MagicBlockInstruction},
     pda::CALLBACK_SIGNER,
     response::{ActionReceipt, MagicResponse, MagicResponseV1},
+};
+use mbv_core::{
+    intent::BaseActionCallback,
+    traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
@@ -65,7 +65,7 @@ impl ActionsCallbackService {
                 // Make each callback TX unique
                 let counter = TX_COUNTER.fetch_add(1, Ordering::Relaxed);
                 let noop_ix = Instruction::new_with_wincode(
-                    magicblock_magic_program_api::ID,
+                    magic_program_api::ID,
                     &MagicBlockInstruction::Noop(counter),
                     vec![],
                 );

@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-use magicblock_metrics::metrics;
+use metrics::metrics;
 use scc::{Guard, Queue};
 use solana_pubkey::Pubkey;
 use solana_pubsub_client::{

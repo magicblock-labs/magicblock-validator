@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
-use magicblock_committor_service::{
+use committor::{
     committor_processor::CommittorProcessor,
     intent_engine::db::AccountsDbIntentBacklog,
     tasks::{
@@ -8,12 +8,12 @@ use magicblock_committor_service::{
         task_info_fetcher::{AccountSnapshot, TaskInfoFetcherResult},
     },
 };
-use magicblock_core::{
+use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
-use magicblock_metrics::metrics;
-use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
+use metrics::metrics;
+use program::magic_sys::INTENT_TOO_LARGE_ERR;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
 use tracing::error;

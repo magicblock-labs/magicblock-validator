@@ -14,7 +14,7 @@ git-version = { workspace = true }
 tokio = { workspace = true, features = ["sync"] }
 wincode = { workspace = true }
 
-magicblock-magic-program-api = { workspace = true }
+magic-program-api = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true, features = ["wincode"] }
 solana-clock = { workspace = true }

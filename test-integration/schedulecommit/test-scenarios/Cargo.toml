@@ -7,10 +7,10 @@ version.workspace = true
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
-magicblock-program = { workspace = true }
+mbv-core = { workspace = true }
+delegation-program-api = { workspace = true }
+magic-program-api = { workspace = true }
+program = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 rand = { workspace = true }
 schedulecommit-client = { workspace = true }

@@ -1,4 +1,4 @@
-use magicblock_core::token_programs::try_get_magic_ata_info;
+use mbv_core::token_programs::try_get_magic_ata_info;
 use solana_account::{AccountMode, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -58,10 +58,8 @@ pub(crate) fn process_close_magic_ata(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::token_programs::{
-        MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID, derive_ata,
-    };
-    use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+    use magic_program_api::instruction::MagicBlockInstruction;
+    use mbv_core::token_programs::{MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID, derive_ata};
     use solana_account::{AccountBuilder, AccountSharedData, ReadableAccount};
     use solana_instruction::{AccountMeta, Instruction};
     use solana_program::{program_option::COption, program_pack::Pack};

@@ -3,8 +3,8 @@
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
+use config::{ConfigError, VerifierParams};
 use engine::Engine;
-use magicblock_config::{ConfigError, VerifierParams};
 use nucleus::shutdown::{Service, ShutdownManager, ShutdownReason};
 use replicator::{ReplicationClient, ReplicationDispatcher};
 use tokio::sync::mpsc;
@@ -14,7 +14,7 @@ use tracing::{error, info};
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn init_logger() {
-    use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
+    use mbv_core::logger::{LogStyle, LoggingConfig, init_with_config};
     init_with_config(LoggingConfig { style: LogStyle::from_env() });
 }
 
@@ -31,7 +31,7 @@ async fn run() -> Result<ShutdownReason> {
     };
     info!(config = ?config, "starting verifier");
 
-    let metrics = magicblock_metrics::MetricsService::bind(config.metrics.address.0)
+    let metrics = metrics::MetricsService::bind(config.metrics.address.0)
         .await
         .context("failed to bind metrics service")?;
     let mut metrics_shutdown = ShutdownManager::default();
@@ -63,7 +63,7 @@ async fn run_engine(
     metrics_shutdown: &mut ShutdownManager,
 ) -> Result<ShutdownReason> {
     let mut shutdown = ShutdownManager::default();
-    let builder = magicblock_runtime::keeper_builder(&config.engine, &config.programs)
+    let builder = runtime::keeper_builder(&config.engine, &config.programs)
         .context("failed to build verifier runtime image")?;
     let (pacer, blocks) = mpsc::channel(16);
     let engine = Engine::new(builder, Some(blocks), &mut shutdown)

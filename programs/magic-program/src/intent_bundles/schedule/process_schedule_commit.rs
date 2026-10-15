@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::{
+use mbv_core::intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee,
     types::CommittedAccount,
 };

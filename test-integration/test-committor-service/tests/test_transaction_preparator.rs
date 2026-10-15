@@ -1,6 +1,5 @@
 use borsh::BorshDeserialize;
-use magicblock_committor_interface::Chunks;
-use magicblock_committor_service::{
+use committor::{
     tasks::{
         commit_stage_task::CleanupTask,
         task_strategist::{TaskStrategist, TransactionStrategy},
@@ -9,8 +8,9 @@ use magicblock_committor_service::{
     },
     transaction_preparator::TransactionPreparator,
 };
-use magicblock_core::intent::{BaseAction, ProgramArgs};
-use magicblock_program::args::ShortAccountMeta;
+use committor_interface::Chunks;
+use mbv_core::intent::{BaseAction, ProgramArgs};
+use program::args::ShortAccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk::signer::Signer;
 use solana_sdk_ids::system_program;

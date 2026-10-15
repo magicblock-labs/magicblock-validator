@@ -57,7 +57,7 @@ macro_rules! assert_subscribed_without_delegation_record {
     ($provider:expr, $pubkeys:expr) => {{
         for pubkey in $pubkeys {
             let deleg_record_pubkey =
-                ::dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
+                ::delegation_program_api::pda::delegation_record_pda_from_delegated_account(pubkey);
             assert!(
                 $provider.is_watching(pubkey),
                 "Expected {} to be subscribed",
@@ -328,7 +328,7 @@ macro_rules! assert_not_undelegating {
             );
             assert_ne!(
                 account.2,
-                dlp_api::id(),
+                delegation_program_api::id(),
                 "Expected account {} to not be owned by the delegation program",
                 pubkey,
             );
@@ -366,7 +366,7 @@ macro_rules! assert_remain_undelegating {
             );
             assert_eq!(
                 account.2,
-                dlp_api::id(),
+                delegation_program_api::id(),
                 "Expected account {} to remain owned by the delegation program",
                 pubkey,
             );

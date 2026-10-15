@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use lazy_static::lazy_static;
-use magicblock_core::intent::outbox::verify_outbox_intent_pda;
+use mbv_core::intent::outbox::verify_outbox_intent_pda;
 use parking_lot::RwLock;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_clock::Slot;
@@ -149,7 +149,7 @@ fn validate(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Assert outbox intent program
-    if ix_ctx.get_program_key()? != &magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
+    if ix_ctx.get_program_key()? != &magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: outbox intent program account not found"
@@ -283,8 +283,8 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPr
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
-    use magicblock_magic_program_api::{EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID};
+    use magic_program_api::{EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID};
+    use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
     use solana_keypair::Keypair;

@@ -1,11 +1,11 @@
 use borsh::BorshDeserialize;
-use magicblock_committor_interface::Chunks;
-use magicblock_committor_service::tasks::{
+use committor::tasks::{
     commit_delivery::CommitDelivery,
     commit_stage_task::{CleanupTask, PreparationTask},
     task_strategist::{TaskStrategist, TransactionStrategy},
     BaseTaskImpl,
 };
+use committor_interface::Chunks;
 use solana_sdk::signer::Signer;
 
 use crate::common::{
@@ -251,7 +251,7 @@ async fn test_reprepare_closed_buffer_with_distinct_intent_nonce() {
         instructions: &[solana_sdk::instruction::Instruction],
         blockhash: solana_sdk::hash::Hash,
     ) -> solana_sdk::signature::Signature {
-        use magicblock_rpc_client::MagicBlockSendTransactionConfig;
+        use rpc_client::MagicBlockSendTransactionConfig;
         use solana_sdk::{
             message::{v0::Message, VersionedMessage},
             transaction::VersionedTransaction,

@@ -388,8 +388,9 @@ pub(crate) async fn fund_validator_auth_and_ensure_validator_fees_vault(validato
     .await;
     debug!("Airdropped to validator: {} ", validator_auth.pubkey(),);
 
-    let validator_fees_vault =
-        dlp_api::pda::validator_fees_vault_pda_from_validator(&validator_auth.pubkey());
+    let validator_fees_vault = delegation_program_api::pda::validator_fees_vault_pda_from_validator(
+        &validator_auth.pubkey(),
+    );
     let validator_fees_vault_exists = rpc_client.get_account(&validator_fees_vault).await.is_ok();
 
     if !validator_fees_vault_exists {

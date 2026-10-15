@@ -1,4 +1,4 @@
-use magicblock_core::version::Version;
+use mbv_core::version::Version;
 
 use super::{HandlerResult, RpcHandlers};
 use crate::requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload};

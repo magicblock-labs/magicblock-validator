@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, to_vec};
-use magicblock_committor_interface::{
+use committor_interface::{
     Chunks, consts, error::CommittorError, instruction::CommittorInstruction, pdas,
 };
 use solana_account_info::AccountInfo;

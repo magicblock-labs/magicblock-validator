@@ -1,9 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::outbox_intent_pda_with_bump;
-use magicblock_magic_program_api::{
-    OUTBOX_INTENT_PROGRAM_ID, instruction::OutboxIntentInstruction,
-};
+use magic_program_api::{OUTBOX_INTENT_PROGRAM_ID, instruction::OutboxIntentInstruction};
+use mbv_core::intent::outbox::outbox_intent_pda_with_bump;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;

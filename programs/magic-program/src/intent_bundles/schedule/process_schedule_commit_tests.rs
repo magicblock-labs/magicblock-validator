@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::intent::{
-    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS, outbox::outbox_intent_pda_with_bump,
-};
-use magicblock_magic_program_api::{
+use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::{
         ActionArgs, AddActionCallbackArgs, BaseActionArgs, MagicIntentBundleArgs, ShortAccountMeta,
     },
     instruction::MagicBlockInstruction,
+};
+use mbv_core::intent::{
+    ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS, outbox::outbox_intent_pda_with_bump,
 };
 use solana_account::{
     AccountBuilder, AccountMode, AccountSharedData, ReadableAccount, WritableAccount,
@@ -522,8 +522,8 @@ mod tests {
     // ---------- Helpers for ATA/eATA remapping tests ----------
     // Use shared SPL/ATA/eATA constants and helpers
     // Reuse test helper to create proper SPL ATA account data
-    use magicblock_chainlink::testing::eatas::{create_ata_account, create_token_2022_ata_account};
-    use magicblock_core::token_programs::{
+    use chainlink::testing::eatas::{create_ata_account, create_token_2022_ata_account};
+    use mbv_core::token_programs::{
         EATA_PROGRAM_ID, MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_2022_PROGRAM_ID, derive_ata,
         derive_ata_with_token_program, derive_eata,
     };

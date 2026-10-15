@@ -13,14 +13,14 @@ path = "src/lib.rs"
 
 [dependencies]
 futures-util = { workspace = true }
-magicblock-config = { workspace = true }
+config = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
-magicblock-core = { workspace = true }
+mbv-core = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
 [lints]

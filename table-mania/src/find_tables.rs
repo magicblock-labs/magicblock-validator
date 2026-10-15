@@ -1,4 +1,4 @@
-use magicblock_rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
+use rpc_client::{MagicBlockRpcClientResult, MagicblockRpcClient};
 use solana_address_lookup_table_interface::instruction::derive_lookup_table_address;
 use solana_clock::Slot;
 use solana_keypair::Keypair;

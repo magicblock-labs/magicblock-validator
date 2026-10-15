@@ -17,6 +17,6 @@ duplicate effects.
 When configured, confirmation uses WebSocket subscriptions with HTTP polling as
 a fallback. Without a WebSocket endpoint, it uses HTTP polling directly.
 For settlement-specific retry and recovery rules, see the
-[committor service](../committor-service/README.md).
+[committor service](../committor/README.md).
 
 [Back to workspace](../README.md)

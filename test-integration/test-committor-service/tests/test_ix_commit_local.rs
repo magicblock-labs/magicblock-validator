@@ -1,8 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use borsh::to_vec;
-use integration_test_tools::init_logger;
-use magicblock_committor_service::{
+use committor::{
     committor_processor::CommittorProcessor,
     config::ChainConfig,
     intent_engine::db::DummyDB,
@@ -10,11 +9,12 @@ use magicblock_committor_service::{
     tasks::{commit_delivery::CommitDelivery, task_strategist::TransactionStrategy, BaseTaskImpl},
     ComputeBudgetConfig,
 };
-use magicblock_core::intent::{
+use integration_test_tools::init_logger;
+use mbv_core::intent::{
     outbox::outbox_intent_pda_with_bump, types::CommittedAccount, CommitAndUndelegate, CommitType,
     MagicBaseIntent, MagicIntentBundle, UndelegateType,
 };
-use magicblock_program::{
+use program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox_intent_bundles::OutboxIntentBundle,
 };
 use program_schedulecommit::MainAccount;
@@ -985,7 +985,8 @@ async fn ix_commit_local(
                 committed_accounts.remove(&pubkey).expect("Account should be persisted");
 
             // When we finalize it is possible to also undelegate the account
-            let expected_owner = if is_undelegate { program_id } else { dlp_api::id() };
+            let expected_owner =
+                if is_undelegate { program_id } else { delegation_program_api::id() };
 
             let lamports = account.account.lamports;
             get_account!(

@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
+use ::metrics::metrics::RPC_REQUESTS_COUNT;
 use engine::Engine;
 use hyper::body::Bytes;
 use json::Serialize;
-use magicblock_metrics::metrics::RPC_REQUESTS_COUNT;
 use tokio::{sync::mpsc, task::JoinHandle};
 use tracing::warn;
 

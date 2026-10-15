@@ -9,9 +9,9 @@ version.workspace = true
 
 [dependencies]
 keeper = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
-magicblock-program = { workspace = true }
+config = { workspace = true }
+magic-program-api = { workspace = true }
+program = { workspace = true }
 solana-account = { workspace = true }
 solana-native-token = { workspace = true }
 solana-program-option = { workspace = true }

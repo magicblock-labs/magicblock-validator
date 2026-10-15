@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
-use dlp_api::state::DelegationRecord;
+use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
+use delegation_program_api::state::DelegationRecord;
 use futures_util::future::{FutureExt, join_all};
-use magicblock_core::token_programs::{
+use mbv_core::token_programs::{
     AtaInfo, EATA_PROGRAM_ID, EphemeralAta, is_ata, try_derive_eata_address_and_bump,
     try_derive_supported_ata_pubkeys,
 };
-use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
 use tokio::task::JoinSet;

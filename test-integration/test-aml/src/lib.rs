@@ -15,16 +15,16 @@ use std::{
 
 use parking_lot::RwLock;
 
+use config::{
+    config::{AmlCheckStrategy, ChainLinkConfig, LoadableProgram, RiskConfig},
+    types::Remote,
+    LeaderParams,
+};
 use integration_test_tools::{
     expect,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     validator::{cleanup, resolve_programs, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
-};
-use magicblock_config::{
-    config::{AmlCheckStrategy, ChainLinkConfig, LoadableProgram, RiskConfig},
-    types::Remote,
-    LeaderParams,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -224,8 +224,9 @@ pub fn setup_validator_with_local_remote(
 
 /// Init validator fees vault for proper validator setup
 pub fn init_validator_fees_vault(chain_ctx: &IntegrationTestContext, validator_identity: &Keypair) {
-    let vault_pda =
-        dlp_api::pda::validator_fees_vault_pda_from_validator(&validator_identity.pubkey());
+    let vault_pda = delegation_program_api::pda::validator_fees_vault_pda_from_validator(
+        &validator_identity.pubkey(),
+    );
     if chain_ctx.fetch_chain_account(vault_pda).is_ok() {
         // Account exists
         return;
@@ -235,7 +236,7 @@ pub fn init_validator_fees_vault(chain_ctx: &IntegrationTestContext, validator_i
     let dlp_authority = Keypair::try_from(&DLP_TEST_AUTHORITY_BYTES[..]).unwrap();
 
     let latest_block_hash = chain_ctx.try_get_latest_blockhash_chain().unwrap();
-    let ix = dlp_api::instruction_builder::init_validator_fees_vault(
+    let ix = delegation_program_api::instruction_builder::init_validator_fees_vault(
         validator_identity.pubkey(),
         dlp_authority.pubkey(),
         validator_identity.pubkey(),
@@ -287,8 +288,9 @@ pub fn cleanup_both(validator: &mut Child, server: &mut MockRangeServer) {
 }
 
 pub fn delegation_record_exists(ctx: &IntegrationTestContext, delegated_account: &Pubkey) -> bool {
-    let record_pubkey =
-        dlp_api::pda::delegation_record_pda_from_delegated_account(delegated_account);
+    let record_pubkey = delegation_program_api::pda::delegation_record_pda_from_delegated_account(
+        delegated_account,
+    );
     ctx.fetch_chain_account(record_pubkey).is_ok()
 }
 

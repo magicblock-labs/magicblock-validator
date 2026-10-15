@@ -6,12 +6,12 @@ use std::{
     },
 };
 
-use futures_util::{future::join_all, stream::FuturesUnordered};
-use magicblock_core::logger::{log_trace_debug, log_trace_warn};
-use magicblock_metrics::metrics::{
+use ::metrics::metrics::{
     inc_account_subscription_account_updates_count, inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count, inc_pubsub_unsubscribe_timeout_count,
 };
+use futures_util::{future::join_all, stream::FuturesUnordered};
+use mbv_core::logger::{log_trace_debug, log_trace_warn};
 use parking_lot::Mutex;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
@@ -875,7 +875,7 @@ impl ChainPubsubActor {
                                         SubscriptionSource::Program,
                                     );
                                 let should_forward = is_directly_subscribed
-                                    || program_pubkey.eq(&dlp_api::id())
+                                    || program_pubkey.eq(&delegation_program_api::id())
                                         && sub_update.account.is_some();
 
                                 if should_forward {

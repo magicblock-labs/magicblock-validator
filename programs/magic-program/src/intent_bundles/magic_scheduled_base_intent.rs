@@ -1,18 +1,18 @@
 use std::collections::{HashMap, HashSet};
 
-pub use magicblock_core::intent::{
+use magic_program_api::args::{
+    BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs,
+    MagicIntentBundleArgs, UndelegateTypeArgs,
+};
+pub use mbv_core::intent::{
     ACTUAL_COMMIT_LIMIT, BaseAction, COMMIT_FEE_LAMPORTS, COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
     CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle, ProgramArgs,
     UndelegateType, calculate_commit_fee,
 };
-use magicblock_core::{
+use mbv_core::{
     Slot,
     intent::types::CommittedAccount,
     token_programs::{EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
-};
-use magicblock_magic_program_api::args::{
-    BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs,
-    MagicIntentBundleArgs, UndelegateTypeArgs,
 };
 use serde::{Deserialize, Serialize};
 use solana_account::{AccountMode, ReadableAccount};
@@ -209,7 +209,7 @@ impl ScheduledIntentBundle {
 
 /// Constructs a type from its wire [`Args`] representation.
 ///
-/// The corresponding data types live in [`magicblock_core::intent::types`]
+/// The corresponding data types live in [`mbv_core::intent::types`]
 /// since they need to be shared with `MagicSys` implementors, but the
 /// construction logic stays here since it depends on [`ConstructionContext`]
 /// (`InvokeContext`, `ic_msg!`, etc.) which only exists on-chain. A local
@@ -671,7 +671,7 @@ pub(crate) fn validate_commit_schedule_permissions(
 mod tests {
     use std::collections::HashMap;
 
-    use magicblock_core::intent::types::CommittedAccount;
+    use mbv_core::intent::types::CommittedAccount;
     use solana_account::Account;
     use solana_pubkey::Pubkey;
 

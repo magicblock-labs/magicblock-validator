@@ -4,12 +4,12 @@ use std::{
     time::{Duration, Instant},
 };
 
+use aml::RiskService;
 use engine::{
     Engine,
     testkit::{Pacing, TestEngine},
 };
 use keeper::testkit::{Dirs, keeper_builder};
-use magicblock_aml::RiskService;
 use solana_account::{Account, AccountBuilder, AccountMode, AccountSharedData};
 use solana_keypair::Keypair;
 use solana_program::clock::Slot;
@@ -250,7 +250,7 @@ impl TestContext {
         // Magicblock program marks account as undelegated in the Ephem
         let reader = |account: &AccountSharedData| {
             AccountBuilder::from(AccountSharedData::from(account.owned()))
-                .owner(dlp_api::id())
+                .owner(delegation_program_api::id())
                 .mode(AccountMode::Transient)
         };
         let account = self
@@ -288,7 +288,7 @@ impl TestContext {
         .mode(AccountMode::ReadOnly)
         .build();
         let delegation_record_pubkey =
-            dlp_api::pda::delegation_record_pda_from_delegated_account(pubkey);
+            delegation_program_api::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
         self.materialize_subscription_update(
             *pubkey,
@@ -314,7 +314,7 @@ impl TestContext {
 
         // Update account to be delegated on chain and send a sub update
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();
-        let delegated_acc = account_shared_with_owner(&acc.account, dlp_api::id());
+        let delegated_acc = account_shared_with_owner(&acc.account, delegation_program_api::id());
         let mode = if authority == &self.validator_pubkey {
             AccountMode::Delegated
         } else {

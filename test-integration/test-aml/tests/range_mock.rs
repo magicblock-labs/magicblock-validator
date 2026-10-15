@@ -13,7 +13,7 @@ use integration_test_tools::{
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     tmpdir::resolve_tmp_dir,
 };
-use magicblock_core::token_programs::derive_ata;
+use mbv_core::token_programs::derive_ata;
 use solana_sdk::{
     program_pack::Pack, signature::Keypair, signer::Signer, transaction::Transaction,
 };

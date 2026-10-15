@@ -35,7 +35,7 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
         writable,
         Account {
             lamports: 1_000_000,
-            owner: dlp_api::id(),
+            owner: delegation_program_api::id(),
             ..Default::default()
         },
     );

@@ -27,7 +27,7 @@ pub(crate) struct ClassifiedAccounts {
     pub(crate) atas: Vec<(
         Pubkey,
         AccountBuilder,
-        magicblock_core::token_programs::AtaInfo,
+        mbv_core::token_programs::AtaInfo,
         u64,
     )>,
 }

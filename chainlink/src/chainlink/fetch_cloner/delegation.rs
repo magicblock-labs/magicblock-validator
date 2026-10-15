@@ -1,11 +1,9 @@
-use dlp_api::{
+use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
+use delegation_program_api::{
     args::PostDelegationActions, decrypt::Decrypt,
     pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
 };
-use magicblock_core::token_programs::{
-    EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump,
-};
-use magicblock_metrics::metrics::{self, ChainlinkCompanionFetchKind};
+use mbv_core::token_programs::{EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump};
 use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
@@ -247,7 +245,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::args::{
+    use delegation_program_api::args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
     };
@@ -290,11 +288,11 @@ mod tests {
                     program_id: 1,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::compact::AccountMeta::new_readonly(0, true),
+                            delegation_program_api::compact::AccountMeta::new_readonly(0, true),
                         ),
-                        MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(
-                            2, false,
-                        )),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            delegation_program_api::compact::AccountMeta::new(2, false),
+                        ),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![7, 8, 9],
@@ -368,12 +366,12 @@ mod tests {
         let program_id = Pubkey::new_unique();
         let account = Pubkey::new_unique();
 
-        let encrypted_program_id = dlp_api::encryption::encrypt_ed25519_recipient(
+        let encrypted_program_id = delegation_program_api::encryption::encrypt_ed25519_recipient(
             program_id.as_array(),
             validator.pubkey().as_array(),
         )
         .unwrap();
-        let encrypted_suffix = dlp_api::encryption::encrypt_ed25519_recipient(
+        let encrypted_suffix = delegation_program_api::encryption::encrypt_ed25519_recipient(
             &[3, 4, 5],
             validator.pubkey().as_array(),
         )
@@ -392,11 +390,11 @@ mod tests {
                     program_id: 2,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            dlp_api::compact::AccountMeta::new_readonly(0, true),
+                            delegation_program_api::compact::AccountMeta::new_readonly(0, true),
                         ),
-                        MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(
-                            1, false,
-                        )),
+                        MaybeEncryptedAccountMeta::ClearText(
+                            delegation_program_api::compact::AccountMeta::new(1, false),
+                        ),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![1, 2],
@@ -427,7 +425,7 @@ mod tests {
     fn fails_when_encrypted_actions_have_wrong_validator_keypair() {
         let validator = Keypair::new();
         let wrong_validator = Keypair::new();
-        let encrypted_program_id = dlp_api::encryption::encrypt_ed25519_recipient(
+        let encrypted_program_id = delegation_program_api::encryption::encrypt_ed25519_recipient(
             Pubkey::new_unique().as_array(),
             validator.pubkey().as_array(),
         )

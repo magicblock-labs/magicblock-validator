@@ -1,7 +1,7 @@
+use ::metrics::metrics::{AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME};
+use chainlink::{ProdChainlink, errors::ChainlinkResult};
 use engine::Engine;
 use json::{Deserialize, Serialize};
-use magicblock_chainlink::{ProdChainlink, errors::ChainlinkResult};
-use magicblock_metrics::metrics::{AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME};
 use nucleus::runtime::TransactionView;
 use serde::{Deserializer, de::Error as _};
 use solana_account::{AccountMode, AccountSharedData};

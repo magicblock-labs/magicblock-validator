@@ -3,7 +3,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
-use magicblock_metrics::metrics;
+use metrics::metrics;
 
 /// Wrapper around Arc<AtomicU64> that automatically captures metrics
 /// when the chain slot is updated.

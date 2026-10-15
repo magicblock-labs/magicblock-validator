@@ -1,4 +1,4 @@
-use magicblock_magic_program_api::instruction::{
+use magic_program_api::instruction::{
     CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction, OutboxIntentInstruction,
 };
 use solana_instruction::error::InstructionError;

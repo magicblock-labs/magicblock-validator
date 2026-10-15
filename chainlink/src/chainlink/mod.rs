@@ -3,14 +3,14 @@ use std::{
     time::Duration,
 };
 
+use ::metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
+use aml::RiskService;
+use config::config::ChainLinkConfig;
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
 use keeper::error::KeeperError;
-use magicblock_aml::RiskService;
-use magicblock_config::config::ChainLinkConfig;
-use magicblock_core::token_programs::{is_ata, try_derive_eata_address_and_bump};
-use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
+use mbv_core::token_programs::{is_ata, try_derive_eata_address_and_bump};
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -540,7 +540,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 let delegated_on_base = remote_account.is_owned_by_delegation_program();
                 let account_on_er = match loader
                     .read(pubkey, |account| {
-                        account.is(AccountMode::Delegated) || account.owner().eq(&dlp_api::id())
+                        account.is(AccountMode::Delegated)
+                            || account.owner().eq(&delegation_program_api::id())
                     })
                     .ok()
                     .flatten()
@@ -562,7 +563,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
     pub async fn undelegation_requested(&self, pubkey: Pubkey) -> ChainlinkResult<()> {
         debug!(pubkey = %pubkey, "Undelegation requested");
 
-        magicblock_metrics::metrics::inc_undelegation_requested();
+        ::metrics::metrics::inc_undelegation_requested();
 
         let Some(fetch_cloner) = self.fetch_cloner() else {
             return Ok(());

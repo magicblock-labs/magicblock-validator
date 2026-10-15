@@ -7,7 +7,7 @@ pub type TableManiaResult<T> = Result<T, TableManiaError>;
 #[derive(Error, Debug)]
 pub enum TableManiaError {
     #[error("MagicBlockRpcClientError: {0} ({0:?})")]
-    MagicBlockRpcClientError(#[from] magicblock_rpc_client::MagicBlockRpcClientError),
+    MagicBlockRpcClientError(#[from] rpc_client::MagicBlockRpcClientError),
 
     #[error("Cannot extend deactivated table {0}.")]
     CannotExtendDeactivatedTable(Pubkey),
@@ -48,7 +48,7 @@ impl TableManiaError {
     }
 
     pub fn is_sent_transaction_invalid_instruction_data_at(&self, instruction_index: u8) -> bool {
-        use magicblock_rpc_client::MagicBlockRpcClientError;
+        use rpc_client::MagicBlockRpcClientError;
         use solana_instruction::error::InstructionError;
         use solana_transaction_error::TransactionError;
 
@@ -69,7 +69,7 @@ impl TableManiaError {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_rpc_client::MagicBlockRpcClientError;
+    use rpc_client::MagicBlockRpcClientError;
     use solana_instruction::error::InstructionError;
     use solana_signature::Signature;
     use solana_transaction_error::TransactionError;

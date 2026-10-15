@@ -10,7 +10,7 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
-use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use magic_program_api::instruction::MagicBlockInstruction;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
@@ -694,11 +694,11 @@ fn process_request_undelegation_cpi(
             owner_program.key, program_id
         )
     })?;
-    assert_keys_equal(dlp_program.key, &dlp_api::id(), || {
+    assert_keys_equal(dlp_program.key, &delegation_program_api::id(), || {
         format!(
             "DLP program '{}' does not match expected program '{}'",
             dlp_program.key,
-            dlp_api::id()
+            delegation_program_api::id()
         )
     })?;
 
@@ -710,7 +710,7 @@ fn process_request_undelegation_cpi(
         )
     })?;
 
-    let ix = dlp_api::instruction_builder::request_undelegation(
+    let ix = delegation_program_api::instruction_builder::request_undelegation(
         *payer.key,
         *delegated_account.key,
         *owner_program.key,

@@ -7,9 +7,7 @@ use std::{
 use parking_lot::Mutex;
 
 use async_trait::async_trait;
-use common::*;
-use integration_test_tools::{loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext};
-use magicblock_committor_service::{
+use committor::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor, build_stage_intent_executor,
         error::IntentExecutorResult, intent_execution_client::IntentExecutionClient,
@@ -24,26 +22,27 @@ use magicblock_committor_service::{
     transaction_preparator::TransactionPreparatorImpl,
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::{
-    intent::{outbox::outbox_intent_pda, BaseActionCallback},
-    traits::{ActionError, ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
-};
-use magicblock_magic_program_api::{
+use common::*;
+use integration_test_tools::{loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext};
+use magic_program_api::{
     args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
     instruction::MagicBlockInstruction,
     outbox::{ExecutionStage, TwoStageProgress},
     MAGIC_CONTEXT_PUBKEY,
 };
-use magicblock_program::{
+use mbv_core::{
+    intent::{outbox::outbox_intent_pda, BaseActionCallback},
+    traits::{ActionError, ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
+};
+use program::{
     instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::{OutboxIntentBundle, OutboxIntentBundleStatus},
     validator::init_validator_authority,
     MagicContext,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
 use program_flexi_counter::{instruction::create_transfer_intent_ix, state::FlexiCounter};
+use rpc_client::MagicblockRpcClient;
 use serial_test::serial;
 use solana_rpc_client::{
     http_sender::HttpSender,
@@ -62,6 +61,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::{Transaction, TransactionError},
 };
+use table_mania::{GarbageCollectorConfig, TableMania};
 
 const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
 const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(200);
@@ -1146,7 +1146,7 @@ pub fn schedule_commit_instruction(payer: &Pubkey, pdas: Vec<Pubkey>) -> Instruc
         account_metas.push(AccountMeta::new_readonly(*pubkey, false));
     }
     Instruction::new_with_bincode(
-        magicblock_magic_program_api::id(),
+        magic_program_api::id(),
         &MagicBlockInstruction::ScheduleCommit,
         account_metas,
     )
@@ -1178,7 +1178,7 @@ fn schedule_commit_and_undelegate_bundle_instruction(
         vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
     account_metas.extend(counter_pdas.iter().map(|pk| AccountMeta::new(*pk, false)));
     Instruction::new_with_bincode(
-        magicblock_magic_program_api::id(),
+        magic_program_api::id(),
         &MagicBlockInstruction::ScheduleIntentBundle(args),
         account_metas,
     )

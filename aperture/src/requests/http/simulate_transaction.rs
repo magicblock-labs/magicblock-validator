@@ -2,7 +2,7 @@ use crate::account::TransactionKind;
 use crate::transaction::{live_inner_instructions, replace_blockhash};
 use std::{collections::HashMap, sync::Arc};
 
-use magicblock_metrics::metrics::AccountFetchEntrypoint;
+use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;

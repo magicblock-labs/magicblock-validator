@@ -1,7 +1,7 @@
 #![allow(clippy::result_large_err)]
 
 use integration_test_tools::{init_logger, run_test};
-use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
+use program::magic_sys::INTENT_TOO_LARGE_ERR;
 use program_schedulecommit::{
     api::{schedule_commit_cpi_instruction, UserSeeds},
     ScheduleCommitType,
@@ -29,8 +29,8 @@ fn schedule_commit_ix(
 ) -> solana_sdk::instruction::Instruction {
     schedule_commit_cpi_instruction(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         None,
         &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),

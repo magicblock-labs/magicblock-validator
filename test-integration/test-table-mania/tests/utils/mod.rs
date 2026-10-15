@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
-use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use rpc_client::MagicblockRpcClient;
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
+use table_mania::{GarbageCollectorConfig, TableMania};
 use tracing::*;
 
 #[allow(unused)] // used in tests

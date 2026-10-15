@@ -3,7 +3,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{instruction::Instruction, rent::Rent, signature::Keypair};
 
 pub(crate) fn init_validator_fees_vault_ix(validator_auth: Pubkey) -> Instruction {
-    dlp_api::instruction_builder::init_validator_fees_vault(
+    delegation_program_api::instruction_builder::init_validator_fees_vault(
         validator_auth,
         validator_auth,
         validator_auth,
@@ -51,7 +51,7 @@ pub(crate) fn init_flexi_counter_and_delegate_ixs(
     label: Option<String>,
 ) -> InitAccountAndDelegateIxs {
     const MAX_ALLOC: u64 =
-        magicblock_committor_interface::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
+        committor_interface::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
     use program_flexi_counter::{instruction::*, state::*};
 

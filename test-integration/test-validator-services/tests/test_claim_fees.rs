@@ -1,6 +1,6 @@
 use std::{thread::sleep, time::Duration};
 
-use dlp_api::instruction_builder::validator_claim_fees;
+use delegation_program_api::instruction_builder::validator_claim_fees;
 use integration_test_tools::{loaded_accounts::LoadedAccounts, IntegrationTestContext};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::rpc_client::RpcClient;
@@ -44,7 +44,7 @@ fn test_claim_fees_instruction() {
     );
     assert_eq!(
         instruction.program_id,
-        dlp_api::id(),
+        delegation_program_api::id(),
         "Instruction should target delegation program"
     );
 

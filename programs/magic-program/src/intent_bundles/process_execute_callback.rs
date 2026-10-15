@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::{CALLBACK_PROGRAM_ID, pda::CALLBACK_SIGNER};
+use magic_program_api::{CALLBACK_PROGRAM_ID, pda::CALLBACK_SIGNER};
 use solana_instruction::{Instruction, error::InstructionError};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -86,7 +86,7 @@ fn validate(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_magic_program_api::{
+    use magic_program_api::{
         CALLBACK_PROGRAM_ID, instruction::CallbackInstruction, pda::CALLBACK_SIGNER,
     };
     use serial_test::serial;

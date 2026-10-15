@@ -1,4 +1,4 @@
-use magicblock_metrics::metrics::AccountFetchEntrypoint;
+use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 

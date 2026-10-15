@@ -1,6 +1,6 @@
 use std::{collections::HashSet, time::Duration};
 
-use magicblock_config::{config::GrpcConfig, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS};
+use config::{config::GrpcConfig, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS};
 use solana_pubkey::Pubkey;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};
@@ -80,7 +80,7 @@ impl Default for RemoteAccountProviderConfig {
     fn default() -> Self {
         Self {
             enable_subscription_metrics: true,
-            program_subs: HashSet::from([dlp_api::id()]),
+            program_subs: HashSet::from([delegation_program_api::id()]),
             resubscription_delay: Duration::from_millis(DEFAULT_RESUBSCRIPTION_DELAY_MS),
             ws_subs_per_connection: None,
             grpc: GrpcConfig::default(),

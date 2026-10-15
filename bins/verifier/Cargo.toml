@@ -11,10 +11,10 @@ version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 engine = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-metrics = { workspace = true }
-magicblock-runtime = { workspace = true }
+config = { workspace = true }
+mbv-core = { workspace = true }
+metrics = { workspace = true }
+runtime = { workspace = true }
 mimalloc = { workspace = true }
 nucleus = { workspace = true }
 replicator = { workspace = true }

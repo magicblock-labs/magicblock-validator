@@ -1,4 +1,4 @@
-use magicblock_metrics::metrics::AccountFetchEntrypoint;
+use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
     parse_account_data::SplTokenAdditionalDataV2,

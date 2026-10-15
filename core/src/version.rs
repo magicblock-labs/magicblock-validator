@@ -10,7 +10,7 @@ use solana_rpc_client_api::response::RpcApiVersion;
 #[serde(rename_all = "kebab-case")]
 pub struct Version {
     /// MagicBlock workspace package version.
-    pub magicblock_core: &'static str,
+    pub core: &'static str,
     /// Solana RPC API compatibility version.
     pub solana_core: String,
     /// First four bytes of the Solana feature-set identifier, in little-endian order.
@@ -24,7 +24,7 @@ impl Default for Version {
     fn default() -> Self {
         let [a, b, c, d, ..] = ID.to_bytes();
         Self {
-            magicblock_core: env!("CARGO_PKG_VERSION"),
+            core: env!("CARGO_PKG_VERSION"),
             solana_core: RpcApiVersion::default().to_string(),
             feature_set: u32::from_le_bytes([a, b, c, d]),
             git_version: git_version!(),

@@ -8,13 +8,7 @@ use std::{
 };
 
 use borsh::to_vec;
-use dlp_api::{
-    args::CommitStateArgs,
-    pda::{commit_record_pda_from_delegated_account, ephemeral_balance_pda_from_payer},
-};
-use futures::future::{join_all, try_join_all};
-use magicblock_committor_interface::pdas;
-use magicblock_committor_service::{
+use committor::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor,
         error::IntentExecutorError,
@@ -41,22 +35,27 @@ use magicblock_committor_service::{
     transaction_preparator::{TransactionPreparator, TransactionPreparatorImpl},
     DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::{
+use committor_interface::pdas;
+use delegation_program_api::{
+    args::CommitStateArgs,
+    pda::{commit_record_pda_from_delegated_account, ephemeral_balance_pda_from_payer},
+};
+use futures::future::{join_all, try_join_all};
+use mbv_core::{
     intent::{
         types::CommittedAccount, BaseAction, BaseActionCallback, CommitAndUndelegate, CommitType,
         MagicBaseIntent, MagicIntentBundle, ProgramArgs, UndelegateType,
     },
     traits::ActionError,
 };
-use magicblock_program::{
+use program::{
     args::ShortAccountMeta,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox::{PendingTransaction, TwoStageProgress},
 };
-use magicblock_rpc_client::MagicBlockSendTransactionConfig;
-use magicblock_table_mania::TableMania;
 use program_flexi_counter::state::{FlexiCounter, FAIL_UNDELEGATION_LABEL};
 use program_schedulecommit::{BookUpdate, MainAccount, OrderLevel, ScheduleCommitInstruction};
+use rpc_client::MagicBlockSendTransactionConfig;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -68,6 +67,7 @@ use solana_sdk::{
     signature::{Keypair, Signer},
     transaction::{Transaction, TransactionError},
 };
+use table_mania::TableMania;
 
 use crate::{
     common::{MockActionsCallbackExecutor, MockOutboxClient, TestFixture},
@@ -220,7 +220,7 @@ async fn test_commit_id_error_parsing() {
             TransactionError::InstructionError(
                 _,
                 InstructionError::Custom(
-                    0xc, // dlp_api::DlpError::NonceOutOfOrder: commit id/nonce is out of order
+                    0xc, // delegation_program_api::DlpError::NonceOutOfOrder: commit id/nonce is out of order
                 )
             ),
             _
@@ -970,17 +970,18 @@ async fn resume_legacy_commit(undelegate: bool) {
     // Commit account without finalization
     // This simulates finalization stage failure
     let pending_commit = {
-        let commit_allow_undelegation_ix = dlp_api::instruction_builder::commit_state(
-            fixture.authority.pubkey(),
-            pda,
-            account.owner,
-            CommitStateArgs {
-                nonce: 1,
-                lamports: account.lamports,
-                allow_undelegation: undelegate,
-                data: account.data.clone(),
-            },
-        );
+        let commit_allow_undelegation_ix =
+            delegation_program_api::instruction_builder::commit_state(
+                fixture.authority.pubkey(),
+                pda,
+                account.owner,
+                CommitStateArgs {
+                    nonce: 1,
+                    lamports: account.lamports,
+                    allow_undelegation: undelegate,
+                    data: account.data.clone(),
+                },
+            );
 
         let blockhash = fixture.rpc_client.get_latest_blockhash().await.unwrap();
         let tx = Transaction::new_signed_with_payer(
@@ -1014,7 +1015,7 @@ async fn resume_legacy_commit(undelegate: bool) {
     };
     let record = commit_record_pda_from_delegated_account(&pda);
     let pending_record = fixture.rpc_client.get_inner().get_account(&record).await.unwrap();
-    assert_eq!(pending_record.owner, dlp_api::id());
+    assert_eq!(pending_record.owner, delegation_program_api::id());
     let before = fixture.rpc_client.get_inner().get_account(&pda).await.unwrap();
     assert_ne!(before.data, committed_account.account.data);
     let intent = create_intent(vec![committed_account.clone()], undelegate);
@@ -1435,7 +1436,7 @@ async fn setup_payer_with_keypair(payer: &Keypair, rpc_client: &Arc<RpcClient>) 
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     // Create actor escrow
-    let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
+    let ix = delegation_program_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),

@@ -53,7 +53,7 @@ pub fn remote_account_lamports(acc: &RemoteAccount) -> u64 {
 }
 
 pub fn init_logger() {
-    magicblock_core::logger::init_for_tests();
+    mbv_core::logger::init_for_tests();
 }
 
 pub fn get_remote_account_lamports<'a>(

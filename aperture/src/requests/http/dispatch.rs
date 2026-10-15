@@ -2,7 +2,7 @@ use super::{
     HandlerResult, RpcHandlers, get_blocks::BlockRange, get_token_accounts::TokenAccountAuthority,
 };
 use crate::{error::RpcError, requests::JsonHttpRequest};
-use magicblock_metrics::metrics::{RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT};
+use ::metrics::metrics::{RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT};
 
 impl RpcHandlers {
     pub(crate) async fn process(

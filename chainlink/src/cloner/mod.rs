@@ -3,7 +3,7 @@ use std::iter;
 use engine::{AccountAccessor, Engine, PostFinalize};
 use errors::ClonerResult;
 use keeper::error::KeeperError;
-use magicblock_magic_program_api::{
+use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
     args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
     instruction::MagicBlockInstruction,
@@ -163,7 +163,7 @@ fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
         ..Default::default()
     };
     Instruction::new_with_wincode(
-        magicblock_magic_program_api::id(),
+        magic_program_api::id(),
         &MagicBlockInstruction::ScheduleIntentBundle(args),
         vec![
             // MagicRoot vouches for declared action signers during native CPI.

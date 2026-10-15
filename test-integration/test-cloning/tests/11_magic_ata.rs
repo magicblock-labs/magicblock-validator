@@ -3,18 +3,18 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dlp_api::pda::{
+use delegation_program_api::pda::{
     delegate_buffer_pda_from_delegated_account_and_owner_program,
     delegation_metadata_pda_from_delegated_account, delegation_record_pda_from_delegated_account,
 };
 use integration_test_tools::{
     init_logger, loaded_accounts::DLP_TEST_AUTHORITY_BYTES, IntegrationTestContext,
 };
-use magicblock_core::token_programs::{
+use magic_program_api::{instruction::MagicBlockInstruction, ID as MAGIC_PROGRAM_ID};
+use mbv_core::token_programs::{
     derive_ata, derive_eata, ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID,
     MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID,
 };
-use magicblock_magic_program_api::{instruction::MagicBlockInstruction, ID as MAGIC_PROGRAM_ID};
 use solana_commitment_config::CommitmentConfig;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -172,7 +172,7 @@ fn delegate_eata_ix(payer: Pubkey, user: Pubkey, mint: Pubkey, validator: Pubkey
             AccountMeta::new(delegation_buffer, false),
             AccountMeta::new(delegation_record, false),
             AccountMeta::new(delegation_metadata, false),
-            AccountMeta::new_readonly(dlp_api::id(), false),
+            AccountMeta::new_readonly(delegation_program_api::id(), false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
         data,
@@ -249,7 +249,7 @@ fn withdraw_through_delegated_shuttle_ix(
             AccountMeta::new(delegation_buffer, false),
             AccountMeta::new(delegation_record, false),
             AccountMeta::new(delegation_metadata, false),
-            AccountMeta::new_readonly(dlp_api::id(), false),
+            AccountMeta::new_readonly(delegation_program_api::id(), false),
             AccountMeta::new_readonly(ASSOCIATED_TOKEN_PROGRAM_ID, false),
             AccountMeta::new_readonly(system_program::id(), false),
             AccountMeta::new(owner_token, false),
@@ -808,7 +808,7 @@ fn test_magic_ata_transparent_withdrawal() {
         .unwrap()
         .value
         .expect("destination eATA must exist after transparent withdrawal");
-    assert_eq!(destination_eata.owner, dlp_api::id());
+    assert_eq!(destination_eata.owner, delegation_program_api::id());
 }
 
 /// Initializes + funds the espl rent PDA (it fronts the shuttle accounts'
@@ -840,12 +840,14 @@ fn fund_withdrawal_sponsors(ctx: &IntegrationTestContext, fee_payer: &Keypair) {
         &rent_pda,
         100_000_000,
     ));
-    setup_ixs.push(dlp_api::instruction_builder::top_up_ephemeral_balance(
-        fee_payer.pubkey(),
-        fee_payer.pubkey(),
-        Some(10_000_000),
-        Some(255),
-    ));
+    setup_ixs.push(
+        delegation_program_api::instruction_builder::top_up_ephemeral_balance(
+            fee_payer.pubkey(),
+            fee_payer.pubkey(),
+            Some(10_000_000),
+            Some(255),
+        ),
+    );
     let mut setup_tx = Transaction::new_with_payer(&setup_ixs, Some(&fee_payer.pubkey()));
     let (_sig, confirmed) =
         ctx.send_and_confirm_transaction_chain(&mut setup_tx, &[fee_payer]).unwrap();

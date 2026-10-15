@@ -7,7 +7,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_config::{config::LoadableProgram, types::BindAddress, LeaderParams};
+use config::{config::LoadableProgram, types::BindAddress, LeaderParams};
 use rand::{thread_rng, Rng};
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -135,7 +135,7 @@ pub fn start_test_validator_with_config(
             "magic-fee-vault.json".to_string(),
         ),
         (
-            dlp_api::pda::delegation_record_pda_from_delegated_account(
+            delegation_program_api::pda::delegation_record_pda_from_delegated_account(
                 &loaded_accounts.magic_fee_vault(),
             )
             .to_string(),

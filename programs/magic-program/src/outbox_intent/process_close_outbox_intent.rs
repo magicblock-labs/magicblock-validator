@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::verify_outbox_intent_pda;
-use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+use magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+use mbv_core::intent::outbox::verify_outbox_intent_pda;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -127,11 +127,11 @@ fn close_outbox_ephemeral_account(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
-    use magicblock_magic_program_api::{
+    use magic_program_api::{
         EPHEMERAL_VAULT_PUBKEY,
         outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
     };
+    use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_hash::Hash;
     use solana_instruction::{Instruction, error::InstructionError};

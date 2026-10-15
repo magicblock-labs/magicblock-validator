@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use magicblock_config::consts::HEALTHCHECK_ACCOUNT_PUBKEY;
-use magicblock_magic_program_api as magic_program;
-use magicblock_program::MagicContext;
+use config::consts::HEALTHCHECK_ACCOUNT_PUBKEY;
+use magic_program_api as magic_program;
+use program::MagicContext;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_program_option::COption;

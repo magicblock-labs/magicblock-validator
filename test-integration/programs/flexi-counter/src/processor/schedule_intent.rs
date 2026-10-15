@@ -6,7 +6,7 @@ use ephemeral_rollups_sdk::{
     },
     ActionArgs, ShortAccountMeta,
 };
-use magicblock_magic_program_api::{
+use magic_program_api::{
     args::{CommitTypeArgs, MagicIntentBundleArgs},
     instruction::MagicBlockInstruction,
 };

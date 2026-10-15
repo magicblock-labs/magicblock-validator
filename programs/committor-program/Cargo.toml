@@ -9,7 +9,7 @@ version.workspace = true
 
 [dependencies]
 borsh = { workspace = true }
-magicblock-committor-interface = { workspace = true }
+committor-interface = { workspace = true }
 solana-account-info = { workspace = true }
 solana-program = { workspace = true }
 solana-pubkey = { workspace = true }

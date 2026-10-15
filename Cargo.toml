@@ -16,7 +16,7 @@ members = [
     "chainlink",
     "programs/committor-interface",
     "programs/committor-program",
-    "committor-service",
+    "committor",
     "config",
     "core",
     "ledger",
@@ -63,23 +63,23 @@ unwrap_used = "warn"
 wildcard_dependencies = "deny"
 
 [workspace.dependencies]
-magicblock-aml = { path = "aml" }
-magicblock-aperture = { path = "aperture" }
-magicblock-chainlink = { path = "chainlink" }
-magicblock-committor-interface = { path = "programs/committor-interface" }
-magicblock-committor-service = { path = "committor-service" }
-magicblock-config = { path = "config" }
-magicblock-core = { path = "core" }
-magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de" }
-magicblock-ledger-deprecated = { path = "ledger" }
-magicblock-magic-program-api = { path = "programs/magic-interface" }
-magicblock-metrics = { path = "metrics" }
-magicblock-program = { path = "programs/magic-program" }
-magicblock-rpc-client = { path = "rpc-client" }
-magicblock-runtime = { path = "runtime" }
-magicblock-services = { path = "services" }
-magicblock-table-mania = { path = "table-mania" }
-magicblock-task-scheduler = { path = "task-scheduler" }
+aml = { package = "magicblock-aml", path = "aml" }
+aperture = { package = "magicblock-aperture", path = "aperture" }
+chainlink = { package = "magicblock-chainlink", path = "chainlink" }
+committor-interface = { package = "magicblock-committor-interface", path = "programs/committor-interface" }
+committor = { package = "magicblock-committor-service", path = "committor" }
+config = { package = "magicblock-config", path = "config" }
+mbv-core = { package = "magicblock-core", path = "core" }
+delegation-program-api = { package = "magicblock-delegation-program-api", git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de" }
+ledger-deprecated = { package = "magicblock-ledger-deprecated", path = "ledger" }
+magic-program-api = { package = "magicblock-magic-program-api", path = "programs/magic-interface" }
+metrics = { package = "magicblock-metrics", path = "metrics" }
+program = { package = "magicblock-program", path = "programs/magic-program" }
+rpc-client = { package = "magicblock-rpc-client", path = "rpc-client" }
+runtime = { package = "magicblock-runtime", path = "runtime" }
+services = { package = "magicblock-services", path = "services" }
+table-mania = { package = "magicblock-table-mania", path = "table-mania" }
+task-scheduler = { package = "magicblock-task-scheduler", path = "task-scheduler" }
 
 accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.14.3" }
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", tag = "0.14.3" }

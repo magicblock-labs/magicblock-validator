@@ -4,9 +4,9 @@ mod expression;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
+use config::{consts::HEALTHCHECK_ACCOUNT_PUBKEY, types::Remote};
 use futures_util::Stream;
 use humantime::re::humantime as ht;
-use magicblock_config::{consts::HEALTHCHECK_ACCOUNT_PUBKEY, types::Remote};
 use nucleus::metrics::EventTimer;
 use serde::Deserialize;
 use solana_commitment_config::CommitmentConfig;

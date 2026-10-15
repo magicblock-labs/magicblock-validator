@@ -4,8 +4,8 @@ use std::{sync::Arc, time::Duration};
 
 use anyhow::{Context, Result};
 use clap::{Args as ClapArgs, Subcommand};
+use config::LeaderParams;
 use isocountry::CountryCode as IsoCountryCode;
-use magicblock_config::LeaderParams;
 use mdp::state::{
     features::FeaturesSet,
     record::{CountryCode, ErRecord},

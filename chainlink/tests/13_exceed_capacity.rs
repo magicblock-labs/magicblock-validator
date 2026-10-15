@@ -19,7 +19,7 @@ async fn delegated_account_survives_readonly_cache_pressure() {
         delegated,
         Account {
             lamports: 1_000_000,
-            owner: dlp_api::id(),
+            owner: delegation_program_api::id(),
             ..Default::default()
         },
     );

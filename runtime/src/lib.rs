@@ -4,9 +4,9 @@ mod accounts;
 
 use std::{collections::HashMap, fs, path::PathBuf};
 
+use config::config::{EngineConfig, LoadableProgram};
 use keeper::builder::KeeperBuilder;
-use magicblock_config::config::{EngineConfig, LoadableProgram};
-use magicblock_program::magicblock_processor::{
+use program::magicblock_processor::{
     CallbackEntrypoint, Entrypoint, EphemeralSystemEntrypoint, OutboxIntentEntrypoint,
 };
 use solana_program_runtime::{
@@ -50,23 +50,20 @@ fn load_programs(programs: &[LoadableProgram]) -> Result<HashMap<Pubkey, Vec<u8>
 
 fn builtins() -> HashMap<Pubkey, BuiltinFunctionWithContext> {
     let mut builtins = HashMap::<Pubkey, BuiltinFunctionWithContext>::new();
+    builtins.insert(program::ID, (Entrypoint::vm, Entrypoint::codegen));
     builtins.insert(
-        magicblock_program::ID,
-        (Entrypoint::vm, Entrypoint::codegen),
-    );
-    builtins.insert(
-        magicblock_program::CALLBACK_PROGRAM_ID,
+        program::CALLBACK_PROGRAM_ID,
         (CallbackEntrypoint::vm, CallbackEntrypoint::codegen),
     );
     builtins.insert(
-        magicblock_program::EPHEMERAL_SYSTEM_PROGRAM_ID,
+        program::EPHEMERAL_SYSTEM_PROGRAM_ID,
         (
             EphemeralSystemEntrypoint::vm,
             EphemeralSystemEntrypoint::codegen,
         ),
     );
     builtins.insert(
-        magicblock_program::OUTBOX_INTENT_PROGRAM_ID,
+        program::OUTBOX_INTENT_PROGRAM_ID,
         (OutboxIntentEntrypoint::vm, OutboxIntentEntrypoint::codegen),
     );
     builtins

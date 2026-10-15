@@ -1,4 +1,4 @@
-pub use magicblock_core::token_programs::{
+pub use mbv_core::token_programs::{
     EATA_PROGRAM_ID, EphemeralAta, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, derive_ata,
     derive_ata_with_token_program, derive_eata,
 };
@@ -89,7 +89,7 @@ fn create_ata_account_with_token_program(
 }
 
 pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate: bool) -> Account {
-    let bump = magicblock_core::token_programs::try_derive_eata_address_and_bump(owner, mint)
+    let bump = mbv_core::token_programs::try_derive_eata_address_and_bump(owner, mint)
         .expect("derive eATA")
         .1;
     let eata_account: Account = EphemeralAta {
@@ -100,7 +100,7 @@ pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate:
     }
     .into();
 
-    let account_owner = if delegate { dlp_api::id() } else { EATA_PROGRAM_ID };
+    let account_owner = if delegate { delegation_program_api::id() } else { EATA_PROGRAM_ID };
 
     Account {
         owner: account_owner,
@@ -110,4 +110,4 @@ pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate:
     }
 }
 
-// Reuse EphemeralAta definition from magicblock_core::token_programs
+// Reuse EphemeralAta definition from mbv_core::token_programs

@@ -6,11 +6,9 @@ use std::{
     time::Instant,
 };
 
-use magicblock_metrics::metrics;
-use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicblockRpcClient,
-};
+use metrics::metrics;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use rpc_client::{MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicblockRpcClient};
 use solana_address_lookup_table_interface::{
     self as alt,
     state::{LOOKUP_TABLE_MAX_ADDRESSES, LookupTableMeta},
