@@ -1,10 +1,7 @@
 use engine::Engine;
+use parking_lot::Mutex;
 use solana_rpc_client_api::response::RpcPerfSample;
-use std::{
-    collections::VecDeque,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{collections::VecDeque, sync::Arc, time::Duration};
 
 use crate::{RpcResult, account::Accounts, history::History, requests::payload::JsonBody};
 

@@ -54,13 +54,13 @@ base64 = { workspace = true }
 bs58 = { workspace = true }
 json = { workspace = true }
 keeper = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
-parking_lot = { workspace = true }
 # Enable the engine's black-box test harness (`engine::testkit::TestEngine`)
 # only for aperture's own tests; downstream lib builds never see this feature.
 engine = { workspace = true, features = ["testkit"] }
