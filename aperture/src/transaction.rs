@@ -14,8 +14,8 @@ use ledger::{
 };
 use solana_hash::Hash;
 use solana_message::{
-    SimpleAddressLoader, compiled_instruction::CompiledInstruction,
-    inner_instruction::InnerInstructionsList, v0::LoadedAddresses, v1::V1_PREFIX,
+    SimpleAddressLoader, compiled_instruction::CompiledInstruction, inner_instruction,
+    v0::LoadedAddresses, v1::V1_PREFIX,
 };
 use solana_pubkey::Pubkey;
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
@@ -78,9 +78,9 @@ fn transaction_meta(execution: Execution) -> TransactionStatusMeta {
     }
 }
 
-/// Moves live metadata into Geyser output, retaining loaded accounts for account delivery.
+/// Projects shared live metadata into owned Geyser output without consuming recordings.
 pub(crate) fn processed_transaction(
-    transaction: &mut FullTransaction,
+    transaction: &FullTransaction,
 ) -> Result<(SanitizedTransaction, TransactionStatusMeta), RpcError> {
     let versioned = deserialize_transaction(
         transaction.transaction.inner_data(),
@@ -96,33 +96,35 @@ pub(crate) fn processed_transaction(
     .map_err(|error| RpcError::internal(format!("invalid processed transaction: {error}")))?;
 
     let status = transaction.execution.result.flattened_result();
-    let Some(execution) = transaction.execution.result.as_mut().ok() else {
+    let Some(execution) = transaction.execution.result.as_ref().ok() else {
         return Ok((
             sanitized,
             TransactionStatusMeta { status, ..Default::default() },
         ));
     };
-    // Only movable metadata is consumed; loaded account images remain available.
-    let details = &mut execution.execution_details;
+    let details = &execution.execution_details;
     let (pre_balances, post_balances) = transaction
         .execution
         .balances
-        .take()
+        .clone()
         .map(|balances| balances.into_vecs())
         .unwrap_or_default();
-    let inner_instructions = details.inner_instructions.take().map(live_inner_instructions);
+    let inner_instructions = details
+        .inner_instructions
+        .as_ref()
+        .map(|groups| live_inner_instructions(groups.iter().map(|group| group.iter().cloned())));
     let meta = TransactionStatusMeta {
         status,
         fee: execution.loaded_transaction.fee_details.total_fee(),
         pre_balances,
         post_balances,
         inner_instructions,
-        log_messages: details.log_messages.take().map(Arc::unwrap_or_clone),
+        log_messages: details.log_messages.as_deref().cloned(),
         pre_token_balances: None,
         post_token_balances: None,
         rewards: None,
         loaded_addresses: LoadedAddresses::default(),
-        return_data: details.return_data.take(),
+        return_data: details.return_data.clone(),
         compute_units_consumed: Some(details.executed_units),
         cost_units: None,
     };
@@ -176,8 +178,10 @@ fn inner_instructions(groups: Vec<Cpis>) -> Vec<InnerInstructions> {
     }))
 }
 
-/// Adapts owned SVM CPI records without an intermediate metadata schema.
-pub(crate) fn live_inner_instructions(groups: InnerInstructionsList) -> Vec<InnerInstructions> {
+/// Adapts SVM CPI records directly into their output groups.
+pub(crate) fn live_inner_instructions(
+    groups: impl IntoIterator<Item = impl IntoIterator<Item = inner_instruction::InnerInstruction>>,
+) -> Vec<InnerInstructions> {
     group_inner_instructions(groups.into_iter().map(|group| {
         group.into_iter().map(|instruction| InnerInstruction {
             instruction: instruction.instruction,

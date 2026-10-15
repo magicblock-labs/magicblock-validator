@@ -1,3 +1,5 @@
+//! One-shot base-chain fee claims using the leader's configured identity.
+
 use anyhow::{Context, Result};
 use config::LeaderParams;
 use delegation_program_api::instruction_builder::validator_claim_fees;
@@ -7,8 +9,11 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use tracing::info;
 
+/// Vault-balance floor for submitting a fee-paying claim transaction.
 const MIN_CLAIMABLE_LAMPORTS: u64 = 100_000_000;
 
+/// Claims and confirms once, with the leader identity as authority, payer, and recipient.
+/// A vault balance at or below the floor is a successful no-op, not a retry condition.
 pub(super) async fn run(config: LeaderParams) -> Result<()> {
     let rpc =
         RpcClient::new_with_commitment(config.rpc_url().to_owned(), CommitmentConfig::confirmed());
@@ -22,13 +27,7 @@ pub(super) async fn run(config: LeaderParams) -> Result<()> {
         .await
         .with_context(|| format!("failed to read fee vault {vault}"))?;
     if balance <= MIN_CLAIMABLE_LAMPORTS {
-        info!(
-            %validator,
-            %vault,
-            balance,
-            threshold = MIN_CLAIMABLE_LAMPORTS,
-            "Skipped fee claim at or below threshold"
-        );
+        info!(balance, "Fee claim skipped: balance at or below threshold");
         return Ok(());
     }
 
@@ -45,6 +44,6 @@ pub(super) async fn run(config: LeaderParams) -> Result<()> {
         .send_and_confirm_transaction(&transaction)
         .await
         .with_context(|| format!("failed to send and confirm fee claim for {validator}"))?;
-    info!(%validator, %vault, %signature, "Confirmed fee claim");
+    info!(%signature, "Fee claim confirmed");
     Ok(())
 }

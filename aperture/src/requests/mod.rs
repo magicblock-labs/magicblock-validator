@@ -118,6 +118,8 @@ pub(crate) enum JsonRpcWsMethod {
     SignatureUnsubscribe,
     SlotSubscribe,
     SlotUnsubscribe,
+    TransactionFailureSubscribe,
+    TransactionFailureUnsubscribe,
     #[serde(other)]
     MethodNotFound,
 }
@@ -189,6 +191,8 @@ impl JsonRpcWsMethod {
             Self::SignatureUnsubscribe => "signatureUnsubscribe",
             Self::SlotSubscribe => "slotSubscribe",
             Self::SlotUnsubscribe => "slotUnsubscribe",
+            Self::TransactionFailureSubscribe => "transactionFailureSubscribe",
+            Self::TransactionFailureUnsubscribe => "transactionFailureUnsubscribe",
             Self::MethodNotFound => "methodNotFound",
         }
     }
