@@ -1,7 +1,7 @@
 use engine::Engine;
 use ledger::request::{AccountSignaturesParams, BlockDetails, BlockParams, BlockResponse};
-use magicblock_core::Slot;
-use magicblock_ledger_deprecated::{Ledger, errors::LedgerError};
+use ledger_deprecated::{Ledger, errors::LedgerError};
+use mbv_core::Slot;
 use solana_hash::Hash;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;

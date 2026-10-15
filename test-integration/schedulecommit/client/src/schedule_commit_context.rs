@@ -120,7 +120,7 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to fetch ephemeral payer account")?;
         trace!("Payer Ephem Account: {:#?}", payer_ephem_on_chain);
         assert!(payer_ephem_on_chain.lamports >= lamports / 2,);
-        assert_eq!(payer_ephem_on_chain.owner, dlp_api::id());
+        assert_eq!(payer_ephem_on_chain.owner, delegation_program_api::id());
 
         let payer_chain_on_ephem = ictx.fetch_ephem_account(payer_chain.pubkey())?;
         trace!("Payer Chain Account on Ephem: {:#?}", payer_chain_on_ephem);

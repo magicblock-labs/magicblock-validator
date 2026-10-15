@@ -8,9 +8,9 @@ mod magic_sys_adapter;
 use std::process::ExitCode;
 
 use anyhow::{Context, Result};
+use config::{ConfigError, LeaderParams};
 use leader::Leader;
-use magicblock_config::{ConfigError, LeaderParams};
-use magicblock_core::version::Version;
+use mbv_core::version::Version;
 use nucleus::shutdown::ShutdownReason;
 use solana_signer::Signer;
 use tokio::runtime::Builder;
@@ -20,7 +20,7 @@ use tracing::{error, info, instrument};
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 fn init_logger() {
-    use magicblock_core::logger::{LogStyle, LoggingConfig, init_with_config};
+    use mbv_core::logger::{LogStyle, LoggingConfig, init_with_config};
     init_with_config(LoggingConfig { style: LogStyle::from_env() });
 }
 
@@ -95,7 +95,7 @@ fn print_startup(rpc_url: &str, ws_url: &str, remote_rpc_url: &str, identity: &s
         "🧙 MagicBlock leader is running! 🪄✦".to_owned(),
         format!(
             "🏷️ Version: {} (Git: {})",
-            version.magicblock_core, version.git_version
+            version.core, version.git_version
         ),
         "-----------------------------------".to_owned(),
         format!("📡 RPC endpoint:       {rpc_url}"),

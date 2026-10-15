@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use magicblock_metrics::metrics::{
+use ::metrics::metrics::{
     ChainlinkPendingFetchLayer, ChainlinkPendingFetchOutcome,
     chainlink_pending_fetch_accounts_value, chainlink_pending_fetch_waiters_gauge_value,
     chainlink_pending_fetch_waiters_value, chainlink_subscription_cleanup_accounts_value,

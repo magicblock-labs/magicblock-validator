@@ -77,7 +77,7 @@ to Solana.
 
 Rollup execution and base-chain settlement are separate steps. Start with the
 [developer documentation](https://docs.magicblock.gg) for the application flow;
-the [settlement guide](committor-service/README.md) explains completion
+the [settlement guide](committor/README.md) explains completion
 and retry boundaries.
 
 ## 🚀 Try it locally
@@ -116,7 +116,7 @@ start with the part of the application flow that interests you:
 
 - **Bring accounts into the rollup:** [Chainlink](chainlink/README.md).
 - **Submit transactions and follow updates:** [Aperture](aperture/README.md).
-- **Commit state back to Solana:** [Committor](committor-service/README.md).
+- **Commit state back to Solana:** [Committor](committor/README.md).
 - **Run recurring actions:** [task scheduler](task-scheduler/README.md).
 - **Build rollup instructions:** [native programs](programs/magic-program/README.md)
   and the [instruction API](programs/magic-interface/README.md).

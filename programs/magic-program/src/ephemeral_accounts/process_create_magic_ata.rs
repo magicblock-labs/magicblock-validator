@@ -1,4 +1,4 @@
-use magicblock_core::token_programs::{
+use mbv_core::token_programs::{
     MAGIC_ATA_CLOSE_AUTHORITY, TOKEN_PROGRAM_ID, derive_ata_with_token_program,
     is_supported_token_program, try_get_base_ata_mirror_info, try_get_magic_ata_info,
     try_remap_ata_to_eata,
@@ -304,8 +304,8 @@ fn matches_existing_ata(
 
 #[cfg(test)]
 mod tests {
-    use magicblock_core::token_programs::TOKEN_2022_PROGRAM_ID;
-    use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+    use magic_program_api::instruction::MagicBlockInstruction;
+    use mbv_core::token_programs::TOKEN_2022_PROGRAM_ID;
     use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
     use solana_instruction::{AccountMeta, Instruction};
     use solana_sdk_ids::{native_loader, system_program};

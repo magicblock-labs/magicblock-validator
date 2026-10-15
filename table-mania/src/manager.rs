@@ -7,8 +7,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use magicblock_metrics::metrics;
-use magicblock_rpc_client::MagicblockRpcClient;
+use metrics::metrics;
+use rpc_client::MagicblockRpcClient;
 use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -940,7 +940,7 @@ fn randomize_lookup_table_slot() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use magicblock_rpc_client::MagicBlockRpcClientError;
+    use rpc_client::MagicBlockRpcClientError;
     use solana_instruction::error::InstructionError;
     use solana_signature::Signature;
     use solana_transaction_error::TransactionError;

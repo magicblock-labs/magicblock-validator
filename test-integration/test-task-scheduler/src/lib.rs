@@ -6,6 +6,11 @@ use std::{
 };
 
 use cleanass::assert;
+use config::{
+    config::LoadableProgram,
+    types::{network::Remote, SerdePubkey},
+    LeaderParams,
+};
 use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
@@ -16,12 +21,7 @@ use integration_test_tools::{
     },
     IntegrationTestContext,
 };
-use magicblock_config::{
-    config::LoadableProgram,
-    types::{network::Remote, SerdePubkey},
-    LeaderParams,
-};
-use magicblock_program::{args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey};
+use program::{args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey};
 use program_schedulecommit::MainAccount;
 use solana_sdk::{
     instruction::Instruction, signature::Keypair, signer::Signer, transaction::Transaction,

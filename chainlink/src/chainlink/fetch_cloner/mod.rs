@@ -11,23 +11,23 @@ use std::{
     time::Duration,
 };
 
-use dlp_api::{
+use ::metrics::metrics::{
+    self, AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason, ChainlinkCloneIntent,
+    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
+    ChainlinkEmptyPlaceholderStage, Outcome,
+};
+use aml::RiskService;
+use config::config::{AllowedProgram, AmlCheckStrategy};
+use delegation_program_api::{
     pda::delegation_record_pda_from_delegated_account,
     state::{DelegationRecord, UndelegationRequest, discriminator::AccountDiscriminator},
 };
 use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;
 use lru::LruCache;
-use magicblock_aml::RiskService;
-use magicblock_config::config::{AllowedProgram, AmlCheckStrategy};
-use magicblock_core::token_programs::{
+use mbv_core::token_programs::{
     ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
     normalize_native_token_account_for_local_clone,
-};
-use magicblock_metrics::metrics::{
-    self, AccountFetchContext, AccountFetchEntrypoint, AccountFetchReason, ChainlinkCloneIntent,
-    ChainlinkCloneOutcome, ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
-    ChainlinkEmptyPlaceholderStage, Outcome,
 };
 use parking_lot::Mutex as PlMutex;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount, StateFlags};
@@ -394,9 +394,9 @@ const RISK_RELEVANT_PROGRAMS: [Pubkey; 6] = [
     TOKEN_PROGRAM_ID,
     TOKEN_2022_PROGRAM_ID,
     EATA_PROGRAM_ID,
-    magicblock_magic_program_api::ID,
+    magic_program_api::ID,
     solana_sdk_ids::system_program::ID,
-    magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+    magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
 ];
 
 /// Decides whether the configured [`AmlCheckStrategy`] requires risk checking
@@ -649,7 +649,7 @@ where
         };
         let accounts = self
             .remote_account_provider
-            .get_program_accounts_with_config(&dlp_api::id(), config)
+            .get_program_accounts_with_config(&delegation_program_api::id(), config)
             .await?;
 
         let mut requests = Vec::with_capacity(accounts.len());
@@ -1183,12 +1183,14 @@ where
         // named separately, or a stale confinement would never be normalized.
         let claims_delegation = request.account.read().is(AccountMode::Delegated)
             || request.account.read().is(AccountMode::Magic);
-        if request.account.read().owner() != dlp_api::id() || !claims_delegation {
+        if request.account.read().owner() != delegation_program_api::id() || !claims_delegation {
             return Ok(());
         }
 
         if request.pubkey
-            == dlp_api::pda::magic_fee_vault_pda_from_validator(&self.validator_pubkey)
+            == delegation_program_api::pda::magic_fee_vault_pda_from_validator(
+                &self.validator_pubkey,
+            )
         {
             return Ok(());
         }
@@ -1276,8 +1278,8 @@ where
         update: ForwardedSubscriptionUpdate,
     ) {
         let fresh_update_account = update.account.fresh_account();
-        let is_dlp_owned_update =
-            fresh_update_account.is_some_and(|account| account.owner() == &dlp_api::id());
+        let is_dlp_owned_update = fresh_update_account
+            .is_some_and(|account| account.owner() == &delegation_program_api::id());
         let is_internal_dlp_update = fresh_update_account
             .is_some_and(|account| is_internal_dlp_account_data(account.data()));
 
@@ -1554,7 +1556,7 @@ where
                     }
                     CompletedUndelegationSlotAction::None => {}
                 }
-            } else if owner == dlp_api::id() {
+            } else if owner == delegation_program_api::id() {
                 debug!(
                     pubkey = %pubkey,
                     "Received update for account owned by delegation program but not marked as undelegating"
@@ -1985,7 +1987,7 @@ where
             return false;
         };
 
-        if account.owner() != &dlp_api::id() {
+        if account.owner() != &delegation_program_api::id() {
             return false;
         }
 
@@ -3171,7 +3173,7 @@ where
                         ))
                     } else {
                         Ok((
-                            account.owner().eq(&dlp_api::id()),
+                            account.owner().eq(&delegation_program_api::id()),
                             account.is(AccountMode::Delegated),
                             *account.owner(),
                         ))

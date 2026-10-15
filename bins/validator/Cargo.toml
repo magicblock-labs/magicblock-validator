@@ -12,18 +12,18 @@ version.workspace = true
 anyhow = { workspace = true }
 bincode = { workspace = true }
 engine = { workspace = true }
-magicblock-aperture = { workspace = true }
-magicblock-chainlink = { workspace = true }
-magicblock-committor-service = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
-magicblock-ledger-deprecated = { workspace = true }
-magicblock-metrics = { workspace = true }
-magicblock-program = { workspace = true }
-magicblock-runtime = { workspace = true }
-magicblock-services = { workspace = true }
-magicblock-task-scheduler = { workspace = true }
+aperture = { workspace = true }
+chainlink = { workspace = true }
+committor = { workspace = true }
+config = { workspace = true }
+mbv-core = { workspace = true }
+delegation-program-api = { workspace = true }
+ledger-deprecated = { workspace = true }
+metrics = { workspace = true }
+program = { workspace = true }
+runtime = { workspace = true }
+services = { workspace = true }
+task-scheduler = { workspace = true }
 mimalloc = { workspace = true }
 nucleus = { workspace = true }
 num_cpus = { workspace = true }
@@ -48,7 +48,7 @@ console-subscriber = { workspace = true, optional = true }
 
 [features]
 default = []
-tokio-console = ["console-subscriber", "magicblock-core/tokio-console", "tokio/tracing"]
+tokio-console = ["console-subscriber", "mbv-core/tokio-console", "tokio/tracing"]
 
 [lints]
 workspace = true

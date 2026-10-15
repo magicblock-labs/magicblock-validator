@@ -1,5 +1,5 @@
 use ledger::request::BlockDetails;
-use magicblock_core::Slot;
+use mbv_core::Slot;
 use solana_rpc_client_api::config::RpcBlockConfig;
 use solana_transaction_status::{BlockEncodingOptions, TransactionDetails, UiTransactionEncoding};
 

@@ -1,15 +1,15 @@
 use std::str::FromStr;
 
+use config::{
+    config::{AllowedProgram, ChainLinkConfig},
+    types::network::Remote,
+    LeaderParams,
+};
 use integration_test_tools::{
     expect, expect_err, init_logger,
     loaded_accounts::LoadedAccounts,
     validator::{cleanup, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
-};
-use magicblock_config::{
-    config::{AllowedProgram, ChainLinkConfig},
-    types::network::Remote,
-    LeaderParams,
 };
 use serial_test::file_serial;
 use solana_sdk::pubkey::Pubkey;

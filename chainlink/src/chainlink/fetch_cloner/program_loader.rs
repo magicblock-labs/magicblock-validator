@@ -1,8 +1,6 @@
 use std::time::{Duration, Instant};
 
-use magicblock_metrics::metrics::{
-    AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
-};
+use ::metrics::metrics::{AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind};
 use solana_account::AccountBuilder;
 use solana_loader_v3_interface::state::UpgradeableLoaderState;
 use solana_pubkey::Pubkey;

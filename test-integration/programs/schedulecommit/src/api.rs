@@ -1,4 +1,4 @@
-use dlp_api::{
+use delegation_program_api::{
     args::{DelegateArgs, DelegateEphemeralBalanceArgs},
     pda::{
         delegation_metadata_pda_from_delegated_account,
@@ -88,13 +88,13 @@ pub fn grow_order_book_instruction(
 }
 
 pub fn init_payer_escrow(payer: Pubkey, escrow_authority: Pubkey) -> [Instruction; 2] {
-    let top_up_ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
+    let top_up_ix = delegation_program_api::instruction_builder::top_up_ephemeral_balance(
         payer,
         escrow_authority,
         Some(300_000_000),
         Some(0),
     );
-    let delegate_ix = dlp_api::instruction_builder::delegate_ephemeral_balance(
+    let delegate_ix = delegation_program_api::instruction_builder::delegate_ephemeral_balance(
         payer,
         escrow_authority,
         DelegateEphemeralBalanceArgs {
@@ -177,7 +177,7 @@ pub fn request_undelegation_cpi_instruction(
         AccountMeta::new_readonly(delegation_record, false),
         AccountMeta::new(delegation_metadata, false),
         AccountMeta::new_readonly(system_program::id(), false),
-        AccountMeta::new_readonly(dlp_api::id(), false),
+        AccountMeta::new_readonly(delegation_program_api::id(), false),
     ];
 
     Instruction::new_with_borsh(
@@ -243,7 +243,7 @@ pub fn schedule_commit_cpi_with_vault_instruction(
     ];
     if args.has_magic_vault {
         account_metas.push(AccountMeta {
-            pubkey: dlp_api::pda::magic_fee_vault_pda_from_validator(&validator),
+            pubkey: delegation_program_api::pda::magic_fee_vault_pda_from_validator(&validator),
             is_writable: true,
             is_signer: false,
         })
@@ -276,7 +276,8 @@ pub fn schedule_commit_with_vault_and_order_book_instruction(
     args: ScheduleCommitWithOrderBookArgs,
 ) -> Instruction {
     let program_id = crate::id();
-    let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(&validator);
+    let magic_fee_vault =
+        delegation_program_api::pda::magic_fee_vault_pda_from_validator(&validator);
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context_id, false),

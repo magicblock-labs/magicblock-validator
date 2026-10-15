@@ -3,8 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use magicblock_config::config::LedgerConfig;
-use magicblock_ledger_deprecated::{BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, Ledger, LedgerOptions};
+use config::config::LedgerConfig;
+use ledger_deprecated::{BLOCKSTORE_DIRECTORY_ROCKS_LEVEL, Ledger, LedgerOptions};
 use solana_program::clock::Slot;
 use tracing::*;
 

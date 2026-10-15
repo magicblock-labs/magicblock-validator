@@ -326,11 +326,12 @@ impl IntegrationTestContext {
         validator_identity: &Keypair,
     ) -> Result<Pubkey> {
         let validator_pubkey = validator_identity.pubkey();
-        let vault_pubkey = dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+        let vault_pubkey =
+            delegation_program_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
         let record_pubkey = dlp_interface::delegation_record_pubkey(&vault_pubkey);
 
         if self.fetch_chain_account(vault_pubkey).is_err() {
-            let ix = dlp_api::instruction_builder::init_magic_fee_vault(
+            let ix = delegation_program_api::instruction_builder::init_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );
@@ -348,7 +349,7 @@ impl IntegrationTestContext {
         }
 
         if self.fetch_chain_account(record_pubkey).is_err() {
-            let ix = dlp_api::instruction_builder::delegate_magic_fee_vault(
+            let ix = delegation_program_api::instruction_builder::delegate_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );
@@ -568,7 +569,7 @@ impl IntegrationTestContext {
         // 2.Delegate the ephem payer
         let delegated_already = self
             .fetch_chain_account_owner(payer_ephem.pubkey())
-            .map(|owner| owner.eq(&dlp_api::id()))
+            .map(|owner| owner.eq(&delegation_program_api::id()))
             .unwrap_or(false);
         let deleg_sig = if !delegated_already {
             let (deleg_sig, confirmed) = self.delegate_account(payer_chain, payer_ephem)?;

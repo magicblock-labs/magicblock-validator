@@ -1,14 +1,14 @@
 use integration_test_tools::init_logger;
-use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::{
-    find_open_tables, LookupTableRc, TableManiaComputeBudgets, CREATE_AND_EXTEND_TABLE_CUS,
-    DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS, MAX_ENTRIES_AS_PART_OF_EXTEND,
-};
+use rpc_client::MagicblockRpcClient;
 use solana_address_lookup_table_interface::state::LookupTableMeta;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{clock::Slot, native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
+use table_mania::{
+    find_open_tables, LookupTableRc, TableManiaComputeBudgets, CREATE_AND_EXTEND_TABLE_CUS,
+    DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS, MAX_ENTRIES_AS_PART_OF_EXTEND,
+};
 use tracing::*;
 
 mod utils;
@@ -158,7 +158,7 @@ async fn test_create_fetch_and_close_lookup_table() {
 
     #[cfg(feature = "test_table_close")]
     {
-        use magicblock_table_mania::TableManiaComputeBudgets;
+        use table_mania::TableManiaComputeBudgets;
         // Wait for deactivation and close table
         debug!("{}", lookup_table);
 
@@ -237,7 +237,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
 
         #[cfg(feature = "test_table_close")]
         {
-            use magicblock_table_mania::CLOSE_TABLE_CUS;
+            use table_mania::CLOSE_TABLE_CUS;
 
             // Testing close takes a long time and is always the same instruction,
             // thus we only perform this test once

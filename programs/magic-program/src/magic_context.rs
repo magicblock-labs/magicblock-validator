@@ -1,4 +1,4 @@
-use magicblock_magic_program_api::MAGIC_CONTEXT_SIZE;
+use magic_program_api::MAGIC_CONTEXT_SIZE;
 use serde::{Deserialize, Serialize};
 use solana_instruction::error::InstructionError;
 use wincode::{

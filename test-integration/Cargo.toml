@@ -70,17 +70,17 @@ light-hasher = "5"
 light-sdk = "0.23"
 light-sdk-types = "0.23"
 
-magicblock-aml = { path = "../aml" }
-magicblock-chainlink = { path = "../chainlink", features = ["dev-context"] }
-magicblock-committor-interface = { path = "../programs/committor-interface" }
-magicblock-committor-service = { path = "../committor-service" }
-magicblock-config = { path = "../config" }
-magicblock-core = { path = "../core" }
-magicblock-delegation-program-api = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de", default-features = false }
-magicblock-magic-program-api = { path = "../programs/magic-interface" }
-magicblock-program = { path = "../programs/magic-program" }
-magicblock-rpc-client = { path = "../rpc-client" }
-magicblock-table-mania = { path = "../table-mania" }
+aml = { package = "magicblock-aml", path = "../aml" }
+chainlink = { package = "magicblock-chainlink", path = "../chainlink", features = ["dev-context"] }
+committor-interface = { package = "magicblock-committor-interface", path = "../programs/committor-interface" }
+committor = { package = "magicblock-committor-service", path = "../committor" }
+config = { package = "magicblock-config", path = "../config" }
+mbv-core = { package = "magicblock-core", path = "../core" }
+delegation-program-api = { package = "magicblock-delegation-program-api", git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de", default-features = false }
+magic-program-api = { package = "magicblock-magic-program-api", path = "../programs/magic-interface" }
+program = { package = "magicblock-program", path = "../programs/magic-program" }
+rpc-client = { package = "magicblock-rpc-client", path = "../rpc-client" }
+table-mania = { package = "magicblock-table-mania", path = "../table-mania" }
 paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::outbox::verify_outbox_intent_pda;
-use magicblock_magic_program_api::outbox::ExecutionStage;
+use magic_program_api::outbox::ExecutionStage;
+use mbv_core::intent::outbox::verify_outbox_intent_pda;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;

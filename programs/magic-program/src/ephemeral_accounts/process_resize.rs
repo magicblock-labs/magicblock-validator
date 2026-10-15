@@ -1,6 +1,6 @@
 //! Resize ephemeral account instruction processor
 
-use magicblock_magic_program_api::ephemeral;
+use magic_program_api::ephemeral;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;

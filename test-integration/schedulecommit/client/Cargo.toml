@@ -7,7 +7,7 @@ version.workspace = true
 anyhow = { workspace = true }
 borsh = { workspace = true }
 integration-test-tools = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
+delegation-program-api = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 solana-commitment-config = { workspace = true }
 solana-compute-budget-interface = { workspace = true }

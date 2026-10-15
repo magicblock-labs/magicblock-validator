@@ -1,6 +1,6 @@
 use std::ops::Deref;
 
-use magicblock_config::types::network::Remote;
+use config::types::network::Remote;
 use url::Url;
 
 use super::errors::RemoteAccountProviderError;

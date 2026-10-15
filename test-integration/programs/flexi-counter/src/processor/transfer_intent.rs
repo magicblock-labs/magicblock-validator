@@ -3,7 +3,7 @@ use ephemeral_rollups_sdk::{
     ephem::{ActionCallback, CallHandler, FoldableIntentBuilder, MagicIntentBundleBuilder},
     ActionArgs, ShortAccountMeta,
 };
-use magicblock_magic_program_api::pda::CALLBACK_SIGNER;
+use magic_program_api::pda::CALLBACK_SIGNER;
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg, program::invoke,
     program_error::ProgramError,

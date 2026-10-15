@@ -8,7 +8,7 @@ use std::{
 };
 
 use futures_util::StreamExt;
-use magicblock_metrics::metrics;
+use metrics::metrics;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;

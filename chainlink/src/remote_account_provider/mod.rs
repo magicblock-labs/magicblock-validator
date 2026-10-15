@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ::config::config::GrpcConfig;
 pub(crate) use chain_pubsub_client::{
     ChainPubsubClient, ChainPubsubClientImpl, ReconnectableClient, SubscriptionGap,
 };
@@ -14,7 +15,6 @@ pub(crate) use chain_rpc_client::{ChainRpcClient, ChainRpcClientImpl};
 use config::RemoteAccountProviderConfig;
 pub(crate) use errors::{RemoteAccountProviderError, RemoteAccountProviderResult};
 use futures_util::future::{join_all, try_join_all};
-use magicblock_config::config::GrpcConfig;
 use parking_lot::Mutex;
 pub(crate) use remote_account::RemoteAccount;
 pub use remote_account::RemoteAccountUpdateSource;
@@ -58,8 +58,7 @@ pub(crate) mod subscription_reconciler;
 #[cfg(test)]
 mod tests;
 
-pub use endpoint::{Endpoint, Endpoints};
-use magicblock_metrics::{
+use ::metrics::{
     metrics,
     metrics::{
         AccountFetchContext, AccountFetchReason, ChainlinkCompanionFetchKind,
@@ -81,6 +80,7 @@ use magicblock_metrics::{
         set_monitored_accounts_count,
     },
 };
+pub use endpoint::{Endpoint, Endpoints};
 
 use crate::{
     remote_account_provider::{

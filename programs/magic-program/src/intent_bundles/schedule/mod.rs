@@ -7,8 +7,8 @@ pub(crate) mod transaction_scheduler;
 
 use std::sync::Arc;
 
-use magicblock_core::intent::types::CommittedAccount;
-use magicblock_magic_program_api::{MAGIC_CONTEXT_PUBKEY, pda::CALLBACK_SIGNER};
+use magic_program_api::{MAGIC_CONTEXT_PUBKEY, pda::CALLBACK_SIGNER};
+use mbv_core::intent::types::CommittedAccount;
 pub(crate) use process_add_action_callback::process_add_action_callback;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;

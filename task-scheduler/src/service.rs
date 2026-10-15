@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use engine::Engine;
 use hydra_api::{ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral};
-use magicblock_program::args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest};
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
+use program::args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest};
 use solana_account::ReadableAccount;
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_service_shuts_down_on_cancel() {
-        magicblock_core::logger::init_for_tests();
+        mbv_core::logger::init_for_tests();
 
         let (_engine, service) = test_service().await;
         let mut shutdown = ShutdownManager::default();

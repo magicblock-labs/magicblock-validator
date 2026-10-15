@@ -1,7 +1,7 @@
 # magicblock-table-mania
 
 Manages base-chain address lookup tables for
-[settlement transactions](../committor-service/README.md), helping
+[settlement transactions](../committor/README.md), helping
 large transactions fit within message limits.
 
 ## Using it

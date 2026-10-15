@@ -1,4 +1,4 @@
-use dlp_api::pda::ephemeral_balance_pda_from_payer;
+use delegation_program_api::pda::ephemeral_balance_pda_from_payer;
 use integration_test_tools::IntegrationTestContext;
 use program_flexi_counter::{
     delegation_program_id,
@@ -17,7 +17,7 @@ pub(crate) fn setup_payer(ctx: &IntegrationTestContext) -> Keypair {
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL).unwrap();
 
-    let ix = dlp_api::instruction_builder::top_up_ephemeral_balance(
+    let ix = delegation_program_api::instruction_builder::top_up_ephemeral_balance(
         payer.pubkey(),
         payer.pubkey(),
         Some(LAMPORTS_PER_SOL / 2),

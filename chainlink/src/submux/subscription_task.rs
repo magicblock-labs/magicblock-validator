@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures_util::stream::{FuturesUnordered, StreamExt};
-use magicblock_core::logger::log_trace_warn;
+use mbv_core::logger::log_trace_warn;
 use parking_lot::Mutex;
 use solana_pubkey::Pubkey;
 use tokio::sync::oneshot;

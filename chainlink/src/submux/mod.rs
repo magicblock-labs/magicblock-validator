@@ -10,7 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_metrics::metrics;
+use metrics::metrics;
 use parking_lot::{Mutex, MutexGuard};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;

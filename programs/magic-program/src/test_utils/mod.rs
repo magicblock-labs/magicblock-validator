@@ -7,12 +7,12 @@ use std::{
     },
 };
 
-use magicblock_core::{
+use magic_program_api::{
+    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
+};
+use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
-};
-use magicblock_magic_program_api::{
-    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, error::InstructionError};

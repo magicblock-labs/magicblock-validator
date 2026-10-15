@@ -7,7 +7,7 @@ payload and buffer layouts for the [committor program](../committor-program/READ
 
 Use this crate to construct instructions and read or prepare settlement buffers
 without depending on the on-chain processor. The
-[committor service](../../committor-service/README.md) uses these types to deliver
+[committor service](../../committor/README.md) uses these types to deliver
 large payloads in chunks.
 
 Instruction tags, PDA seeds, and serialized state must remain compatible with

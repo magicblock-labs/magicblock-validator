@@ -1,6 +1,6 @@
 #![allow(unused)] // most of these utilities will come in useful later
 
-use magicblock_magic_program_api::args::ShortAccountMeta;
+use magic_program_api::args::ShortAccountMeta;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_log_collector::ic_msg;

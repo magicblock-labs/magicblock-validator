@@ -6,8 +6,8 @@ pub mod cloner;
 pub mod remote_account_provider;
 pub mod submux;
 
+pub use ::metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 pub use chainlink::*;
-pub use magicblock_metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 
 #[cfg(any(test, feature = "dev-context"))]
 pub mod testing;

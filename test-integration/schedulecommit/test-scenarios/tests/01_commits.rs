@@ -58,8 +58,8 @@ fn test_committing_one_account() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -107,8 +107,8 @@ fn test_committing_two_accounts() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -240,8 +240,8 @@ fn schedule_commit_tx(
     let ephem_client = ctx.ephem_client.as_ref().unwrap();
     let ix = schedule_commit_cpi_illegal_owner(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &[player.pubkey()],
         &[player_pda],
         is_undelegate,

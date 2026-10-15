@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use dlp_api::{
+use delegation_program_api::{
     args::{
         EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
         MaybeEncryptedIxData, PostDelegationActions,
@@ -24,7 +24,7 @@ fn remote_account() -> Account {
     Account {
         lamports: 1_000_000,
         data: 10_i64.to_le_bytes().to_vec(),
-        owner: dlp_api::id(),
+        owner: delegation_program_api::id(),
         ..Default::default()
     }
 }
@@ -48,8 +48,12 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 2,
             accounts: vec![
-                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(0, false)),
-                MaybeEncryptedAccountMeta::ClearText(dlp_api::compact::AccountMeta::new(1, false)),
+                MaybeEncryptedAccountMeta::ClearText(
+                    delegation_program_api::compact::AccountMeta::new(0, false),
+                ),
+                MaybeEncryptedAccountMeta::ClearText(
+                    delegation_program_api::compact::AccountMeta::new(1, false),
+                ),
             ],
             data: MaybeEncryptedIxData {
                 prefix: action.data,
@@ -61,7 +65,7 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
     ctx.rpc_client.add_account(
         record_pubkey,
         Account {
-            owner: dlp_api::id(),
+            owner: delegation_program_api::id(),
             data,
             ..Default::default()
         },
@@ -156,7 +160,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
             AccountBuilder::default()
                 .lamports(1_000_000)
                 .data(10_i64.to_le_bytes().to_vec())
-                .owner(dlp_api::id())
+                .owner(delegation_program_api::id())
                 .mode(AccountMode::Transient)
                 .slot(CURRENT_SLOT)
                 .build(),
@@ -197,7 +201,7 @@ async fn older_completion_update_replaces_transient_account() {
             AccountBuilder::default()
                 .lamports(1_000_000)
                 .data(700_i64.to_le_bytes().to_vec())
-                .owner(dlp_api::id())
+                .owner(delegation_program_api::id())
                 .mode(AccountMode::Transient)
                 .slot(local_slot)
                 .build(),

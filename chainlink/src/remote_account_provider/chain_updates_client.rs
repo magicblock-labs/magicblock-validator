@@ -7,7 +7,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use magicblock_config::config::GrpcConfig;
+use config::config::GrpcConfig;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
 use tokio::sync::mpsc;

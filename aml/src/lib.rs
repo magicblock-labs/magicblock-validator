@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
+use config::config::{AmlCheckStrategy, RiskConfig};
 use futures_util::future::try_join_all;
-use magicblock_config::config::{AmlCheckStrategy, RiskConfig};
 use reqwest::{Client, redirect};
 use serde::Deserialize;
 use thiserror::Error;
@@ -221,7 +221,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_addresses_allows_low_risk_addresses() {
-        magicblock_core::logger::init_for_tests();
+        mbv_core::logger::init_for_tests();
         let first = "11111111111111111111111111111111".to_string();
         let second = "33333333333333333333333333333333".to_string();
         let addresses = vec![first.clone(), second.clone()];
@@ -242,7 +242,7 @@ mod tests {
 
     #[tokio::test]
     async fn check_addresses_returns_high_risk_error() {
-        magicblock_core::logger::init_for_tests();
+        mbv_core::logger::init_for_tests();
         let address = "22222222222222222222222222222222".to_string();
         let server = MockRiskServer::start(vec![(address.clone(), 9)], 7, 1).await;
 

@@ -8,7 +8,7 @@ use std::{io, path::PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use magicblock_config::LeaderParams;
+use config::LeaderParams;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]

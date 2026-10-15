@@ -3,38 +3,38 @@ use std::{
     time::Duration,
 };
 
-use engine::Engine;
-use magicblock_aperture::Aperture;
-use magicblock_chainlink::{
+use aperture::Aperture;
+use chainlink::{
     ProdChainlink,
     errors::ChainlinkError,
     remote_account_provider::{Endpoints, config::RemoteAccountProviderConfig},
 };
-use magicblock_committor_service::{
+use committor::{
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT, committor_processor::CommittorProcessor,
     config::ChainConfig, intent_engine::db::AccountsDbIntentBacklog,
     outbox::outbox_client::InternalOutboxClient, service::IntentExecutionService,
 };
-use magicblock_config::LeaderParams;
-use magicblock_metrics::MetricsService;
-use magicblock_program::{init_magic_sys, validator::init_validator_authority};
-use magicblock_runtime::keeper_builder;
-use magicblock_services::{
-    actions_callback_service::ActionsCallbackService,
-    undelegation_request_service::UndelegationRequestService,
-};
-use magicblock_task_scheduler::TaskSchedulerService;
+use config::LeaderParams;
+use engine::Engine;
+use metrics::MetricsService;
 use nucleus::{
     metrics::EventTimer,
     shutdown::{Service, ShutdownManager, ShutdownReason},
 };
+use program::{init_magic_sys, validator::init_validator_authority};
 use replicator::ReplicationDispatcher;
+use runtime::keeper_builder;
+use services::{
+    actions_callback_service::ActionsCallbackService,
+    undelegation_request_service::UndelegationRequestService,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_native_token::LAMPORTS_PER_SOL;
 use solana_program::{rent::Rent, sysvar};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
+use task_scheduler::TaskSchedulerService;
 use tracing::*;
 
 use crate::{
@@ -304,9 +304,12 @@ impl Leader {
     async fn ensure_magic_fee_vault_on_chain(engine: &Engine, rpc_url: String) -> ApiResult<()> {
         let validator_keypair = engine.signer().insecure_clone();
         let validator_pubkey = validator_keypair.pubkey();
-        let vault_pubkey = dlp_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+        let vault_pubkey =
+            delegation_program_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
         let delegation_record_pubkey =
-            dlp_api::pda::delegation_record_pda_from_delegated_account(&vault_pubkey);
+            delegation_program_api::pda::delegation_record_pda_from_delegated_account(
+                &vault_pubkey,
+            );
 
         let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
@@ -322,7 +325,7 @@ impl Leader {
 
         if !vault_exists {
             info!(%validator_pubkey, "Magic fee vault absent, initializing");
-            let ix = dlp_api::instruction_builder::init_magic_fee_vault(
+            let ix = delegation_program_api::instruction_builder::init_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );
@@ -350,7 +353,7 @@ impl Leader {
 
         if !delegation_record_exists {
             info!(%validator_pubkey, "Magic fee vault not delegated, delegating");
-            let ix = dlp_api::instruction_builder::delegate_magic_fee_vault(
+            let ix = delegation_program_api::instruction_builder::delegate_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );

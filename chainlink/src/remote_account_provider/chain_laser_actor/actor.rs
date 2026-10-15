@@ -8,16 +8,16 @@ use std::{
     time::Duration,
 };
 
+use ::metrics::metrics::{
+    inc_account_subscription_account_updates_count, inc_per_program_account_updates_count,
+    inc_program_subscription_account_updates_count,
+};
+use config::config::GrpcConfig;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError,
     grpc::{CommitmentLevel, SubscribeUpdate, subscribe_update::UpdateOneof},
 };
-use magicblock_config::config::GrpcConfig;
-use magicblock_core::logger::log_trace_debug;
-use magicblock_metrics::metrics::{
-    inc_account_subscription_account_updates_count, inc_per_program_account_updates_count,
-    inc_program_subscription_account_updates_count,
-};
+use mbv_core::logger::log_trace_debug;
 use solana_account::Account;
 use solana_commitment_config::CommitmentLevel as SolanaCommitmentLevel;
 use solana_pubkey::Pubkey;
@@ -742,7 +742,8 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
 
         let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program) && owner.eq(&dlp_api::id());
+            || matches!(source, AccountUpdateSource::Program)
+                && owner.eq(&delegation_program_api::id());
         if !should_forward {
             return;
         }

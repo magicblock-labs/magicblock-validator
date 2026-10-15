@@ -12,8 +12,8 @@ pub(crate) fn create_sibling_schedule_cpis_instruction(
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
-    let magic_program = magicblock_magic_program_api::id();
-    let magic_context = magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
+    let magic_program = magic_program_api::id();
+    let magic_context = magic_program_api::MAGIC_CONTEXT_PUBKEY;
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),
@@ -43,8 +43,8 @@ pub(crate) fn create_nested_schedule_cpis_instruction(
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
-    let magic_program = magicblock_magic_program_api::id();
-    let magic_context = magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY;
+    let magic_program = magic_program_api::id();
+    let magic_context = magic_program_api::MAGIC_CONTEXT_PUBKEY;
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),

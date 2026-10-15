@@ -1,7 +1,7 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use magicblock_config::config::GrpcConfig;
+use config::config::GrpcConfig;
 use parking_lot::Mutex;
 use solana_commitment_config::CommitmentLevel;
 use solana_pubkey::{Pubkey, pubkey};

@@ -63,7 +63,9 @@ fn create_schedule_commit_ix(
 }
 
 fn magic_fee_vault(ctx: &ScheduleCommitTestContext) -> Pubkey {
-    dlp_api::pda::magic_fee_vault_pda_from_validator(&ctx.ephem_validator_identity().unwrap())
+    delegation_program_api::pda::magic_fee_vault_pda_from_validator(
+        &ctx.ephem_validator_identity().unwrap(),
+    )
 }
 
 #[test]
@@ -81,8 +83,8 @@ fn test_schedule_commit_directly_with_single_ix() {
 
     let ix = create_schedule_commit_ix(
         payer_chain.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         None, // vault not needed as we commit with non-delegated payer
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
@@ -121,8 +123,8 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
 
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         Some(magic_fee_vault), // Payer is delegated - need vault
         &[payer.pubkey()],
     );
@@ -181,8 +183,8 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         None,
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
@@ -276,8 +278,8 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
 
     let cpi_ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         None,
         players,
         pdas,

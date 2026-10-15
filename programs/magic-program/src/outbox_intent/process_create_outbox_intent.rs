@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use magicblock_magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+use magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;

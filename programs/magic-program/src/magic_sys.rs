@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use lazy_static::lazy_static;
-use magicblock_core::{
+use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };

@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use integration_test_tools::{expect, validator::cleanup};
-use magicblock_task_scheduler::crank_pubkey;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer};
+use task_scheduler::crank_pubkey;
 use test_task_scheduler::{
     cancel_task, schedule_noop_task, setup_validator, wait_for_hydra_crank,
     wait_for_hydra_crank_closed,

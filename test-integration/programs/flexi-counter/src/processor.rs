@@ -9,7 +9,7 @@ use ephemeral_rollups_sdk::{
     cpi::{delegate_account, undelegate_account, DelegateAccounts, DelegateConfig},
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
-use magicblock_magic_program_api::{args::ScheduleTaskArgs, instruction::MagicBlockInstruction};
+use magic_program_api::{args::ScheduleTaskArgs, instruction::MagicBlockInstruction};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,

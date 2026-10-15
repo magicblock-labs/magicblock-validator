@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use magicblock_core::intent::outbox::outbox_intent_pda;
-use magicblock_magic_program_api::{
+use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::ScheduleTaskArgs,
     instruction::{MagicBlockInstruction, OutboxIntentInstruction},
     outbox,
 };
+use mbv_core::intent::outbox::outbox_intent_pda;
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;

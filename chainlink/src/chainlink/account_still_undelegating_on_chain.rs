@@ -1,4 +1,4 @@
-use dlp_api::state::DelegationRecord;
+use delegation_program_api::state::DelegationRecord;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
@@ -62,25 +62,25 @@ pub(crate) fn account_still_undelegating_on_chain(
             // This is a re-delegation to us after undelegation completed.
             // Case (B))
             debug!(pubkey = %pubkey, delegation_slot = delegation_slot, "Undelegation completed, account re-delegated to us");
-            magicblock_metrics::metrics::inc_undelegation_completed();
+            ::metrics::metrics::inc_undelegation_completed();
             false
         }
     } else if let Some(deleg_record) = deleg_record {
         // Account delegated to other (Case C)) -> clone as is
         debug!(pubkey = %pubkey, authority = %validator_auth, delegated_to = %deleg_record.authority, "Account re-delegated to another validator");
-        magicblock_metrics::metrics::inc_undelegation_completed();
+        ::metrics::metrics::inc_undelegation_completed();
         false
     } else {
         // Account no longer delegated (Case A)) -> clone as is
         debug!(pubkey = %pubkey, "Account undelegated and remained so");
-        magicblock_metrics::metrics::inc_undelegation_completed();
+        ::metrics::metrics::inc_undelegation_completed();
         false
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use dlp_api::state::DelegationRecord;
+    use delegation_program_api::state::DelegationRecord;
     use solana_pubkey::Pubkey;
 
     use super::*;

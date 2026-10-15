@@ -4,11 +4,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+use config::config::GrpcConfig;
 use helius_laserstream::grpc::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts, SubscribeRequestFilterSlots,
 };
-use magicblock_config::config::GrpcConfig;
-use magicblock_metrics::metrics;
+use metrics::metrics;
 use solana_pubkey::Pubkey;
 use tokio_stream::StreamMap;
 use tracing::{trace, warn};

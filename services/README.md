@@ -17,7 +17,7 @@ polling does not disable subscriptions. The service checks account state before
 scheduling work and retries transient failures, but the subscription channel is
 not a durable queue.
 
-See the [committor service](../committor-service/README.md) for settlement
+See the [committor service](../committor/README.md) for settlement
 delivery and the [leader configuration](../config.validator.example.toml) for settings.
 
 [Back to workspace](../README.md)

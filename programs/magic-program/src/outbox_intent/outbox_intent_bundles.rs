@@ -1,9 +1,9 @@
 use std::{fmt, ops::Deref};
 
-use magicblock_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
-use magicblock_magic_program_api::outbox::{
+use magic_program_api::outbox::{
     ExecutionStage, PendingTransaction, StageTransitionError, TwoStageProgress,
 };
+use mbv_core::intent::outbox::OUTBOX_INTENT_DISCRIMINATOR;
 use serde::{Deserialize, Serialize};
 use solana_hash::Hash;
 use solana_pubkey::Pubkey;

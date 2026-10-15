@@ -1,8 +1,8 @@
 use std::sync::OnceLock;
 
 use integration_test_tools::{init_logger, run_test};
-use magicblock_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
-use magicblock_program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
+use mbv_core::intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS};
+use program::magic_sys::{COMMIT_LIMIT, COMMIT_LIMIT_ERR};
 use program_schedulecommit::{
     api::{
         init_order_book_instruction, schedule_commit_and_undelegate_cpi_instruction,
@@ -55,8 +55,8 @@ fn get_prepared() -> &'static ScheduleCommitTestContext {
         for n in 0..COMMIT_LIMIT {
             let ix = schedule_commit_cpi_instruction(
                 payer.pubkey(),
-                magicblock_magic_program_api::id(),
-                magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+                magic_program_api::id(),
+                magic_program_api::MAGIC_CONTEXT_PUBKEY,
                 None,
                 &players,
                 &pdas,
@@ -109,8 +109,8 @@ fn test_schedule_commit_fails_at_commit_limit() {
         let committee = &committees[IDX_COMMIT_FAILS];
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &[committee.0.pubkey()],
             &[committee.1],
@@ -153,8 +153,8 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
         let committee = &committees[IDX_UNDELEGATE_SUCCEEDS];
         let ix = schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &[committee.0.pubkey()],
             &[committee.1],
@@ -220,8 +220,8 @@ fn get_vault_prepared() -> &'static ScheduleCommitTestContext {
             let ix = schedule_commit_cpi_with_vault_instruction(
                 payer.pubkey(),
                 *validator_identity,
-                magicblock_magic_program_api::id(),
-                magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+                magic_program_api::id(),
+                magic_program_api::MAGIC_CONTEXT_PUBKEY,
                 &[pda],
                 ScheduleCommitCpiWithVaultArgs {
                     players: vec![player],
@@ -290,8 +290,8 @@ fn test_payer_delegated_vault_absent_error() {
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
             *validator_identity,
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &[committee.1],
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
@@ -345,8 +345,8 @@ fn test_no_fee_charged_within_actual_commit_limit() {
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
             *validator_identity,
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &[committee.1],
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
@@ -400,7 +400,8 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault =
+            delegation_program_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
 
         let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
         let vault_balance_before = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
@@ -408,8 +409,8 @@ fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
         let ix = schedule_commit_cpi_with_vault_instruction(
             payer.pubkey(),
             *validator_identity,
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &[committee.1],
             ScheduleCommitCpiWithVaultArgs {
                 players: vec![committee.0.pubkey()],
@@ -480,7 +481,8 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         } = ctx.fields();
 
         let committee = &committees[IDX_OVER_LIMIT];
-        let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
+        let magic_fee_vault =
+            delegation_program_api::pda::magic_fee_vault_pda_from_validator(validator_identity);
 
         let payer_balance_before = ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
         let vault_balance_before = ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
@@ -504,8 +506,8 @@ fn test_schedule_commit_with_vault_and_order_book_action() {
         let ix = schedule_commit_with_vault_and_order_book_instruction(
             payer.pubkey(),
             *validator_identity,
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             order_book_pda,
             &[committee.1],
             ScheduleCommitWithOrderBookArgs {

@@ -1,4 +1,4 @@
-use magicblock_aml::RiskError;
+use aml::RiskError;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use thiserror::Error;

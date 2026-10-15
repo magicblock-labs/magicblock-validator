@@ -9,8 +9,7 @@ use std::{
 use parking_lot::Mutex;
 
 use async_trait::async_trait;
-use dlp_api::state::{DelegationMetadata, UndelegationRequester};
-use magicblock_committor_service::{
+use committor::{
     intent_executor::{
         accepted_intent_executor::AcceptedIntentExecutor, error::IntentExecutorResult,
         intent_execution_client::IntentExecutionClient, ExecutionOutput, IntentExecutionReport,
@@ -32,16 +31,16 @@ use magicblock_committor_service::{
     transaction_preparator::{delivery_preparator::DeliveryPreparator, TransactionPreparatorImpl},
     ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT,
 };
-use magicblock_core::{
+use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
+use mbv_core::{
     intent::{types::CommittedAccount, BaseActionCallback},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
-use magicblock_program::{
+use program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
     outbox_intent_bundles::OutboxIntentBundle,
 };
-use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use rpc_client::MagicblockRpcClient;
 use solana_account::Account;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
@@ -50,6 +49,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
+use table_mania::{GarbageCollectorConfig, TableMania};
 
 // Poll until the account holds at least `min_lamports`. On a freshly
 // started validator the first airdrop can take a few slots to land.
@@ -335,7 +335,7 @@ pub(crate) fn create_commit_finalize_task(data: &[u8]) -> CommitFinalizeTask {
             account: Account {
                 lamports: 1000,
                 data: data.to_vec(),
-                owner: dlp_api::id(),
+                owner: delegation_program_api::id(),
                 executable: false,
                 rent_epoch: 0,
             },
@@ -361,7 +361,7 @@ pub(crate) fn create_committed_account(data: &[u8]) -> CommittedAccount {
         account: Account {
             lamports: 1000,
             data: data.to_vec(),
-            owner: dlp_api::id(),
+            owner: delegation_program_api::id(),
             executable: false,
             rent_epoch: 0,
         },

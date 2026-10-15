@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::BaseActionCallback;
-use magicblock_magic_program_api::{
+use magic_program_api::{
     args::{AddActionCallbackArgs, ShortAccountMeta},
     pda::CALLBACK_SIGNER,
 };
+use mbv_core::intent::BaseActionCallback;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;

@@ -1,7 +1,7 @@
 mod process_cancel_task;
 mod process_schedule_task;
 
-use magicblock_magic_program_api::instruction::MagicBlockInstruction;
+use magic_program_api::instruction::MagicBlockInstruction;
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_schedule_task::*;
 use solana_instruction::{Instruction, error::InstructionError};

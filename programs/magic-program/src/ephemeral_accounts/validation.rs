@@ -1,6 +1,6 @@
 //! Validation helpers for ephemeral account instructions.
 
-use magicblock_magic_program_api::EPHEMERAL_VAULT_PUBKEY;
+use magic_program_api::EPHEMERAL_VAULT_PUBKEY;
 use solana_account::{AccountMode, ReadableAccount};
 use solana_instruction::error::InstructionError;
 use solana_program_runtime::invoke_context::InvokeContext;

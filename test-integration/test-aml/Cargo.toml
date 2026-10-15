@@ -5,9 +5,9 @@ version.workspace = true
 
 [dependencies]
 integration-test-tools = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-delegation-program-api = { workspace = true, features = ["encryption"] }
+config = { workspace = true }
+mbv-core = { workspace = true }
+delegation-program-api = { workspace = true, features = ["encryption"] }
 parking_lot = { workspace = true }
 solana-sdk = { workspace = true }
 solana-system-interface = { workspace = true }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use magicblock_magic_program_api::args::{ActionArgs, ShortAccountMeta};
+use magic_program_api::args::{ActionArgs, ShortAccountMeta};
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;

@@ -3,7 +3,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use dlp_api::pda::undelegation_request_pda_from_delegated_account;
+use delegation_program_api::pda::undelegation_request_pda_from_delegated_account;
 use integration_test_tools::{
     conversions::stringify_simulation_result, init_logger, run_test,
     scheduled_commits::extract_scheduled_commit_sent_signature_from_logs,
@@ -67,16 +67,16 @@ fn commit_and_undelegate_one_account(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -127,8 +127,8 @@ fn commit_order_book_account(
         schedule_commit_instruction_for_order_book(
             payer.pubkey(),
             committees[0].1,
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             commit_type,
         ),
     ];
@@ -171,16 +171,16 @@ fn commit_and_undelegate_two_accounts(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
         )
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            magicblock_magic_program_api::id(),
-            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            magic_program_api::id(),
+            magic_program_api::MAGIC_CONTEXT_PUBKEY,
             None,
             &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
             &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -224,8 +224,8 @@ fn commit_and_undelegate_two_accounts_twice() -> (
 
     let ix = schedule_commit_and_undelegate_cpi_twice(
         payer.pubkey(),
-        magicblock_magic_program_api::id(),
-        magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+        magic_program_api::id(),
+        magic_program_api::MAGIC_CONTEXT_PUBKEY,
         &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
@@ -846,8 +846,8 @@ fn test_committing_after_failed_undelegation() {
         {
             let ix = schedule_commit_and_undelegate_cpi_instruction(
                 payer.pubkey(),
-                magicblock_magic_program_api::id(),
-                magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+                magic_program_api::id(),
+                magic_program_api::MAGIC_CONTEXT_PUBKEY,
                 None,
                 &committees.iter().map(|(player, _)| player.pubkey()).collect::<Vec<_>>(),
                 &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),

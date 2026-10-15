@@ -181,7 +181,7 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
     };
 
     let transient = AccountBuilder::from(remote_account(7))
-        .owner(dlp_api::id())
+        .owner(delegation_program_api::id())
         .mode(AccountMode::Transient)
         .slot(100)
         .build();
@@ -276,9 +276,9 @@ mod aml_check_strategy {
             TOKEN_PROGRAM_ID,
             TOKEN_2022_PROGRAM_ID,
             EATA_PROGRAM_ID,
-            magicblock_magic_program_api::ID,
+            magic_program_api::ID,
             system_program::ID,
-            magicblock_magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+            magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
         ] {
             let actions = vec![action_for_program(program)];
             assert!(

@@ -1,7 +1,7 @@
 # magicblock-committor-program
 
 Stages large settlement payloads in base-chain buffers so they can be delivered
-in chunks. The [committor service](../../committor-service/README.md)
+in chunks. The [committor service](../../committor/README.md)
 coordinates writing, finalizing, and cleaning up those buffers.
 
 ## Using it

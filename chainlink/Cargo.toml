@@ -13,12 +13,12 @@ futures-util = { workspace = true }
 helius-laserstream = { workspace = true }
 keeper = { workspace = true }
 lru = { workspace = true }
-magicblock-aml = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-delegation-program-api = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
-magicblock-metrics = { workspace = true }
+aml = { workspace = true }
+config = { workspace = true }
+mbv-core = { workspace = true }
+delegation-program-api = { workspace = true }
+magic-program-api = { workspace = true }
+metrics = { workspace = true }
 nucleus = { workspace = true, features = ["runtime"] }
 parking_lot = { workspace = true }
 scc = { workspace = true }
@@ -61,15 +61,15 @@ wincode = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
-magicblock-chainlink = { path = ".", features = ["dev-context"] }
-magicblock-metrics = { workspace = true, features = ["dev-context"] }
+chainlink = { package = "magicblock-chainlink", path = ".", features = ["dev-context"] }
+metrics = { workspace = true, features = ["dev-context"] }
 nucleus = { workspace = true, features = ["runtime", "testkit"] }
 tempfile = { workspace = true }
 v42-calculator-interface = { workspace = true }
 
 [features]
 default = []
-dev-context = ["engine/testkit", "keeper/testkit", "magicblock-metrics/dev-context"]
+dev-context = ["engine/testkit", "keeper/testkit", "metrics/dev-context"]
 
 [lints]
 workspace = true

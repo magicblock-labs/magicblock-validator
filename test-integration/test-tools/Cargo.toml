@@ -7,8 +7,8 @@ version.workspace = true
 anyhow = { workspace = true }
 borsh = { workspace = true }
 color-backtrace = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-delegation-program-api = { workspace = true, features = ["instruction"] }
+config = { workspace = true }
+delegation-program-api = { workspace = true, features = ["instruction"] }
 rand = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }

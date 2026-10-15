@@ -24,11 +24,11 @@ tokio-util = { workspace = true }
 # magicblock
 engine = { workspace = true }
 ledger = { workspace = true }
-magicblock-chainlink = { workspace = true }
-magicblock-config = { workspace = true }
-magicblock-core = { workspace = true }
-magicblock-ledger-deprecated = { workspace = true }
-magicblock-metrics = { workspace = true }
+chainlink = { workspace = true }
+config = { workspace = true }
+mbv-core = { workspace = true }
+ledger-deprecated = { workspace = true }
+metrics = { workspace = true }
 nucleus = { workspace = true, features = ["runtime"] }
 
 # solana

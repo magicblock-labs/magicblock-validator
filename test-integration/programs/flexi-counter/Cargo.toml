@@ -7,7 +7,7 @@ version.workspace = true
 bincode = { workspace = true }
 borsh = { workspace = true }
 ephemeral-rollups-sdk = { workspace = true }
-magicblock-magic-program-api = { workspace = true }
+magic-program-api = { workspace = true }
 serde = { workspace = true }
 solana-program = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
