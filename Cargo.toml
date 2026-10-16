@@ -250,7 +250,6 @@ zstd = "0.13"
 
 sha1 = "0.10"
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
-tokio-tungstenite = "0.28"
 webpki-roots = "1"
 
 
