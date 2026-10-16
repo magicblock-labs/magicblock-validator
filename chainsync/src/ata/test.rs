@@ -1,4 +1,4 @@
-use dlp_api::state::DelegationRecord;
+use delegation_program_api::state::DelegationRecord;
 
 use super::*;
 use crate::support::{
@@ -46,7 +46,7 @@ fn canonical_projection_preserves_extensions_and_native_reserve_for_both_token_p
             let projected = result.build();
             assert!(is_projection_of(ata, eata, &projected));
             let transient = AccountBuilder::from(projected)
-                .owner(dlp_api::id())
+                .owner(delegation_program_api::id())
                 .mode(AccountMode::Transient)
                 .build();
             assert!(is_projection_of(ata, eata, &transient));
