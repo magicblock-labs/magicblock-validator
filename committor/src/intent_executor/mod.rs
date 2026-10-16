@@ -120,9 +120,6 @@ pub struct IntentExecutionResult {
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Callbacks result
     pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
-    #[cfg(feature = "dev-context-only-utils")]
-    /// Strategies that were successfully executed (test only)
-    pub successful_transaction_strategies: Vec<TransactionStrategy>,
 }
 
 impl IntentExecutionResult {
@@ -162,9 +159,6 @@ pub struct IntentExecutionReport {
     patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Report of scheduled callbacks
     callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
-    #[cfg(feature = "dev-context-only-utils")]
-    /// Succeeded transaction strategies report (test only)
-    successful_transaction_strategies: Vec<TransactionStrategy>,
 }
 
 impl IntentExecutionReport {
@@ -193,10 +187,5 @@ impl IntentExecutionReport {
 
     pub fn junk(&self) -> &Vec<TransactionStrategy> {
         &self.junk
-    }
-
-    #[cfg(feature = "dev-context-only-utils")]
-    pub fn add_succeeded_transaction_strategy(&mut self, value: TransactionStrategy) {
-        self.successful_transaction_strategies.push(value);
     }
 }

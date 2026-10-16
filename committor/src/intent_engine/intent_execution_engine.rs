@@ -19,8 +19,6 @@ use tokio::{
 use tokio_stream::StreamExt;
 use tracing::{error, info, instrument, trace, warn};
 
-#[cfg(feature = "dev-context-only-utils")]
-use crate::tasks::task_strategist::TransactionStrategy;
 use crate::{
     error::IntentScheduleError,
     intent_engine::{
@@ -61,8 +59,6 @@ pub struct BroadcastedIntentExecutionResult {
     pub id: u64,
     pub patched_errors: Arc<PatchedErrors>,
     pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
-    #[cfg(feature = "dev-context-only-utils")]
-    pub successful_transaction_strategies: Vec<TransactionStrategy>,
 }
 
 impl BroadcastedIntentExecutionResult {
@@ -80,8 +76,6 @@ impl BroadcastedIntentExecutionResult {
             patched_errors,
             inner,
             callbacks_report,
-            #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: execution_result.successful_transaction_strategies,
         }
     }
 
@@ -91,8 +85,6 @@ impl BroadcastedIntentExecutionResult {
             id,
             patched_errors: Arc::default(),
             callbacks_report: Vec::new(),
-            #[cfg(feature = "dev-context-only-utils")]
-            successful_transaction_strategies: vec![],
         }
     }
 }
@@ -1150,8 +1142,6 @@ mod tests {
                 }),
                 patched_errors: vec![],
                 callbacks_report: vec![],
-                #[cfg(feature = "dev-context-only-utils")]
-                successful_transaction_strategies: vec![],
             };
             let result = match &self.failure_mode {
                 MockFailureMode::None => success,
@@ -1167,8 +1157,6 @@ mod tests {
                         None,
                     )],
                     callbacks_report: vec![],
-                    #[cfg(feature = "dev-context-only-utils")]
-                    successful_transaction_strategies: vec![],
                 },
                 MockFailureMode::Transient(remaining) => {
                     let should_fail = remaining
@@ -1196,8 +1184,6 @@ mod tests {
                             }),
                             patched_errors: vec![],
                             callbacks_report,
-                            #[cfg(feature = "dev-context-only-utils")]
-                            successful_transaction_strategies: vec![],
                         }
                     } else {
                         success

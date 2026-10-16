@@ -46,7 +46,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: fd62fb6fb82e33b623fcbb3c7f3c4f404fbd829d
+  REDSUITE_REV: "1.0.0"
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
   BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
 
@@ -104,8 +104,6 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         id: agave
-        with:
-          solana_version: v4.2.0
 
       - name: Restore redsuite build
         id: redsuite-cache
@@ -177,8 +175,8 @@ jobs:
           retention-days: 3
           if-no-files-found: ignore
 
-      - name: Upload scenario reports
-        if: always()
+      - name: Upload benchmark reports
+        if: always() && matrix.suite == 'benchmarks'
         uses: actions/upload-artifact@v7
         with:
           name: redsuite-reports-${{ matrix.suite }}
