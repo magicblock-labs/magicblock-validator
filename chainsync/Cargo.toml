@@ -10,6 +10,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+solana-sdk-ids = { workspace = true }
+solana-instruction = { workspace = true, features = ["wincode"] }
+humantime = { workspace = true }
 ahash = { workspace = true }
 base64 = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "display", "error"] }
@@ -21,9 +24,11 @@ hyper-util = { workspace = true, features = ["tokio"] }
 json = { workspace = true }
 engine = { workspace = true }
 nucleus = { workspace = true, features = ["metrics", "runtime"] }
+delegation-program-api = { workspace = true, features = ["encryption", "instruction"] }
 reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 sha1 = { workspace = true }
+smallvec = { workspace = true }
 solana-account = { workspace = true }
 solana-loader-v3-interface = { workspace = true }
 solana-pubkey = { workspace = true }
@@ -33,8 +38,11 @@ tokio-rustls = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true, features = ["serde"] }
 webpki-roots = { workspace = true }
+yellowstone-grpc-client = { workspace = true }
+yellowstone-grpc-proto = { workspace = true }
 zstd = { workspace = true }
 [dev-dependencies]
+borsh = { workspace = true }
 hyper = { workspace = true, features = ["server"] }
 serde_json = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
@@ -43,5 +51,7 @@ engine = { workspace = true, features = ["testkit"] }
 nucleus = { workspace = true, features = ["testkit"] }
 solana-account = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true, features = ["test-util"] }
+yellowstone-grpc-geyser = { workspace = true }
+yellowstone-plugin-proto = { workspace = true }
 [lints]
 workspace = true
