@@ -4310,9 +4310,9 @@ dependencies = [
  "magicblock-keeper",
  "magicblock-ledger",
  "magicblock-ledger-deprecated",
- "magicblock-metrics",
  "num_cpus",
  "parking_lot",
+ "prometheus",
  "reqwest 0.12.28",
  "serde",
  "solana-account 4.3.1",
@@ -4441,7 +4441,6 @@ dependencies = [
  "magicblock-delegation-program-api",
  "magicblock-engine",
  "magicblock-engine-nucleus",
- "magicblock-metrics",
  "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
@@ -4731,21 +4730,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-metrics"
-version = "1.0.1"
-dependencies = [
- "http-body-util",
- "hyper",
- "hyper-util",
- "lazy_static",
- "magicblock-engine-nucleus",
- "prometheus",
- "solana-signature 3.4.1",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "magicblock-processor"
 version = "0.15.0"
 source = "git+https://github.com/magicblock-labs/magicblock-engine.git?tag=0.15.0#89889caf0ce3ec11d76266c385a4a95c58c59101"
@@ -4849,7 +4833,7 @@ version = "1.0.1"
 dependencies = [
  "async-trait",
  "futures-util",
- "magicblock-metrics",
+ "magicblock-engine-nucleus",
  "parking_lot",
  "serde_json",
  "solana-account 4.3.1",
@@ -4924,7 +4908,7 @@ dependencies = [
 name = "magicblock-table-mania"
 version = "1.0.1"
 dependencies = [
- "magicblock-metrics",
+ "magicblock-engine-nucleus",
  "magicblock-rpc-client",
  "parking_lot",
  "rand 0.9.5",
@@ -4989,7 +4973,6 @@ dependencies = [
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-ledger-deprecated",
- "magicblock-metrics",
  "magicblock-program",
  "magicblock-replicator",
  "magicblock-runtime",
@@ -5039,11 +5022,11 @@ name = "magicblock-verifier"
 version = "1.0.1"
 dependencies = [
  "anyhow",
+ "magicblock-aperture",
  "magicblock-config",
  "magicblock-core",
  "magicblock-engine",
  "magicblock-engine-nucleus",
- "magicblock-metrics",
  "magicblock-replicator",
  "magicblock-runtime",
  "mimalloc",
