@@ -211,7 +211,9 @@ impl ChainSync {
     ) -> Result<()> {
         let _timer = metrics::time(Op::Apply);
         let AccountSubscription { pubkey, program } = subscription;
-        if account.read().owner() == dlp_api::id() && ata::is_raw_eata(pubkey, &account) {
+        if account.read().owner() == delegation_program_api::id()
+            && ata::is_raw_eata(pubkey, &account)
+        {
             let target = SyncTarget::new(
                 self.engine.account(pubkey).await?,
                 AccountProperty::Readonly,

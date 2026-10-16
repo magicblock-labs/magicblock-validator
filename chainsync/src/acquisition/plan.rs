@@ -2,7 +2,7 @@
 
 use std::iter::Peekable;
 
-use dlp_api::pda::delegation_record_pda_from_delegated_account;
+use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
 use solana_pubkey::Pubkey;
 
 use crate::{

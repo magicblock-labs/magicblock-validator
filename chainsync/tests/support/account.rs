@@ -3,7 +3,9 @@
 use std::sync::Arc;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
-use dlp_api::{pda::delegation_record_pda_from_delegated_account, state::DelegationRecord};
+use delegation_program_api::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
 use serde_json::{Value, json};
 use solana_account::{AccountBuilder, StateFlags, testkit::delegated_account};
 use solana_instruction::Instruction;
@@ -90,9 +92,9 @@ pub(crate) fn delegation(
     slot: u64,
     actions: &[Instruction],
 ) -> (Account, Account) {
-    use dlp_api::compact::ClearText;
+    use delegation_program_api::compact::ClearText;
     let mut account = Account::new(key);
-    account.owner = dlp_api::id();
+    account.owner = delegation_program_api::id();
     account.data = V42_INITIAL.to_le_bytes().to_vec();
     let metadata = DelegationRecord {
         owner,
@@ -102,7 +104,7 @@ pub(crate) fn delegation(
         commit_frequency_ms: 1,
     };
     let mut record = Account::new(delegation_record_pda_from_delegated_account(&key));
-    record.owner = dlp_api::id();
+    record.owner = delegation_program_api::id();
     record.data = encode_record(&metadata);
     if !actions.is_empty() {
         record.data.extend(borsh::to_vec(&actions.to_vec().cleartext()).unwrap());
@@ -119,7 +121,7 @@ pub(crate) fn encode_record(metadata: &DelegationRecord) -> Vec<u8> {
 
 /// Canonical, DLP-owned request image accepted by the confirmed account filter.
 pub(crate) fn undelegation_request(key: Pubkey) -> Account {
-    use dlp_api::{
+    use delegation_program_api::{
         pda::undelegation_request_pda_from_delegated_account, state::UndelegationRequest,
     };
     let request = UndelegationRequest {
@@ -127,7 +129,7 @@ pub(crate) fn undelegation_request(key: Pubkey) -> Account {
         expires_at_slot: 1000,
     };
     let mut account = Account::new(undelegation_request_pda_from_delegated_account(&key));
-    account.owner = dlp_api::id();
+    account.owner = delegation_program_api::id();
     account.data.resize(UndelegationRequest::size_with_discriminator(), 0);
     request.to_bytes_with_discriminator(&mut account.data).unwrap();
     account
@@ -201,9 +203,9 @@ impl Ata {
     /// DLP-owned application and canonical record images for HTTP or the plugin.
     pub(crate) fn delegation(&self) -> [Account; 2] {
         let mut account = Account::from_builder(self.eata, &self.delegated);
-        account.owner = dlp_api::id();
+        account.owner = delegation_program_api::id();
         let record = Account {
-            owner: dlp_api::id(),
+            owner: delegation_program_api::id(),
             data: self.record.clone(),
             ..Account::new(delegation_record_pda_from_delegated_account(&self.eata))
         };

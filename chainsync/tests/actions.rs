@@ -77,7 +77,9 @@ async fn nested_postdelegation_actions_execute_dependency_first() {
     // PostFinalize invokes v42 through CPI, so calculator results are return-data, not writes.
     let logs = within(logs.recv()).await.unwrap();
     let result = format!("v42: result={} -> return_data", V42_INITIAL - ACTION_AMOUNT);
-    assert!(logs.logs.iter().any(|line| line.contains(&result)));
+    let execution = logs.execution.result.as_ref().unwrap();
+    let messages = execution.execution_details.log_messages.as_ref().unwrap();
+    assert!(messages.iter().any(|line| line.contains(&result)));
     drop(chain_sync);
     engine.close().await;
     ws.close().await;
