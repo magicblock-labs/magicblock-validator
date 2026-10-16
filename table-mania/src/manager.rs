@@ -72,7 +72,6 @@ pub struct TableMania {
     released_tables: Arc<Mutex<Vec<LookupTableRc>>>,
     authority_pubkey: Pubkey,
     pub rpc_client: MagicblockRpcClient,
-    randomize_lookup_table_slot: bool,
     compute_budgets: TableManiaComputeBudgets,
 }
 
@@ -111,7 +110,6 @@ impl TableMania {
             released_tables: Arc::<Mutex<Vec<LookupTableRc>>>::default(),
             authority_pubkey: authority.pubkey(),
             rpc_client,
-            randomize_lookup_table_slot: randomize_lookup_table_slot(),
             compute_budgets: TableManiaComputeBudgets::default(),
         };
         if let Some(config) = garbage_collector_config {
@@ -483,19 +481,12 @@ impl TableMania {
         let pubkeys_len = pubkeys.len();
         let slot = self.rpc_client.get_slot().await?;
 
-        if self.randomize_lookup_table_slot {
-            use rand::Rng;
-            let mut rng = rand::rng();
-            let random_slot = rng.random_range(0..=u64::MAX);
-            SUB_SLOT.store(random_slot, Ordering::Relaxed);
+        static LAST_SLOT: AtomicU64 = AtomicU64::new(0);
+        let prev_last_slot = LAST_SLOT.swap(slot, Ordering::Relaxed);
+        if prev_last_slot != slot {
+            SUB_SLOT.store(0, Ordering::Relaxed);
         } else {
-            static LAST_SLOT: AtomicU64 = AtomicU64::new(0);
-            let prev_last_slot = LAST_SLOT.swap(slot, Ordering::Relaxed);
-            if prev_last_slot != slot {
-                SUB_SLOT.store(0, Ordering::Relaxed);
-            } else {
-                SUB_SLOT.fetch_add(1, Ordering::Relaxed);
-            }
+            SUB_SLOT.fetch_add(1, Ordering::Relaxed);
         }
 
         let len = pubkeys_len
@@ -924,17 +915,6 @@ impl TableMania {
             ));
         }
         Ok(())
-    }
-}
-
-fn randomize_lookup_table_slot() -> bool {
-    #[cfg(feature = "randomize_lookup_table_slot")]
-    {
-        true
-    }
-    #[cfg(not(feature = "randomize_lookup_table_slot"))]
-    {
-        std::env::var("RANDOMIZE_LOOKUP_TABLE_SLOT").is_ok()
     }
 }
 

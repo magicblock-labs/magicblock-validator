@@ -4621,7 +4621,6 @@ dependencies = [
  "magicblock-metrics",
  "magicblock-rpc-client",
  "parking_lot",
- "rand 0.9.5",
  "sha3",
  "solana-address-lookup-table-interface 3.1.0",
  "solana-clock 3.1.1",

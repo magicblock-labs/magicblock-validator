@@ -12,7 +12,6 @@ use crate::{
 };
 
 #[derive(Default, Clone)]
-#[cfg_attr(feature = "dev-context-only-utils", derive(Debug))]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<BaseTaskImpl>,
     pub lookup_tables_keys: Vec<Pubkey>,

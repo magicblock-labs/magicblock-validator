@@ -52,16 +52,11 @@ lint:
 ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
 
-ci-test-integration:
-	$(MAKE) -C test-integration ci-test
-
 ci-fmt:
 	cargo fmt --check
-	$(MAKE) -C test-integration ci-fmt
 
 ci-lint:
 	cargo clippy --all-targets -- -D warnings
-	$(MAKE) -C test-integration ci-lint
 
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml

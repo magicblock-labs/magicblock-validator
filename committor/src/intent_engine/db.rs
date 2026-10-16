@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::VecDeque};
 use engine::Engine;
 use mbv_core::intent::outbox::outbox_intent_pda;
 use metrics::metrics;
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_account::ReadableAccount;
@@ -77,26 +77,26 @@ impl BacklogDB for AccountsDbIntentBacklog {
     }
 }
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 pub struct DummyDB {
     db: Mutex<VecDeque<OutboxIntentBundle>>,
 }
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 impl Default for DummyDB {
     fn default() -> Self {
         Self { db: Mutex::new(VecDeque::new()) }
     }
 }
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 impl DummyDB {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-#[cfg(any(test, feature = "dev-context-only-utils"))]
+#[cfg(test)]
 impl BacklogDB for DummyDB {
     fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()> {
         self.db.lock().push_back(intent_bundle);
