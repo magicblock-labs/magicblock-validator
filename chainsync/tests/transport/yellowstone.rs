@@ -165,7 +165,7 @@ impl Server {
 
     /// Successful outer and CPI releases from one authority exercise decoding and deduplication.
     pub(crate) fn undelegated(&self, slot: u64, key: Pubkey, authority: Pubkey) {
-        use dlp_api::discriminator::DlpDiscriminator;
+        use delegation_program_api::discriminator::DlpDiscriminator;
         let release = CompiledInstruction {
             program_id_index: 0,
             accounts: vec![2, 1],
@@ -174,7 +174,7 @@ impl Server {
         let transaction = Transaction {
             message: Some(TransactionMessage {
                 account_keys: vec![
-                    dlp_api::id().to_bytes().to_vec(),
+                    delegation_program_api::id().to_bytes().to_vec(),
                     key.to_bytes().to_vec(),
                     authority.to_bytes().to_vec(),
                 ],
@@ -217,7 +217,7 @@ impl Server {
             token_owners_changed: Default::default(),
         };
         transaction.fill_account_keys().unwrap();
-        transaction.account_keys.insert(dlp_api::id());
+        transaction.account_keys.insert(delegation_program_api::id());
         Message::Transaction(Arc::new(MessageTransaction {
             transaction,
             slot,

@@ -1,5 +1,5 @@
 use super::{Error, Result, pubkey};
-use dlp_api::discriminator::DlpDiscriminator::{
+use delegation_program_api::discriminator::DlpDiscriminator::{
     self, Undelegate, UndelegateWithRollbackAfterTimeout,
 };
 use smallvec::SmallVec;
@@ -32,7 +32,7 @@ pub(super) fn undelegated_accounts(
             .ok_or(Error::Protocol("invalid account index"))?;
         pubkey(bytes)
     };
-    let dlp = dlp_api::id();
+    let dlp = delegation_program_api::id();
     // Resolve both instruction kinds against static keys only; lookup-table keys are unsupported.
     let outer = message
         .instructions

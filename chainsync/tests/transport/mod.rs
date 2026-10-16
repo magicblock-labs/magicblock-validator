@@ -4,7 +4,9 @@ pub(crate) mod http;
 pub(crate) mod websocket;
 pub(crate) mod yellowstone;
 use base64::{Engine, engine::general_purpose::STANDARD};
-use dlp_api::{pda::delegation_record_pda_from_delegated_account, state::DelegationRecord};
+use delegation_program_api::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
 use serde_json::{Value, json};
 use solana_account::{AccountBuilder, StateFlags};
 use solana_instruction::Instruction;
@@ -157,9 +159,9 @@ pub(crate) fn delegation(
     slot: u64,
     actions: &[Instruction],
 ) -> (Account, Account) {
-    use dlp_api::compact::ClearText;
+    use delegation_program_api::compact::ClearText;
     let mut account = Account::new(key);
-    account.owner = dlp_api::id();
+    account.owner = delegation_program_api::id();
     account.data = V42_INITIAL.to_le_bytes().to_vec();
     let metadata = DelegationRecord {
         owner,
@@ -169,7 +171,7 @@ pub(crate) fn delegation(
         commit_frequency_ms: 1,
     };
     let mut record = Account::new(delegation_record_pda_from_delegated_account(&key));
-    record.owner = dlp_api::id();
+    record.owner = delegation_program_api::id();
     record.data = encode_record(&metadata);
     if !actions.is_empty() {
         record.data.extend(borsh::to_vec(&actions.to_vec().cleartext()).unwrap());

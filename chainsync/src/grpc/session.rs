@@ -4,7 +4,7 @@ use std::{
 };
 
 use ahash::AHashMap;
-use dlp_api::{
+use delegation_program_api::{
     pda::undelegation_request_pda_from_delegated_account,
     state::{
         DelegationRecord, UndelegationRequest,
@@ -271,7 +271,7 @@ impl Session {
                 .insert_into_subscribe_request(&mut request, RETAINED_FILTER);
         }
         let dlp = SubscribeRequestFilterAccounts {
-            owner: vec![dlp_api::id().to_string()],
+            owner: vec![delegation_program_api::id().to_string()],
             nonempty_txn_signature: Some(true),
             ..Default::default()
         };
@@ -294,7 +294,7 @@ impl Session {
         let releases = SubscribeRequestFilterTransactions {
             vote: Some(false),
             failed: Some(false),
-            account_include: vec![dlp_api::id().to_string()],
+            account_include: vec![delegation_program_api::id().to_string()],
             ..Default::default()
         };
         request.transactions.insert(RELEASES_FILTER.into(), releases);
@@ -312,7 +312,7 @@ impl Session {
             // Clock is not transaction-written; its context slot is the confirmed watermark.
             self.engine.accounts().advance_chain_slot(slot);
         }
-        let candidate = account.owner == dlp_api::id().as_ref();
+        let candidate = account.owner == delegation_program_api::id().as_ref();
         if let Some(desired) = self.desired.get(&key).filter(|_| self.retained_filter.contains(key))
         {
             let owner = super::pubkey(&account.owner)?;

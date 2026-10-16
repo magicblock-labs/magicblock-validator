@@ -24,7 +24,7 @@ hyper-util = { workspace = true, features = ["tokio"] }
 json = { workspace = true }
 engine = { workspace = true }
 nucleus = { workspace = true, features = ["metrics", "runtime"] }
-magicblock-delegation-program-api = { workspace = true, features = ["encryption", "instruction"] }
+delegation-program-api = { workspace = true, features = ["encryption", "instruction"] }
 reqwest = { workspace = true, features = ["rustls-tls"] }
 serde = { workspace = true, features = ["derive"] }
 sha1 = { workspace = true }
