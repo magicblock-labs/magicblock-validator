@@ -73,3 +73,18 @@ runs:
             export PATH="$HOME/.local/share/solana/install/active_release/bin:$PATH"
           fi
           solana-test-validator --version
+
+      - name: Install platform-tools
+        shell: bash
+        run: |
+          # Retry only toolchain installation, not compilation. Cached installs
+          # return immediately; transient release-download failures get two retries.
+          for attempt in 1 2 3; do
+            if cargo build-sbf --install-only; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              exit 1
+            fi
+            sleep 5
+          done
