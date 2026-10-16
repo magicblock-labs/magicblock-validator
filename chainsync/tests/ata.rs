@@ -2,7 +2,7 @@
 
 //! HTTP and streamed delegation share canonical ATA projection and confirmed-release behavior.
 
-mod transport;
+mod support;
 
 use chainsync::{AccountProperty, ChainSyncAccount};
 use dlp_api::compact::ClearText;
@@ -14,7 +14,7 @@ use nucleus::testkit::v42_sum;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
 use solana_program_pack::Pack;
 use spl_token::state::Account as TokenAccount;
-use transport::{
+use support::{
     Account, Ata, DELEGATED_TOKEN_BALANCE, DELEGATION_SLOT, FIRST_SUBSCRIPTION, READY_SLOT,
     TOKEN_BALANCE, acquire, http, scripted, start_chain_sync, websocket, within, yellowstone,
 };
