@@ -11,8 +11,8 @@ use super::{
     *,
 };
 use crate::delegation::{self, Delegation};
-use crate::transport::magic::intents;
-use crate::transport::{
+use crate::support::magic::intents;
+use crate::support::{
     Account, Ata, CONTEXT_SLOT, DELEGATED_TOKEN_BALANCE, DELEGATION_SLOT, FIRST_SUBSCRIPTION,
     PROJECTION_SLOT, SERVICE_ERROR, TOKEN_BALANCE, V42_INITIAL, delegation as delegation_images,
     encode_record, http::Server, magic, scripted, start_chain_sync, start_handler_sync, websocket,

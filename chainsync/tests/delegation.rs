@@ -2,7 +2,7 @@
 
 //! Delegation ownership, replay, duplicate actions, and undelegation.
 
-mod transport;
+mod support;
 
 use std::slice::from_ref;
 
@@ -14,8 +14,8 @@ use nucleus::testkit::V42_ID;
 use solana_account::{AccountMode, ReadableAccount};
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock::ID as CLOCK_ID;
-use transport::yellowstone::wait_for_retained_update;
-use transport::{
+use support::yellowstone::wait_for_retained_update;
+use support::{
     ACTION_AMOUNT, Account, CONTEXT_SLOT, DELEGATION_SLOT, DUPLICATION_DELAY, READY_SLOT,
     START_SLOT, V42_INITIAL, acquire, config, delegation, http, scripted, start, websocket, within,
     yellowstone,
@@ -68,7 +68,7 @@ async fn opening_replays_two_slots_back_and_clock_advances_without_tracking() {
 /// Requests schedule once; releases restore live mirrors, and duplicate confirmations discover redelegation through HTTP waves.
 #[tokio::test]
 async fn grpc_undelegation_requests_and_confirmations_apply_once_across_streams() {
-    use transport::{magic, undelegation_request};
+    use support::{magic, undelegation_request};
     let mut engine = magic::engine().await;
     let mut http = http::Server::new().await;
     let mut ws = websocket::Server::new().await;

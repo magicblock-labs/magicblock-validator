@@ -247,8 +247,8 @@ impl ChainSync {
 }
 
 #[cfg(test)]
-#[path = "../tests/transport/mod.rs"]
-mod transport;
+#[path = "../tests/support/mod.rs"]
+mod support;
 
 // The shared fixtures import the same API in library and integration tests.
 #[cfg(test)]

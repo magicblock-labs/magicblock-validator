@@ -2,7 +2,7 @@
 
 //! Redundant source loss, cache eviction, and reacquisition.
 
-mod transport;
+mod support;
 
 use std::{collections::HashMap, slice::from_ref};
 
@@ -13,8 +13,8 @@ use magicblock_chainsync as chainsync;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock::ID as CLOCK_ID;
-use transport::yellowstone::wait_for_retained_update;
-use transport::{
+use support::yellowstone::wait_for_retained_update;
+use support::{
     Account, CONTEXT_SLOT, DUPLICATION_DELAY, FIRST_SUBSCRIPTION, READY_SLOT, RPC_BATCH_LIMIT,
     START_SLOT, acquire, config, http, scripted, start, websocket, within, yellowstone,
 };

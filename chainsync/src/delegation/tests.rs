@@ -7,7 +7,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use super::{Delegation, PreparedDelegation};
-use crate::transport::{
+use crate::support::{
     DELEGATION_SLOT, SERVICE_ERROR, UNAVAILABLE, V42_INITIAL, config,
     delegation as delegation_images,
     http::Server,

@@ -1,7 +1,7 @@
 use dlp_api::state::DelegationRecord;
 
 use super::*;
-use crate::transport::{
+use crate::support::{
     Ata, DELEGATED_TOKEN_BALANCE, NATIVE_RESERVE, PROJECTION_SLOT, TOKEN_LAMPORTS,
 };
 

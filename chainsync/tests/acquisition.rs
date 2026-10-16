@@ -2,7 +2,7 @@
 
 //! HTTP materialization, subscription ordering, and failed acquisition cleanup.
 
-mod transport;
+mod support;
 
 use chainsync::{AccountProperty, ChainSyncAccount, Error};
 use engine::testkit::TestEngine;
@@ -11,7 +11,7 @@ use magicblock_chainsync as chainsync;
 use nucleus::testkit::V42_ID;
 use solana_account::{AccountMode, ReadableAccount};
 use solana_pubkey::Pubkey;
-use transport::{
+use support::{
     ACCOUNT_DATA, Account, CONTEXT_SLOT, FIRST_SUBSCRIPTION, RPC_BATCH_LIMIT, V42_INITIAL, acquire,
     delegation, http, scripted, start_chain_sync, websocket, within, yellowstone,
 };
