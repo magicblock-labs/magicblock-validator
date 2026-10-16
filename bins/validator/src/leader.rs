@@ -3,7 +3,6 @@ use std::{
     time::Duration,
 };
 
-use engine::Engine;
 use aperture::{Aperture, MetricsService};
 use chainsync::ChainSync;
 use committor::{
@@ -12,6 +11,7 @@ use committor::{
     outbox::outbox_client::InternalOutboxClient, service::IntentExecutionService,
 };
 use config::LeaderParams;
+use engine::Engine;
 use nucleus::{
     metrics::EventTimer,
     shutdown::{Service, ShutdownManager, ShutdownReason},

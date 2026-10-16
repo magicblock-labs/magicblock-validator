@@ -1,8 +1,8 @@
 use std::{collections::HashSet, ops::ControlFlow, time::Duration};
 
 use crate::metrics;
-use futures_util::future::{join, join_all, try_join_all};
 use committor_interface::{Chunks, instruction_chunks::chunk_realloc_ixs};
+use futures_util::future::{join, join_all, try_join_all};
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicBlockSendTransactionOutcome,
     MagicblockRpcClient,

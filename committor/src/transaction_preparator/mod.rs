@@ -83,7 +83,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 tx_strategy.uniqueness_nonce,
             )?;
             self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
-            metrics::observe_committor_intent_alt_count(0);
+            metrics::lookup_tables(0);
             return Ok(
                 TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                     authority,
