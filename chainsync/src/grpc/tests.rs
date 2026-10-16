@@ -5,7 +5,7 @@ use super::{
     *,
 };
 use crate::transport::{Account, DELEGATION_SLOT, UNAVAILABLE, within, yellowstone::Server};
-use dlp_api::{
+use delegation_program_api::{
     discriminator::DlpDiscriminator,
     pda::{
         delegation_record_pda_from_delegated_account,
@@ -227,7 +227,7 @@ async fn only_clock_advances_watermark_and_only_canonical_requests_emit_events()
     let mut session = session(engine.clone(), events);
     for (key, owner, slot) in [
         (Pubkey::new_unique(), Pubkey::default(), 100),
-        (Pubkey::new_unique(), dlp_api::id(), 101),
+        (Pubkey::new_unique(), delegation_program_api::id(), 101),
         (clock::ID, Pubkey::default(), CLOCK_SLOT),
         (clock::ID, Pubkey::default(), 70),
     ] {
@@ -259,10 +259,10 @@ async fn only_clock_advances_watermark_and_only_canonical_requests_emit_events()
     let mut data = vec![0; UndelegationRequest::size_with_discriminator()];
     request.to_bytes_with_discriminator(&mut data).unwrap();
     for (address, owner, lamports, requested) in [
-        (Pubkey::new_unique(), dlp_api::id(), 1, false),
+        (Pubkey::new_unique(), delegation_program_api::id(), 1, false),
         (pda, Pubkey::default(), 1, false),
-        (pda, dlp_api::id(), 0, false),
-        (pda, dlp_api::id(), 1, true),
+        (pda, delegation_program_api::id(), 0, false),
+        (pda, delegation_program_api::id(), 1, true),
     ] {
         session
             .account(SubscribeUpdateAccount {
@@ -309,7 +309,7 @@ async fn plugin_applies_account_and_dlp_filters_and_preserves_clock_after_rebuil
         commit_frequency_ms: 1,
     };
     let mut record = Account::new(Pubkey::new_unique());
-    record.owner = dlp_api::id();
+    record.owner = delegation_program_api::id();
     record.data.resize(DelegationRecord::size_with_discriminator(), 0);
     metadata.to_bytes_with_discriminator(&mut record.data).unwrap();
     let mut wrong_owner = record.clone();
@@ -429,7 +429,7 @@ fn undelegation_targets_deduplicate_outer_and_cpi_without_partial_decode() {
         transaction: Some(Transaction {
             message: Some(Message {
                 account_keys: vec![
-                    dlp_api::id().to_bytes().to_vec(),
+                    delegation_program_api::id().to_bytes().to_vec(),
                     target.to_bytes().to_vec(),
                     authority.to_bytes().to_vec(),
                 ],
