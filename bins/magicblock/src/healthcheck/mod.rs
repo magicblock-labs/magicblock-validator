@@ -6,14 +6,12 @@ mod expression;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
-use futures_util::Stream;
-use humantime::re::humantime as ht;
 use config::{
     consts::HEALTHCHECK_ACCOUNT_PUBKEY,
     types::{ResolvedUrl, network::websocket_url},
 };
-use nucleus::metrics::EventTimer;
-use serde::Deserialize;
+use futures_util::Stream;
+use humantime::re::humantime as ht;
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;

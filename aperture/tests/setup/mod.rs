@@ -11,7 +11,7 @@ use config::config::aperture::ApertureConfig;
 use engine::testkit::TestEngine;
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
 use ledger_deprecated::Ledger;
-use aperture::Aperture;
+use magicblock_aperture::Aperture;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::Instruction;
 use solana_program_pack::Pack;

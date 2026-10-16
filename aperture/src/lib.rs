@@ -1,9 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 use account::Accounts;
+use chainsync::ChainSync;
 use engine::Engine;
 use history::History;
-use chainsync::ChainSync;
 use ledger_deprecated::Ledger;
 use requests::http::RpcHandlers;
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};

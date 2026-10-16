@@ -1,8 +1,9 @@
-use engine::Engine;
 use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
+use engine::Engine;
+use json::{Deserialize, Serialize};
 use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
-use serde::{Deserialize, Deserializer, de::Error as _};
+use serde::{Deserializer, de::Error as _};
 use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{

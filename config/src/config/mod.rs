@@ -8,9 +8,9 @@ pub mod program;
 
 pub use aperture::ApertureConfig;
 pub use chain::CommittorConfig;
-pub use engine::{EngineConfig, FollowerReplication, LeaderReplication};
-pub use ledger::LedgerConfig;
-pub use magicblock_chainsync::{
+pub use chainsync::{
     AmlConfig, ChainSyncConfig, GrpcStreamConfig, WebSocketConfig, WebSocketProvider,
 };
+pub use engine::{EngineConfig, FollowerReplication, LeaderReplication};
+pub use ledger::LedgerConfig;
 pub use program::LoadableProgram;
