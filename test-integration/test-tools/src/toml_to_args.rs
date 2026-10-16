@@ -3,12 +3,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use config::config::ChainSyncConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
     #[serde(default)]
-    remotes: Vec<String>,
+    chainsync: ChainSyncConfig,
     #[serde(default)]
     aperture: Option<ApertureConfig>,
     #[serde(default)]
@@ -84,9 +85,9 @@ pub fn config_to_args(config_path: &PathBuf, program_loader: Option<ProgramLoade
     }
 
     // Add the first HTTP/HTTPS remote URL if available
-    if let Some(http_remote) = config.remotes.iter().find(|r| r.starts_with("http")) {
+    if let Some(http_remote) = config.chainsync.http.first() {
         args.push("--url".into());
-        args.push(http_remote.clone());
+        args.push(http_remote.to_string());
     }
 
     args

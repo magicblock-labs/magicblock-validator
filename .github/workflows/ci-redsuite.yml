@@ -46,7 +46,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: beed82fb3c45a2cba6eb7d62a8949a277f5e7773
+  REDSUITE_REV: f0d37b7858c8e189238fbfda6f181d78963095d3
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
   BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
 

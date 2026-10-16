@@ -1,4 +1,3 @@
-remotes = ["http://0.0.0.0:7799", "ws://0.0.0.0:7800"]
 
 [aperture]
 listen = "0.0.0.0:8899"
@@ -14,3 +13,15 @@ reset = true
 
 [metrics]
 address = "0.0.0.0:9000"
+
+[chainsync]
+http = ["http://0.0.0.0:7799"]
+
+[[chainsync.websocket]]
+url = "ws://0.0.0.0:7800"
+max-connections = 4
+subs-per-connection = 900
+
+[[chainsync.grpc]]
+endpoint = "http://127.0.0.1:7801"
+duplication-delay = "30m"

@@ -669,7 +669,7 @@ fn test_magic_ata_requires_close_before_eata_projection() {
         .unwrap();
     assert!(confirmed, "explicit close transaction failed");
 
-    // With the local Magic ATA closed, Chainlink may install the projection.
+    // With the local Magic ATA closed, ChainSync may install the projection.
     let deadline = Instant::now() + Duration::from_secs(20);
     while token_balance_ephem(&ctx, &destination_ata) != Some(EATA_DEPOSIT) {
         assert!(

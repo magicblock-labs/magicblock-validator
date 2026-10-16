@@ -154,7 +154,7 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     // The merge credits the recipient's ATA from inside the ephemeral rollup,
     // so that ATA has to be writable there. A plain SPL ATA is cloned read-only
     // and the merge would be rejected. Giving the recipient an ephemeral ATA
-    // delegated to this validator is what lets chainlink project the eATA onto
+    // delegated to this validator is what lets ChainSync project the eATA onto
     // the base ATA and clone it delegated, which is what makes it writable.
     let mut eata_tx = Transaction::new_with_payer(
         &[
@@ -292,7 +292,7 @@ fn run_shuttle_merge_risk_case(owner_risk: u64, expect_allowed: bool) {
     );
 
     // The merge credits the recipient inside the rollup, against the ATA
-    // chainlink projects from the recipient's delegated eATA. The base chain
+    // ChainSync projects from the recipient's delegated eATA. The base chain
     // only sees those tokens once the eATA is settled, which this flow does not
     // do, so the rollup is where the verdict is observable.
     if expect_allowed {

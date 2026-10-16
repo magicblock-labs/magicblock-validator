@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
 use account::Accounts;
-use chainlink::ProdChainlink;
+use chainsync::ChainSync;
 use engine::Engine;
 use history::History;
 use ledger_deprecated::Ledger;
@@ -36,7 +36,7 @@ impl Aperture {
     pub async fn bind(
         config: &ApertureConfig,
         engine: Engine,
-        chainlink: Arc<ProdChainlink>,
+        chainsync: Arc<ChainSync>,
         legacy: Arc<Ledger>,
         blocktime: Duration,
         cancel: CancellationToken,
@@ -70,7 +70,7 @@ impl Aperture {
         // Initialize HTTP and Websocket servers before starting any background
         // delivery tasks, so a bind failure cannot leak engine subscriptions.
         let websocket = WebsocketServer::new(ws, engine.clone(), cancel.clone());
-        let accounts = Accounts::new(engine.clone(), chainlink);
+        let accounts = Accounts::new(engine.clone(), chainsync);
         let history = History::new(engine.clone(), legacy);
         let handlers = RpcHandlers::new(engine.clone(), accounts, history, blocktime);
         let http = HttpServer::new(http, handlers.clone(), cancel.clone());

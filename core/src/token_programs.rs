@@ -33,7 +33,7 @@ const LEGACY_EPHEMERAL_ATA_LEN: usize = 72;
 /// A validator-created ER-only token account at the canonical ATA address,
 /// letting a wallet receive tokens before its ATA exists anywhere.
 /// It remains locally authoritative, even when empty, until explicitly closed.
-/// Chainlink must not replace it with a base-chain delegation while it exists.
+/// ChainSync must not replace it with a base-chain delegation while it exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MagicAtaInfo {
     pub ata_pubkey: Pubkey,

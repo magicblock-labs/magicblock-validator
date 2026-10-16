@@ -1,16 +1,11 @@
 use std::{
     path::PathBuf,
     process::Child,
-    str::FromStr,
     time::{Duration, Instant},
 };
 
 use cleanass::assert;
-use config::{
-    config::LoadableProgram,
-    types::{network::Remote, SerdePubkey},
-    LeaderParams,
-};
+use config::{config::LoadableProgram, types::SerdePubkey, LeaderParams};
 use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
@@ -44,10 +39,7 @@ pub fn setup_validator() -> (TempDir, Child, IntegrationTestContext, Pubkey) {
     let sponsor = loaded_accounts.validator_authority();
 
     let config = LeaderParams {
-        remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
-        ],
+        chainsync: IntegrationTestContext::chainsync_config(),
         // `eHyd5…` is the *ephemeral* hydra program: it executes cranks inside
         // the ER, so it is preloaded here rather than cloned from the base
         // chain (which only hosts hydra's base-chain counterpart).

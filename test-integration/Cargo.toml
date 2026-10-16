@@ -13,7 +13,6 @@ members = [
     "test-config",
     "test-runner",
     "test-schedule-intent",
-    "test-table-mania",
     "test-task-scheduler",
     "test-tools",
     "test-validator-services",
@@ -70,8 +69,7 @@ light-hasher = "5"
 light-sdk = "0.23"
 light-sdk-types = "0.23"
 
-aml = { package = "magicblock-aml", path = "../aml" }
-chainlink = { package = "magicblock-chainlink", path = "../chainlink", features = ["dev-context"] }
+chainsync = { package = "magicblock-chainsync", path = "../chainsync" }
 committor-interface = { package = "magicblock-committor-interface", path = "../programs/committor-interface" }
 committor = { package = "magicblock-committor-service", path = "../committor" }
 config = { package = "magicblock-config", path = "../config" }

@@ -6,9 +6,9 @@ use std::{
     time::Duration,
 };
 
-use chainlink::ProdChainlink;
+use chainsync::{ChainSync, ChainSyncConfig, GrpcStreamConfig};
 use config::config::aperture::ApertureConfig;
-use engine::{Engine, testkit::TestEngine};
+use engine::testkit::TestEngine;
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
 use ledger_deprecated::Ledger;
 use magicblock_aperture::Aperture;
@@ -65,8 +65,18 @@ fn shared_ledger() -> Arc<Ledger> {
         .clone()
 }
 
-fn chainlink(engine: &Engine) -> Arc<ProdChainlink> {
-    Arc::new(ProdChainlink::try_new(engine.clone(), None).expect("create chainlink"))
+fn chainsync(engine: &mut TestEngine) -> Arc<ChainSync> {
+    let handle = engine.clone();
+    // RPC tests seed resident Engine state; no live provider observations are needed.
+    let config = ChainSyncConfig {
+        grpc: vec![GrpcStreamConfig {
+            endpoint: "http://127.0.0.1:9".parse().unwrap(),
+            token: None,
+            duplication_delay: Duration::from_secs(30 * 60),
+        }],
+        ..Default::default()
+    };
+    ChainSync::new(handle, config, engine.shutdown()).expect("create chainsync")
 }
 
 impl RpcTestEnv {
@@ -77,7 +87,7 @@ impl RpcTestEnv {
         Self::with_engine(TestEngine::new().await).await
     }
 
-    pub(crate) async fn with_engine(engine: TestEngine) -> Self {
+    pub(crate) async fn with_engine(mut engine: TestEngine) -> Self {
         let cancel = CancellationToken::new();
         let server = Aperture::bind(
             &ApertureConfig {
@@ -85,7 +95,7 @@ impl RpcTestEnv {
                 ..Default::default()
             },
             (*engine).clone(),
-            chainlink(&engine),
+            chainsync(&mut engine),
             shared_ledger(),
             Duration::from_millis(100),
             cancel.clone(),

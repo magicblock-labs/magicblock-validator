@@ -670,45 +670,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Eleven combined commits fit within the compute budget. Extra action
-        // accounts push their buffered form beyond V1's static-key limit.
-        const NUM_COMMITS: u64 = 11;
-
-        let validator = Pubkey::new_unique();
-
-        let mut tasks: Vec<BaseTaskImpl> = (0..NUM_COMMITS)
-            .map(|i| {
-                // Large task
-                let task = create_test_commit_task(i, 1000, 0);
-                task.into()
-            })
-            .collect();
-        let mut action = create_test_base_action_task(0);
-        let BaseActionTask::V1(action_task) = &mut action else {
-            panic!("expected a V1 action");
-        };
-        action_task.action.account_metas_per_program = (0..20)
-            .map(|_| ShortAccountMeta {
-                pubkey: Pubkey::new_unique(),
-                is_writable: false,
-            })
-            .collect();
-        tasks.push(action.into());
-
-        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
-            .expect("Should build strategy with buffer optimization");
-
-        for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize] {
-            assert!(matches!(
-                commit_delivery(optimized_task),
-                CommitDelivery::StateInBuffer { .. }
-            ));
-        }
-        assert!(!strategy.lookup_tables_keys.is_empty());
-    }
-
-    #[test]
     fn test_build_strategy_reserves_space_for_uniqueness_nonce() {
         let validator = Pubkey::new_unique();
         let build = |data_len, nonce| {

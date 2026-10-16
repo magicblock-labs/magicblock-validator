@@ -4,6 +4,7 @@ use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use borsh::BorshDeserialize;
+use config::config::{ChainSyncConfig, GrpcStreamConfig, WebSocketConfig, WebSocketProvider};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::{
     nonblocking,
@@ -1182,6 +1183,25 @@ impl IntegrationTestContext {
         WS_URL_CHAIN
     }
 
+    /// Provider configuration shared by programmatically launched leader fixtures.
+    /// The test-validator launcher serves Yellowstone on port 7801.
+    pub fn chainsync_config() -> ChainSyncConfig {
+        ChainSyncConfig {
+            http: vec![Self::url_chain().parse().unwrap()],
+            websocket: WebSocketConfig(vec![WebSocketProvider {
+                url: Self::ws_url_chain().parse().unwrap(),
+                max_connections: 4,
+                subs_per_connection: 900,
+            }]),
+            grpc: vec![GrpcStreamConfig {
+                endpoint: "http://127.0.0.1:7801".parse().unwrap(),
+                token: None,
+                duplication_delay: Duration::from_secs(30 * 60),
+            }],
+            ..Default::default()
+        }
+    }
+
     // -----------------
     // Prometheus Metrics
     // -----------------
@@ -1199,24 +1219,17 @@ impl IntegrationTestContext {
             .into_string()
             .map_err(|e| anyhow::anyhow!("Failed to read metrics response: {}", e))?;
 
+        let mut count = 0;
         for line in response.lines() {
-            if line.starts_with("mbv_monitored_accounts ") {
-                let value_str = line
+            if line.starts_with("engine_chainsync_coverage{") {
+                let value = line
                     .split_whitespace()
                     .nth(1)
-                    .ok_or_else(|| anyhow::anyhow!("Failed to parse monitored_accounts metric"))?;
-                return value_str.parse::<usize>().map_err(|e| {
-                    anyhow::anyhow!(
-                        "Failed to parse monitored_accounts value '{}': {}",
-                        value_str,
-                        e
-                    )
-                });
+                    .ok_or_else(|| anyhow::anyhow!("missing ChainSync coverage value"))?;
+                count += value.parse::<usize>()?;
             }
         }
-
-        Err(anyhow::anyhow!(
-            "monitored_accounts metric not found in Prometheus response"
-        ))
+        // No series means no subscriptions have activated yet.
+        Ok(count)
     }
 }

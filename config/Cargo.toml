@@ -8,6 +8,7 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+chainsync = { workspace = true }
 clap = { workspace = true, features = ["derive"] }
 derive_more = { workspace = true, features = ["deref", "display", "from_str"] }
 figment = { workspace = true, features = ["env", "toml"] }

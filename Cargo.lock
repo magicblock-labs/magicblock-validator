@@ -641,28 +641,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-stream"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
-dependencies = [
- "async-stream-impl",
- "futures-core",
- "pin-project-lite",
-]
-
-[[package]]
-name = "async-stream-impl"
-version = "0.3.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3103,26 +3081,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "helius-laserstream"
-version = "0.2.2"
-source = "git+https://github.com/magicblock-labs/laserstream-sdk.git?branch=mbv-4.0%2Bconn-fix#97c2698dfa8b813de6ed53548e80ac0cc1d65e92"
-dependencies = [
- "async-stream",
- "futures",
- "futures-channel",
- "futures-util",
- "serde",
- "thiserror 2.0.20",
- "tokio",
- "tonic",
- "tracing",
- "url",
- "uuid",
- "yellowstone-grpc-client",
- "yellowstone-grpc-proto 12.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "hermit-abi"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4331,20 +4289,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-aml"
-version = "1.0.1"
-dependencies = [
- "futures-util",
- "magicblock-config",
- "magicblock-core",
- "reqwest 0.12.28",
- "serde",
- "thiserror 2.0.20",
- "tokio",
- "url",
-]
-
-[[package]]
 name = "magicblock-aperture"
 version = "1.0.1"
 dependencies = [
@@ -4358,7 +4302,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "libloading",
- "magicblock-chainlink",
+ "magicblock-chainsync",
  "magicblock-config",
  "magicblock-core",
  "magicblock-engine",
@@ -4394,69 +4338,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "v42-calculator-interface",
- "wincode",
-]
-
-[[package]]
-name = "magicblock-chainlink"
-version = "1.0.1"
-dependencies = [
- "agave-feature-set",
- "arc-swap",
- "assert_matches",
- "async-trait",
- "bincode 1.3.3",
- "borsh",
- "futures-util",
- "helius-laserstream",
- "lru",
- "magicblock-aml",
- "magicblock-chainlink",
- "magicblock-config",
- "magicblock-core",
- "magicblock-delegation-program-api",
- "magicblock-engine",
- "magicblock-engine-nucleus",
- "magicblock-keeper",
- "magicblock-magic-program-api",
- "magicblock-metrics",
- "parking_lot",
- "scc",
- "solana-account 4.3.1",
- "solana-account-decoder",
- "solana-account-decoder-client-types",
- "solana-address-lookup-table-interface 3.1.0",
- "solana-clock 3.1.1",
- "solana-commitment-config",
- "solana-hash 4.4.0",
- "solana-instruction 3.4.0",
- "solana-keypair",
- "solana-loader-v3-interface 7.0.0",
- "solana-loader-v4-interface 3.1.0",
- "solana-message 4.4.1",
- "solana-program 4.0.0",
- "solana-pubkey 4.2.0",
- "solana-pubsub-client",
- "solana-rent 4.3.0",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk-ids 3.1.0",
- "solana-signature 3.4.1",
- "solana-signer",
- "solana-system-interface 3.2.0",
- "solana-transaction",
- "solana-transaction-error 3.3.1",
- "spl-token-2022-interface 2.1.0",
- "spl-token-interface 2.0.0",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tonic",
- "tracing",
- "url",
  "v42-calculator-interface",
  "wincode",
 ]
@@ -4555,7 +4436,6 @@ dependencies = [
  "futures-util",
  "lru",
  "magicblock-accountsdb",
- "magicblock-chainlink",
  "magicblock-committor-interface",
  "magicblock-core",
  "magicblock-delegation-program-api",
@@ -4606,6 +4486,7 @@ dependencies = [
  "derive_more",
  "figment",
  "humantime-serde",
+ "magicblock-chainsync",
  "magicblock-engine-nucleus",
  "serde",
  "serde_with",
@@ -4903,7 +4784,6 @@ version = "1.0.1"
 dependencies = [
  "assert_matches",
  "lazy_static",
- "magicblock-chainlink",
  "magicblock-core",
  "magicblock-delegation-program-api",
  "magicblock-engine-nucleus",
@@ -5017,13 +4897,11 @@ name = "magicblock-services"
 version = "1.0.1"
 dependencies = [
  "futures-util",
- "magicblock-chainlink",
  "magicblock-core",
  "magicblock-delegation-program-api",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-magic-program-api",
- "magicblock-metrics",
  "magicblock-program",
  "solana-hash 4.4.0",
  "solana-instruction 3.4.0",
@@ -5103,7 +4981,7 @@ dependencies = [
  "bincode 1.3.3",
  "console-subscriber",
  "magicblock-aperture",
- "magicblock-chainlink",
+ "magicblock-chainsync",
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
@@ -7968,7 +7846,6 @@ dependencies = [
  "solana-sdk-ids 3.1.0",
  "solana-sdk-macro 3.0.1",
  "solana-sysvar-id 3.1.0",
- "wincode",
 ]
 
 [[package]]
@@ -8677,9 +8554,6 @@ version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4c948b33ff81fa89699911b207059e493defdba9647eaf18f23abdf3674e0fb"
 dependencies = [
- "serde",
- "serde_bytes",
- "serde_derive",
  "solana-instruction 3.4.0",
  "solana-pubkey 3.0.0",
  "solana-sdk-ids 3.1.0",

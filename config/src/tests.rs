@@ -1,4 +1,4 @@
-use std::{ffi::OsString, fs::File, io::Write, path::PathBuf, time::Duration};
+use std::{ffi::OsString, fs::File, io::Write, net::SocketAddr, path::PathBuf, time::Duration};
 
 use serial_test::parallel;
 use tempfile::TempDir;
@@ -46,11 +46,12 @@ fn defaults_use_leader_engine_configuration() {
     assert_eq!(
         config.engine.replication.bind_address.0,
         consts::DEFAULT_REPLICATION_BIND_ADDRESS
-            .parse()
+            .parse::<SocketAddr>()
             .expect("default replication address should parse"),
     );
     assert!(config.engine.replication.allowed_followers.is_empty());
-    assert_eq!(config.remotes.len(), 2);
+    assert_eq!(config.chainsync.http.len(), 1);
+    assert_eq!(config.chainsync.websocket.0.len(), 1);
 }
 
 #[test]
@@ -94,7 +95,7 @@ fn engine_configuration_loads_from_toml() {
     assert_eq!(config.engine.ledger.size_limit, 1_073_741_824);
     assert_eq!(
         config.engine.replication.bind_address.0,
-        "0.0.0.0:11000".parse().expect("address should parse"),
+        "0.0.0.0:11000".parse::<SocketAddr>().expect("address should parse"),
     );
 }
 
@@ -103,24 +104,17 @@ fn engine_configuration_loads_from_toml() {
 fn risk_configuration_loads_from_toml() {
     let (_dir, path) = create_temp_config(
         r#"
-        [chainlink.risk]
-        enabled = true
-        risk-server-url = "http://risk.example:3001"
-        request-timeout = "2s"
+        [chainsync.aml]
+        endpoint = "https://risk.example/risk"
+        timeout = "2s"
         "#,
     );
 
     let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
 
-    assert!(config.chainlink.risk.enabled);
-    assert_eq!(
-        config.chainlink.risk.risk_server_url,
-        "http://risk.example:3001",
-    );
-    assert_eq!(
-        config.chainlink.risk.request_timeout,
-        Duration::from_secs(2)
-    );
+    let aml = config.chainsync.aml.as_ref().expect("AML configured");
+    assert_eq!(aml.endpoint.as_str(), "https://risk.example/risk",);
+    assert_eq!(aml.timeout, Duration::from_secs(2));
 }
 
 #[test]
@@ -188,13 +182,10 @@ fn example_configuration_parses() {
 
     let config = run_cli(&[path.to_str().expect("UTF-8 path")]);
 
-    assert!(!config.chainlink.risk.enabled);
+    assert!(config.chainsync.aml.is_none());
+    assert_eq!(config.chainsync.grpc.len(), 1);
     assert_eq!(
-        config.chainlink.risk.risk_server_url,
-        consts::DEFAULT_RISK_SERVER_URL,
-    );
-    assert_eq!(
-        config.chainlink.risk.request_timeout,
-        Duration::from_secs(consts::DEFAULT_RISK_REQUEST_TIMEOUT_SEC),
+        config.chainsync.grpc[0].duplication_delay,
+        Duration::from_secs(30 * 60)
     );
 }

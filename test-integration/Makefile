@@ -121,15 +121,6 @@ setup-validator-services-both:
 	SETUP_ONLY=both \
 	$(MAKE) test
 
-test-table-mania:
-	RUN_TESTS=table_mania \
-	$(MAKE) test
-setup-table-mania-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=table_mania \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-
 test-committor:
 	RUN_TESTS=$(COMMITTOR_TESTS) \
 	$(MAKE) test
@@ -169,15 +160,6 @@ test-committor-intent-executor-recovery:
 setup-committor-devnet:
 	RUST_LOG_STYLE=none \
 	RUN_TESTS=$(COMMITTOR_TESTS) \
-	SETUP_ONLY=devnet \
-	$(MAKE) test
-
-test-config:
-	RUN_TESTS=config \
-	$(MAKE) test
-setup-config-devnet:
-	RUST_LOG_STYLE=none \
-	RUN_TESTS=config \
 	SETUP_ONLY=devnet \
 	$(MAKE) test
 
@@ -255,7 +237,6 @@ ci-lint:
 	setup-cloning-devnet \
 	setup-cloning-ephem \
 	setup-committor-devnet \
-	setup-config-devnet \
 	setup-validator-services-both \
 	setup-validator-services-devnet \
 	setup-validator-services-ephem \
@@ -265,7 +246,6 @@ ci-lint:
 	setup-schedulecommit-both \
 	setup-schedulecommit-devnet \
 	setup-schedulecommit-ephem \
-	setup-table-mania-devnet \
 	setup-task-scheduler-devnet \
 	test \
 	test-aml \
@@ -280,10 +260,8 @@ ci-lint:
 	test-committor-bundles-heavy \
 	test-committor-commitfinalize \
 	test-committor-intent-executor \
-	test-config \
 	test-force-mb \
 	test-schedule-intents \
 	test-schedulecommit \
-	test-table-mania \
 	test-task-scheduler \
 	test-validator-services

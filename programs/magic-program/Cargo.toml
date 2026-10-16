@@ -45,7 +45,6 @@ wincode = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
-chainlink = { workspace = true, features = ["dev-context"] }
 rand = { workspace = true }
 serial_test = { workspace = true }
 solana-signature = { workspace = true }

@@ -331,7 +331,6 @@ impl OutboxClient for InternalOutboxClient {
         let intent_id = meta.id;
         let transaction = mem::take(&mut meta.intent_sent_transaction);
         let sent_commit = build_sent_commit(meta, result, execution_report);
-        // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
         // Register once before submission. Only BlockhashNotFound permits a
         // fallback because it occurs before the processor can consume this payload.
         register_scheduled_commit_sent(sent_commit);

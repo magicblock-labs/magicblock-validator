@@ -295,11 +295,11 @@ fn test_redelegation_intent() {
 /// can contain both Commit and CommitAndUndelegate intents simultaneously.
 ///
 /// Setup:
-/// - 2 payers for commit-only (their counters will just be committed)
+/// - 1 payer for commit-only (its counter will just be committed)
 /// - 1 payer for commit-and-undelegate (their counters will be committed and undelegated)
 ///
 /// Expected behavior:
-/// - All 3 counters should be committed to base layer
+/// - Both counters should be committed to base layer
 /// - Only the undelegate payers' counters should be undelegated
 /// - Commit-only payers' counters remain delegated
 #[test]
@@ -309,8 +309,8 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     // Init context
     let ctx = IntegrationTestContext::try_new().unwrap();
 
-    // Create 2 payers for commit-only and 1 for undelegate
-    let commit_only_payers: Vec<Keypair> = (0..2).map(|_| setup_payer(&ctx)).collect();
+    // Keep the mixed intent within static-key delivery; lookup tables are unsupported.
+    let commit_only_payers: Vec<Keypair> = (0..1).map(|_| setup_payer(&ctx)).collect();
     let undelegate_payer = setup_payer(&ctx);
 
     debug!(
@@ -319,7 +319,7 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     );
 
     // Init and delegate counters for commit-only payers
-    let commit_values: [u8; 2] = [50, 75];
+    let commit_values: [u8; 1] = [50];
     for (idx, payer) in commit_only_payers.iter().enumerate() {
         init_counter(&ctx, payer);
         delegate_counter(&ctx, payer);
@@ -354,19 +354,13 @@ fn test_intent_bundle_commit_and_undelegate_simultaneously() {
     debug!("Scheduled intent bundle");
 
     // Assert commit-only counters have their values committed
-    // (commit-only payers: 50, 75)
+    // (commit-only payer: 50)
     assert_counters(
         &ctx,
-        &[
-            ExpectedCounter {
-                pda: FlexiCounter::pda(&commit_only_payers[0].pubkey()).0,
-                expected: 50,
-            },
-            ExpectedCounter {
-                pda: FlexiCounter::pda(&commit_only_payers[1].pubkey()).0,
-                expected: 75,
-            },
-        ],
+        &[ExpectedCounter {
+            pda: FlexiCounter::pda(&commit_only_payers[0].pubkey()).0,
+            expected: 50,
+        }],
         true,
     );
     debug!("Verified commit-only counters on base layer");

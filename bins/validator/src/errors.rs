@@ -1,7 +1,7 @@
 use std::io;
 
 use aperture::ApertureError;
-use chainlink::errors::ChainlinkError;
+use chainsync::Error as ChainSyncError;
 use committor::error::CommittorServiceError;
 use engine::EngineError;
 use ledger_deprecated::errors::LedgerError;
@@ -35,8 +35,8 @@ pub(crate) enum ApiError {
     #[error("Runtime image error: {0}")]
     Runtime(#[from] RuntimeError),
 
-    #[error("Chainlink error: {0}")]
-    ChainlinkError(Box<ChainlinkError>),
+    #[error("ChainSync error: {0}")]
+    ChainSyncError(Box<ChainSyncError>),
 
     #[error("Failed to obtain balance for validator '{0}' from chain: {1}")]
     FailedToObtainValidatorOnChainBalance(Pubkey, #[source] Box<RpcClientError>),
@@ -81,9 +81,9 @@ impl From<LedgerError> for ApiError {
     }
 }
 
-impl From<ChainlinkError> for ApiError {
-    fn from(e: ChainlinkError) -> Self {
-        Self::ChainlinkError(Box::new(e))
+impl From<ChainSyncError> for ApiError {
+    fn from(e: ChainSyncError) -> Self {
+        Self::ChainSyncError(Box::new(e))
     }
 }
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser};
 use serde::Serialize;
 
-use crate::types::{BindAddress, network::Remote};
+use crate::types::BindAddress;
 
 /// CLI arguments mirroring the structure of [`crate::LeaderParams`].
 /// All fields are optional to allow "overlay" behavior on top of the config file.
@@ -12,23 +12,6 @@ use crate::types::{BindAddress, network::Remote};
 pub struct CliParams {
     /// Path to the TOML configuration file.
     pub config: Option<PathBuf>,
-
-    /// List of remote endpoints for syncing with the base chain.
-    /// Can be specified multiple times.
-    ///
-    /// SUPPORTED SCHEMES: http(s), ws(s), grpc(s)
-    ///
-    /// ALIASES: mainnet, devnet, testnet, localhost
-    ///
-    /// EXAMPLES:
-    /// - `--remotes devnet`
-    /// - `--remotes wss://devnet.solana.com`
-    /// - `--remotes grpcs://grpc.example.com`
-    ///
-    /// DEFAULT: devnet (HTTP endpoint with auto-added WS endpoint)
-    #[arg(long)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub remotes: Option<Vec<Remote>>,
 
     /// Listen address for the metrics endpoint.
     #[arg(long, short)]

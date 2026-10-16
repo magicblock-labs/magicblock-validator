@@ -11,6 +11,12 @@ Start with the example for the process you want to run:
   local storage, identity, and startup programs.
 
 Replace sample identities, credentials, addresses, and program paths before use.
+Account synchronization is configured under `[chainsync]`: HTTP providers,
+WebSocket pool capacities, per-stream gRPC endpoints/tokens/duplication delays,
+and optional AML assessment. Omitted HTTP defaults to devnet; omitted WebSocket
+providers are derived from the first HTTP URL.
+Configure at least one gRPC stream for delegation lifecycle monitoring. The old
+`remotes`, `--remotes`, `[chainlink]`, and global `[grpc]` settings are not accepted.
 
 ## Overrides
 

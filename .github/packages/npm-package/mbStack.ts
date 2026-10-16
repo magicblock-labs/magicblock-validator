@@ -37,26 +37,6 @@ const BASE_PORT = port("MB_STACK_BASE_PORT", 8899);
 // what readiness is gated on.
 const CRANKER_PORT = port("MB_STACK_CRANKER_PORT", 9797);
 
-// Which base chain the ephemeral-validator clones from / commits to. Defaults to
-// the local mb-test-validator; override (comma-separated remotes, e.g.
-// MB_STACK_ER_REMOTES=devnet) to point the ER at a real provisioned base.
-function erRemotes(): string[] {
-  const override = process.env.MB_STACK_ER_REMOTES;
-  if (override) {
-    return override
-      .split(",")
-      .map((r) => r.trim())
-      .filter((r) => r.length > 0)
-      .flatMap((r) => ["--remotes", r]);
-  }
-  return [
-    "--remotes",
-    `http://${HOST}:${BASE_PORT}`,
-    "--remotes",
-    `ws://${HOST}:${BASE_PORT + 1}`,
-  ];
-}
-
 interface Service {
   name: string;
   script: string;
@@ -139,7 +119,12 @@ const SERVICES: Service[] = [
     // --no-tui is required: the published ER is built with the TUI feature, and a
     // supervised child with redirected stdio (no TTY) would otherwise exit
     // immediately. The stack is headless by design.
-    args: ["--no-tui", "--listen", `${HOST}:${ER_PORT}`, ...erRemotes()],
+    args: ["--no-tui", "--listen", `${HOST}:${ER_PORT}`],
+    extraEnv: {
+      MBV_CHAINSYNC__HTTP:
+        process.env.MBV_CHAINSYNC__HTTP ??
+        JSON.stringify([`http://${HOST}:${BASE_PORT}`]),
+    },
     healthPort: ER_PORT,
     tag: "er",
     color: "\x1b[32m", // green
@@ -422,7 +407,7 @@ function startService(svc: Service): ChildProcess {
 function printSummary(): void {
   console.log("");
   console.log(color("MagicBlock stack is ready.", `${BOLD}`));
-  const remotesOverride = process.env.MB_STACK_ER_REMOTES;
+  const remotesOverride = process.env.MBV_CHAINSYNC__HTTP;
   if (remotesOverride) {
     console.log(`${color("Base chain:", CYAN)}             ${remotesOverride}`);
   }
@@ -443,7 +428,7 @@ async function main(): Promise<void> {
   // skip it so we don't boot an idle validator. The cranker is opt-in.
   const services = SERVICES.filter((s) => {
     if (s.script === "mbTestValidator.js")
-      return !process.env.MB_STACK_ER_REMOTES;
+      return !process.env.MBV_CHAINSYNC__HTTP;
     if (s.script === "hydraCranker.js") return WITH_CRANKER;
     return true;
   });

@@ -4,7 +4,6 @@ use std::{
     net::TcpListener,
     path::Path,
     process::Child,
-    str::FromStr,
     sync::{
         atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
@@ -16,8 +15,7 @@ use std::{
 use parking_lot::RwLock;
 
 use config::{
-    config::{AmlCheckStrategy, ChainLinkConfig, LoadableProgram, RiskConfig},
-    types::Remote,
+    config::{AmlConfig, ChainSyncConfig, LoadableProgram},
     LeaderParams,
 };
 use integration_test_tools::{
@@ -165,21 +163,14 @@ pub fn setup_validator_with_local_remote(
 
     let mut config = LeaderParams {
         programs,
-        remotes: vec![
-            Remote::from_str(IntegrationTestContext::url_chain()).unwrap(),
-            Remote::from_str(IntegrationTestContext::ws_url_chain()).unwrap(),
-        ],
-        chainlink: ChainLinkConfig {
-            risk: RiskConfig {
-                enabled: true,
-                risk_server_url,
-                // Pinned rather than defaulted: the suite asserts that risky
-                // signers are blocked, which is only meaningful if we know
-                // which strategy decided to check them.
-                check_strategy: AmlCheckStrategy::AllSigners,
-                ..Default::default()
-            },
-            ..Default::default()
+        chainsync: ChainSyncConfig {
+            aml: Some(AmlConfig {
+                endpoint: format!("{}/risk", risk_server_url.trim_end_matches('/'))
+                    .parse()
+                    .unwrap(),
+                timeout: Duration::from_secs(5),
+            }),
+            ..IntegrationTestContext::chainsync_config()
         },
         ..Default::default()
     };
