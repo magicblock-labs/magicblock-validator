@@ -14,6 +14,7 @@ members = [
     "aml",
     "aperture",
     "chainlink",
+    "chainsync",
     "programs/committor-interface",
     "programs/committor-program",
     "committor",
@@ -63,6 +64,7 @@ unwrap_used = "warn"
 wildcard_dependencies = "deny"
 
 [workspace.dependencies]
+chainsync = { package = "magicblock-chainsync", path = "chainsync" }
 aml = { package = "magicblock-aml", path = "aml" }
 aperture = { package = "magicblock-aperture", path = "aperture" }
 chainlink = { package = "magicblock-chainlink", path = "chainlink" }
@@ -243,6 +245,8 @@ solana-zk-elgamal-proof-program = { version = "=4.2.2", features = ["agave-unsta
 spl-token = { package = "spl-token-interface", version = "2.0" }
 spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 
+
+zstd = "0.13"
 
 [patch.crates-io]
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
