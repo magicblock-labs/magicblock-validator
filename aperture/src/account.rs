@@ -120,15 +120,6 @@ impl AccountWithPubkey {
     }
 }
 
-/// Match validated filters without decoding their bytes for each account.
-pub(crate) fn matches_filters(filters: &[PreparedFilter], data: &[u8]) -> bool {
-    filters.iter().all(|filter| match &filter.0 {
-        RpcFilterType::DataSize(size) => data.len() as u64 == *size,
-        RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
-        RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
-    })
-}
-
 /// The upstream program config, with filters decoded during parameter parsing.
 #[derive(Deserialize, Default)]
 pub(crate) struct ProgramConfig {
@@ -139,6 +130,17 @@ pub(crate) struct ProgramConfig {
 
 /// A size-checked RPC filter with memcmp bytes decoded once, before scanning or subscribing.
 pub(crate) struct PreparedFilter(RpcFilterType);
+
+impl PreparedFilter {
+    /// Matches account data without repeating memcmp decoding.
+    pub(crate) fn matches(&self, data: &[u8]) -> bool {
+        match &self.0 {
+            RpcFilterType::DataSize(size) => data.len() as u64 == *size,
+            RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
+            RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
+        }
+    }
+}
 
 impl<'de> Deserialize<'de> for PreparedFilter {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -162,12 +164,12 @@ impl<'de> Deserialize<'de> for PreparedFilter {
             Filter::DataSize(size) => RpcFilterType::DataSize(size),
             Filter::TokenAccountState => RpcFilterType::TokenAccountState,
             Filter::Memcmp(compare) => {
-                // Reject oversized wire values before allocating decoded bytes. These
-                // are Solana's encoded limits; verify below enforces the raw 128-byte limit.
+                // Bound decoding work using Solana's encoded limits. The upstream
+                // verify below enforces the 128-byte limit for all decoded/raw inputs.
                 let oversized = match &compare.bytes {
                     MemcmpEncodedBytes::Base58(bytes) => bytes.len() > 175,
                     MemcmpEncodedBytes::Base64(bytes) => bytes.len() > 172,
-                    MemcmpEncodedBytes::Bytes(bytes) => bytes.len() > 128,
+                    MemcmpEncodedBytes::Bytes(_) => false,
                 };
                 if oversized {
                     return Err(D::Error::custom(RpcFilterError::DataTooLarge));
