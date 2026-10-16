@@ -1,22 +1,22 @@
 name: Setup Yellowstone
-description: Install the lifecycle feed plugin for Agave 4.1 integration fixtures
+description: Install the lifecycle feed plugin for Agave 4.2.0 integration fixtures
 runs:
   using: composite
   steps:
     - uses: actions/cache@v6
       id: cache
       with:
-        path: ~/.cache/yellowstone/v14.2.4+solana.4.1.0
-        key: yellowstone-v14.2.4-solana4.1.0-${{ runner.os }}-${{ runner.arch }}
+        path: ~/.cache/yellowstone/v15.1.2+solana.4.2.0
+        key: yellowstone-v15.1.2-solana4.2.0-${{ runner.os }}-${{ runner.arch }}
     - name: Download Yellowstone plugin
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        dir="$HOME/.cache/yellowstone/v14.2.4+solana.4.1.0"
+        dir="$HOME/.cache/yellowstone/v15.1.2+solana.4.2.0"
         mkdir -p "$dir"
-        base='https://github.com/rpcpool/yellowstone-grpc/releases/download/v14.2.4%2Bsolana.4.1.0'
+        base='https://github.com/rpcpool/yellowstone-grpc/releases/download/v15.1.2%2Bsolana.4.2.0'
         curl --fail --location --retry 3 "$base/libyellowstone_grpc_geyser.so" -o "$dir/libyellowstone_grpc_geyser.so"
-        curl --fail --location --retry 3 "$base/yellowstone-grpc_14.2.4%2Bsolana.4.1.0_checksums.txt" -o "$dir/checksums.txt"
+        curl --fail --location --retry 3 "$base/yellowstone-grpc_15.1.2%2Bsolana.4.2.0_checksums.txt" -o "$dir/checksums.txt"
         cd "$dir"
         grep '  libyellowstone_grpc_geyser.so$' checksums.txt | sha256sum --check
     - name: Configure the integration feed
@@ -24,5 +24,5 @@ runs:
       run: |
         config="$RUNNER_TEMP/yellowstone-integration.json"
         printf '{"libpath":"%s","log":{"level":"warn"},"grpc":{"listen":[{"address":"127.0.0.1:7801"}]}}' \
-          "$HOME/.cache/yellowstone/v14.2.4+solana.4.1.0/libyellowstone_grpc_geyser.so" > "$config"
+          "$HOME/.cache/yellowstone/v15.1.2+solana.4.2.0/libyellowstone_grpc_geyser.so" > "$config"
         echo "YELLOWSTONE_GRPC_CONFIG=$config" >> "$GITHUB_ENV"
