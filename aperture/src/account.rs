@@ -1,8 +1,9 @@
-use engine::Engine;
 use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
+use engine::Engine;
+use json::{Deserialize, Serialize};
 use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
-use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
+use serde::{Deserializer, de::Error as _};
 use solana_account::{AccountMode, AccountSharedData};
 use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -32,7 +33,7 @@ impl Accounts {
 
     /// Uninitialized images are storage placeholders, not RPC-visible accounts.
     pub(crate) fn account_is_visible(account: &AccountSharedData) -> bool {
-        !account.is(AccountMode::Missing)
+        !account.is(AccountMode::Uninit)
     }
 
     /// Ensure best-effort, then project the account while its borrowed image is scoped.

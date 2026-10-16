@@ -1,4 +1,4 @@
-use magicblock_core::token_programs::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
+use mbv_core::token_programs::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
 use solana_account::Account;
 use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::Pubkey;
