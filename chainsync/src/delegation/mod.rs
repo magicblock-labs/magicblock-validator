@@ -1,6 +1,6 @@
 //! Validated delegation images shared by acquisition and stream matching.
 
-use dlp_api::state::DelegationRecord;
+use delegation_program_api::state::DelegationRecord;
 use solana_account::{AccountBuilder, AccountMode};
 use solana_pubkey::Pubkey;
 
