@@ -14,15 +14,15 @@ use std::{
 
 use parking_lot::RwLock;
 
+use config::{
+    config::{AmlConfig, ChainSyncConfig, LoadableProgram},
+    LeaderParams,
+};
 use integration_test_tools::{
     expect,
     loaded_accounts::{LoadedAccounts, DLP_TEST_AUTHORITY_BYTES},
     validator::{cleanup, resolve_programs, start_magicblock_validator_with_config_struct},
     IntegrationTestContext,
-};
-use config::{
-    config::{AmlConfig, ChainSyncConfig, LoadableProgram},
-    LeaderParams,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair, signer::Signer,

@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use config::types::Remote;
+use config::types::{ResolvedUrl, network::websocket_url};
 use futures_util::{SinkExt, StreamExt};
 use json::{JsonValueTrait, Value};
 use tokio::{net::TcpStream, time::timeout};
@@ -18,15 +18,19 @@ type Socket = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub(crate) struct Args {
     /// Validator HTTP RPC or WebSocket URL.
     #[arg(long)]
-    url: Remote,
+    url: ResolvedUrl,
 }
 
 impl Args {
     /// Bounds connection setup, then logs live failures until Ctrl-C or disconnection.
     /// Idle monitoring has no deadline and does not detect missed notifications.
     pub(crate) async fn run(self) -> Result<()> {
-        let url = self.url.to_websocket().context("monitor requires an HTTP or WebSocket URL")?;
-        let mut ws = timeout(Duration::from_secs(10), subscribe(url.url_str()))
+        let url = match self.url.scheme() {
+            "http" | "https" => websocket_url(self.url.0),
+            "ws" | "wss" => self.url.0,
+            _ => bail!("monitor requires an HTTP or WebSocket URL"),
+        };
+        let mut ws = timeout(Duration::from_secs(10), subscribe(url.as_str()))
             .await
             .context("timed out connecting and subscribing")??;
         info!(websocket = %url, "Monitoring transaction failures");

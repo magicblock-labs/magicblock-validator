@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use magicblock_config::config::ChainSyncConfig;
+use config::config::ChainSyncConfig;
 use serde::Deserialize;
 
 #[derive(Deserialize)]

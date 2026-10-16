@@ -1,8 +1,6 @@
+use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
 use engine::Engine;
 use json::{Deserialize, Serialize};
-use chainsync::{
-    AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult,
-};
 use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
 use serde::{Deserializer, de::Error as _};

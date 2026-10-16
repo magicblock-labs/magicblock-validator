@@ -5,6 +5,7 @@ use std::{
 };
 
 use cleanass::assert;
+use config::{config::LoadableProgram, types::SerdePubkey, LeaderParams};
 use hydra_api::ephemeral::ID as HYDRA_EPHEMERAL_PROGRAM_ID;
 use integration_test_tools::{
     expect,
@@ -14,11 +15,6 @@ use integration_test_tools::{
         cleanup, start_magicblock_validator_with_config_struct_and_temp_dir, TMP_DIR_CONFIG,
     },
     IntegrationTestContext,
-};
-use config::{
-    config::LoadableProgram,
-    types::SerdePubkey,
-    LeaderParams,
 };
 use program::{args::ScheduleTaskArgs, instruction_utils::InstructionUtils, Pubkey};
 use program_schedulecommit::MainAccount;
