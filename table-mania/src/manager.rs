@@ -7,7 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use metrics::metrics;
+use crate::metrics;
 use rpc_client::MagicblockRpcClient;
 use solana_address_lookup_table_interface::state::AddressLookupTable;
 use solana_commitment_config::CommitmentConfig;
@@ -678,7 +678,7 @@ impl TableMania {
                 .await;
 
             loop {
-                metrics::inc_table_mania_a_count();
+                metrics::readiness_fetch();
                 // Fetch the tables from chain
                 let remote_table_accs = self
                     .rpc_client

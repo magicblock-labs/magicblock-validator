@@ -12,7 +12,6 @@ use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use mbv_core::traits::{ActionsCallbackScheduler, CallbackScheduleError};
-use metrics::metrics;
 use program::{
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
     outbox_intent_bundles::OutboxIntentBundleStatus,
@@ -101,8 +100,8 @@ pub enum ExecutionOutput {
     },
 }
 
-impl metrics::LabelValue for ExecutionOutput {
-    fn value(&self) -> &str {
+impl ExecutionOutput {
+    pub(crate) fn metric_label(&self) -> &'static str {
         match self {
             Self::SingleStage(_) => "single_stage_succeeded",
             Self::TwoStage {

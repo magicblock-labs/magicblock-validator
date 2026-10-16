@@ -119,3 +119,5 @@ fn print_info(message: impl std::fmt::Display) {
         info!("{message}");
     }
 }
+
+mod metrics;

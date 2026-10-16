@@ -1,7 +1,7 @@
 use std::{ops::ControlFlow, time::Duration};
 
+use crate::metrics;
 use delegation_program_api::pda::commit_record_pda_from_delegated_account;
-use metrics::metrics;
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
@@ -15,7 +15,6 @@ use solana_hash::Hash;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
@@ -24,7 +23,6 @@ use tracing::warn;
 
 use crate::{
     intent_executor::{
-        ExecutionOutput,
         error::{IntentExecutorError, IntentExecutorResult, InternalError},
         strategy_executor::error::{
             IntentTransactionErrorMapper, TransactionStrategyExecutionError,
@@ -194,7 +192,7 @@ impl IntentExecutionClient {
         signatures: &[Signature],
         commitment_config: CommitmentConfig,
     ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>> {
-        let _timer = metrics::start_rpc_client_signature_history_timer();
+        let _timer = metrics::time_history();
         let response = self
             .rpc_client
             .get_inner()
@@ -274,51 +272,6 @@ impl IntentExecutionClient {
             .await?;
 
         Ok(result)
-    }
-
-    pub async fn intent_metrics(&self, execution_outcome: ExecutionOutput) {
-        use solana_transaction_status_client_types::EncodedTransactionWithStatusMeta;
-        fn extract_cu(tx: EncodedTransactionWithStatusMeta) -> Option<u64> {
-            let cu = tx.meta?.compute_units_consumed;
-            cu.into()
-        }
-
-        let config = RpcTransactionConfig {
-            commitment: Some(self.rpc_client.commitment()),
-            max_supported_transaction_version: Some(1),
-            ..Default::default()
-        };
-        let cu_metrics = || async {
-            match execution_outcome {
-                ExecutionOutput::SingleStage(signature) => {
-                    let tx = self.rpc_client.get_transaction(&signature, Some(config)).await?;
-                    Ok::<_, MagicBlockRpcClientError>(extract_cu(tx.transaction))
-                }
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => {
-                    let commit_tx =
-                        self.rpc_client.get_transaction(&commit_signature, Some(config)).await?;
-                    let finalize_tx =
-                        self.rpc_client.get_transaction(&finalize_signature, Some(config)).await?;
-                    let commit_cu = extract_cu(commit_tx.transaction);
-                    let finalize_cu = extract_cu(finalize_tx.transaction);
-                    let (Some(commit_cu), Some(finalize_cu)) = (commit_cu, finalize_cu) else {
-                        return Ok(None);
-                    };
-                    Ok(Some(commit_cu + finalize_cu))
-                }
-            }
-        };
-
-        match cu_metrics().await {
-            Ok(Some(cu)) => {
-                metrics::set_commmittor_intent_cu_usage(i64::try_from(cu).unwrap_or(i64::MAX))
-            }
-            Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
-            _ => {}
-        }
     }
 }
 

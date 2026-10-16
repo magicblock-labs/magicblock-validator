@@ -1,5 +1,6 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use crate::metrics;
 use committor::{
     committor_processor::CommittorProcessor,
     intent_engine::db::AccountsDbIntentBacklog,
@@ -12,7 +13,6 @@ use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
 };
-use metrics::metrics;
 use program::magic_sys::INTENT_TOO_LARGE_ERR;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
@@ -78,7 +78,7 @@ impl MagicSys for MagicSysAdapter {
         let accounts: Vec<_> =
             commits.iter().map(|account| (account.pubkey, account.remote_slot)).collect();
 
-        let _timer = metrics::start_fetch_commit_nonces_wait_timer();
+        let _timer = metrics::time_nonce_wait();
         let receiver = self.fetch_current_commit_nonces_sync(&accounts, min_context_slot);
         receiver
             .recv_timeout(Self::FETCH_TIMEOUT)

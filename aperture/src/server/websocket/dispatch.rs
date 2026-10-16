@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use ::metrics::metrics::RPC_REQUESTS_COUNT;
+use crate::metrics;
 use engine::Engine;
 use hyper::body::Bytes;
 use json::Serialize;
@@ -48,7 +48,7 @@ impl WsDispatcher {
     /// Routes an incoming JSON-RPC request to the appropriate subscription handler.
     pub(crate) async fn dispatch(&mut self, request: &JsonWsRequest) -> RpcResult<SubResult> {
         use JsonRpcWsMethod::*;
-        RPC_REQUESTS_COUNT.with_label_values(&[request.method.as_str()]).inc();
+        metrics::request(request.method.as_str());
         match request.method {
             AccountSubscribe => self.account_subscribe(request),
             ProgramSubscribe => self.program_subscribe(request),

@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use metrics::metrics;
+use crate::metrics;
 use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use rpc_client::{MagicBlockRpcClientError, MagicBlockSendTransactionConfig, MagicblockRpcClient};
 use solana_address_lookup_table_interface::{
@@ -739,7 +739,7 @@ impl LookupTableRc {
     }
 
     pub async fn is_closed(&self, rpc_client: &MagicblockRpcClient) -> TableManiaResult<bool> {
-        metrics::inc_table_mania_close_a_count();
+        metrics::closure_check();
         let acc = rpc_client.get_account(self.table_address()).await?;
         Ok(acc.is_none())
     }

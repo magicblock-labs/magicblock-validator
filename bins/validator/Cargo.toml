@@ -19,13 +19,12 @@ config = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }
 ledger-deprecated = { workspace = true }
-metrics = { workspace = true }
 program = { workspace = true }
 runtime = { workspace = true }
 services = { workspace = true }
 task-scheduler = { workspace = true }
 mimalloc = { workspace = true }
-nucleus = { workspace = true }
+nucleus = { workspace = true, features = ["metrics"] }
 num_cpus = { workspace = true }
 replicator = { workspace = true }
 solana-commitment-config = { workspace = true }

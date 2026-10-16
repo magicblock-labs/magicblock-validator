@@ -1,8 +1,8 @@
 use super::{
     HandlerResult, RpcHandlers, get_blocks::BlockRange, get_token_accounts::TokenAccountAuthority,
 };
+use crate::metrics;
 use crate::{error::RpcError, requests::JsonHttpRequest};
-use ::metrics::metrics::{RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT};
 
 impl RpcHandlers {
     pub(crate) async fn process(
@@ -13,8 +13,8 @@ impl RpcHandlers {
         // Route the request to the correct handler based on the method name.
         use crate::requests::JsonRpcHttpMethod::*;
         let method = request.method.as_str();
-        RPC_REQUESTS_COUNT.with_label_values(&[method]).inc();
-        let _timer = RPC_REQUEST_HANDLING_TIME.with_label_values(&[method]).start_timer();
+        metrics::request(method);
+        let _timer = metrics::time_request(method);
 
         match request.method {
             GetAccountInfo => self.get_account_info(request, fetches).await,

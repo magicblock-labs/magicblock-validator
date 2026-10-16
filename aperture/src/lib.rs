@@ -126,3 +126,8 @@ mod requests;
 mod server;
 mod state;
 mod transaction;
+
+mod metrics;
+
+/// Standalone Prometheus scrape server for leaders and verifiers.
+pub use server::metrics::MetricsService;
