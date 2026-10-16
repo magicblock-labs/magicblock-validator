@@ -1,4 +1,6 @@
-use dlp_api::{pda::delegation_record_pda_from_delegated_account, state::DelegationRecord};
+use delegation_program_api::{
+    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+};
 use engine::testkit::TestEngine;
 use hyper::StatusCode;
 use keeper::testkit::{V42_ID, store_v42, v42_builder};
@@ -376,9 +378,9 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
         ..*delegation::record(&record).unwrap()
     };
     let mut raw = Account::from_builder(eata, &delegated);
-    raw.owner = dlp_api::id();
+    raw.owner = delegation_program_api::id();
     let remote_record = Account {
-        owner: dlp_api::id(),
+        owner: delegation_program_api::id(),
         data: encode_record(&metadata),
         ..Account::new(delegation_record_pda_from_delegated_account(&eata))
     };

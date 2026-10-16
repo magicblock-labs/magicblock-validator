@@ -2,8 +2,8 @@
 
 use std::borrow::Cow;
 
-use dlp_api::pda::delegation_record_pda_from_delegated_account;
-use magicblock_core::token_programs::EATA_PROGRAM_ID;
+use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
+use mbv_core::token_programs::EATA_PROGRAM_ID;
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
 use solana_pubkey::Pubkey;
 use solana_rent::Rent;
@@ -138,7 +138,7 @@ impl<'engine> Acquisition<'engine> {
             let image = account.read();
             let executable = image.flags().contains(StateFlags::EXECUTABLE);
             let refetch = match target.property {
-                Readonly if image.owner() == dlp_api::id() => Some(Writable),
+                Readonly if image.owner() == delegation_program_api::id() => Some(Writable),
                 Readonly if executable && image.owner() == bpf_loader_upgradeable::ID => {
                     Some(Program)
                 }

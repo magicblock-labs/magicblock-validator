@@ -87,7 +87,7 @@ pub enum Error {
     #[error("invalid delegation actions: {0}")]
     Actions(#[from] borsh::io::Error),
     #[error("delegation action decryption failed: {0}")]
-    Decrypt(#[from] dlp_api::decrypt::DecryptError),
+    Decrypt(#[from] delegation_program_api::decrypt::DecryptError),
     #[error("delegation signer assessment failed: {0}")]
     Aml(#[from] AmlError),
 }

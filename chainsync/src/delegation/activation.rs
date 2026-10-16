@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use dlp_api::{Decrypt, args::PostDelegationActions};
+use delegation_program_api::{Decrypt, args::PostDelegationActions};
 use engine::PostFinalize;
 use solana_account::{AccountBuilder, AccountMode};
 use solana_instruction::Instruction;

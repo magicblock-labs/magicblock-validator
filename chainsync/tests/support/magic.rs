@@ -2,8 +2,8 @@ use std::sync::{Arc, OnceLock};
 
 use engine::testkit::{Pacing, TestEngine};
 use keeper::testkit::{Dirs, keeper_builder};
-use magicblock_magic_program_api::{MAGIC_CONTEXT_PUBKEY, id};
-use magicblock_program::{
+use magic_program_api::{MAGIC_CONTEXT_PUBKEY, id};
+use program::{
     MagicContext, init_magic_sys, magicblock_processor::Entrypoint, test_utils::MagicSysStub,
     validator,
 };

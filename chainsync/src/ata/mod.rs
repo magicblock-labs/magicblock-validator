@@ -1,4 +1,4 @@
-use magicblock_core::token_programs::{
+use mbv_core::token_programs::{
     EATA_PROGRAM_ID, EphemeralAta, derive_ata_with_token_program, try_derive_eata_address_and_bump,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
@@ -84,7 +84,7 @@ fn token_account(
     data: &[u8],
 ) -> Option<TokenAccount> {
     // Scheduling undelegation changes the owner to DLP but retains the token layout.
-    let transient = program == dlp_api::id() && mode == AccountMode::Transient;
+    let transient = program == delegation_program_api::id() && mode == AccountMode::Transient;
     let token = if program == spl_token::id() {
         TokenAccount::unpack(data).ok()?
     } else if program == spl_token_2022::id() || transient {
@@ -104,7 +104,7 @@ fn token_account(
 
 /// An eATA is trusted only when its owner and derived address agree with its data.
 fn eata_data(pubkey: Pubkey, owner: Pubkey, data: &[u8]) -> Option<EphemeralAta> {
-    if owner != EATA_PROGRAM_ID && owner != dlp_api::id() {
+    if owner != EATA_PROGRAM_ID && owner != delegation_program_api::id() {
         return None;
     }
     let eata = EphemeralAta::try_from_account_data(data)?;

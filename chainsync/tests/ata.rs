@@ -5,11 +5,11 @@
 mod support;
 
 use chainsync::{AccountProperty, ChainSyncAccount};
-use dlp_api::compact::ClearText;
+use delegation_program_api::compact::ClearText;
 use engine::testkit::TestEngine;
 use keeper::testkit::store_v42;
 use magicblock_chainsync as chainsync;
-use magicblock_core::token_programs::EATA_PROGRAM_ID;
+use mbv_core::token_programs::EATA_PROGRAM_ID;
 use nucleus::testkit::v42_sum;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
 use solana_program_pack::Pack;
@@ -96,7 +96,9 @@ async fn http_and_grpc_delegations_retain_raw_eata_and_refresh_both_images() {
         within(async {
             loop {
                 let event = logs.recv().await.unwrap();
-                if event.logs.iter().any(|line| line.contains(&expected)) {
+                let execution = event.execution.result.as_ref().unwrap();
+                let messages = execution.execution_details.log_messages.as_ref().unwrap();
+                if messages.iter().any(|line| line.contains(&expected)) {
                     break;
                 }
             }
