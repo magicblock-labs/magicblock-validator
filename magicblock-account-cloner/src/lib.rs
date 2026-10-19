@@ -715,6 +715,12 @@ impl Cloner for ChainlinkCloner {
         // Both V1 and V4 use buffer_pubkey for multi-tx cloning
         let buffer_pubkey = derive_buffer_pubkey(&program_id).0;
 
+        // Commit eviction before uploading so stale buffer metadata cannot reject
+        // scratch writes with remote_slot=0. Chainlink serializes clones per program.
+        self.evict_account(buffer_pubkey).await.map_err(|err| {
+            ClonerError::FailedToCloneProgram(program_id, Box::new(err))
+        })?;
+
         let mut last_sig = None;
         for tx in txs {
             match self.send_tx(tx).await {

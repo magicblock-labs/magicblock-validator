@@ -1,9 +1,19 @@
 use std::sync::Arc;
 
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{
+    loaded_accounts::LoadedAccounts, IntegrationTestContext,
+};
+use magicblock_magic_program_api::instruction::{
+    AccountCloneFields, MagicBlockInstruction,
+};
 use program_mini::sdk::MiniSdk;
 use solana_loader_v4_interface::state::{LoaderV4State, LoaderV4Status};
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Keypair};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::Keypair,
+};
 use spl_memo_interface::{instruction as memo_ix, v1 as memo_v1};
 use test_chainlink::programs::{
     deploy::{compile_mini, deploy_loader_v4},
@@ -120,6 +130,8 @@ fn test_clone_mini_v3_loader_program() {
     check_v4_program_status!(ctx, program, MINIV3_AUTH);
 }
 
+/// Proves an ELF upgrade replaces the executable even when its staging buffer
+/// contains non-pending clone state with a newer remote slot than scratch writes.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_clone_mini_v4_loader_program_and_upgrade() {
     init_logger!();
@@ -161,6 +173,42 @@ async fn test_clone_mini_v4_loader_program_and_upgrade() {
 
         let program = ctx.fetch_ephem_account(prog_kp.pubkey()).unwrap();
         check_v4_program_status!(ctx, program, auth_kp.pubkey());
+    }
+
+    {
+        let accounts = LoadedAccounts::with_delegation_program_test_authority();
+        let authority = accounts.validator_authority_keypair();
+        let buffer = Pubkey::find_program_address(
+            &[b"buffer", prog_kp.pubkey().as_ref()],
+            &authority.pubkey(),
+        )
+        .0;
+        let seed_buffer = MagicBlockInstruction::CloneAccount {
+            pubkey: buffer,
+            data: vec![42],
+            fields: AccountCloneFields {
+                lamports: 1_000_000,
+                owner: solana_system_interface::program::id(),
+                // Exceed even the slot of a placeholder fetched while ensuring
+                // this transaction. Scratch uploads use remote_slot=0.
+                remote_slot: u64::MAX,
+                ..Default::default()
+            },
+            actions: vec![],
+        };
+        let ix = Instruction::new_with_bytes(
+            magicblock_magic_program_api::id(),
+            &seed_buffer.try_to_vec().unwrap(),
+            vec![
+                AccountMeta::new(authority.pubkey(), true),
+                AccountMeta::new(buffer, false),
+            ],
+        );
+        let (_, found) = ctx
+            .send_and_confirm_instructions_with_payer_ephem(&[ix], authority)
+            .unwrap();
+        assert!(found);
+        assert_eq!(ctx.fetch_ephem_account(buffer).unwrap().data, [42]);
     }
 
     // Upgrade and check again
