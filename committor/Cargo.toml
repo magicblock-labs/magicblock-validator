@@ -65,9 +65,5 @@ solana-signature = { workspace = true, features = ["rand"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
-[features]
-default = []
-dev-context-only-utils = []
-
 [lints]
 workspace = true
