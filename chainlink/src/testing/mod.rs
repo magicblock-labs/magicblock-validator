@@ -304,7 +304,7 @@ macro_rules! assert_not_undelegating {
         use solana_account::ReadableAccount;
         let reader = |account: &::solana_account::AccountSharedData| {
             (
-                account.is(::solana_account::AccountMode::Transient),
+                account.is(::solana_account::AccountMode::Undelegating),
                 account.slot(),
                 *account.owner(),
             )
@@ -342,7 +342,7 @@ macro_rules! assert_remain_undelegating {
         use solana_account::ReadableAccount;
         let reader = |account: &::solana_account::AccountSharedData| {
             (
-                account.is(::solana_account::AccountMode::Transient),
+                account.is(::solana_account::AccountMode::Undelegating),
                 account.slot(),
                 *account.owner(),
             )

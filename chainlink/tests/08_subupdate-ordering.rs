@@ -59,7 +59,7 @@ async fn test_subs_receive_out_of_order_updates() {
     debug!(update_number = 3, "Sending update");
     let expected_state_3 = AccountBuilder::from(acc_state_3.clone())
         .slot(3)
-        .mode(AccountMode::ReadOnly)
+        .mode(AccountMode::Mirrored)
         .build();
     assert!(
         ctx.send_and_receive_account_update(pubkey, acc_state_3.clone(), None,).await,

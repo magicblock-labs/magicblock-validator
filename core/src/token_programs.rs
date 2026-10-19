@@ -348,7 +348,7 @@ pub fn try_get_base_ata_mirror_info(
     pubkey: &Pubkey,
     account: &AccountSharedData,
 ) -> Option<AtaInfo> {
-    if !account.is(AccountMode::ReadOnly) {
+    if !account.is(AccountMode::Mirrored) {
         return None;
     }
     is_ata(pubkey, *account.owner(), account.data())
@@ -722,11 +722,11 @@ mod tests {
         assert!(try_get_magic_ata_info(&ata, &default_close_authority).is_none());
 
         for mode in [
-            AccountMode::Uninit,
-            AccountMode::ReadOnly,
-            AccountMode::System,
+            AccountMode::Missing,
+            AccountMode::Mirrored,
+            AccountMode::Runtime,
             AccountMode::Delegated,
-            AccountMode::Transient,
+            AccountMode::Undelegating,
             AccountMode::Closed,
         ] {
             let other_mode = AccountBuilder::from(account.clone()).mode(mode).build();

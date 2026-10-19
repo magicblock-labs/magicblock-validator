@@ -100,7 +100,7 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
         let acc_redeleg_expected: AccountSharedData = AccountBuilder::from(
             account_shared_with_owner_and_slot(&acc, program_pubkey, slot),
         )
-        .mode(AccountMode::ReadOnly)
+        .mode(AccountMode::Mirrored)
         .build();
         assert!(
             bank.accounts()

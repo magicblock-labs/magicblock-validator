@@ -2757,8 +2757,9 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                             ChainlinkEmptyPlaceholderStage::ConvertedToEmpty,
                             Outcome::Success,
                         );
-                        let account =
-                            AccountBuilder::default().mode(AccountMode::Uninit).slot(response_slot);
+                        let account = AccountBuilder::default()
+                            .mode(AccountMode::Missing)
+                            .slot(response_slot);
                         RemoteAccount::from_fresh_account_builder(
                             account,
                             RemoteAccountUpdateSource::Fetch,

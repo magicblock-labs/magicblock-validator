@@ -24,9 +24,8 @@ pub(crate) fn mark_account_as_undelegated(
 ) -> Result<(), InstructionError> {
     let mut acc = acc.borrow_mut()?;
     acc.set_owner(DELEGATION_PROGRAM_ID);
-    // `Transient` is a delegated account on its way back to readonly, which is
-    // what the separate undelegating/delegated flags used to express together.
-    set_account_mode(invoke_context, &mut acc, AccountMode::Transient)
+    // Undelegating revokes program writes while retaining the local image until handoff completes.
+    set_account_mode(invoke_context, &mut acc, AccountMode::Undelegating)
 }
 
 /// Transfers `fee` lamports from `payer` to `fee_vault`.

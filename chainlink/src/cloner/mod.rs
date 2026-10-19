@@ -217,7 +217,7 @@ pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequ
         .lamports(program.lamports())
         .data(program.program_data)
         .owner(owner)
-        .mode(AccountMode::ReadOnly)
+        .mode(AccountMode::Mirrored)
         .executable(true)
         .slot(program.remote_slot);
 
@@ -305,7 +305,7 @@ mod tests {
             .await
             .unwrap()
             .materialize(
-                AccountBuilder::default().lamports(1_000_000).mode(AccountMode::ReadOnly),
+                AccountBuilder::default().lamports(1_000_000).mode(AccountMode::Mirrored),
                 None,
             )
             .await

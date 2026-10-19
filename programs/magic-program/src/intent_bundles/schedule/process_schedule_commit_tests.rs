@@ -45,7 +45,7 @@ const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
 /// Delegation is a mode rather than a flag, so `false` here means the account
 /// is simply not delegated: an ordinary readonly account.
 fn mode_for(delegated: bool) -> AccountMode {
-    if delegated { AccountMode::Delegated } else { AccountMode::ReadOnly }
+    if delegated { AccountMode::Delegated } else { AccountMode::Mirrored }
 }
 
 fn get_clock() -> Clock {
@@ -1294,7 +1294,7 @@ mod tests {
         let committee_account = account_data.remove(&committee).unwrap();
         account_data.insert(
             committee,
-            AccountBuilder::from(committee_account).mode(AccountMode::ReadOnly).build(),
+            AccountBuilder::from(committee_account).mode(AccountMode::Mirrored).build(),
         );
 
         // Create ScheduleCommit instruction with non-delegated committee

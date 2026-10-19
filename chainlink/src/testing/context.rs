@@ -251,7 +251,7 @@ impl TestContext {
         let reader = |account: &AccountSharedData| {
             AccountBuilder::from(AccountSharedData::from(account.owned()))
                 .owner(delegation_program_api::id())
-                .mode(AccountMode::Transient)
+                .mode(AccountMode::Undelegating)
         };
         let account = self
             .bank
@@ -285,7 +285,7 @@ impl TestContext {
         let undelegated_acc: AccountSharedData = AccountBuilder::from(
             account_shared_with_owner_and_slot(&acc.account, *owner, self.rpc_client.get_slot()),
         )
-        .mode(AccountMode::ReadOnly)
+        .mode(AccountMode::Mirrored)
         .build();
         let delegation_record_pubkey =
             delegation_program_api::pda::delegation_record_pda_from_delegated_account(pubkey);
@@ -318,7 +318,7 @@ impl TestContext {
         let mode = if authority == &self.validator_pubkey {
             AccountMode::Delegated
         } else {
-            AccountMode::ReadOnly
+            AccountMode::Mirrored
         };
         let expected = AccountBuilder::from(AccountSharedData::from(delegated_acc.owned()))
             .owner(*owner)
