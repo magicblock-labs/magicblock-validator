@@ -122,7 +122,7 @@ start with the part of the application flow that interests you:
   and the [instruction API](programs/magic-interface/README.md).
 
 Want to contribute? Start with [contributing](docs/CONTRIBUTING.md) for development
-setup and checks, or explore the supported [integration tests](test-integration/).
+checks and validator qualification.
 Maintainers can follow the [release process](docs/RELEASE_PROCESS.md).
 
 ## 🔒 API stability and security

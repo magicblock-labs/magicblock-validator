@@ -11,9 +11,23 @@ application services.
 ## Checks
 
 See [validation guidance](../AGENTS.md#validation) for scoped checks.
-[Integration tests](../test-integration/) use a separate Cargo workspace and
-runner: `make ci-test-integration`. `make ci-fmt` and `make ci-lint` cover both
-workspaces.
+`make ci-fmt`, `make ci-lint`, and `make ci-test-unit` check this Cargo workspace.
+
+## Validator qualification
+
+Use the RedSuite revision pinned in [validator CI](../.github/workflows/ci-redsuite.yml).
+Follow [RedSuite's setup](https://github.com/magicblock-labs/redsuite#-get-started)
+at that revision, using this checkout's validator, verifier, and committor program.
+From the RedSuite checkout, run:
+
+```sh
+redsuite run redshift
+redsuite run redhat
+redsuite run redline --profile lite
+```
+
+Redshift and Redhat check correctness and security. Redline measures performance;
+use `--profile full` for its larger workloads. A failed run exits nonzero.
 
 Report vulnerabilities privately through the [security policy](SECURITY.md).
 For publishing, see the [release process](RELEASE_PROCESS.md).
