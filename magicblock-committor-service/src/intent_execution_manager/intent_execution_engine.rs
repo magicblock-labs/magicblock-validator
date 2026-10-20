@@ -221,7 +221,7 @@ where
     ) -> Result<Option<ScheduledIntentBundle>, IntentExecutionManagerError>
     {
         // Limit on number of intents that can be stored in scheduler
-        const SCHEDULER_CAPACITY: usize = 1000;
+        const SCHEDULER_CAPACITY: usize = 3_000;
 
         let can_receive = || {
             let num_blocked_intents = self
