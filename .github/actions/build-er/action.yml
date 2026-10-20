@@ -13,7 +13,7 @@ runs:
       shell: bash
       run: |
         echo 'CARGO_PROFILE_DEV_DEBUG=line-tables-only' >> "$GITHUB_ENV"
-        echo 'RUSTFLAGS=-C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
+        echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
 
     # Keep exact artifacts outside target: Cargo-cache restoration can clean it
     # even when only the other artifact cache missed.
