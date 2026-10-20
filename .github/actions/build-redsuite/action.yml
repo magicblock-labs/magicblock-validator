@@ -10,17 +10,13 @@ runs:
       working-directory: redsuite
       run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
+    # Bump artifact versions when build flags or profiles change, not cache plumbing.
     - name: Restore RedSuite CLI
       id: cli
       uses: actions/cache/restore@v6
       with:
         path: redsuite-dist/redsuite
-        key: >-
-          redsuite-cli-v3-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}-${{ hashFiles(
-            'magicblock-validator/.github/actions/build-redsuite/**',
-            'magicblock-validator/.github/actions/setup-build-env/**',
-            'magicblock-validator/.github/actions/setup-protoc/**'
-          ) }}
+        key: redsuite-cli-v4-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}
 
     - name: Restore RedSuite fixtures
       id: fixtures
@@ -28,12 +24,9 @@ runs:
       with:
         path: redsuite-dist/deploy
         key: >-
-          redsuite-fixtures-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{ hashFiles(
-            'magicblock-validator/.github/actions/build-redsuite/**',
-            'magicblock-validator/.github/actions/setup-build-env/**',
-            'magicblock-validator/.github/actions/setup-protoc/**',
-            'magicblock-validator/.github/actions/setup-solana/**'
-          ) }}
+          redsuite-fixtures-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{
+            hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
+          }}
 
     - uses: ./magicblock-validator/.github/actions/setup-build-env
       id: build-env
