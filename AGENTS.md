@@ -40,6 +40,9 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```
 
+For public API qualification, follow the
+[RedSuite workflow](docs/CONTRIBUTING.md#validator-qualification).
+
 For documentation-only changes, check links, paths, and `git diff --check`;
 no Rust build is needed. Report checks run and remaining gaps in the completion
 report to the user. Do not list routine check results in PR descriptions.
