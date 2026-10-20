@@ -37,7 +37,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: ${{ inputs.revision || 'c971612b3db94afa7c845f39ee72aa413a33a03b' }}
+        ref: ${{ inputs.revision || 'c72172c0444f5857af17581a9e8dd2073b9bc107' }}
         path: redsuite
         persist-credentials: false
 
