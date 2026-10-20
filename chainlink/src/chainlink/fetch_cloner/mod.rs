@@ -2271,9 +2271,15 @@ where
         let owned_by_delegation_program = account.is_owned_by_delegation_program();
 
         if let Some(account) = account.into_fresh_account() {
-            // If the account is owned by the delegation program we need to resolve
-            // its true owner and determine if it is delegated to us
-            if owned_by_delegation_program {
+            let undelegating = self.account_mode(&pubkey) == Some(AccountMode::Undelegating);
+            // An owner change can be a delayed pre-delegation notification.
+            // Resolve current account/record state before completing undelegation.
+            if owned_by_delegation_program || undelegating {
+                let min_context_slot = if undelegating {
+                    account.slot().max(self.remote_account_provider.chain_slot())
+                } else {
+                    account.slot()
+                };
                 let delegation_record_pubkey =
                     delegation_record_pda_from_delegated_account(&pubkey);
 
@@ -2297,7 +2303,7 @@ where
                     .task_to_fetch_with_companion(
                         pubkey,
                         delegation_record_pubkey,
-                        account.slot(),
+                        min_context_slot,
                         AccountFetchContext::subscription_update(
                             AccountFetchReason::DelegationRecord,
                         ),
@@ -2326,7 +2332,17 @@ where
                             });
                         }
 
-                        let account = if let Some(delegation_record) = delegation_record {
+                        let account = if account.read().owner() != delegation_program_api::id() {
+                            Some(
+                                ata_projection::maybe_project_ata_from_subscription_update(
+                                    self,
+                                    pubkey,
+                                    account,
+                                    companion_fetch_log_context,
+                                )
+                                .await,
+                            )
+                        } else if let Some(delegation_record) = delegation_record {
                             let delegation_record_with_actions = match self.parse_delegation_record(
                                 delegation_record.read().data(),
                                 delegation_record_pubkey,
