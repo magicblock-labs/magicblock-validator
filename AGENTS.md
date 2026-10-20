@@ -1,78 +1,45 @@
-# Agent Guide
+# MBV repository
 
-This repository contains AI-agent guidance in `./.agents/`. These files describe the validator's intended behavior, goals, protocol-level expectations, architecture, crate ownership, validation workflow, and documentation-memory rules.
+This workspace owns validator orchestration, execution, account storage,
+replication, and application services.
 
-## Required acknowledgement
+## Boundaries
 
-At the start of any task that may change code, behavior, tests, documentation, configuration, or architecture, the agent **must first read the index at `./.agents/README.md` and explicitly say so** before proceeding. Do not pre-read every document — the index is a routing map that tells you which document to open for a given concern.
+- `magicblock-validator` owns process startup and shutdown;
+  `magicblock-api` owns validator lifecycle and service wiring.
+- `magicblock-processor` owns transaction execution; `magicblock-accounts-db`
+  owns account storage; `magicblock-ledger` owns ledger persistence;
+  `magicblock-replicator` owns replication.
+- `magicblock-chainlink` owns account synchronization/materialization;
+  `magicblock-aperture` owns RPC; committor crates own settlement;
+  `magicblock-task-scheduler` owns repeated tasks.
+- Keep operator tooling in `tools/`, off execution hot paths.
+- Reuse `test-kit` and the existing `programs/guinea` program for execution
+  tests; do not add local test-program crates.
 
-Use wording like:
+## Review
 
-> I read the agent index in `./.agents/README.md` and will open the relevant detailed docs as needed.
+Never weaken signer checks, synchronization integrity, atomicity, or resource
+bounds to work around existing gaps. Applicable violations block PR creation,
+approval, and merge recommendations. Report concrete gaps and unvalidated
+security paths, plus critical-path costs; distinguish measured from reasoned
+performance claims.
 
-If the task is only a trivial file operation and no `./.agents/` file is relevant, say that explicitly.
+## Validation
 
-## Announce available `mbv-*` skills
+Use `make fmt` for formatting and `cargo check -p <package> --tests` for the
+affected package. Before pushing a code fix, run exactly one relevant test:
+`cargo nextest run -p <package> <test_name> --no-capture`. Use `cargo test` if
+nextest is unavailable or libtest-specific flags are needed.
 
-At startup, before doing task work, the agent **must make the user aware of every `mbv-*` skill** — these are the skills customized for the magicblock-validator. List each by name with its one-line description; do **not** read the skill bodies. Discover them from the skill set available in the environment and/or by listing `.agents/skills/mbv-*/SKILL.md`.
+For an explicitly requested full gate or a completed significant milestone:
 
-Currently available:
+```sh
+make ci-fmt
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+```
 
-- `mbv-check` — formats, lints, and tests the magicblock-validator Rust workspace (nightly rustfmt, workspace clippy, nextest) with optional error fixing.
-- `mbv-run-single-integration-test` — runs a single integration test with the correct validator setup (brings up only the devnet and/or ephem validators the suite needs, then runs one targeted test).
-
-Only load a skill (read its `SKILL.md`) when the task actually calls for it.
-
-## Required invariant review
-
-Before making or reviewing any repository change, including a new pull request
-or follow-up changes to an existing pull request, read
-`.agents/rules/invariants.md`. Check the proposed or current diff against every
-applicable invariant. An invariant violation is blocking: do not create,
-approve, or recommend merging the pull request until the violation is resolved.
-
-In the final reply, explicitly state whether the invariant review found any
-violation and identify the validation or evidence used for that conclusion.
-
-## Pull request and GitHub policy
-
-- Do not mix documentation updates into feature, fix, refactor, or other code
-  pull requests. Documentation updates are handled in a dedicated weekly
-  documentation-maintenance task, which is currently started manually. See
-  `.agents/memory/agent-memory-and-docs.md`.
-- Before pushing to GitHub, follow `.github/PULL_REQUEST_TEMPLATE.md` and the
-  repository's existing pull request convention. Use a
-  `type(scope): summary` title where the scope is optional, and keep the
-  `Summary`, `Breaking Changes`, and `Test Plan` structure.
-- Run only targeted tests locally before a GitHub push. When fixing an existing
-  pull request, run one relevant unit test or one relevant integration test
-  instead of a full suite. Broader validation belongs in CI. See
-  `.agents/rules/testing-and-validation.md`.
-- Never mention or include the name of an agent, assistant, model, or automation
-  tool in branch names, commit messages, pull request titles or bodies, review
-  replies, or any other GitHub-visible metadata.
-
-## Directory layout
-
-- `.agents/rules/` — invariant behavioral and decision-making rules agents must follow.
-- `.agents/context/` — static reference context, including overview, architecture, crate map, and crate-specific guides.
-- `.agents/memory/` — durable project-memory and documentation-stewardship rules.
-- `.agents/specs/` — active protocol/specification notes.
-- `.agents/skills/` — executable scripts or capabilities agents can run, when present.
-- `.agents/personas/` — specialized agent profiles when this repository needs them.
-
-## Start here
-
-Read `.agents/README.md` first. It is a compact index whose routing table maps each concern (goals, protocol, architecture, crate ownership, validation, memory, per-crate guides) to the single document that covers it. **Open a detailed document only when your task touches that concern** — this keeps the context window small.
-
-For document routing, read ./.agents/README.md; it is the single routing map for this knowledge base.
-
-Before changing code, consult the matching `./.agents` material so the change does not violate the validator's goals, invariants, performance requirements, or specification. This acknowledgement is required; do not proceed silently.
-
-The validator is performance-sensitive infrastructure. Changes must not degrade critical-path performance unless there is no viable alternative; if a tradeoff is unavoidable, call it out explicitly with the reason, expected impact, and any mitigation.
-
-For durable-knowledge and documentation-stewardship requirements, follow `.agents/memory/agent-memory-and-docs.md`. In every task's final reply, state whether agent docs were updated or whether a follow-up was queued for weekly maintenance.
-
-During a documentation-only change, if anything is added to, removed from,
-renamed, or reorganized inside `./.agents/`, update this `AGENTS.md` file in the
-same change so this entrypoint remains accurate.
+For documentation-only changes, check links, paths, and `git diff --check`;
+no Rust build is needed. Report checks run and remaining gaps in the completion
+report to the user. Do not list routine check results in PR descriptions.
