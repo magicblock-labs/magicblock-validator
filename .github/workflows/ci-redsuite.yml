@@ -45,19 +45,6 @@ jobs:
         with:
           sbf_tools: "false"
 
-      - name: Record actual runner resources
-        run: |
-          nproc
-          lscpu
-          free -h
-          df -h .
-          for metric in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
-            if [ -r "$metric" ]; then
-              echo "$metric"
-              cat "$metric"
-            fi
-          done
-
       - name: Checkout redsuite
         uses: actions/checkout@v5
         with:
@@ -96,17 +83,6 @@ jobs:
         env:
           REDSUITE_CLONE_URL: ${{ secrets.REDSUITE_CLONE_URL }}
           RUST_LOG: info,redsuite_core::check=debug
-
-      - name: Record peak memory, CPU use and final disk use
-        if: always()
-        run: |
-          df -h .
-          for metric in /sys/fs/cgroup/memory.peak /sys/fs/cgroup/cpu.stat; do
-            if [ -r "$metric" ]; then
-              echo "$metric"
-              cat "$metric"
-            fi
-          done
 
       - name: Upload stack logs
         if: always()
