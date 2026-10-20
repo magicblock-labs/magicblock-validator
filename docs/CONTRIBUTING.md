@@ -26,8 +26,9 @@ redsuite run redhat
 redsuite run redline --profile lite
 ```
 
-Redshift and Redhat check correctness and security. Redline measures performance;
-use `--profile full` for its larger workloads. A failed run exits nonzero.
+Redshift checks correctness. Redhat exercises adversarial ownership, authorization,
+and fee cases. Redline measures performance; use `--profile full` for its larger
+workloads. A failed run exits nonzero.
 
 Report vulnerabilities privately through the [security policy](SECURITY.md).
 For publishing, see the [release process](RELEASE_PROCESS.md).
