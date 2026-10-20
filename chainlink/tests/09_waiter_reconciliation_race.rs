@@ -161,7 +161,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
                 .lamports(1_000_000)
                 .data(10_i64.to_le_bytes().to_vec())
                 .owner(delegation_program_api::id())
-                .mode(AccountMode::Transient)
+                .mode(AccountMode::Undelegating)
                 .slot(CURRENT_SLOT)
                 .build(),
         )])
@@ -202,7 +202,7 @@ async fn older_completion_update_replaces_transient_account() {
                 .lamports(1_000_000)
                 .data(700_i64.to_le_bytes().to_vec())
                 .owner(delegation_program_api::id())
-                .mode(AccountMode::Transient)
+                .mode(AccountMode::Undelegating)
                 .slot(local_slot)
                 .build(),
         )])
@@ -237,7 +237,7 @@ async fn older_completion_update_replaces_transient_account() {
         .expect("completed account remains materialized");
     assert_eq!(
         local,
-        (AccountMode::ReadOnly, local_slot, V42_ID, 900),
+        (AccountMode::Mirrored, local_slot, V42_ID, 900),
         "completed base image replaces the transient without regressing the lifecycle slot"
     );
 }

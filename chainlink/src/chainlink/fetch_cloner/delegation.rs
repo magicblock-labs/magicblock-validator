@@ -113,7 +113,7 @@ pub(super) fn apply_record(
     } else if is_delegated_to_us && !is_raw_eata {
         AccountMode::Delegated
     } else {
-        AccountMode::ReadOnly
+        AccountMode::Mirrored
     };
     let account = account.owner(delegation_record.owner).mode(mode);
     if is_confined {

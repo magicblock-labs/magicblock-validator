@@ -58,7 +58,7 @@ async fn test_deleg_after_subscribe_case2() {
             .read(&pubkey, |account| account.mode())
             .unwrap()
             .unwrap();
-        assert_eq!(mode, AccountMode::Uninit);
+        assert_eq!(mode, AccountMode::Missing);
         assert_subscribed_without_delegation_record!(&chainlink, &[&pubkey]);
     }
 
@@ -75,7 +75,7 @@ async fn test_deleg_after_subscribe_case2() {
 
         assert!(chainlink.is_watching(&pubkey));
         let expected = AccountBuilder::from(AccountSharedData::from(acc.owned()))
-            .mode(AccountMode::ReadOnly)
+            .mode(AccountMode::Mirrored)
             .build();
         let mut local_updates = bank.accounts().subscribe(pubkey);
         assert!(ctx.send_and_receive_account_update(pubkey, acc, Some(8_000)).await);

@@ -33,7 +33,7 @@ impl Accounts {
 
     /// Uninitialized images are storage placeholders, not RPC-visible accounts.
     pub(crate) fn account_is_visible(account: &AccountSharedData) -> bool {
-        !account.is(AccountMode::Uninit)
+        !account.is(AccountMode::Missing)
     }
 
     /// Ensure best-effort, then project the account while its borrowed image is scoped.

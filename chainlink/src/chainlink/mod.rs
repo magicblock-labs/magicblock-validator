@@ -383,7 +383,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures absent accounts are materialized locally and refreshes Transient
+    /// Ensures absent accounts are materialized locally and refreshes Undelegating
     /// accounts whose undelegation completed without a subscription update.
     /// Missing remote accounts are represented as placeholders.
     /// Returns the number of requested remote accounts claimed by this call.
@@ -404,7 +404,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 let mut transients = Vec::new();
                 for &pubkey in pubkeys {
                     if loader.read(&pubkey, |account| account.mode()).map_err(KeeperError::from)?
-                        == Some(AccountMode::Transient)
+                        == Some(AccountMode::Undelegating)
                     {
                         transients.push(pubkey);
                     }
@@ -481,8 +481,8 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
             .map(|pubkey| {
                 loader
                     .read(pubkey, |account| AccountDelegationSession {
-                        locally_protected: account.is(AccountMode::Delegated)
-                            || account.is(AccountMode::Transient),
+                        locally_protected: account
+                            .is_any([AccountMode::Delegated, AccountMode::Undelegating]),
                         remote_slot: account.slot(),
                     })
                     .ok()

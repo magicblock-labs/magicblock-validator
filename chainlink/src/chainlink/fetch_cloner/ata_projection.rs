@@ -212,7 +212,7 @@ where
 
     // A local Magic ATA stays authoritative even when empty. Its owner must
     // close it before a base-chain delegation can supply the local ATA image.
-    if base_ata.read().mode().authoritative() {
+    if base_ata.read().mode().requires_persistence() {
         return None;
     }
     let source_slots =

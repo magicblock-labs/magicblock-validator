@@ -31,7 +31,7 @@ fn account() -> AccountBuilder {
         executable: false,
         rent_epoch: 0,
     })
-    .mode(AccountMode::ReadOnly)
+    .mode(AccountMode::Mirrored)
 }
 
 #[test]
@@ -91,12 +91,12 @@ fn post_delegation_dependency_fetch_policy() {
         None, 10, false,
     ));
     assert!(TestFetchCloner::action_dependency_needs_fetch(
-        Some((9, AccountMode::ReadOnly)),
+        Some((9, AccountMode::Mirrored)),
         10,
         true,
     ));
     assert!(!TestFetchCloner::action_dependency_needs_fetch(
-        Some((10, AccountMode::ReadOnly)),
+        Some((10, AccountMode::Mirrored)),
         10,
         true,
     ));
@@ -121,7 +121,7 @@ async fn waiter_applies_newer_account_image() {
             .lamports(1_000_000)
             .data(vec![byte])
             .owner(system_program::id())
-            .mode(AccountMode::ReadOnly)
+            .mode(AccountMode::Mirrored)
             .slot(slot),
         post_delegation_mode: ClonePostDelegationMode::None,
         delegated_to_other: None,
@@ -164,7 +164,7 @@ async fn waiter_applies_newer_account_image() {
         })
         .unwrap()
         .unwrap();
-    assert_eq!(state, (AccountMode::ReadOnly, 12, vec![2]));
+    assert_eq!(state, (AccountMode::Mirrored, 12, vec![2]));
 }
 
 #[tokio::test]
@@ -182,7 +182,7 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
 
     let transient = AccountBuilder::from(remote_account(7))
         .owner(delegation_program_api::id())
-        .mode(AccountMode::Transient)
+        .mode(AccountMode::Undelegating)
         .slot(100)
         .build();
     ctx.bank
@@ -208,7 +208,7 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
                 (account.mode(), account.slot(), account.data().to_vec())
             })
             .expect("read completed account"),
-        Some((AccountMode::ReadOnly, 100, vec![7]))
+        Some((AccountMode::Mirrored, 100, vec![7]))
     );
 
     ctx.rpc_client.set_slot(11);
@@ -225,7 +225,7 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
                 (account.mode(), account.slot(), account.data().to_vec())
             })
             .expect("read refreshed account"),
-        Some((AccountMode::ReadOnly, 101, vec![9]))
+        Some((AccountMode::Mirrored, 101, vec![9]))
     );
 }
 

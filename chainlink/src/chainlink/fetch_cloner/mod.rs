@@ -47,7 +47,7 @@ use tokio::{
 use tracing::*;
 
 fn immutable_account_mode(lamports: u64) -> AccountMode {
-    if lamports == 0 { AccountMode::Uninit } else { AccountMode::ReadOnly }
+    if lamports == 0 { AccountMode::Missing } else { AccountMode::Mirrored }
 }
 
 mod ata_projection;
@@ -505,7 +505,7 @@ where
         account: &AccountSharedData,
     ) -> DlpProgramUpdateInterest {
         match self.account_mode(&pubkey) {
-            Some(AccountMode::Transient) => {
+            Some(AccountMode::Undelegating) => {
                 return DlpProgramUpdateInterest::ProcessUndelegating;
             }
             Some(AccountMode::Delegated) => {
@@ -732,7 +732,7 @@ where
     }
 
     fn is_empty_placeholder_account(account: &AccountBuilder) -> bool {
-        account.read().is(AccountMode::Uninit)
+        account.read().is(AccountMode::Missing)
     }
 
     fn clone_remote_result_for_request(
@@ -1181,8 +1181,8 @@ where
         // accounts used to carry the delegated flag as well, so a single
         // `delegated()` check covered them. With exclusive modes they have to be
         // named separately, or a stale confinement would never be normalized.
-        let claims_delegation = request.account.read().is(AccountMode::Delegated)
-            || request.account.read().is(AccountMode::Magic);
+        let claims_delegation =
+            request.account.read().is_any([AccountMode::Delegated, AccountMode::Magic]);
         if request.account.read().owner() != delegation_program_api::id() || !claims_delegation {
             return Ok(());
         }
@@ -1202,13 +1202,13 @@ where
             ));
         }
 
-        request.account = mem::take(&mut request.account).mode(AccountMode::ReadOnly);
+        request.account = mem::take(&mut request.account).mode(AccountMode::Mirrored);
         Ok(())
     }
 
     fn normalize_immutable_account(request: &mut AccountCloneRequest) {
         let account = request.account.read();
-        if !matches!(account.mode(), AccountMode::ReadOnly | AccountMode::Uninit) {
+        if !account.is_any([AccountMode::Mirrored, AccountMode::Missing]) {
             return;
         }
 
@@ -1444,7 +1444,7 @@ where
         let reader = |in_bank: &AccountSharedData| {
             (
                 in_bank.is(AccountMode::Delegated),
-                in_bank.is(AccountMode::Transient),
+                in_bank.is(AccountMode::Undelegating),
                 *in_bank.owner(),
                 in_bank.slot(),
             )
@@ -1584,9 +1584,9 @@ where
         //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
         //    or undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
-        //  - A completed undelegation replaces a local Transient image with
+        //  - A completed undelegation replaces a local Undelegating image with
         //    base-chain state. That base image can have an older observed slot
-        //    than the local transient while still being the lifecycle-completing
+        //    than the local undelegating image while still being the lifecycle-completing
         //    authority.
         //
         if !completed_transient_replacement {
@@ -1595,7 +1595,7 @@ where
                 let update_slot = account.read().slot().max(update_slot);
                 let same_slot_delegated_refresh = bank_slot == update_slot
                     && account.read().is(AccountMode::Delegated)
-                    && (!in_bank.is(AccountMode::Delegated) || in_bank.is(AccountMode::Transient));
+                    && !in_bank.is(AccountMode::Delegated);
                 if bank_slot > update_slot
                     || (bank_slot == update_slot && !same_slot_delegated_refresh)
                 {
@@ -1673,12 +1673,12 @@ where
             return;
         }
 
-        // A successful clone call can leave a rescued account Transient.
+        // A successful clone call can leave a rescued account Undelegating.
         // Retain recovery subscriptions until the local image actually
         // reflects completion, not merely a newer on-chain delegation.
         if self.read_account(&pubkey, |local| {
             local.slot() >= slot
-                && !local.is(AccountMode::Transient)
+                && !local.is(AccountMode::Undelegating)
                 && local.is(AccountMode::Delegated) == delegated
         }) == Some(true)
         {
@@ -1833,7 +1833,7 @@ where
         request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
-        if self.account_mode(&request.pubkey) == Some(AccountMode::Transient) {
+        if self.account_mode(&request.pubkey) == Some(AccountMode::Undelegating) {
             return Ok(());
         }
 
@@ -1901,7 +1901,7 @@ where
             // started. Do not let its later record sighting bypass the normal
             // confirmation check and overwrite protected local state.
             let reader = |in_bank: &AccountSharedData| {
-                in_bank.is(AccountMode::Transient)
+                in_bank.is(AccountMode::Undelegating)
                     && account_still_undelegating_on_chain(
                         &candidate.pubkey,
                         true,
@@ -1951,7 +1951,7 @@ where
             let reader = |account: &AccountSharedData| {
                 let settled = account.slot() > candidate.slot
                     || (account.slot() == candidate.slot && account.is(AccountMode::Delegated));
-                let stale_transient = account.is(AccountMode::Transient)
+                let stale_transient = account.is(AccountMode::Undelegating)
                     && deleg_record.delegation_slot <= account.slot();
                 (settled, stale_transient)
             };
@@ -3091,7 +3091,7 @@ where
         Ok(fetch_context.remote_account_claims_value())
     }
 
-    /// Rechecks present Transient accounts against their delegation records
+    /// Rechecks present Undelegating accounts against their delegation records
     /// before fetching an image that may complete undelegation.
     pub(crate) async fn refresh_transient_requested_accounts(
         &self,
@@ -3143,7 +3143,7 @@ where
                 if force_refresh_pubkeys.contains(*pubkey) {
                     if let Some(slot) = loader
                         .read(pubkey, |account| {
-                            account.is(AccountMode::Transient).then(|| account.slot())
+                            account.is(AccountMode::Undelegating).then(|| account.slot())
                         })
                         .ok()
                         .flatten()
@@ -3162,7 +3162,7 @@ where
                     continue;
                 }
                 let reader = |account: &AccountSharedData| {
-                    if account.is(AccountMode::Transient) {
+                    if account.is(AccountMode::Undelegating) {
                         Err((
                             account.slot(),
                             account.is(AccountMode::Delegated),

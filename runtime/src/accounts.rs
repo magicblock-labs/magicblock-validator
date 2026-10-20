@@ -56,7 +56,7 @@ pub(crate) fn initial_accounts(
     accounts.insert(HEALTHCHECK_ACCOUNT_PUBKEY, healthcheck);
 
     if !programs.contains_key(&v42_calculator_interface::ID) {
-        let sentinel = AccountBuilder::default().mode(AccountMode::System);
+        let sentinel = AccountBuilder::default().mode(AccountMode::Runtime);
         accounts.insert(v42_calculator_interface::ID, sentinel.build());
     }
 
