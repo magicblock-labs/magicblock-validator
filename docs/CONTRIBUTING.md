@@ -11,7 +11,13 @@ application services.
 ## Checks
 
 See [validation guidance](../AGENTS.md#validation) for scoped checks.
-`make ci-fmt`, `make ci-lint`, and `make ci-test-unit` check this Cargo workspace.
+Run CI's formatting, lint, and unit checks directly with Cargo:
+
+```sh
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+RUST_BACKTRACE=1 cargo nextest run --no-capture
+```
 
 ## Validator qualification
 

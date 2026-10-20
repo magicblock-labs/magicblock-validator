@@ -17,6 +17,11 @@ on:
         required: true
         default: 'v0.1.0'
 
+env:
+  RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.release_version }}
+  DRY_RUN: ${{ github.event_name != 'release' }}
+  RELEASE_BINARIES: magicblock-validator magicblock-verifier magicblock magicblock-validator-tui
+
 jobs:
   validate-release-branch:
     name: Validate release branch
@@ -81,25 +86,21 @@ jobs:
           - {
             NAME: linux-x64-glibc,
             OS: ubuntu-latest,
-            TOOLCHAIN: stable,
             TARGET: x86_64-unknown-linux-gnu
           }
           - {
             NAME: linux-arm64-glibc,
             OS: arm64,
-            TOOLCHAIN: stable,
             TARGET: aarch64-unknown-linux-gnu
           }
           - {
             NAME: darwin-x64,
             OS: macos-15-intel,
-            TOOLCHAIN: stable,
             TARGET: x86_64-apple-darwin
           }
           - {
             NAME: darwin-arm64,
             OS: macos-latest,
-            TOOLCHAIN: stable,
             TARGET: aarch64-apple-darwin
           }
 
@@ -108,36 +109,6 @@ jobs:
         uses: actions/checkout@v5
         with:
           path: magicblock-validator
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-publish-v000"
-
-      - name: Install target
-        shell: bash
-        run: rustup target add ${{ matrix.build.TARGET }}
-
-      - name: Set DRY_RUN by default
-        shell: bash
-        run: echo "DRY_RUN=true" >> $GITHUB_ENV
-
-      - name: Unset DRY_RUN for releases
-        if: github.event_name == 'release' && github.event.action == 'published'
-        shell: bash
-        run: echo "DRY_RUN=false" >> $GITHUB_ENV
-
-      - name: Set release version
-        shell: bash
-        run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
-          elif [[ "${{ github.ref }}" == refs/heads/release/v* ]]; then
-            echo "RELEASE_VERSION=$(echo ${{ github.ref }} | sed 's|refs/heads/release/||')" >> $GITHUB_ENV
-          else
-            echo "RELEASE_VERSION=v0.0.0-dev" >> $GITHUB_ENV
-          fi
 
       - name: Set up GCC
         if: matrix.build.OS == 'ubuntu-latest'
@@ -152,39 +123,43 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake pkg-config libssl-dev
 
-      - name: Install macOS dependencies
+      - name: Set up macOS build environment
         if: startsWith(matrix.build.OS, 'macos')
         shell: bash
         run: |
-          brew install protobuf llvm
-          # Add LLVM to PATH for libclang.dylib - base on target architecture
-          if [ "${{ matrix.build.TARGET }}" = "aarch64-apple-darwin" ]; then
-            echo "/opt/homebrew/opt/llvm/bin" >> $GITHUB_PATH
-            echo "LIBCLANG_PATH=/opt/homebrew/opt/llvm/lib" >> $GITHUB_ENV
-          else
-            echo "/usr/local/opt/llvm/bin" >> $GITHUB_PATH
-            echo "LIBCLANG_PATH=/usr/local/opt/llvm/lib" >> $GITHUB_ENV
-          fi
+          brew install llvm
+          llvm=$(brew --prefix llvm)
+          echo "$llvm/bin" >> "$GITHUB_PATH"
+          {
+            echo "LIBCLANG_PATH=$llvm/lib"
+            echo "MACOSX_DEPLOYMENT_TARGET=11.0"
+            echo "CFLAGS=-mmacosx-version-min=11.0"
+            echo "CXXFLAGS=-mmacosx-version-min=11.0"
+            echo "LDFLAGS=-mmacosx-version-min=11.0"
+            echo "OPENSSL_STATIC=1"
+            echo "OPENSSL_VENDORED=1"
+          } >> "$GITHUB_ENV"
 
-      - name: Set macOS minimum version
-        if: startsWith(matrix.build.OS, 'macos')
-        shell: bash
-        run: |
-          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> $GITHUB_ENV
-          echo "CFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
-          echo "CXXFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
-          echo "LDFLAGS=-mmacosx-version-min=11.0" >> $GITHUB_ENV
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-publish-${{ matrix.build.TARGET }}-release-v001"
 
-      - name: Force vendored OpenSSL for macOS
-        if: startsWith(matrix.build.OS, 'macos')
+      - name: Install target
+        working-directory: magicblock-validator
         shell: bash
-        run: |
-          echo "OPENSSL_STATIC=1" >> $GITHUB_ENV
-          echo "OPENSSL_VENDORED=1" >> $GITHUB_ENV
+        run: rustup target add ${{ matrix.build.TARGET }}
 
       - name: Build (linux/macos)
+        working-directory: magicblock-validator
         shell: bash
-        run: cargo build --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} -p magicblock-validator -p magicblock-verifier -p magicblock -p magicblock-validator-tui
+        env:
+          TARGET: ${{ matrix.build.TARGET }}
+        run: |
+          packages=()
+          for package in $RELEASE_BINARIES; do
+            packages+=(-p "$package")
+          done
+          cargo build --release --locked --target "$TARGET" "${packages[@]}"
 
       - name: Check versions are aligned
         shell: bash
@@ -192,71 +167,38 @@ jobs:
           cd magicblock-validator/.github && ./version-align.sh --check
 
       - name: Build the NPM package
+        working-directory: magicblock-validator
         shell: bash
+        env:
+          ASSET_SUFFIX: ${{ matrix.build.NAME }}
+          TARGET: ${{ matrix.build.TARGET }}
         run: |
-          cd magicblock-validator
           bin="ephemeral-validator"
-          node_os=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f1)
-          export node_os
-          node_arch=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f2)
-          export node_arch
-          export node_version="${{ env.RELEASE_VERSION }}"
+          export node_os="${ASSET_SUFFIX%%-*}"
+          arch="${ASSET_SUFFIX#*-}"
+          export node_arch="${arch%%-*}"
           export node_pkg="${bin}-${node_os}-${node_arch}"
           echo "node_pkg=${node_pkg}" >> $GITHUB_ENV
           mkdir -p "${node_pkg}/bin"
           envsubst < .github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
-          echo "bin_name=${bin}" >> $GITHUB_ENV
-          cp "target/${{ matrix.build.TARGET }}/release/magicblock-validator" "${node_pkg}/bin/${bin}"
-          for artifact in magicblock-validator magicblock-verifier magicblock magicblock-validator-tui; do
-            cp \
-              "target/${{ matrix.build.TARGET }}/release/${artifact}" \
-              "target/${{ matrix.build.TARGET }}/release/${artifact}-${{ matrix.build.NAME }}"
+          cp "target/$TARGET/release/magicblock-validator" "${node_pkg}/bin/${bin}"
+          for artifact in $RELEASE_BINARIES; do
+            cp "target/$TARGET/release/$artifact" "target/$TARGET/release/$artifact-$ASSET_SUFFIX"
           done
 
-      - name: Publish magicblock-validator to GitHub release
-        if: ${{ env.DRY_RUN == 'false' }}
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-validator-${{ matrix.build.NAME }}
-          overwrite: true
-          tag: "${{ env.RELEASE_VERSION }}"
-          release_name: "${{ env.RELEASE_VERSION }}"
-          asset_name: "magicblock-validator-${{ matrix.build.NAME }}"
-
-      - name: Publish magicblock-verifier to GitHub release
-        if: ${{ env.DRY_RUN == 'false' }}
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-verifier-${{ matrix.build.NAME }}
-          overwrite: true
-          tag: "${{ env.RELEASE_VERSION }}"
-          release_name: "${{ env.RELEASE_VERSION }}"
-          asset_name: "magicblock-verifier-${{ matrix.build.NAME }}"
-
-      - name: Publish magicblock to GitHub release
-        if: ${{ env.DRY_RUN == 'false' }}
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-${{ matrix.build.NAME }}
-          overwrite: true
-          tag: "${{ env.RELEASE_VERSION }}"
-          release_name: "${{ env.RELEASE_VERSION }}"
-          asset_name: "magicblock-${{ matrix.build.NAME }}"
-
-      - name: Publish magicblock-validator-tui to GitHub release
-        if: ${{ env.DRY_RUN == 'false' }}
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/magicblock-validator-tui-${{ matrix.build.NAME }}
-          overwrite: true
-          tag: "${{ env.RELEASE_VERSION }}"
-          release_name: "${{ env.RELEASE_VERSION }}"
-          asset_name: "magicblock-validator-tui-${{ matrix.build.NAME }}"
+      - name: Publish binaries to GitHub release
+        if: env.DRY_RUN == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_SUFFIX: ${{ matrix.build.NAME }}
+          TARGET: ${{ matrix.build.TARGET }}
+        working-directory: magicblock-validator
+        run: |
+          for artifact in $RELEASE_BINARIES; do
+            gh release upload "$RELEASE_VERSION" "target/$TARGET/release/$artifact-$ASSET_SUFFIX" --clobber
+          done
 
       - name: Publish the NPM package
         shell: bash
@@ -266,8 +208,7 @@ jobs:
           cd magicblock-validator
           echo "DRY_RUN=${{ env.DRY_RUN }}"
           cd ${{ env.node_pkg }}
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-          npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
           if [ "${{ env.DRY_RUN }}" = "true" ]; then
             echo "Running npm publish in dry-run mode"
             npm publish --access public --dry-run
@@ -284,16 +225,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
-      - name: Set DRY_RUN by default
-        shell: bash
-        run: echo "DRY_RUN=true" >> $GITHUB_ENV
-
-      - name: Unset DRY_RUN for releases
-        if: github.event_name == 'release' && github.event.action == 'published'
-        shell: bash
-        run: echo "DRY_RUN=false" >> $GITHUB_ENV
-
       - uses: ./.github/actions/setup-solana
+        with:
+          sbf_tools: "false"
 
       - name: Publish the NPM package
         shell: bash
@@ -304,8 +238,7 @@ jobs:
           npm install
           npm run build
           cd lib
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-          npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
+          printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
           if [ "${{ env.DRY_RUN }}" = "true" ]; then
             echo "Running npm publish in dry-run mode"
             npm publish --access public --dry-run
@@ -316,15 +249,10 @@ jobs:
       - name: cargo publish
         working-directory: programs/magic-interface/
         run: |
-          DRY_RUN_FLAG=""
-          if [ "${DRY_RUN}" = "true" ]; then
-            DRY_RUN_FLAG="--dry-run"
+          options=()
+          if [ "$DRY_RUN" = true ]; then
+            options=(--dry-run --no-verify)
           fi
-
-          if [ "${DRY_RUN}" = "true" ]; then
-            NO_VERIFY_FLAG="--no-verify"
-          fi
-          cargo publish $DRY_RUN_FLAG --manifest-path=./Cargo.toml --token $CRATES_TOKEN $NO_VERIFY_FLAG
+          cargo publish "${options[@]}" --manifest-path=./Cargo.toml --token "$CRATES_TOKEN"
         env:
           CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
-          DRY_RUN: ${{ env.DRY_RUN }}

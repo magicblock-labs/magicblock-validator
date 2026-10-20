@@ -1,100 +1,38 @@
-name: Run CI - RedSuite
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'push' }}
+name: RedSuite
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       benchmarks:
-        description: Also run the redline benchmarks
+        description: Run release benchmarks instead of correctness and security
         type: boolean
         default: false
-  release:
-    types: [published]
-  push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/workflows/build-er.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
-  pull_request:
-    branches: [master, dev]
-    types: [opened, reopened, synchronize]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/workflows/build-er.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+      redsuite_revision:
+        description: RedSuite revision override; empty uses the pinned revision
+        type: string
+        default: ''
 
 permissions:
   contents: read
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: "1.0.0"
-  BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
-  BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
+  REDSUITE_REV: ${{ inputs.redsuite_revision || 'c971612b3db94afa7c845f39ee72aa413a33a03b' }}
 
 jobs:
-  build_er:
-    name: Build ER
-    uses: ./.github/workflows/build-er.yml
-
-  plan:
-    runs-on: ubuntu-latest
-    name: Select suites
-    outputs:
-      matrix: ${{ steps.select.outputs.matrix }}
-    steps:
-      - id: select
-        run: |
-          set -euo pipefail
-          correctness='{"suite":"correctness","targets":"redshift redhat"}'
-          benchmarks='{"suite":"benchmarks","targets":"redline"}'
-          if [ "$RUN_BENCHMARKS" = "true" ]; then
-            echo "matrix=[$correctness,$benchmarks]" >> "$GITHUB_OUTPUT"
-          else
-            echo "matrix=[$correctness]" >> "$GITHUB_OUTPUT"
-          fi
-        shell: bash
-        env:
-          RUN_BENCHMARKS: >-
-            ${{
-              github.event_name == 'release'
-              || (github.event_name == 'push' && github.ref == 'refs/heads/master')
-              || (github.event_name == 'workflow_dispatch' && inputs.benchmarks)
-            }}
-
   run_redsuite:
-    needs: [build_er, plan]
-    runs-on: blacksmith-16vcpu-ubuntu-2404
-    name: RedSuite ${{ matrix.suite }}
+    name: RedSuite ${{ inputs.benchmarks && 'benchmarks' || 'correctness security' }}
+    runs-on: ${{ inputs.benchmarks && 'blacksmith-16vcpu-ubuntu-2404' || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    permissions:
-      contents: read
+    defaults:
+      run:
+        shell: bash
     env:
       REDSUITE_ROOT: ${{ github.workspace }}/runroot
+      REDSUITE_YELLOWSTONE_DIR: ${{ github.workspace }}/yellowstone-cache
       MAGICBLOCK_VALIDATOR_BIN: ${{ github.workspace }}/magicblock-validator/target/debug/magicblock-validator
       MAGICBLOCK_VERIFIER_BIN: ${{ github.workspace }}/magicblock-validator/target/debug/magicblock-verifier
+      REDSUITE_MODE: ${{ inputs.benchmarks && 'benchmarks' || 'checks' }}
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
@@ -104,16 +42,18 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
         id: agave
-
-      - name: Restore redsuite build
-        id: redsuite-cache
-        uses: actions/cache@v6
         with:
-          path: redsuite-dist
-          key: redsuite-bin-${{ env.REDSUITE_REV }}-agave${{ steps.agave.outputs.agave_version }}-${{ runner.os }}-${{ runner.arch }}
+          sbf_tools: "false"
+
+      - name: Record actual runner resources
+        run: |
+          nproc
+          lscpu
+          free -h
+          df -h .
+          cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max
 
       - name: Checkout redsuite
-        if: steps.redsuite-cache.outputs.cache-hit != 'true'
         uses: actions/checkout@v5
         with:
           repository: ${{ env.REDSUITE_REPO }}
@@ -121,26 +61,22 @@ jobs:
           path: redsuite
           persist-credentials: false
 
-      - name: Build redsuite
-        if: steps.redsuite-cache.outputs.cache-hit != 'true'
-        run: |
-          set -euxo pipefail
-          rustup toolchain install
-          CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-C target-cpu=native" \
-            cargo build --release --locked -p redsuite
-          env -u REDSUITE_ROOT cargo xtask programs
-          mkdir -p ../redsuite-dist/deploy
-          cp target/release/redsuite ../redsuite-dist/
-          cp target/deploy/*.so target/deploy/fixtures.json ../redsuite-dist/deploy/
-          rm -rf target
-        shell: bash
-        working-directory: redsuite
-
-      - name: Download ER + verifier + committor artifact
-        uses: actions/download-artifact@v8
+      - uses: ./magicblock-validator/.github/actions/build-redsuite
         with:
-          name: er-debug-bin
-          path: magicblock-validator/target
+          agave_version: ${{ steps.agave.outputs.agave_version }}
+
+      - uses: ./magicblock-validator/.github/actions/build-er
+        with:
+          agave_version: ${{ steps.agave.outputs.agave_version }}
+
+      - name: Cache Yellowstone plugin
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.REDSUITE_YELLOWSTONE_DIR }}
+          key: >-
+            yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.agave.outputs.agave_version }}-${{ hashFiles(
+              'redsuite/crates/redsuite-core/src/topology/yellowstone.rs'
+            ) }}
 
       - name: Prepare run root
         run: |
@@ -149,83 +85,44 @@ jobs:
           cp redsuite-dist/deploy/* runroot/target/deploy/
           chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN" "$MAGICBLOCK_VERIFIER_BIN"
           test -x "$MAGICBLOCK_VALIDATOR_BIN" -a -x "$MAGICBLOCK_VERIFIER_BIN"
-        shell: bash
 
-      - name: Run redsuite ${{ matrix.suite }} suite
-        run: |
-          set -euo pipefail
-          sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo sysctl fs.inotify.max_user_instances=1280
-          sudo sysctl fs.inotify.max_user_watches=655360
-          [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
-          for target in $TARGETS; do
-            ./redsuite-dist/redsuite run "$target"
-          done
-        shell: bash
+      - name: Run RedSuite
+        run: bash magicblock-validator/.github/scripts/run-redsuite.sh "$REDSUITE_MODE"
         env:
           REDSUITE_CLONE_URL: ${{ secrets.REDSUITE_CLONE_URL }}
-          TARGETS: ${{ matrix.targets }}
+          RUST_LOG: info,redsuite_core::check=debug
+
+      - name: Record peak memory, CPU use and final disk use
+        if: always()
+        run: |
+          df -h .
+          cat /sys/fs/cgroup/memory.peak /sys/fs/cgroup/cpu.stat
 
       - name: Upload stack logs
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: redsuite-stack-logs-${{ matrix.suite }}
+          name: redsuite-stack-logs-${{ env.REDSUITE_MODE }}
           path: runroot/target/redsuite-stack/*.log*
           retention-days: 3
           if-no-files-found: ignore
 
       - name: Upload benchmark reports
-        if: always() && matrix.suite == 'benchmarks'
+        if: always() && inputs.benchmarks
         uses: actions/upload-artifact@v7
         with:
-          name: redsuite-reports-${{ matrix.suite }}
+          name: redsuite-reports-${{ env.REDSUITE_MODE }}
           path: runroot/target/redsuite-reports/
-          retention-days: ${{ github.event_name == 'pull_request' && 14 || 90 }}
+          retention-days: 90
           if-no-files-found: ignore
 
-      - name: Export Bencher Metric Format
-        if: matrix.suite == 'benchmarks'
-        run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
-        shell: bash
-
-      - uses: bencherdev/bencher@v0.6.10
-        if: matrix.suite == 'benchmarks'
-
-      - name: Track results with Bencher
-        if: matrix.suite == 'benchmarks'
-        run: |
-          set -euo pipefail
-          if [ -z "${BENCHER_API_KEY:-}" ]; then
-            echo "BENCHER_API_KEY not set — skipping Bencher tracking"
-            exit 0
-          fi
-          bencher run \
-            --project "$BENCHER_PROJECT" \
-            --key "$BENCHER_API_KEY" \
-            --branch "$BENCHER_BRANCH" \
-            --testbed "$BENCHER_TESTBED" \
-            --threshold-measure latency \
-            --threshold-test t_test \
-            --threshold-min-sample-size 4 \
-            --threshold-max-sample-size 30 \
-            --threshold-lower-boundary _ \
-            --threshold-upper-boundary 0.99 \
-            --threshold-measure throughput \
-            --threshold-test t_test \
-            --threshold-min-sample-size 4 \
-            --threshold-max-sample-size 30 \
-            --threshold-lower-boundary 0.99 \
-            --threshold-upper-boundary _ \
-            --thresholds-reset \
-            --adapter json \
-            --file redsuite-bmf.json
-        shell: bash
-        env:
-          BENCHER_API_KEY: ${{ secrets.BENCHER_API_TOKEN }}
-          BENCHER_BRANCH: ${{ github.event.release.target_commitish || github.ref_name }}
+      - name: Track benchmark results
+        if: inputs.benchmarks
+        uses: ./magicblock-validator/.github/actions/track-benchmarks
+        with:
+          token: ${{ secrets.BENCHER_API_TOKEN }}
+          branch: ${{ github.event.release.target_commitish || github.ref_name }}
 
       - name: Stack down
         if: always()
         run: ./redsuite-dist/redsuite stack down
-        shell: bash

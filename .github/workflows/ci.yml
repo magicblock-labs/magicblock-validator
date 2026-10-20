@@ -1,0 +1,97 @@
+name: Run CI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      redsuite_revision:
+        description: RedSuite revision override (empty uses the pinned revision)
+        type: string
+  push:
+    branches: [master, dev]
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: magicblock-validator
+
+concurrency:
+  group: validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  run_make_ci_format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - run: cargo fmt --check
+
+  run_make_ci_lint:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-lint-v002"
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+        with:
+          sbf_tools: "false"
+
+      - run: cargo clippy --all-targets -- -D warnings
+
+  run_make_ci_test:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run unit tests
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          RUST_BACKTRACE=1 cargo nextest run --no-capture
+
+  checks:
+    name: RedSuite correctness and security
+    uses: ./.github/workflows/ci-redsuite.yml
+    with:
+      redsuite_revision: ${{ inputs.redsuite_revision }}
+    secrets: inherit
+
+  benchmarks:
+    name: RedSuite benchmarks
+    if: github.event_name == 'release'
+    uses: ./.github/workflows/ci-redsuite.yml
+    with:
+      benchmarks: true
+    secrets: inherit

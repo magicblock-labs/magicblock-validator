@@ -1,0 +1,88 @@
+name: Build or restore RedSuite
+description: Cache the portable CLI separately from Agave-specific SBF fixtures
+
+inputs:
+  agave_version:
+    description: Installed Agave release
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve RedSuite source
+      id: source
+      shell: bash
+      working-directory: redsuite
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    - name: Restore RedSuite CLI
+      id: cli
+      uses: actions/cache/restore@v6
+      with:
+        path: redsuite-dist/redsuite
+        key: >-
+          redsuite-cli-v3-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/build-redsuite/**',
+            'magicblock-validator/.github/actions/setup-build-env/**',
+            'magicblock-validator/.github/actions/setup-protoc/**'
+          ) }}
+
+    - name: Restore RedSuite fixtures
+      id: fixtures
+      uses: actions/cache/restore@v6
+      with:
+        path: redsuite-dist/deploy
+        key: >-
+          redsuite-fixtures-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.agave_version }}-${{ steps.source.outputs.sha }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/build-redsuite/**',
+            'magicblock-validator/.github/actions/setup-build-env/**',
+            'magicblock-validator/.github/actions/setup-protoc/**',
+            'magicblock-validator/.github/actions/setup-solana/**'
+          ) }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-build-env
+      if: steps.cli.outputs.cache-hit != 'true' || steps.fixtures.outputs.cache-hit != 'true'
+      with:
+        workspace: redsuite
+        build_cache_key_name: redsuite-release-v001
+
+    - name: Build RedSuite CLI
+      if: steps.cli.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: redsuite
+      run: |
+        cargo build --release --locked -p redsuite
+        mkdir -p ../redsuite-dist
+        cp target/release/redsuite ../redsuite-dist/
+
+    - name: Save RedSuite CLI
+      if: steps.cli.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: redsuite-dist/redsuite
+        key: ${{ steps.cli.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      with:
+        solana_version: ${{ inputs.agave_version }}
+
+    - name: Build RedSuite fixtures
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: redsuite
+      run: |
+        env -u REDSUITE_ROOT cargo xtask programs
+        mkdir -p ../redsuite-dist/deploy
+        cp target/deploy/*.so ../redsuite-dist/deploy/
+        # Older RedSuite revisions still require the fixture manifest.
+        if [[ -f target/deploy/fixtures.json ]]; then
+          cp target/deploy/fixtures.json ../redsuite-dist/deploy/
+        fi
+
+    - name: Save RedSuite fixtures
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: redsuite-dist/deploy
+        key: ${{ steps.fixtures.outputs.cache-primary-key }}

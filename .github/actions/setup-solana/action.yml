@@ -2,6 +2,10 @@ name: 'MagicBlock - Setup Solana'
 description: 'Install Solana Test Validator and ensure it works'
 
 inputs:
+  sbf_tools:
+    description: Restore SBF tools when building programs
+    default: "true"
+    required: false
   solana_version:
     description: 'Agave release version override'
     required: false
@@ -45,6 +49,7 @@ runs:
       # into ~/.cache/solana/<tools-version>/ on first use. Cache it so we
       # don't re-fetch it (and so concurrent builds don't race on install).
       - name: Cache cargo-build-sbf platform-tools
+        if: inputs.sbf_tools == 'true'
         uses: actions/cache@v6
         with:
           path: ~/.cache/solana

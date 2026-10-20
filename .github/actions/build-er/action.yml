@@ -1,0 +1,114 @@
+name: Build or restore ER
+description: Exact executable caches with independent native and SBF rebuilds
+
+inputs:
+  agave_version:
+    description: Installed Agave release
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set build flags before cache lookup
+      shell: bash
+      run: |
+        echo 'CARGO_PROFILE_DEV_DEBUG=line-tables-only' >> "$GITHUB_ENV"
+        echo 'RUSTFLAGS=-C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
+
+    # Keep exact artifacts outside target: Cargo-cache restoration can clean it
+    # even when only the other artifact cache missed.
+    - name: Restore validator and verifier
+      id: native
+      uses: actions/cache/restore@v6
+      with:
+        path: er-dist/native
+        key: >-
+          er-native-v3-${{ runner.os }}-${{ runner.arch }}-host-dev-lld-line-tables-${{ hashFiles(
+            'magicblock-validator/**',
+            '!magicblock-validator/.git/**',
+            '!magicblock-validator/.github/**',
+            '!magicblock-validator/target/**',
+            '!magicblock-validator/**/*.md',
+            '!magicblock-validator/docs/**',
+            '!magicblock-validator/LICENSE*',
+            '!magicblock-validator/.gitignore',
+            '!magicblock-validator/rustfmt*.toml',
+            '!magicblock-validator/clippy.toml'
+          ) }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/build-er/**',
+            'magicblock-validator/.github/actions/setup-build-env/**',
+            'magicblock-validator/.github/actions/setup-protoc/**'
+          ) }}
+
+    - name: Restore committor program
+      id: committor
+      uses: actions/cache/restore@v6
+      with:
+        path: er-dist/deploy
+        key: >-
+          er-committor-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.agave_version }}-${{ hashFiles(
+            'magicblock-validator/programs/committor-program/**',
+            'magicblock-validator/programs/committor-interface/**',
+            'magicblock-validator/Cargo.toml',
+            'magicblock-validator/Cargo.lock',
+            'magicblock-validator/rust-toolchain*',
+            'magicblock-validator/.cargo/**',
+            '!magicblock-validator/**/*.md',
+            '!magicblock-validator/programs/committor-program/bin/**'
+          ) }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/build-er/**',
+            'magicblock-validator/.github/actions/setup-build-env/**',
+            'magicblock-validator/.github/actions/setup-protoc/**'
+          ) }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/setup-solana/**'
+          ) }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-build-env
+      if: steps.native.outputs.cache-hit != 'true' || steps.committor.outputs.cache-hit != 'true'
+      with:
+        build_cache_key_name: magicblock-validator-build-er-debug-v002
+
+    - name: Build validator and verifier
+      if: steps.native.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: magicblock-validator
+      run: |
+        sudo apt-get install -y lld
+        /usr/bin/time -v cargo build --locked --bin magicblock-validator --bin magicblock-verifier
+        mkdir -p ../er-dist/native
+        cp target/debug/magicblock-validator target/debug/magicblock-verifier ../er-dist/native/
+
+    - name: Save validator and verifier
+      if: steps.native.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: er-dist/native
+        key: ${{ steps.native.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      if: steps.committor.outputs.cache-hit != 'true'
+      with:
+        solana_version: ${{ inputs.agave_version }}
+
+    - name: Build committor program
+      if: steps.committor.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: magicblock-validator
+      run: |
+        cargo build-sbf --manifest-path programs/committor-program/Cargo.toml --sbf-out-dir target/deploy/ --quiet
+        mkdir -p ../er-dist/deploy
+        cp target/deploy/magicblock_committor_program.so ../er-dist/deploy/
+
+    - name: Save committor program
+      if: steps.committor.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: er-dist/deploy
+        key: ${{ steps.committor.outputs.cache-primary-key }}
+
+    - name: Stage ER binaries and committor program
+      shell: bash
+      run: |
+        mkdir -p magicblock-validator/target/debug magicblock-validator/target/deploy
+        cp er-dist/native/* magicblock-validator/target/debug/
+        cp er-dist/deploy/* magicblock-validator/target/deploy/
