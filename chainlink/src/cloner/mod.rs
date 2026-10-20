@@ -1,6 +1,6 @@
 use std::iter;
 
-use engine::{AccountAccessor, Engine, PostFinalize};
+use engine::{AccountAccessor, Engine, EngineError, PostFinalize};
 use errors::ClonerResult;
 use keeper::error::KeeperError;
 use magic_program_api::{
@@ -11,7 +11,9 @@ use magic_program_api::{
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
+use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 use tracing::{debug, warn};
 
 use crate::remote_account_provider::program_account::{
@@ -197,7 +199,24 @@ pub(crate) async fn clone_account(
         }),
     };
     let account = request.account;
-    accessor.materialize(account, actions).await.map_err(|err| {
+    let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
+    let result = accessor.materialize(account, actions).await;
+    if empty_placeholder
+        && matches!(
+            result,
+            Err(EngineError::TransactionExecution(
+                TransactionError::InstructionError(1, InstructionError::InvalidArgument)
+            ))
+        )
+    {
+        // A queued local creation can win after the original lease observed
+        // absence. Reacquire before accepting its protected image as sufficient.
+        let current = engine.account(request.pubkey).await?;
+        if matches!(current.observed(), Some((AccountMode::Magic, _))) {
+            return Ok(());
+        }
+    }
+    result.map_err(|err| {
         errors::ClonerError::FailedToCloneRegularAccount(request.pubkey, Box::new(err.into()))
     })
 }
@@ -275,7 +294,7 @@ pub(crate) async fn claim_cached_account_eviction<R>(
         .loader()
         .read(&pubkey, inspect)
         .map_err(KeeperError::from)
-        .map_err(engine::EngineError::from)?;
+        .map_err(EngineError::from)?;
     Ok(value.map(|value| (accessor, value)))
 }
 
