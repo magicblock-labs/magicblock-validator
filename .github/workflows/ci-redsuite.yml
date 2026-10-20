@@ -51,7 +51,12 @@ jobs:
           lscpu
           free -h
           df -h .
-          cat /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max
+          for metric in /sys/fs/cgroup/cpu.max /sys/fs/cgroup/memory.max; do
+            if [ -r "$metric" ]; then
+              echo "$metric"
+              cat "$metric"
+            fi
+          done
 
       - name: Checkout redsuite
         uses: actions/checkout@v5
@@ -96,7 +101,12 @@ jobs:
         if: always()
         run: |
           df -h .
-          cat /sys/fs/cgroup/memory.peak /sys/fs/cgroup/cpu.stat
+          for metric in /sys/fs/cgroup/memory.peak /sys/fs/cgroup/cpu.stat; do
+            if [ -r "$metric" ]; then
+              echo "$metric"
+              cat "$metric"
+            fi
+          done
 
       - name: Upload stack logs
         if: always()
@@ -125,4 +135,7 @@ jobs:
 
       - name: Stack down
         if: always()
-        run: ./redsuite-dist/redsuite stack down
+        run: |
+          if [ -x ./redsuite-dist/redsuite ]; then
+            ./redsuite-dist/redsuite stack down
+          fi
