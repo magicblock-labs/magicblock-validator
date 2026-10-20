@@ -19,17 +19,20 @@ cargo clippy --all-targets -- -D warnings
 RUST_BACKTRACE=1 cargo nextest run --no-capture
 ```
 
+CI also runs RedSuite's Redshift correctness and Redhat security scenarios on
+every PR change. Redline benchmarks run only on published releases.
+
 ## Validator qualification
 
-Use the RedSuite revision pinned in [validator CI](../.github/workflows/ci-redsuite.yml).
-Follow [RedSuite's setup](https://github.com/magicblock-labs/redsuite#-get-started)
-at that revision, using this checkout's validator, verifier, and committor program.
+Follow [RedSuite's setup guide](https://github.com/magicblock-labs/redsuite/blob/c72172c0444f5857af17581a9e8dd2073b9bc107/README.md#-get-started)
+using the [revision pinned by CI](../.github/actions/run-redsuite/action.yml)
+and this checkout's validator, verifier, and committor program.
 From the RedSuite checkout, run:
 
 ```sh
-redsuite run redshift
-redsuite run redhat
-redsuite run redline --profile lite
+redsuite redshift run
+redsuite redhat run
+redsuite redline run --profile lite
 ```
 
 Redshift checks correctness. Redhat exercises adversarial ownership, authorization,
