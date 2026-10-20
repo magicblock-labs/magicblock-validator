@@ -1,0 +1,17 @@
+name: Save Cargo cache
+description: Save a refreshed compilation snapshot when setup returned a save key
+
+inputs:
+  key:
+    description: Snapshot key from setup-build-env; empty skips saving
+  path:
+    description: Cache paths from setup-build-env
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache/save@v6
+      if: inputs.key != ''
+      with:
+        key: ${{ inputs.key }}
+        path: ${{ inputs.path }}

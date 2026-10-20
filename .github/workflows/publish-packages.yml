@@ -141,6 +141,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
+        id: build-env
         with:
           cache-key: publish-${{ matrix.build.TARGET }}-release
 
@@ -165,6 +166,11 @@ jobs:
         shell: bash
         run: |
           cd magicblock-validator/.github && ./version-align.sh --check
+
+      - uses: ./magicblock-validator/.github/actions/save-build-cache
+        with:
+          key: ${{ steps.build-env.outputs.save-key }}
+          path: ${{ steps.build-env.outputs.cache-paths }}
 
       - name: Build the NPM package
         working-directory: magicblock-validator

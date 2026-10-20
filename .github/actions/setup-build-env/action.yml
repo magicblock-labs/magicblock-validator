@@ -12,6 +12,14 @@ inputs:
     description: Install Linux libclang for bindgen
     default: "true"
 
+outputs:
+  save-key:
+    description: Cargo snapshot key to save after success; empty on an exact hit
+    value: ${{ steps.cache.outputs.cache-hit != 'true' && steps.cache.outputs.cache-primary-key || '' }}
+  cache-paths:
+    description: Paths shared by cache restore and save
+    value: ${{ steps.cargo-cache.outputs.paths }}
+
 runs:
   using: composite
   steps:
@@ -36,6 +44,7 @@ runs:
       env:
         CARGO_INCREMENTAL: "0"
         CACHE_LANE: ${{ inputs.cache-key }}
+        CACHE_WORKSPACE: ${{ inputs.workspace }}
       run: |
         echo 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
         environment=$(
@@ -54,16 +63,17 @@ runs:
           echo "prefix=cargo-v1-$RUNNER_OS-$RUNNER_ARCH-$CACHE_LANE-$environment"
           echo "dependencies=$dependencies"
           echo "source=$(git rev-parse HEAD)"
+          echo 'paths<<CARGO_CACHE_PATHS'
+          printf '%s\n' '~/.cargo/registry' '~/.cargo/git' "$CACHE_WORKSPACE/target"
+          echo 'CARGO_CACHE_PATHS'
         } >> "$GITHUB_OUTPUT"
 
     # A new revision saves refreshed outputs; older snapshots remain useful to Cargo.
     - name: Restore Cargo compilation cache
-      uses: actions/cache@v6
+      id: cache
+      uses: actions/cache/restore@v6
       with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-          ${{ inputs.workspace }}/target
+        path: ${{ steps.cargo-cache.outputs.paths }}
         key: ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-${{ steps.cargo-cache.outputs.source }}
         restore-keys: |
           ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-

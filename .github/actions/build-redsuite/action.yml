@@ -36,6 +36,7 @@ runs:
           ) }}
 
     - uses: ./magicblock-validator/.github/actions/setup-build-env
+      id: build-env
       if: steps.cli.outputs.cache-hit != 'true' || steps.fixtures.outputs.cache-hit != 'true'
       with:
         workspace: redsuite
@@ -76,3 +77,8 @@ runs:
       with:
         path: redsuite-dist/deploy
         key: ${{ steps.fixtures.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/save-build-cache
+      with:
+        key: ${{ steps.build-env.outputs.save-key }}
+        path: ${{ steps.build-env.outputs.cache-paths }}

@@ -58,6 +58,7 @@ runs:
           ) }}
 
     - uses: ./magicblock-validator/.github/actions/setup-build-env
+      id: build-env
       if: steps.native.outputs.cache-hit != 'true' || steps.committor.outputs.cache-hit != 'true'
       with:
         cache-key: validator-dev
@@ -97,6 +98,11 @@ runs:
       with:
         path: er-dist/deploy
         key: ${{ steps.committor.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/save-build-cache
+      with:
+        key: ${{ steps.build-env.outputs.save-key }}
+        path: ${{ steps.build-env.outputs.cache-paths }}
 
     - name: Stage ER binaries and committor program
       shell: bash
