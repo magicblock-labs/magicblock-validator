@@ -1,48 +1,19 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
-
-Only the latest `main` branch and the most recent release are supported with security fixes.
-
+Security fixes support the latest `master` branch and most recent release.
 Older releases may not receive patches.
 
----
+## Report a vulnerability
 
-## Reporting a Vulnerability
+Do not open a public issue. Use **Report a vulnerability** on the repository's
+GitHub Security tab to report privately through Security Advisories.
 
-If you discover a security issue, **do not open a public issue**.
+Include the issue, affected components or configuration, reproduction steps
+where possible, and potential impact on funds, state, availability, or integrity.
+Avoid public disclosure until we have acknowledged and addressed the report.
 
-Please report it privately via **GitHub Security Advisories**:
+This policy covers validator runtime behavior, consensus and state handling,
+RPC and APIs, configuration, and on-disk formats and migrations.
 
-- Go to: **Security → Advisories → New draft advisory**
-- Or use the “Report a vulnerability” button on the Security tab
-
-Include:
-- a clear description of the issue
-- affected components or configs
-- minimal repro steps (if possible)
-- potential impact (funds, state, availability, integrity)
-
-Please avoid public disclosure until we have acknowledged and addressed the report.
-
----
-
-## Scope
-
-This policy applies to:
-- validator runtime behavior
-- consensus / state handling
-- RPC / API surfaces
-- config parsing and defaults
-- on-disk formats and migrations
-
----
-
-## Response Expectations
-
-We aim to:
-- acknowledge reports within a few business days
-- assess severity and impact promptly
-- coordinate disclosure when appropriate
-
-Thanks for helping keep the codebase safe and predictable.
+We aim to acknowledge reports within a few business days, assess severity and
+impact promptly, and coordinate disclosure when appropriate.

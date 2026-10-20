@@ -1,109 +1,23 @@
-# Contributing to magicblock-validator
+# Contributing
 
-Thanks for contributing. This repository implements a high-performance, long-running solana execution engine.  
-Correctness, determinism, and operational safety matter more than velocity.
+Open a PR using the [template](../.github/PULL_REQUEST_TEMPLATE.md).
+Use its title convention for commit subjects too.
 
-Please keep contributions **small, explicit, and reviewable**.
+This workspace owns validator orchestration, execution, account storage,
+replication, and application services. Keep changes in the owning crate; see
+[repository boundaries](../AGENTS.md#boundaries).
 
----
+## Checks
 
-## Scope & Philosophy
+See [validation guidance](../AGENTS.md#validation) for scoped checks.
+[Integration tests](../test-integration/) use a separate Cargo workspace and
+runner: `make ci-test-integration`. `make ci-fmt` and `make ci-lint` cover the root
+workspace. Check the integration workspace separately when it is affected:
 
-- Prefer **minimal changes** over broad refactors.
-- Avoid speculative abstractions.
-- Treat config, CLI flags, and on-disk formats as **public interfaces**.
-- Backward compatibility is the default.
+```sh
+cargo +nightly fmt --manifest-path test-integration/Cargo.toml --check -- --config-path rustfmt-nightly.toml
+cargo clippy --manifest-path test-integration/Cargo.toml --all-targets -- -D warnings
+```
 
-If you are unsure whether a change belongs here, start a **Discussion**.
-
----
-
-## Pull Requests
-
-
-### Title format
-PR titles must follow:
-
-type(scope): short summary
-
-Where:
-- `type` ∈ `feat | fix | docs | chore | refactor | test | perf | ci | build`
-- `scope` is optional
-- use lowercase, no trailing period
-
-Examples:
-- `fix: prevent panic on empty slot`
-- `feat(rpc): add account snapshot endpoint`
-
-The PR title becomes the commit title when merged.
-
----
-
-### Compatibility & Safety
-
-Explicitly call out any of the following in the PR description:
-- config changes
-- migrations (disk, state, network, protocol)
-- behavior changes affecting operators
-
-If none apply, mark the change as **non-breaking**.
-
----
-
-### Testing
-
-- Changes affecting correctness, consensus, or state handling **must** be tested.
-- Small refactors may rely on existing coverage; explain why if no new tests are added.
-- Performance-sensitive changes should include rationale or benchmarks where relevant.
-
----
-
-## Commits
-
-- Keep commits focused.
-- Avoid drive-by formatting or unrelated cleanups.
-- Squash merges are used; intermediate commit messages are not critical.
-
----
-
-## Code Style
-
-- Follow existing patterns.
-- Prefer explicitness over cleverness.
-- Avoid macros or unsafe code unless there is a clear, documented need.
-- Performance optimizations should be obvious and justified.
-
----
-
-## Configs & Interfaces
-
-Assume that:
-- config files
-- CLI flags
-- RPC / API surfaces
-- on-disk formats
-
-are relied upon by external operators.
-
-Changes here require:
-- documentation updates
-- compatibility notes in the PR
-- clear migration paths if breaking
-
----
-
-## Security
-
-If you believe you’ve found a security issue, **do not open a public issue**.  
-Use the repository’s security policy instead.
-
----
-
-## Questions & Ideas
-
-- Use **Issues** for concrete, actionable work.
-- Use **Discussions** for design questions, ideas, or uncertain proposals.
-
----
-
-Thanks for helping keep the codebase fast, predictable, and boring in the best way.
+Report vulnerabilities privately through the [security policy](SECURITY.md).
+For publishing, see the [release process](RELEASE_PROCESS.md).
