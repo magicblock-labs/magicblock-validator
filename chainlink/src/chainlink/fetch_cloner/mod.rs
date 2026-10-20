@@ -1584,9 +1584,9 @@ where
         //  - In the undelegate/redelegate same-slot path, the bank can still hold a plain
         //    or undelegating version while the subscription update carries the delegated state
         //    at the same slot, so we must allow that update.
-        //  - A completed undelegation replaces a local Transient image with
+        //  - A completed undelegation replaces a local Undelegating image with
         //    base-chain state. That base image can have an older observed slot
-        //    than the local transient while still being the lifecycle-completing
+        //    than the local undelegating image while still being the lifecycle-completing
         //    authority.
         //
         if !completed_transient_replacement {
@@ -1673,7 +1673,7 @@ where
             return;
         }
 
-        // A successful clone call can leave a rescued account Transient.
+        // A successful clone call can leave a rescued account Undelegating.
         // Retain recovery subscriptions until the local image actually
         // reflects completion, not merely a newer on-chain delegation.
         if self.read_account(&pubkey, |local| {
@@ -3091,7 +3091,7 @@ where
         Ok(fetch_context.remote_account_claims_value())
     }
 
-    /// Rechecks present Transient accounts against their delegation records
+    /// Rechecks present Undelegating accounts against their delegation records
     /// before fetching an image that may complete undelegation.
     pub(crate) async fn refresh_transient_requested_accounts(
         &self,

@@ -383,7 +383,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         })
     }
 
-    /// Ensures absent accounts are materialized locally and refreshes Transient
+    /// Ensures absent accounts are materialized locally and refreshes Undelegating
     /// accounts whose undelegation completed without a subscription update.
     /// Missing remote accounts are represented as placeholders.
     /// Returns the number of requested remote accounts claimed by this call.
