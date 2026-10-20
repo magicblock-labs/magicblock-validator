@@ -142,8 +142,8 @@ impl CloneSourceSlots {
     }
 }
 
-/// Claims a remote image unless local Magic state owns the key. Engine handles
-/// slot deduplication and validates lifecycle transitions under the lease.
+/// Claims a remote image unless local Magic state owns the key.
+/// The lease serializes account maintenance, not ordinary transaction execution.
 pub(crate) async fn claim_materialization<'a>(
     engine: &'a Engine,
     pubkey: Pubkey,
@@ -183,6 +183,21 @@ pub(crate) async fn clone_account(
     accessor: AccountAccessor<'_>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
+    // Delegation was confirmed before ER execution could request undelegation.
+    // Its completion must therefore advance that base-chain delegation slot.
+    // Recheck under the lease in case another delegation won while we waited.
+    // A queued transaction can still move Delegated to Undelegating afterward,
+    // but that transition preserves the same delegation stamp.
+    if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
+        accessor.observed()
+    {
+        let incoming = request.account.read();
+        let completes_undelegation = incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
+        let advances_delegation = incoming.slot() > delegation_slot;
+        if completes_undelegation && !advances_delegation {
+            return Ok(());
+        }
+    }
     if let Some(authority) = request.delegated_to_other {
         warn!(
             pubkey = %request.pubkey,
@@ -200,25 +215,29 @@ pub(crate) async fn clone_account(
     };
     let account = request.account;
     let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
-    let result = accessor.materialize(account, actions).await;
-    if empty_placeholder
-        && matches!(
-            result,
-            Err(EngineError::TransactionExecution(
-                TransactionError::InstructionError(1, InstructionError::InvalidArgument)
-            ))
-        )
-    {
-        // A queued local creation can win after the original lease observed
-        // absence. Reacquire before accepting its protected image as sufficient.
-        let current = engine.account(request.pubkey).await?;
-        if matches!(current.observed(), Some((AccountMode::Magic, _))) {
+    let error = match accessor.materialize(account, actions).await {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    // A queued local creation can win after the original lease observed
+    // absence. Reacquire before accepting its protected image as sufficient.
+    let lifecycle_conflict = matches!(
+        error,
+        EngineError::TransactionExecution(TransactionError::InstructionError(
+            1,
+            InstructionError::InvalidArgument
+        ))
+    );
+    if empty_placeholder && lifecycle_conflict {
+        let locally_created = claim_materialization(engine, request.pubkey).await?.is_none();
+        if locally_created {
             return Ok(());
         }
     }
-    result.map_err(|err| {
-        errors::ClonerError::FailedToCloneRegularAccount(request.pubkey, Box::new(err.into()))
-    })
+    Err(errors::ClonerError::FailedToCloneRegularAccount(
+        request.pubkey,
+        Box::new(error.into()),
+    ))
 }
 
 pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequest> {
