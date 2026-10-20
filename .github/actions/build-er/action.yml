@@ -1,11 +1,6 @@
 name: Build or restore ER
 description: Exact executable caches with independent native and SBF rebuilds
 
-inputs:
-  agave_version:
-    description: Installed Agave release
-    required: true
-
 runs:
   using: composite
   steps:
@@ -15,8 +10,7 @@ runs:
         echo 'CARGO_PROFILE_DEV_DEBUG=line-tables-only' >> "$GITHUB_ENV"
         echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
 
-    # Keep exact artifacts outside target: Cargo-cache restoration can clean it
-    # even when only the other artifact cache missed.
+    # Stage exact artifacts after restoring Cargo's potentially older target directory.
     - name: Restore validator and verifier
       id: native
       uses: actions/cache/restore@v6
@@ -46,7 +40,7 @@ runs:
       with:
         path: er-dist/deploy
         key: >-
-          er-committor-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.agave_version }}-${{ hashFiles(
+          er-committor-v3-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
             'magicblock-validator/programs/committor-program/**',
             'magicblock-validator/programs/committor-interface/**',
             'magicblock-validator/Cargo.toml',
@@ -66,7 +60,7 @@ runs:
     - uses: ./magicblock-validator/.github/actions/setup-build-env
       if: steps.native.outputs.cache-hit != 'true' || steps.committor.outputs.cache-hit != 'true'
       with:
-        build_cache_key_name: magicblock-validator-build-er-debug-v002
+        cache-key: validator-dev
 
     - name: Build validator and verifier
       if: steps.native.outputs.cache-hit != 'true'
@@ -87,8 +81,6 @@ runs:
 
     - uses: ./magicblock-validator/.github/actions/setup-solana
       if: steps.committor.outputs.cache-hit != 'true'
-      with:
-        solana_version: ${{ inputs.agave_version }}
 
     - name: Build committor program
       if: steps.committor.outputs.cache-hit != 'true'

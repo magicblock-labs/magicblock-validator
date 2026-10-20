@@ -142,7 +142,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-publish-${{ matrix.build.TARGET }}-release-v001"
+          cache-key: publish-${{ matrix.build.TARGET }}-release
 
       - name: Install target
         working-directory: magicblock-validator

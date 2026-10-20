@@ -1,11 +1,6 @@
 name: Build or restore RedSuite
 description: Cache the portable CLI separately from Agave-specific SBF fixtures
 
-inputs:
-  agave_version:
-    description: Installed Agave release
-    required: true
-
 runs:
   using: composite
   steps:
@@ -33,7 +28,7 @@ runs:
       with:
         path: redsuite-dist/deploy
         key: >-
-          redsuite-fixtures-v3-${{ runner.os }}-${{ runner.arch }}-${{ inputs.agave_version }}-${{ steps.source.outputs.sha }}-${{ hashFiles(
+          redsuite-fixtures-v3-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{ hashFiles(
             'magicblock-validator/.github/actions/build-redsuite/**',
             'magicblock-validator/.github/actions/setup-build-env/**',
             'magicblock-validator/.github/actions/setup-protoc/**',
@@ -44,7 +39,8 @@ runs:
       if: steps.cli.outputs.cache-hit != 'true' || steps.fixtures.outputs.cache-hit != 'true'
       with:
         workspace: redsuite
-        build_cache_key_name: redsuite-release-v001
+        cache-key: redsuite-release
+        libclang: "false"
 
     - name: Build RedSuite CLI
       if: steps.cli.outputs.cache-hit != 'true'
@@ -64,8 +60,6 @@ runs:
 
     - uses: ./magicblock-validator/.github/actions/setup-solana
       if: steps.fixtures.outputs.cache-hit != 'true'
-      with:
-        solana_version: ${{ inputs.agave_version }}
 
     - name: Build RedSuite fixtures
       if: steps.fixtures.outputs.cache-hit != 'true'
@@ -75,10 +69,6 @@ runs:
         env -u REDSUITE_ROOT cargo xtask programs
         mkdir -p ../redsuite-dist/deploy
         cp target/deploy/*.so ../redsuite-dist/deploy/
-        # Older RedSuite revisions still require the fixture manifest.
-        if [[ -f target/deploy/fixtures.json ]]; then
-          cp target/deploy/fixtures.json ../redsuite-dist/deploy/
-        fi
 
     - name: Save RedSuite fixtures
       if: steps.fixtures.outputs.cache-hit != 'true'

@@ -4,10 +4,6 @@ on:
   release:
     types: [published]
   workflow_dispatch:
-    inputs:
-      redsuite_revision:
-        description: RedSuite revision override (empty uses the pinned revision)
-        type: string
   push:
     branches: [master, dev]
   pull_request:
@@ -51,13 +47,14 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-lint-v002"
+          cache-key: lint
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-        with:
-          sbf_tools: "false"
 
+      # Temporary: identify why native dependencies rebuild after cache restoration.
       - run: cargo clippy --all-targets -- -D warnings
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
 
   unit-tests:
     name: Unit tests
@@ -70,7 +67,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
+          cache-key: unit-tests
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
@@ -78,6 +75,8 @@ jobs:
         uses: taiki-e/install-action@nextest
 
       - name: Run unit tests
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=info
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
@@ -97,7 +96,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/run-redsuite
         with:
           family: redshift
-          revision: ${{ inputs.redsuite_revision }}
           clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
 
   security:
@@ -113,7 +111,6 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/run-redsuite
         with:
           family: redhat
-          revision: ${{ inputs.redsuite_revision }}
           clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
 
   benchmarks:

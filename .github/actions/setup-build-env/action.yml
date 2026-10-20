@@ -1,50 +1,70 @@
-name: 'MagicBlock - Setup Build Env'
-description: 'Install compilation dependencies and restore the Cargo cache'
+name: Setup Rust build
+description: Install compilation dependencies and restore rolling Cargo snapshots
 
 inputs:
   workspace:
     description: Workspace path relative to github.workspace
     default: magicblock-validator
-    required: false
-  rust_toolchain_release:
-    description: "Rust toolchain override; defaults to rust-toolchain.toml"
-    required: false
-  build_cache_key_name:
-    description: "Build cache key"
+  cache-key:
+    description: Cargo cache lane (separates lint, tests, and build profiles)
     required: true
+  libclang:
+    description: Install Linux libclang for bindgen
+    default: "true"
 
 runs:
-  using: "composite"
+  using: composite
   steps:
     - uses: ./magicblock-validator/.github/actions/setup-protoc
 
     - name: Install Rust
-      shell: "bash"
+      shell: bash
       working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
-      env:
-        REQUESTED_TOOLCHAIN: ${{ inputs.rust_toolchain_release }}
-      run: |
-        if [ -n "$REQUESTED_TOOLCHAIN" ]; then
-          rustup toolchain install "$REQUESTED_TOOLCHAIN" --profile default --component clippy
-        else
-          rustup toolchain install
-        fi
+      run: rustup toolchain install
 
-    - name: Install system deps (libudev, LLVM/Clang)
-      if: runner.os == 'Linux'
-      shell: "bash"
+    - name: Install libclang for bindgen
+      if: runner.os == 'Linux' && inputs.libclang == 'true'
+      shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y \
-          libudev-dev \
-          libclang-dev
+        sudo apt-get install -y libclang-dev
 
-    - uses: Swatinem/rust-cache@v2
+    - name: Identify Cargo cache
+      id: cargo-cache
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
+      env:
+        CARGO_INCREMENTAL: "0"
+        CACHE_LANE: ${{ inputs.cache-key }}
+      run: |
+        echo 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
+        environment=$(
+          {
+            rustc --version --verbose
+            env | LC_ALL=C sort |
+              sed -n -E '/^(CARGO|RUST|CC=|CXX=|CFLAGS|CXXFLAGS|CMAKE|LDFLAGS=|LIBCLANG_PATH=|OPENSSL|PROTOC=)/p'
+          } | shasum -a 256 | cut -d ' ' -f 1
+        )
+        dependencies=$(
+          git ls-files -z -- 'Cargo.toml' '**/Cargo.toml' 'Cargo.lock' '**/Cargo.lock' \
+            'rust-toolchain*' '.cargo/*' '**/.cargo/*' |
+            xargs -0 shasum -a 256 | shasum -a 256 | cut -d ' ' -f 1
+        )
+        {
+          echo "prefix=cargo-v1-$RUNNER_OS-$RUNNER_ARCH-$CACHE_LANE-$environment"
+          echo "dependencies=$dependencies"
+          echo "source=$(git rev-parse HEAD)"
+        } >> "$GITHUB_OUTPUT"
+
+    # A new revision saves refreshed outputs; older snapshots remain useful to Cargo.
+    - name: Restore Cargo compilation cache
+      uses: actions/cache@v6
       with:
-        shared-key: ${{ inputs.build_cache_key_name }}
-        workspaces: |
-          ${{ inputs.workspace }} -> target
-        cache-workspace-crates: true
-        cache-targets: true
-        cache-all-crates: true
-        cache-on-failure: true
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          ${{ inputs.workspace }}/target
+        key: ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-${{ steps.cargo-cache.outputs.source }}
+        restore-keys: |
+          ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-
+          ${{ steps.cargo-cache.outputs.prefix }}-

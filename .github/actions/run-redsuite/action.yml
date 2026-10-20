@@ -5,9 +5,6 @@ inputs:
   family:
     description: Redshift correctness, Redhat security, or Redline benchmarks
     required: true
-  revision:
-    description: RedSuite revision override; empty uses the pinned revision
-    required: false
   clone-url:
     description: Base-chain RPC override
     required: false
@@ -29,7 +26,6 @@ runs:
         } >> "$GITHUB_ENV"
 
     - uses: ./magicblock-validator/.github/actions/setup-solana
-      id: agave
       with:
         sbf_tools: "false"
 
@@ -37,24 +33,21 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: ${{ inputs.revision || 'c72172c0444f5857af17581a9e8dd2073b9bc107' }}
+        ref: c72172c0444f5857af17581a9e8dd2073b9bc107
         path: redsuite
         persist-credentials: false
 
     - uses: ./magicblock-validator/.github/actions/build-redsuite
-      with:
-        agave_version: ${{ steps.agave.outputs.agave_version }}
 
     - uses: ./magicblock-validator/.github/actions/build-er
-      with:
-        agave_version: ${{ steps.agave.outputs.agave_version }}
 
     - name: Cache Yellowstone plugin
       uses: actions/cache@v6
       with:
         path: ${{ env.REDSUITE_YELLOWSTONE_DIR }}
         key: >-
-          yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.agave.outputs.agave_version }}-${{ hashFiles(
+          yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
+            'magicblock-validator/.github/actions/setup-solana/agave-version',
             'redsuite/crates/redsuite-core/src/topology/yellowstone.rs'
           ) }}
 
