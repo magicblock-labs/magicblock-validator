@@ -46,7 +46,7 @@ permissions:
 
 env:
   REDSUITE_REPO: magicblock-labs/redsuite
-  REDSUITE_REV: "1.0.0"
+  REDSUITE_REV: "2.0.0"
   BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
   BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
 
@@ -159,7 +159,7 @@ jobs:
           sudo sysctl fs.inotify.max_user_watches=655360
           [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
           for target in $TARGETS; do
-            ./redsuite-dist/redsuite run "$target"
+            ./redsuite-dist/redsuite "$target" run
           done
         shell: bash
         env:
