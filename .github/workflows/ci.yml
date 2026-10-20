@@ -1,4 +1,4 @@
-name: Run CI
+name: CI
 
 on:
   release:
@@ -26,7 +26,8 @@ concurrency:
   cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
-  run_make_ci_format:
+  format:
+    name: Formatting
     runs-on: ubuntu-latest
     steps:
       - name: Checkout this magicblock-validator
@@ -39,7 +40,8 @@ jobs:
 
       - run: cargo fmt --check
 
-  run_make_ci_lint:
+  lint:
+    name: Lint
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout this magicblock-validator
@@ -57,7 +59,8 @@ jobs:
 
       - run: cargo clippy --all-targets -- -D warnings
 
-  run_make_ci_test:
+  unit-tests:
+    name: Unit tests
     runs-on: blacksmith-4vcpu-ubuntu-2404
     steps:
       - name: Checkout this magicblock-validator
@@ -81,17 +84,51 @@ jobs:
           sudo sysctl fs.inotify.max_user_watches=655360
           RUST_BACKTRACE=1 cargo nextest run --no-capture
 
-  checks:
-    name: RedSuite correctness and security
-    uses: ./.github/workflows/ci-redsuite.yml
-    with:
-      redsuite_revision: ${{ inputs.redsuite_revision }}
-    secrets: inherit
+  correctness:
+    name: RedSuite correctness
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redshift
+          revision: ${{ inputs.redsuite_revision }}
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
+
+  security:
+    name: RedSuite security
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redhat
+          revision: ${{ inputs.redsuite_revision }}
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
 
   benchmarks:
     name: RedSuite benchmarks
     if: github.event_name == 'release'
-    uses: ./.github/workflows/ci-redsuite.yml
-    with:
-      benchmarks: true
-    secrets: inherit
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redline
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
+          bencher-token: ${{ secrets.BENCHER_API_TOKEN }}

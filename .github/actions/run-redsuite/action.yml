@@ -1,0 +1,109 @@
+name: Run RedSuite
+description: Build or restore artifacts, run one family, and collect logs
+
+inputs:
+  family:
+    description: Redshift correctness, Redhat security, or Redline benchmarks
+    required: true
+  revision:
+    description: RedSuite revision override; empty uses the pinned revision
+    required: false
+  clone-url:
+    description: Base-chain RPC override
+    required: false
+  bencher-token:
+    description: Bencher API token for release benchmarks
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Configure RedSuite paths
+      shell: bash
+      run: |
+        {
+          echo "REDSUITE_ROOT=$GITHUB_WORKSPACE/runroot"
+          echo "REDSUITE_YELLOWSTONE_DIR=$GITHUB_WORKSPACE/yellowstone-cache"
+          echo "MAGICBLOCK_VALIDATOR_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-validator"
+          echo "MAGICBLOCK_VERIFIER_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-verifier"
+        } >> "$GITHUB_ENV"
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      id: agave
+      with:
+        sbf_tools: "false"
+
+    - name: Checkout redsuite
+      uses: actions/checkout@v5
+      with:
+        repository: magicblock-labs/redsuite
+        ref: ${{ inputs.revision || 'c971612b3db94afa7c845f39ee72aa413a33a03b' }}
+        path: redsuite
+        persist-credentials: false
+
+    - uses: ./magicblock-validator/.github/actions/build-redsuite
+      with:
+        agave_version: ${{ steps.agave.outputs.agave_version }}
+
+    - uses: ./magicblock-validator/.github/actions/build-er
+      with:
+        agave_version: ${{ steps.agave.outputs.agave_version }}
+
+    - name: Cache Yellowstone plugin
+      uses: actions/cache@v6
+      with:
+        path: ${{ env.REDSUITE_YELLOWSTONE_DIR }}
+        key: >-
+          yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.agave.outputs.agave_version }}-${{ hashFiles(
+            'redsuite/crates/redsuite-core/src/topology/yellowstone.rs'
+          ) }}
+
+    - name: Prepare run root
+      shell: bash
+      run: |
+        set -euxo pipefail
+        mkdir -p runroot/target/deploy runroot/target/redsuite-stack
+        cp redsuite-dist/deploy/* runroot/target/deploy/
+        chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN" "$MAGICBLOCK_VERIFIER_BIN"
+        test -x "$MAGICBLOCK_VALIDATOR_BIN" -a -x "$MAGICBLOCK_VERIFIER_BIN"
+
+    - name: Run RedSuite
+      shell: bash
+      run: bash magicblock-validator/.github/scripts/run-redsuite.sh "$REDSUITE_FAMILY"
+      env:
+        REDSUITE_FAMILY: ${{ inputs.family }}
+        REDSUITE_CLONE_URL: ${{ inputs.clone-url }}
+        RUST_LOG: info,redsuite_core::check=debug
+
+    - name: Upload stack logs
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: redsuite-stack-logs-${{ inputs.family }}
+        path: runroot/target/redsuite-stack/*.log*
+        retention-days: 3
+        if-no-files-found: ignore
+
+    - name: Upload benchmark reports
+      if: always() && inputs.family == 'redline'
+      uses: actions/upload-artifact@v7
+      with:
+        name: redsuite-reports-${{ inputs.family }}
+        path: runroot/target/redsuite-reports/
+        retention-days: 90
+        if-no-files-found: ignore
+
+    - name: Track benchmark results
+      if: inputs.family == 'redline'
+      uses: ./magicblock-validator/.github/actions/track-benchmarks
+      with:
+        token: ${{ inputs.bencher-token }}
+        branch: ${{ github.event.release.target_commitish || github.ref_name }}
+
+    - name: Stack down
+      if: always()
+      shell: bash
+      run: |
+        if [ -x ./redsuite-dist/redsuite ]; then
+          ./redsuite-dist/redsuite stack down
+        fi
