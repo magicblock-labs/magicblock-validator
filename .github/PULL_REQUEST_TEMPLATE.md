@@ -1,26 +1,24 @@
 <!--
-Title: use `<type>: <description>`, with a Conventional Commit type and a
-concise lowercase imperative description, without terminal punctuation.
-Example: `feat: add state replicator crate`
+Title: `<type>: <description>`, with a Conventional Commit type and a
+concise lowercase description, without terminal punctuation.
+Example: `refactor: simpler error handling`
 -->
 
 ## What changed
-<!-- Summarize the change at the immediate-parent diff boundary. -->
+<!-- What changed relative to the immediate parent, and why. Explanatory prose, not instructions. -->
 
 <!--
-Link relevant existing issues when useful. Use `Closes #<issue>` only when this
-PR completes the issue; otherwise use `Related to #<issue>`. Omit issue links
-when none apply.
+Relevant existing issues, when applicable: `Closes #<issue>` for issues completed
+by this PR, or `Related to #<issue>` otherwise. Issue links are optional.
 -->
 
 <!--
-Impact and Reviewer notes are optional. Include only relevant, non-obvious
-information; do not narrate the code. Omit either section when it adds no value,
-including for routine chores such as dependency updates or typo fixes.
+Impact and Reviewer notes are optional: relevant, non-obvious information only,
+without a code inventory. Routine chores may need neither section.
 -->
 
 ## Impact
-<!-- Note behavior, API, storage, compatibility, security, or performance effects. -->
+<!-- Behavior, API, storage, compatibility, security, or performance effects. -->
 
 ## Reviewer notes
-<!-- Point reviewers to invariants, sharp edges, or the highest-risk part of the diff. -->
+<!-- Invariants, sharp edges, or the highest-risk part of the diff. -->

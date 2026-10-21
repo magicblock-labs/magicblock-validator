@@ -5,9 +5,9 @@ body:
   - type: markdown
     attributes:
       value: >-
-        Title: state the decision or unknown concisely in sentence case,
+        Title: the decision or unknown in sentence case,
         without a category prefix or terminal punctuation.
-        Example: `Determine whether snapshots require versioned manifests`
+        Example: `Whether snapshots require versioned manifests`
   - type: textarea
     id: question
     attributes:
@@ -19,13 +19,13 @@ body:
     id: context
     attributes:
       label: Context
-      description: Add background or prior findings when they help explain the question.
+      description: Background or prior findings that help explain the question.
     validations:
       required: false
   - type: textarea
     id: desired-output
     attributes:
       label: Desired output
-      description: Specify an answer, recommendation, prototype, or other artifact when not already clear from the question.
+      description: An answer, recommendation, prototype, or other artifact, when not already clear from the question.
     validations:
       required: false
