@@ -19,20 +19,38 @@ permissions:
 jobs:
   prepare-release:
     name: Prepare release PR
-    if: github.ref_name == github.event.repository.default_branch
     runs-on: blacksmith-32vcpu-ubuntu-2404
     env:
       HOST_CARGO_JOBS: "8"
       # Releases are always cut from master, regardless of the default branch.
       RELEASE_BASE_BRANCH: master
     steps:
+      - name: Require release base branch
+        if: github.ref_name != env.RELEASE_BASE_BRANCH
+        shell: bash
+        run: |
+          echo "::error::Releases are cut from ${RELEASE_BASE_BRANCH}; run this workflow on ${RELEASE_BASE_BRANCH}."
+          exit 1
+
+      # The workflow and the code it releases come from the same commit.
       - name: Checkout release base branch
         uses: actions/checkout@v5
         with:
           path: magicblock-validator
-          ref: ${{ env.RELEASE_BASE_BRANCH }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Require identical release workflows on dev
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          if ! git diff --exit-code origin/dev HEAD -- \
+            .github/workflows/prepare-release.yml \
+            .github/workflows/release-tag.yml \
+            .github/scripts/workspace-version.sh; then
+            echo "::error::Release workflows differ between dev and ${RELEASE_BASE_BRANCH}; land the same change on both branches."
+            exit 1
+          fi
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
@@ -47,19 +65,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          current_version="$(
-            awk '
-              $0 == "[workspace.package]" { in_section = 1; next }
-              in_section && /^\[/ { exit }
-              in_section && /^version = "/ {
-                value = $0
-                sub(/^version = "/, "", value)
-                sub(/"$/, "", value)
-                print value
-                exit
-              }
-            ' Cargo.toml
-          )"
+          current_version="$(.github/scripts/workspace-version.sh)"
 
           if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "Invalid current workspace version: $current_version" >&2
@@ -143,15 +149,18 @@ jobs:
         shell: bash
         run: ./version-align.sh
 
-      - name: Build workspace
+      - name: Build workspaces
         working-directory: magicblock-validator
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --workspace --jobs "$HOST_CARGO_JOBS"
-          # Full dependency resolution so --locked actually validates the
-          # lockfile (--no-deps skips resolution and never trips --locked).
-          cargo metadata --locked --format-version 1 >/dev/null
+          for manifest in Cargo.toml test-integration/Cargo.toml; do
+            [[ -f "$manifest" ]] || continue
+            cargo build --workspace --manifest-path "$manifest" --jobs "$HOST_CARGO_JOBS"
+            # Full dependency resolution so --locked actually validates the
+            # lockfile (--no-deps skips resolution and never trips --locked).
+            cargo metadata --manifest-path "$manifest" --locked --format-version 1 >/dev/null
+          done
 
       - name: Commit and push release branch
         working-directory: magicblock-validator
