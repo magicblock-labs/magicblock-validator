@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# Prints the release version: `[workspace.package] version` in the root Cargo.toml.
+# Prints the release version: `[workspace.package] version` in the root Cargo.toml,
+# from the working tree or from the given git revision.
 # Release tags are `v` followed by this version.
 
 set -euo pipefail
 
-manifest="$(dirname "$0")/../../Cargo.toml"
+root="$(dirname "$0")/../.."
+revision="${1:-}"
+
+if [[ -n "$revision" ]]; then
+  manifest="$(git -C "$root" show "${revision}:Cargo.toml")"
+else
+  manifest="$(cat "$root/Cargo.toml")"
+fi
 
 version="$(
   awk '
@@ -17,11 +25,11 @@ version="$(
       print value
       exit
     }
-  ' "$manifest"
+  ' <<< "$manifest"
 )"
 
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "Invalid workspace version in $manifest: \"$version\"" >&2
+  echo "Invalid workspace version in ${revision:-the working tree}'s Cargo.toml: \"$version\"" >&2
   exit 1
 fi
 
