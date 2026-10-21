@@ -33,9 +33,46 @@ jobs:
         run: |
           cd magicblock-validator/.github && ./version-align.sh --check
 
+  # A release event runs this workflow from the tagged commit, so this guard must
+  # exist on every branch a tag could point at.
+  verify-release:
+    name: Verify release source
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require a master commit carrying the tagged version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          problem=""
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
+            problem="${TAG} points at ${GITHUB_SHA}, which is not on master"
+          elif ! version="v$(.github/scripts/workspace-version.sh)"; then
+            problem="${TAG} points at a commit without a valid workspace version"
+          elif [[ "$version" != "$TAG" ]]; then
+            problem="${TAG} points at a commit versioned ${version}"
+          fi
+          if [[ -n "$problem" ]]; then
+            gh release edit "$TAG" --draft=true
+            echo "::error::${problem}. The release is back in draft; release tags come from the Tag release workflow on master."
+            exit 1
+          fi
+
   publish-binaries:
     name: Publish Binaries
-    if: github.event_name != 'push'
+    needs: verify-release
+    if: ${{ !cancelled() && github.event_name != 'push' && needs.verify-release.result != 'failure' }}
     runs-on: ${{ matrix.build.OS }}
     strategy:
       fail-fast: false
