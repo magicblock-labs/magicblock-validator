@@ -1,0 +1,80 @@
+name: Tag release
+
+# Every workspace version is tagged once, on the master push that introduces it,
+# with a draft release to publish. Release tags are never created by hand.
+
+"on":
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Tag release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require master
+        if: github.ref_name != 'master'
+        shell: bash
+        run: |
+          echo "::error::Releases are tagged from master only; run this workflow on master."
+          exit 1
+
+      # A GitHub App token lets a tag ruleset restrict release tags to this workflow.
+      - name: Create release app token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout master
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Tag version and draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="v$(.github/scripts/workspace-version.sh)"
+
+          if tagged="$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}")"; then
+            if ! git merge-base --is-ancestor "$tagged" HEAD; then
+              echo "::error::${tag} points at ${tagged}, which is not on master. Move it to the master commit that introduced ${tag}."
+              exit 1
+            fi
+            echo "${tag} is tagged at ${tagged}"
+          else
+            # Tag the commit that introduced the version, even when a later push
+            # is the first to get here.
+            introduced="$GITHUB_SHA"
+            while parent="$(git rev-parse --verify --quiet "${introduced}^")" &&
+              [[ "v$(.github/scripts/workspace-version.sh "$parent" 2> /dev/null)" == "$tag" ]]; do
+              introduced="$parent"
+            done
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag --annotate "$tag" --message "$tag" "$introduced"
+            git push origin "refs/tags/${tag}"
+            echo "Tagged ${tag} at ${introduced}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --draft --verify-tag --generate-notes --title "$tag"
+            echo "Drafted release ${tag}; publish it to ship the packages" >> "$GITHUB_STEP_SUMMARY"
+          fi
