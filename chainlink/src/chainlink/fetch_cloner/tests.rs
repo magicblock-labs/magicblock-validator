@@ -325,3 +325,131 @@ mod aml_check_strategy {
         ));
     }
 }
+
+/// A delegated account already in the bank at its delegation slot must not
+/// trigger repeated fetches when a released collision candidate carries a
+/// later fetch slot.
+#[tokio::test]
+async fn released_collision_candidate_does_not_retry_settled_delegation() {
+    use crate::testing::deleg::add_delegation_record_with_slot_for;
+
+    const DELEGATION_SLOT: u64 = 5;
+    const CANDIDATE_SLOT: u64 = 20;
+
+    let ctx = TestContext::init(CANDIDATE_SLOT).await;
+    let fetch = ctx.chainlink.fetch_cloner().expect("fetch cloner");
+    let pubkey = Pubkey::new_unique();
+    let owner = system_program::id();
+
+    ctx.rpc_client.set_slot(CANDIDATE_SLOT);
+    ctx.rpc_client.add_account(
+        pubkey,
+        Account {
+            lamports: 1_000_000,
+            data: vec![1],
+            owner: delegation_program_api::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    add_delegation_record_with_slot_for(
+        &ctx.rpc_client,
+        pubkey,
+        fetch.validator_pubkey,
+        owner,
+        DELEGATION_SLOT,
+    );
+
+    let local = AccountBuilder::from(Account {
+        lamports: 1_000_000,
+        data: vec![1],
+        owner,
+        executable: false,
+        rent_epoch: 0,
+    })
+    .mode(AccountMode::Delegated)
+    .slot(DELEGATION_SLOT)
+    .build();
+    ctx.bank.accounts().store(&[(pubkey, local)]).unwrap();
+
+    let before = fetch.fetch_count();
+    fetch
+        .clone_released_collision_candidate(ParkedCollisionCandidate {
+            pubkey,
+            slot: CANDIDATE_SLOT,
+        })
+        .await;
+    let delta = fetch.fetch_count() - before;
+
+    assert_eq!(
+        fetch.dlp_collision_tracker.lock().parked.len(),
+        0,
+        "settled candidate must not be preserved"
+    );
+    assert_eq!(delta, 0, "re-fetched an already delegated account");
+}
+
+/// A delegation cloned through the retry loop settles at its delegation slot
+/// and is not parked again, although the candidate carries a later fetch slot.
+#[tokio::test]
+async fn released_collision_candidate_settles_after_successful_clone() {
+    use crate::testing::deleg::add_delegation_record_with_slot_for;
+
+    const DELEGATION_SLOT: u64 = 5;
+    const CANDIDATE_SLOT: u64 = 20;
+
+    let ctx = TestContext::init(CANDIDATE_SLOT).await;
+    let fetch = ctx.chainlink.fetch_cloner().expect("fetch cloner");
+    let pubkey = Pubkey::new_unique();
+    let owner = system_program::id();
+
+    ctx.rpc_client.set_slot(CANDIDATE_SLOT);
+    ctx.rpc_client.add_account(
+        pubkey,
+        Account {
+            lamports: 1_000_000,
+            data: vec![2],
+            owner: delegation_program_api::id(),
+            executable: false,
+            rent_epoch: 0,
+        },
+    );
+    add_delegation_record_with_slot_for(
+        &ctx.rpc_client,
+        pubkey,
+        fetch.validator_pubkey,
+        owner,
+        DELEGATION_SLOT,
+    );
+
+    let before = fetch.fetch_count();
+    fetch
+        .clone_released_collision_candidate(ParkedCollisionCandidate {
+            pubkey,
+            slot: CANDIDATE_SLOT,
+        })
+        .await;
+    let fetches = fetch.fetch_count() - before;
+
+    let state = ctx
+        .bank
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| {
+            (
+                account.mode(),
+                account.slot(),
+                *account.owner(),
+                account.data().to_vec(),
+            )
+        })
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        state,
+        (AccountMode::Delegated, DELEGATION_SLOT, owner, vec![2])
+    );
+    // One attempt is 3 fetches; without the `settled` condition this is 9.
+    assert_eq!(fetches, 3, "expected a single clone attempt");
+    assert_eq!(fetch.dlp_collision_tracker.lock().parked.len(), 0);
+}
