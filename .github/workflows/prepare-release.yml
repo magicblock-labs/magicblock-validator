@@ -149,6 +149,46 @@ jobs:
         shell: bash
         run: ./version-align.sh
 
+      # Re-resolving a lockfile can switch third-party versions (it paired five8 1.0.0
+      # with five8_core 0.1.2, which does not compile), so a release moves only the
+      # repository's own packages to the new version and builds what master tested.
+      - name: Set package versions in lockfiles
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          for lockfile in Cargo.lock test-integration/Cargo.lock; do
+            [[ -f "$lockfile" ]] || continue
+            awk -v from="$CURRENT_VERSION" -v to="$VERSION" '
+              BEGIN { RS = "" }
+              # First pass: local packages (no source) at the old version.
+              NR == FNR {
+                if ($0 !~ /\nsource = / && index($0 "\n", "\nversion = \"" from "\"\n") && match($0, /\nname = "[^"]+"/))
+                  local[substr($0, RSTART + 9, RLENGTH - 10)] = 1
+                next
+              }
+              # Second pass: move them, and every reference pinned to them, to the new version.
+              {
+                block = $0
+                if (block !~ /\nsource = / && match(block, /\nname = "[^"]+"/) && substr(block, RSTART + 9, RLENGTH - 10) in local)
+                  block = swap(block, "\nversion = \"" from "\"", "\nversion = \"" to "\"")
+                for (name in local)
+                  block = swap(block, "\"" name " " from "\"", "\"" name " " to "\"")
+                printf "%s%s", (FNR > 1 ? "\n\n" : ""), block
+              }
+              END { print "" }
+              function swap(s, old, new,    i, out) {
+                out = ""
+                while ((i = index(s, old)) > 0) {
+                  out = out substr(s, 1, i - 1) new
+                  s = substr(s, i + length(old))
+                }
+                return out s
+              }
+            ' "$lockfile" "$lockfile" > "$lockfile.tmp"
+            mv "$lockfile.tmp" "$lockfile"
+          done
+
       - name: Build workspaces
         working-directory: magicblock-validator
         shell: bash
@@ -156,10 +196,7 @@ jobs:
           set -euo pipefail
           for manifest in Cargo.toml test-integration/Cargo.toml; do
             [[ -f "$manifest" ]] || continue
-            cargo build --workspace --manifest-path "$manifest" --jobs "$HOST_CARGO_JOBS"
-            # Full dependency resolution so --locked actually validates the
-            # lockfile (--no-deps skips resolution and never trips --locked).
-            cargo metadata --manifest-path "$manifest" --locked --format-version 1 >/dev/null
+            cargo build --workspace --locked --manifest-path "$manifest" --jobs "$HOST_CARGO_JOBS"
           done
 
       - name: Commit and push release branch
