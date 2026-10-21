@@ -36,6 +36,7 @@ jobs:
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
 
       - name: Checkout master
         uses: actions/checkout@v5
@@ -59,11 +60,18 @@ jobs:
             fi
             echo "${tag} is tagged at ${tagged}"
           else
+            # Tag the commit that introduced the version, even when a later push
+            # is the first to get here.
+            introduced="$GITHUB_SHA"
+            while parent="$(git rev-parse --verify --quiet "${introduced}^")" &&
+              [[ "v$(.github/scripts/workspace-version.sh "$parent" 2> /dev/null)" == "$tag" ]]; do
+              introduced="$parent"
+            done
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag --annotate "$tag" --message "$tag" "$GITHUB_SHA"
+            git tag --annotate "$tag" --message "$tag" "$introduced"
             git push origin "refs/tags/${tag}"
-            echo "Tagged ${tag} at ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Tagged ${tag} at ${introduced}" >> "$GITHUB_STEP_SUMMARY"
           fi
 
           if ! gh release view "$tag" > /dev/null 2>&1; then

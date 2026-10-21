@@ -46,6 +46,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Require a master commit carrying the tagged version
         shell: bash
@@ -54,10 +55,11 @@ jobs:
           TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          version="v$(.github/scripts/workspace-version.sh)"
           problem=""
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
             problem="${TAG} points at ${GITHUB_SHA}, which is not on master"
+          elif ! version="v$(.github/scripts/workspace-version.sh)"; then
+            problem="${TAG} points at a commit without a valid workspace version"
           elif [[ "$version" != "$TAG" ]]; then
             problem="${TAG} points at a commit versioned ${version}"
           fi
