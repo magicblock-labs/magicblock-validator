@@ -1565,9 +1565,6 @@ where
 
         let strategy = risk_service.check_strategy();
         if !delegation_actions_require_risk_check(strategy, delegation_actions) {
-            // A suppressed check is a compliance-relevant event, so leave a
-            // record that the delegation was activated without a risk query.
-
             return Ok(());
         }
 
