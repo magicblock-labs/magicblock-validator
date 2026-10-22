@@ -461,11 +461,9 @@ fn test_commit_fees_from_second_commit_with_capped_dlp_deposit() {
         let deposits = dlp_accounts
             .map(|pubkey| ctx.fetch_chain_account(pubkey).unwrap().lamports);
         let deposit: u64 = deposits.iter().sum();
-        assert!(
-            deposit
-                < dlp_api::consts::SESSION_FEE_LAMPORTS
-                    + dlp_api::consts::COMMIT_FEE_LAMPORTS
-        );
+        // The DLP v2 fixture charges 3,000,000 per session and 1,000,000 per
+        // additional commit. The pinned API still exposes the old prices.
+        assert!(deposit < 3_000_000 + 1_000_000);
         let protocol_vault = dlp_api::pda::fees_vault_pda();
         let validator_vault =
             dlp_api::pda::validator_fees_vault_pda_from_validator(

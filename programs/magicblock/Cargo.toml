@@ -44,7 +44,6 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 test-kit = { workspace = true }
-solana-keypair = { workspace = true, features = ["seed-derivable"] }
 assert_matches = { workspace = true }
 rand = { workspace = true }
 serial_test = { workspace = true }
