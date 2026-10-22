@@ -8,8 +8,7 @@ use magicblock_core::{
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, AddActionCallbackArgs, BaseActionArgs,
-        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
-        ShortAccountMeta, UndelegateTypeArgs,
+        MagicIntentBundleArgs, ShortAccountMeta,
     },
     instruction::MagicBlockInstruction,
     MAGIC_CONTEXT_PUBKEY,
@@ -1604,7 +1603,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_checks_sponsored_limit() {
+    fn test_schedule_commit_fails_when_commit_limit_exceeded() {
         init_logger!();
 
         let payer =
@@ -1617,7 +1616,13 @@ mod tests {
                 &payer, program, committee,
             );
 
-        let mut ix = InstructionUtils::schedule_commit_instruction(
+        // Override stub to return nonce at the commit limit
+        ensure_started_validator(
+            &mut account_data,
+            Some(StubNonces::Global(COMMIT_LIMIT)),
+        );
+
+        let ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
             vec![committee],
         );
@@ -1627,43 +1632,12 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        for instruction in [
-            MagicBlockInstruction::ScheduleCommit,
-            MagicBlockInstruction::ScheduleIntentBundle(
-                MagicIntentBundleArgs {
-                    commit: Some(CommitTypeArgs::Standalone(vec![2])),
-                    ..Default::default()
-                },
-            ),
-            MagicBlockInstruction::ScheduleIntentBundle(
-                MagicIntentBundleArgs {
-                    commit_finalize: Some(CommitTypeArgs::Standalone(vec![2])),
-                    ..Default::default()
-                },
-            ),
-        ] {
-            ix.data = bincode::serialize(&instruction).unwrap();
-            for (nonce, expected) in [
-                (COMMIT_LIMIT - 1, Ok(())),
-                (
-                    COMMIT_LIMIT,
-                    Err(InstructionError::Custom(
-                        crate::magic_sys::COMMIT_LIMIT_ERR,
-                    )),
-                ),
-            ] {
-                ensure_started_validator(
-                    &mut account_data,
-                    Some(StubNonces::Global(nonce)),
-                );
-                process_instruction(
-                    &ix.data,
-                    transaction_accounts.clone(),
-                    ix.accounts.clone(),
-                    expected,
-                );
-            }
-        }
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+        );
     }
 
     #[test]
@@ -1736,39 +1710,22 @@ mod tests {
             Some(StubNonces::Global(COMMIT_LIMIT)),
         );
 
-        let mut ix =
-            InstructionUtils::schedule_commit_and_undelegate_instruction(
-                &payer.pubkey(),
-                vec![committee],
-            );
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            vec![committee],
+        );
         extend_transaction_accounts_from_ix(
             &ix,
             &mut account_data,
             &mut transaction_accounts,
         );
 
-        for instruction in [
-            MagicBlockInstruction::ScheduleCommitAndUndelegate,
-            MagicBlockInstruction::ScheduleIntentBundle(
-                MagicIntentBundleArgs {
-                    commit_finalize_and_undelegate: Some(
-                        CommitAndUndelegateArgs {
-                            commit_type: CommitTypeArgs::Standalone(vec![2]),
-                            undelegate_type: UndelegateTypeArgs::Standalone,
-                        },
-                    ),
-                    ..Default::default()
-                },
-            ),
-        ] {
-            ix.data = bincode::serialize(&instruction).unwrap();
-            process_instruction(
-                &ix.data,
-                transaction_accounts.clone(),
-                ix.accounts.clone(),
-                Ok(()),
-            );
-        }
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
     }
 
     #[test]

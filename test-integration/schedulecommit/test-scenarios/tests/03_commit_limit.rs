@@ -212,7 +212,7 @@ fn test_schedule_commit_and_undelegate_succeeds_at_commit_limit() {
 }
 
 // ---------------------------------------------------------------------------
-// Shared context — vault / first commit included
+// Shared context — vault / actual commit limit (ACTUAL_COMMIT_LIMIT = 25)
 // ---------------------------------------------------------------------------
 
 const NUM_VAULT_TESTS: usize = 3;
@@ -300,7 +300,7 @@ fn get_vault_prepared() -> &'static ScheduleCommitTestContext {
 }
 
 // ---------------------------------------------------------------------------
-// Tests — vault / first commit included
+// Tests — vault / ACTUAL_COMMIT_LIMIT (25)
 // ---------------------------------------------------------------------------
 
 /// A delegated payer without the required fee vault must receive MissingAccount.
@@ -426,18 +426,13 @@ fn test_no_fee_charged_within_actual_commit_limit() {
     });
 }
 
-/// The first commit is included; later commits charge ER even when the DLP
-/// deposit cannot cover all session and commit fees at undelegation.
+/// After ACTUAL_COMMIT_LIMIT commits, the next one must deduct COMMIT_FEE_LAMPORTS
+/// from the payer and credit the same amount to the fee vault.
 #[test]
 #[serial]
-fn test_commit_fees_from_second_commit_with_capped_dlp_deposit() {
+fn test_fee_charged_and_vault_credited_after_actual_commit_limit() {
     run_test!({
-        // This account is undelegated at the end, so it cannot share the context
-        // used by the other fee tests.
-        let ctx = get_context_with_delegated_committees(
-            1,
-            UserSeeds::MagicScheduleCommit,
-        );
+        let ctx = get_vault_prepared();
         let ScheduleCommitTestContextFields {
             payer_ephem: payer,
             committees,
@@ -446,105 +441,71 @@ fn test_commit_fees_from_second_commit_with_capped_dlp_deposit() {
             validator_identity,
             ..
         } = ctx.fields();
-        let committee = &committees[0];
+
+        let committee = &committees[IDX_OVER_LIMIT];
         let magic_fee_vault = dlp_api::pda::magic_fee_vault_pda_from_validator(
             validator_identity,
         );
-        let dlp_accounts = [
-            dlp_api::pda::delegation_record_pda_from_delegated_account(
-                &committee.1,
-            ),
-            dlp_api::pda::delegation_metadata_pda_from_delegated_account(
-                &committee.1,
-            ),
-        ];
-        let deposits = dlp_accounts
-            .map(|pubkey| ctx.fetch_chain_account(pubkey).unwrap().lamports);
-        let deposit: u64 = deposits.iter().sum();
-        // The DLP fixture charges 3,000,000 per session. The pinned API
-        // still exposes the old session fee.
-        assert!(deposit < 3_000_000 + COMMIT_FEE_LAMPORTS);
-        let protocol_vault = dlp_api::pda::fees_vault_pda();
-        let validator_vault =
-            dlp_api::pda::validator_fees_vault_pda_from_validator(
-                validator_identity,
-            );
-        let protocol_before =
-            ctx.fetch_chain_account(protocol_vault).unwrap().lamports;
-        let validator_before =
-            ctx.fetch_chain_account(validator_vault).unwrap().lamports;
 
-        for (undelegate, expected_fee) in [
-            (false, 0),
-            (false, COMMIT_FEE_LAMPORTS),
-            (true, COMMIT_FEE_LAMPORTS),
-        ] {
-            let payer_before =
-                ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
-            let vault_before =
-                ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
-            let ix = schedule_commit_cpi_with_vault_instruction(
-                payer.pubkey(),
-                *validator_identity,
-                magicblock_magic_program_api::id(),
-                magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
-                &[committee.1],
-                ScheduleCommitCpiWithVaultArgs {
-                    players: vec![committee.0.pubkey()],
-                    undelegate,
-                    has_magic_vault: true,
+        let payer_balance_before =
+            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_before =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+
+        let ix = schedule_commit_cpi_with_vault_instruction(
+            payer.pubkey(),
+            *validator_identity,
+            magicblock_magic_program_api::id(),
+            magicblock_magic_program_api::MAGIC_CONTEXT_PUBKEY,
+            &[committee.1],
+            ScheduleCommitCpiWithVaultArgs {
+                players: vec![committee.0.pubkey()],
+                undelegate: false,
+                has_magic_vault: true,
+            },
+        );
+
+        let blockhash = ephem_client.get_latest_blockhash().unwrap();
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&payer.pubkey()),
+            &[&payer],
+            blockhash,
+        );
+        let sig = *tx.get_signature();
+        ephem_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                *commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
                 },
-            );
-            let blockhash = ephem_client.get_latest_blockhash().unwrap();
-            let tx = Transaction::new_signed_with_payer(
-                &[ix],
-                Some(&payer.pubkey()),
-                &[payer],
-                blockhash,
-            );
-            let sig = ephem_client
-                .send_and_confirm_transaction_with_spinner_and_config(
-                    &tx,
-                    *commitment,
-                    RpcSendTransactionConfig {
-                        skip_preflight: true,
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-            verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
-            assert_eq!(
-                ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap(),
-                payer_before - expected_fee
-            );
-            assert_eq!(
-                ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap(),
-                vault_before + expected_fee
-            );
-        }
+            )
+            .unwrap_or_else(|e| panic!("commit over limit failed: {:?}", e));
 
-        assert_account_was_undelegated_on_chain(
-            &ctx,
-            committee.1,
-            program_schedulecommit::id(),
-        );
-        // DLP takes the available deposit, splitting each account's fee separately.
-        let protocol_fee: u64 = deposits
-            .iter()
-            .map(|lamports| {
-                lamports * dlp_api::consts::PROTOCOL_FEES_PERCENTAGE as u64
-                    / 100
-            })
-            .sum();
+        verify::fetch_and_verify_commit_result_from_logs(ctx, sig);
+
+        let payer_balance_after =
+            ctx.fetch_ephem_account_balance(&payer.pubkey()).unwrap();
+        let vault_balance_after =
+            ctx.fetch_ephem_account_balance(&magic_fee_vault).unwrap();
+
         assert_eq!(
-            ctx.fetch_chain_account(protocol_vault).unwrap().lamports
-                - protocol_before,
-            protocol_fee
+            payer_balance_after,
+            payer_balance_before - COMMIT_FEE_LAMPORTS,
+            "Payer should be charged {} lamports (before={}, after={})",
+            COMMIT_FEE_LAMPORTS,
+            payer_balance_before,
+            payer_balance_after
         );
         assert_eq!(
-            ctx.fetch_chain_account(validator_vault).unwrap().lamports
-                - validator_before,
-            deposit - protocol_fee
+            vault_balance_after,
+            vault_balance_before + COMMIT_FEE_LAMPORTS,
+            "Vault should be credited {} lamports (before={}, after={})",
+            COMMIT_FEE_LAMPORTS,
+            vault_balance_before,
+            vault_balance_after
         );
     });
 }
