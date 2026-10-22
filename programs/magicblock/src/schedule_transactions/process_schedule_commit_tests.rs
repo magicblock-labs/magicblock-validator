@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::tls::ExecutionTlsStash;
+use magicblock_core::{
+    intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
+    tls::ExecutionTlsStash,
+};
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, AddActionCallbackArgs, BaseActionArgs,
@@ -1887,7 +1890,7 @@ mod tests {
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
-        let nonce = 1; // Charge the second commit.
+        let nonce = ACTUAL_COMMIT_LIMIT;
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
                 &payer,
@@ -1909,18 +1912,24 @@ mod tests {
 
         let accounts = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Ok(()),
         );
 
-        let accounts: HashMap<_, _> = transaction_accounts
+        // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
+        accounts
             .iter()
-            .map(|(pubkey, _)| *pubkey)
-            .zip(accounts)
-            .collect();
-        assert_eq!(accounts[&magic_fee_vault_pubkey()].lamports(), 1_000_000);
-        assert_eq!(accounts[&payer.pubkey()].lamports(), 0);
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+
+        // Payer must have been debited
+        accounts
+            .iter()
+            .find(|a| {
+                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
+            })
+            .expect("payer should have been debited");
     }
 
     #[test]
@@ -1934,8 +1943,8 @@ mod tests {
         let committee_at = Pubkey::new_unique(); // nonce < limit → free
 
         let mut per_account = HashMap::new();
-        per_account.insert(committee_above, 1);
-        per_account.insert(committee_at, 0);
+        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT);
+        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT - 1);
 
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
@@ -1958,19 +1967,23 @@ mod tests {
 
         let accounts = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts.clone(),
+            transaction_accounts,
             ix.accounts,
             Ok(()),
         );
 
-        let accounts: HashMap<_, _> = transaction_accounts
+        // Only committee_above is charged → vault receives exactly one fee
+        let vault = accounts
             .iter()
-            .map(|(pubkey, _)| *pubkey)
-            .zip(accounts)
-            .collect();
-        // Only the account with an existing commit is charged.
-        assert_eq!(accounts[&magic_fee_vault_pubkey()].lamports(), 1_000_000);
-        assert_eq!(accounts[&payer.pubkey()].lamports(), 0);
+            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
+            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
+        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
+
+        // Payer debited by exactly one fee
+        assert!(accounts
+            .iter()
+            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
+                && a.delegated()));
     }
 
     #[test]

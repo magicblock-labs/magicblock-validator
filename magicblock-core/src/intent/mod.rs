@@ -672,9 +672,11 @@ mod tests {
     // ---- calculate_commit_fee ----
 
     #[test]
-    fn test_first_commit_has_no_er_fee() {
+    fn test_commit_fee_at_limit_is_zero() {
         let pk = Pubkey::new_unique();
-        let nonces = HashMap::from([(pk, 0)]);
+        // nonce is commits done so far; nonce+1 is the next commit number.
+        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
+        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
         let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
             .unwrap();
         assert_eq!(fee, 0);
@@ -684,13 +686,16 @@ mod tests {
     fn test_commit_fee_above_limit_charges_per_account() {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
-        let nonces = HashMap::from([(pk1, 1), (pk2, 2)]);
+        let nonces = HashMap::from([
+            (pk1, ACTUAL_COMMIT_LIMIT + 1),
+            (pk2, ACTUAL_COMMIT_LIMIT + 1),
+        ]);
         let fee = calculate_commit_fee(
             &[make_committed_account(pk1), make_committed_account(pk2)],
             &nonces,
         )
         .unwrap();
-        assert_eq!(fee, 2_000_000);
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
     }
 
     #[test]
@@ -698,8 +703,8 @@ mod tests {
         let pk_below = Pubkey::new_unique();
         let pk_above = Pubkey::new_unique();
         let nonces = HashMap::from([
-            (pk_below, 0), // first commit is included
-            (pk_above, 1), // second commit is charged
+            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
+            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
         ]);
         let fee = calculate_commit_fee(
             &[
@@ -709,7 +714,7 @@ mod tests {
             &nonces,
         )
         .unwrap();
-        assert_eq!(fee, 1_000_000);
+        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
     }
 
     #[test]
