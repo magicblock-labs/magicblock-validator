@@ -29,6 +29,7 @@ solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true, features = ["agave-unstable-api"] }
 magicblock-magic-program-api = { workspace = true }
+magicblock-delegation-program-api = { workspace = true }
 spl-token = { workspace = true }
 spl-token-2022 = { workspace = true }
 

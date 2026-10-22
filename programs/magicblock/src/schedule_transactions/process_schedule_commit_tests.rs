@@ -1,14 +1,12 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use magicblock_core::{
-    intent::{ACTUAL_COMMIT_LIMIT, COMMIT_FEE_LAMPORTS},
-    tls::ExecutionTlsStash,
-};
+use magicblock_core::tls::ExecutionTlsStash;
 use magicblock_magic_program_api::{
     args::{
         ActionArgs, AddActionCallbackArgs, BaseActionArgs,
-        MagicIntentBundleArgs, ShortAccountMeta,
+        CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs,
+        ShortAccountMeta, UndelegateTypeArgs,
     },
     instruction::MagicBlockInstruction,
     MAGIC_CONTEXT_PUBKEY,
@@ -1603,7 +1601,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_fails_when_commit_limit_exceeded() {
+    fn test_schedule_commit_checks_sponsored_limit() {
         init_logger!();
 
         let payer =
@@ -1616,13 +1614,7 @@ mod tests {
                 &payer, program, committee,
             );
 
-        // Override stub to return nonce at the commit limit
-        ensure_started_validator(
-            &mut account_data,
-            Some(StubNonces::Global(COMMIT_LIMIT)),
-        );
-
-        let ix = InstructionUtils::schedule_commit_instruction(
+        let mut ix = InstructionUtils::schedule_commit_instruction(
             &payer.pubkey(),
             vec![committee],
         );
@@ -1632,12 +1624,43 @@ mod tests {
             &mut transaction_accounts,
         );
 
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
-        );
+        for instruction in [
+            MagicBlockInstruction::ScheduleCommit,
+            MagicBlockInstruction::ScheduleIntentBundle(
+                MagicIntentBundleArgs {
+                    commit: Some(CommitTypeArgs::Standalone(vec![2])),
+                    ..Default::default()
+                },
+            ),
+            MagicBlockInstruction::ScheduleIntentBundle(
+                MagicIntentBundleArgs {
+                    commit_finalize: Some(CommitTypeArgs::Standalone(vec![2])),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            ix.data = bincode::serialize(&instruction).unwrap();
+            for (nonce, expected) in [
+                (COMMIT_LIMIT - 1, Ok(())),
+                (
+                    COMMIT_LIMIT,
+                    Err(InstructionError::Custom(
+                        crate::magic_sys::COMMIT_LIMIT_ERR,
+                    )),
+                ),
+            ] {
+                ensure_started_validator(
+                    &mut account_data,
+                    Some(StubNonces::Global(nonce)),
+                );
+                process_instruction(
+                    &ix.data,
+                    transaction_accounts.clone(),
+                    ix.accounts.clone(),
+                    expected,
+                );
+            }
+        }
     }
 
     #[test]
@@ -1710,22 +1733,39 @@ mod tests {
             Some(StubNonces::Global(COMMIT_LIMIT)),
         );
 
-        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            vec![committee],
-        );
+        let mut ix =
+            InstructionUtils::schedule_commit_and_undelegate_instruction(
+                &payer.pubkey(),
+                vec![committee],
+            );
         extend_transaction_accounts_from_ix(
             &ix,
             &mut account_data,
             &mut transaction_accounts,
         );
 
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+        for instruction in [
+            MagicBlockInstruction::ScheduleCommitAndUndelegate,
+            MagicBlockInstruction::ScheduleIntentBundle(
+                MagicIntentBundleArgs {
+                    commit_finalize_and_undelegate: Some(
+                        CommitAndUndelegateArgs {
+                            commit_type: CommitTypeArgs::Standalone(vec![2]),
+                            undelegate_type: UndelegateTypeArgs::Standalone,
+                        },
+                    ),
+                    ..Default::default()
+                },
+            ),
+        ] {
+            ix.data = bincode::serialize(&instruction).unwrap();
+            process_instruction(
+                &ix.data,
+                transaction_accounts.clone(),
+                ix.accounts.clone(),
+                Ok(()),
+            );
+        }
     }
 
     #[test]
@@ -1847,7 +1887,7 @@ mod tests {
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
-        let nonce = ACTUAL_COMMIT_LIMIT;
+        let nonce = 1; // Charge the second commit.
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
                 &payer,
@@ -1869,24 +1909,18 @@ mod tests {
 
         let accounts = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts,
+            transaction_accounts.clone(),
             ix.accounts,
             Ok(()),
         );
 
-        // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
-        accounts
+        let accounts: HashMap<_, _> = transaction_accounts
             .iter()
-            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
-            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
-
-        // Payer must have been debited
-        accounts
-            .iter()
-            .find(|a| {
-                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.delegated()
-            })
-            .expect("payer should have been debited");
+            .map(|(pubkey, _)| *pubkey)
+            .zip(accounts)
+            .collect();
+        assert_eq!(accounts[&magic_fee_vault_pubkey()].lamports(), 1_000_000);
+        assert_eq!(accounts[&payer.pubkey()].lamports(), 0);
     }
 
     #[test]
@@ -1900,8 +1934,8 @@ mod tests {
         let committee_at = Pubkey::new_unique(); // nonce < limit → free
 
         let mut per_account = HashMap::new();
-        per_account.insert(committee_above, ACTUAL_COMMIT_LIMIT);
-        per_account.insert(committee_at, ACTUAL_COMMIT_LIMIT - 1);
+        per_account.insert(committee_above, 1);
+        per_account.insert(committee_at, 0);
 
         let (mut account_data, mut transaction_accounts) =
             prepare_delegated_payer_transaction(
@@ -1924,23 +1958,19 @@ mod tests {
 
         let accounts = process_instruction(
             ix.data.as_slice(),
-            transaction_accounts,
+            transaction_accounts.clone(),
             ix.accounts,
             Ok(()),
         );
 
-        // Only committee_above is charged → vault receives exactly one fee
-        let vault = accounts
+        let accounts: HashMap<_, _> = transaction_accounts
             .iter()
-            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
-            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
-        assert_eq!(vault.lamports(), COMMIT_FEE_LAMPORTS);
-
-        // Payer debited by exactly one fee
-        assert!(accounts
-            .iter()
-            .any(|a| a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS
-                && a.delegated()));
+            .map(|(pubkey, _)| *pubkey)
+            .zip(accounts)
+            .collect();
+        // Only the account with an existing commit is charged.
+        assert_eq!(accounts[&magic_fee_vault_pubkey()].lamports(), 1_000_000);
+        assert_eq!(accounts[&payer.pubkey()].lamports(), 0);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+pub use dlp_api::consts::COMMIT_FEE_LAMPORTS;
 use magicblock_magic_program_api::args::{ActionArgs, ShortAccountMeta};
 pub use scheduled::ScheduledIntentBundle;
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,10 @@ pub use types::CommittedAccount;
 mod scheduled;
 pub mod types;
 
-/// Commits that are covered by User's dlp PDAs
-pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Fixed fee per commit.
-/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
-pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// The first commit is included in the delegation session; ER charges after it.
+/// A current nonce of 0 is free; a nonce of 1 or higher incurs the commit fee.
+/// This allowance does not depend on the remaining balance of the DLP accounts.
+pub const ACTUAL_COMMIT_LIMIT: u64 = 1;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
@@ -671,11 +671,9 @@ mod tests {
     // ---- calculate_commit_fee ----
 
     #[test]
-    fn test_commit_fee_at_limit_is_zero() {
+    fn test_first_commit_has_no_er_fee() {
         let pk = Pubkey::new_unique();
-        // nonce is commits done so far; nonce+1 is the next commit number.
-        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
-        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
+        let nonces = HashMap::from([(pk, 0)]);
         let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces)
             .unwrap();
         assert_eq!(fee, 0);
@@ -685,16 +683,13 @@ mod tests {
     fn test_commit_fee_above_limit_charges_per_account() {
         let pk1 = Pubkey::new_unique();
         let pk2 = Pubkey::new_unique();
-        let nonces = HashMap::from([
-            (pk1, ACTUAL_COMMIT_LIMIT + 1),
-            (pk2, ACTUAL_COMMIT_LIMIT + 1),
-        ]);
+        let nonces = HashMap::from([(pk1, 1), (pk2, 2)]);
         let fee = calculate_commit_fee(
             &[make_committed_account(pk1), make_committed_account(pk2)],
             &nonces,
         )
         .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
+        assert_eq!(fee, 2_000_000);
     }
 
     #[test]
@@ -702,8 +697,8 @@ mod tests {
         let pk_below = Pubkey::new_unique();
         let pk_above = Pubkey::new_unique();
         let nonces = HashMap::from([
-            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
-            (pk_above, ACTUAL_COMMIT_LIMIT), // next commit exceeds limit → charged
+            (pk_below, 0), // first commit is included
+            (pk_above, 1), // second commit is charged
         ]);
         let fee = calculate_commit_fee(
             &[
@@ -713,7 +708,7 @@ mod tests {
             &nonces,
         )
         .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
+        assert_eq!(fee, 1_000_000);
     }
 
     #[test]
