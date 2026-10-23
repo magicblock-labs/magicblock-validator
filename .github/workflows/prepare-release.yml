@@ -53,9 +53,9 @@ jobs:
           fi
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
+        id: build-env
         with:
-          build_cache_key_name: "magicblock-validator-prepare-release-v001"
-          rust_toolchain_release: "1.94.1"
+          cache-key: prepare-release
 
       - name: Determine release version
         working-directory: magicblock-validator
@@ -198,6 +198,11 @@ jobs:
             [[ -f "$manifest" ]] || continue
             cargo build --workspace --locked --manifest-path "$manifest" --jobs "$HOST_CARGO_JOBS"
           done
+
+      - uses: ./magicblock-validator/.github/actions/save-build-cache
+        with:
+          key: ${{ steps.build-env.outputs.save-key }}
+          path: ${{ steps.build-env.outputs.cache-paths }}
 
       - name: Commit and push release branch
         working-directory: magicblock-validator

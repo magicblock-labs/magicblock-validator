@@ -1,66 +1,80 @@
-name: 'MagicBlock - Setup Build Env'
-description: 'Checkout repositories and install dependencies'
+name: Setup Rust build
+description: Install compilation dependencies and restore rolling Cargo snapshots
 
 inputs:
-  rust_toolchain_release:
-    description: "Rust toolchain override; defaults to rust-toolchain.toml"
-    required: false
-  build_cache_key_name:
-    description: "Build cache key"
+  workspace:
+    description: Workspace path relative to github.workspace
+    default: magicblock-validator
+  cache-key:
+    description: Cargo cache lane (separates lint, tests, and build profiles)
     required: true
+  libclang:
+    description: Install Linux libclang for bindgen
+    default: "true"
+
+outputs:
+  save-key:
+    description: Cargo snapshot key to save after success; empty on an exact hit
+    value: ${{ steps.cache.outputs.cache-hit != 'true' && steps.cache.outputs.cache-primary-key || '' }}
+  cache-paths:
+    description: Paths shared by cache restore and save
+    value: ${{ steps.cargo-cache.outputs.paths }}
 
 runs:
-  using: "composite"
+  using: composite
   steps:
-  - name: Install Protoc
-    shell: bash
-    run: |
-      # Keep the compiler on the previous installer's 26.x series.
-      version=26.1
-      case "$RUNNER_OS/$RUNNER_ARCH" in
-        Linux/X64) platform=linux-x86_64 ;;
-        Linux/ARM64) platform=linux-aarch_64 ;;
-        macOS/X64) platform=osx-x86_64 ;;
-        macOS/ARM64) platform=osx-aarch_64 ;;
-        *) echo "Unsupported protoc platform: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
-      esac
-      install_dir="$(mktemp -d "$RUNNER_TEMP/protoc-$version.XXXXXX")"
-      curl --fail --silent --show-error --location --retry 3 \
-        "https://github.com/protocolbuffers/protobuf/releases/download/v$version/protoc-$version-$platform.zip" \
-        --output "$install_dir/protoc.zip"
-      unzip -q "$install_dir/protoc.zip" -d "$install_dir"
-      echo "$install_dir/bin" >> "$GITHUB_PATH"
-      echo "PROTOC=$install_dir/bin/protoc" >> "$GITHUB_ENV"
-  - name: Show Protoc version
-    shell: "bash"
-    run: protoc --version
+    - uses: ./magicblock-validator/.github/actions/setup-protoc
 
-  - name: Install Rust
-    shell: "bash"
-    working-directory: ${{ github.action_path }}/../../..
-    env:
-      REQUESTED_TOOLCHAIN: ${{ inputs.rust_toolchain_release }}
-    run: |
-      if [ -n "$REQUESTED_TOOLCHAIN" ]; then
-        rustup toolchain install "$REQUESTED_TOOLCHAIN" --profile default --component clippy
-      else
-        rustup toolchain install
-      fi
+    - name: Install Rust
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
+      run: rustup toolchain install
 
-  - name: Install system deps (libudev, LLVM/Clang)
-    if: runner.os == 'Linux'
-    shell: "bash"
-    run: |
-      sudo apt-get update
-      sudo apt-get install -y \
-        libudev-dev \
-        libclang-dev
+    - name: Install libclang for bindgen
+      if: runner.os == 'Linux' && inputs.libclang == 'true'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libclang-dev
 
-  - uses: Swatinem/rust-cache@v2
-    with:
-      shared-key: ${{ inputs.build_cache_key_name }}
-      workspaces: |
-        magicblock-validator -> target
-      cache-targets: true
-      cache-all-crates: true
-      cache-on-failure: true
+    - name: Identify Cargo cache
+      id: cargo-cache
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
+      env:
+        CARGO_INCREMENTAL: "0"
+        CACHE_LANE: ${{ inputs.cache-key }}
+        CACHE_WORKSPACE: ${{ inputs.workspace }}
+      run: |
+        echo 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
+        environment=$(
+          {
+            rustc --version --verbose
+            env | LC_ALL=C sort |
+              sed -n -E '/^(CARGO|RUST|CC=|CXX=|CFLAGS|CXXFLAGS|CMAKE|LDFLAGS=|LIBCLANG_PATH=|OPENSSL|PROTOC=)/p'
+          } | shasum -a 256 | cut -d ' ' -f 1
+        )
+        dependencies=$(
+          git ls-files -z -- 'Cargo.toml' '**/Cargo.toml' 'Cargo.lock' '**/Cargo.lock' \
+            'rust-toolchain*' '.cargo/*' '**/.cargo/*' |
+            xargs -0 shasum -a 256 | shasum -a 256 | cut -d ' ' -f 1
+        )
+        {
+          echo "prefix=cargo-v1-$RUNNER_OS-$RUNNER_ARCH-$CACHE_LANE-$environment"
+          echo "dependencies=$dependencies"
+          echo "source=$(git rev-parse HEAD)"
+          echo 'paths<<CARGO_CACHE_PATHS'
+          printf '%s\n' '~/.cargo/registry' '~/.cargo/git' "$CACHE_WORKSPACE/target"
+          echo 'CARGO_CACHE_PATHS'
+        } >> "$GITHUB_OUTPUT"
+
+    # A new revision saves refreshed outputs; older snapshots remain useful to Cargo.
+    - name: Restore Cargo compilation cache
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.cargo-cache.outputs.paths }}
+        key: ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-${{ steps.cargo-cache.outputs.source }}
+        restore-keys: |
+          ${{ steps.cargo-cache.outputs.prefix }}-${{ steps.cargo-cache.outputs.dependencies }}-
+          ${{ steps.cargo-cache.outputs.prefix }}-

@@ -125,7 +125,6 @@ where
 
     if account.read().owner() == LOADER_V2 {
         // LoaderV2 programs are immutable once deployed.
-        trace!(pubkey = %pubkey, "Ignoring update for immutable LoaderV2 program");
         return true;
     }
     if account.read().owner() != LOADER_V3 {
@@ -158,7 +157,6 @@ where
         Ok(Some(header))
             if header.get(..programdata_header_len()).unwrap_or(&header) == loaded_header =>
         {
-            trace!(pubkey = %pubkey, "Programdata header unchanged; skipping program reload");
             if let Some(state) = this.program_verify_cache.lock().get_mut(&pubkey) {
                 state.verified_at = Instant::now();
             }
@@ -189,7 +187,6 @@ pub(crate) async fn handle_executable_sub_update_with_context<T, U>(
     U: ChainPubsubClient,
 {
     if !this.is_program_allowed(&pubkey) {
-        debug!(pubkey = %pubkey, "Skipping clone of program, not in allowed_programs");
         return;
     }
 

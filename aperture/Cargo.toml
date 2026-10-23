@@ -9,7 +9,7 @@ version.workspace = true
 
 [dependencies]
 # network
-fastwebsockets = { workspace = true, features = ["upgrade"] }
+fastwebsockets = { workspace = true, features = ["upgrade", "unstable-split"] }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["http1", "http2", "server"] }
 hyper-util = { workspace = true, features = ["http1", "http2", "server"] }

@@ -43,11 +43,6 @@ pub(crate) struct ResolvedPrograms {
     pub(crate) program_data_subs: HashSet<Pubkey>,
 }
 
-pub(crate) struct PartitionedNotFound {
-    pub(crate) clone_as_empty: Vec<(Pubkey, u64)>,
-    pub(crate) not_found: Vec<(Pubkey, u64)>,
-}
-
 #[derive(Default)]
 pub(crate) struct FetchAndCloneBatchResult {
     pub(crate) result: FetchAndCloneResult,

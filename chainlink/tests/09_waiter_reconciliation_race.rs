@@ -186,10 +186,10 @@ async fn transient_redelegation_subscription_executes_action_once() {
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);
 }
 
-/// Proves an undelegation-completion update is not dropped just because the
-/// local Transient image was written at a newer ER slot.
+/// Proves stale completion cannot replace the current delegation generation,
+/// while a later completion retains its actual base-chain slot.
 #[tokio::test]
-async fn older_completion_update_replaces_transient_account() {
+async fn completion_update_must_follow_delegation() {
     let ctx = TestContext::init(CURRENT_SLOT).await;
     let pubkey = Pubkey::new_unique();
     let local_slot = CURRENT_SLOT + 20;
@@ -217,28 +217,47 @@ async fn older_completion_update_replaces_transient_account() {
         ..Default::default()
     };
     assert!(
-        ctx.send_and_receive_account_update(pubkey, completed, Some(8_000)).await,
+        ctx.send_and_receive_account_update(pubkey, completed.clone(), Some(8_000))
+            .await,
         "subscription update completes"
     );
 
-    let local = ctx
-        .bank
-        .accounts()
-        .loader()
-        .read(&pubkey, |account| {
-            (
-                account.mode(),
-                account.slot(),
-                *account.owner(),
-                i64::from_le_bytes(account.data().try_into().unwrap()),
-            )
-        })
-        .unwrap()
-        .expect("completed account remains materialized");
+    let local = || {
+        ctx.bank
+            .accounts()
+            .loader()
+            .read(&pubkey, |account| {
+                (
+                    account.mode(),
+                    account.slot(),
+                    *account.owner(),
+                    i64::from_le_bytes(account.data().try_into().unwrap()),
+                )
+            })
+            .unwrap()
+            .expect("account remains materialized")
+    };
     assert_eq!(
-        local,
-        (AccountMode::Mirrored, local_slot, V42_ID, 900),
-        "completed base image replaces the transient without regressing the lifecycle slot"
+        local(),
+        (
+            AccountMode::Undelegating,
+            local_slot,
+            delegation_program_api::id(),
+            700
+        ),
+        "an older original-owner image cannot complete this delegation"
+    );
+
+    let completion_slot = local_slot + 1;
+    ctx.rpc_client.set_slot(completion_slot);
+    assert!(
+        ctx.send_and_receive_account_update(pubkey, completed, Some(8_000)).await,
+        "later completion update finishes"
+    );
+    assert_eq!(
+        local(),
+        (AccountMode::Mirrored, completion_slot, V42_ID, 900),
+        "completion uses its real base slot without promotion"
     );
 }
 

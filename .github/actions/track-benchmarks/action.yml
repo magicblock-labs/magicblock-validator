@@ -1,0 +1,53 @@
+name: Track RedSuite benchmarks
+description: Export and publish benchmark results to the existing Bencher testbed
+
+inputs:
+  token:
+    description: Bencher API token; empty skips tracking
+    required: false
+  branch:
+    description: Branch being benchmarked
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Export Bencher Metric Format
+      run: ./redsuite-dist/redsuite report bmf --out redsuite-bmf.json
+      shell: bash
+
+    - uses: bencherdev/bencher@v0.6.10
+
+    - name: Track results with Bencher
+      run: |
+        set -euo pipefail
+        if [ -z "${BENCHER_API_KEY:-}" ]; then
+          echo "BENCHER_API_KEY not set — skipping Bencher tracking"
+          exit 0
+        fi
+        bencher run \
+          --project "$BENCHER_PROJECT" \
+          --key "$BENCHER_API_KEY" \
+          --branch "$BENCHER_BRANCH" \
+          --testbed "$BENCHER_TESTBED" \
+          --threshold-measure latency \
+          --threshold-test t_test \
+          --threshold-min-sample-size 4 \
+          --threshold-max-sample-size 30 \
+          --threshold-lower-boundary _ \
+          --threshold-upper-boundary 0.99 \
+          --threshold-measure throughput \
+          --threshold-test t_test \
+          --threshold-min-sample-size 4 \
+          --threshold-max-sample-size 30 \
+          --threshold-lower-boundary 0.99 \
+          --threshold-upper-boundary _ \
+          --thresholds-reset \
+          --adapter json \
+          --file redsuite-bmf.json
+      shell: bash
+      env:
+        BENCHER_PROJECT: 019f8273-ddb4-7dc3-99f7-44e7fe7c4f36
+        BENCHER_TESTBED: blacksmith-16vcpu-ubuntu-2404
+        BENCHER_API_KEY: ${{ inputs.token }}
+        BENCHER_BRANCH: ${{ inputs.branch }}

@@ -1,6 +1,6 @@
 use std::iter;
 
-use engine::{AccountAccessor, Engine, PostFinalize};
+use engine::{AccountAccessor, Engine, EngineError, PostFinalize};
 use errors::ClonerResult;
 use keeper::error::KeeperError;
 use magic_program_api::{
@@ -11,7 +11,9 @@ use magic_program_api::{
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
+use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
 use tracing::{debug, warn};
 
 use crate::remote_account_provider::program_account::{
@@ -140,8 +142,8 @@ impl CloneSourceSlots {
     }
 }
 
-/// Claims a remote image unless local Magic state owns the key. Engine handles
-/// slot deduplication and validates lifecycle transitions under the lease.
+/// Claims a remote image unless local Magic state owns the key.
+/// The lease serializes account maintenance, not ordinary transaction execution.
 pub(crate) async fn claim_materialization<'a>(
     engine: &'a Engine,
     pubkey: Pubkey,
@@ -181,6 +183,21 @@ pub(crate) async fn clone_account(
     accessor: AccountAccessor<'_>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
+    // Delegation was confirmed before ER execution could request undelegation.
+    // Its completion must therefore advance that base-chain delegation slot.
+    // Recheck under the lease in case another delegation won while we waited.
+    // A queued transaction can still move Delegated to Undelegating afterward,
+    // but that transition preserves the same delegation stamp.
+    if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
+        accessor.observed()
+    {
+        let incoming = request.account.read();
+        let completes_undelegation = incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
+        let advances_delegation = incoming.slot() > delegation_slot;
+        if completes_undelegation && !advances_delegation {
+            return Ok(());
+        }
+    }
     if let Some(authority) = request.delegated_to_other {
         warn!(
             pubkey = %request.pubkey,
@@ -197,9 +214,30 @@ pub(crate) async fn clone_account(
         }),
     };
     let account = request.account;
-    accessor.materialize(account, actions).await.map_err(|err| {
-        errors::ClonerError::FailedToCloneRegularAccount(request.pubkey, Box::new(err.into()))
-    })
+    let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
+    let error = match accessor.materialize(account, actions).await {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    // A queued local creation can win after the original lease observed
+    // absence. Reacquire before accepting its protected image as sufficient.
+    let lifecycle_conflict = matches!(
+        error,
+        EngineError::TransactionExecution(TransactionError::InstructionError(
+            1,
+            InstructionError::InvalidArgument
+        ))
+    );
+    if empty_placeholder && lifecycle_conflict {
+        let locally_created = claim_materialization(engine, request.pubkey).await?.is_none();
+        if locally_created {
+            return Ok(());
+        }
+    }
+    Err(errors::ClonerError::FailedToCloneRegularAccount(
+        request.pubkey,
+        Box::new(error.into()),
+    ))
 }
 
 pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequest> {
@@ -275,7 +313,7 @@ pub(crate) async fn claim_cached_account_eviction<R>(
         .loader()
         .read(&pubkey, inspect)
         .map_err(KeeperError::from)
-        .map_err(engine::EngineError::from)?;
+        .map_err(EngineError::from)?;
     Ok(value.map(|value| (accessor, value)))
 }
 

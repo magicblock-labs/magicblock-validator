@@ -1,0 +1,145 @@
+name: CI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+  push:
+    branches: [master, dev]
+    paths: ['**/*.rs', '**/*.toml']
+  pull_request:
+    types: [opened, reopened, synchronize]
+    paths: ['**/*.rs', '**/*.toml']
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+    working-directory: magicblock-validator
+
+concurrency:
+  group: validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'push' }}
+
+jobs:
+  format:
+    name: Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+
+      - name: Install Rust toolchain
+        run: rustup toolchain install
+
+      - run: cargo fmt --check
+
+  lint:
+    name: Lint
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        id: build-env
+        with:
+          cache-key: lint
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - run: cargo clippy --all-targets -- -D warnings
+
+      - uses: ./magicblock-validator/.github/actions/save-build-cache
+        with:
+          key: ${{ steps.build-env.outputs.save-key }}
+          path: ${{ steps.build-env.outputs.cache-paths }}
+
+  unit-tests:
+    name: Unit tests
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        id: build-env
+        with:
+          cache-key: unit-tests
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+
+      - name: Run unit tests
+        env:
+          RUST_BACKTRACE: "1"
+          RUST_LIB_BACKTRACE: "0"
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          cargo nextest run
+
+      - uses: ./magicblock-validator/.github/actions/save-build-cache
+        with:
+          key: ${{ steps.build-env.outputs.save-key }}
+          path: ${{ steps.build-env.outputs.cache-paths }}
+
+  correctness:
+    name: RedSuite correctness
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redshift
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
+
+  security:
+    name: RedSuite security
+    runs-on: blacksmith-8vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redhat
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
+
+  benchmarks:
+    name: RedSuite benchmarks
+    if: github.event_name == 'release'
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - uses: ./magicblock-validator/.github/actions/run-redsuite
+        with:
+          family: redline
+          clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
+          bencher-token: ${{ secrets.BENCHER_API_TOKEN }}

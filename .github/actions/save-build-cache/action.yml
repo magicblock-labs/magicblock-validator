@@ -1,0 +1,33 @@
+name: Save Cargo cache
+description: Save a refreshed compilation snapshot when setup returned a save key
+
+inputs:
+  key:
+    description: Snapshot key from setup-build-env; empty skips saving
+  path:
+    description: Cache paths from setup-build-env
+  workspace:
+    description: Workspace path relative to github.workspace
+    default: magicblock-validator
+
+runs:
+  using: composite
+  steps:
+    - name: Prune old compilation artifacts
+      if: inputs.key != ''
+      shell: bash
+      working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
+      run: |
+        # Retain recent workspace outputs so successive PR pushes can reuse them.
+        for profile in target/{debug,release} target/*/{debug,release}; do
+          for artifacts in "$profile"/{.fingerprint,build,deps}; do
+            [ -d "$artifacts" ] || continue
+            find "$artifacts" -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf -- {} +
+          done
+        done
+
+    - uses: actions/cache/save@v6
+      if: inputs.key != ''
+      with:
+        key: ${{ inputs.key }}
+        path: ${{ inputs.path }}
