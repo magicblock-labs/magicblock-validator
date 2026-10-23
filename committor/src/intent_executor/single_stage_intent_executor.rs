@@ -12,13 +12,16 @@ use crate::{
         IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::utils::{requires_uniqueness_nonce, resolve_pending_signature},
-        utils::{build_commit_finalize_tasks, execute_single_stage_flow, report_and_close_intent},
+        strategy_executor::{
+            transaction::TransactionExecutor,
+            utils::{requires_uniqueness_nonce, resolve_pending_signature},
+        },
+        utils::{build_commit_finalize_tasks, report_and_close_intent},
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_info_fetcher::{ResetType, TaskInfoFetcher},
-        task_strategist::TaskStrategist,
+        task_strategist::{StrategyExecutionMode, TaskStrategist},
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -92,14 +95,14 @@ where
                     uniqueness_nonce,
                 )?;
 
-                execute_single_stage_flow(
+                TransactionExecutor::new(
                     &self.ctx,
-                    &self.authority,
-                    intent_bundle,
-                    transaction_strategy,
                     execution_report,
-                    || self.time_left(),
+                    intent_bundle.intent_id,
+                    &intent_bundle.get_all_committed_pubkeys(),
+                    StrategyExecutionMode::SingleStage(transaction_strategy),
                 )
+                .execute(|| self.time_left())
                 .await
             }
         }
