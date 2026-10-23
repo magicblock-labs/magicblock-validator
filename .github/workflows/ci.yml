@@ -6,8 +6,10 @@ on:
   workflow_dispatch:
   push:
     branches: [master, dev]
+    paths: ['**/*.rs', '**/*.toml']
   pull_request:
     types: [opened, reopened, synchronize]
+    paths: ['**/*.rs', '**/*.toml']
 
 permissions:
   contents: read
@@ -88,7 +90,7 @@ jobs:
           sudo prlimit --pid $$ --nofile=1048576:1048576
           sudo sysctl fs.inotify.max_user_instances=1280
           sudo sysctl fs.inotify.max_user_watches=655360
-          cargo nextest run --no-capture
+          cargo nextest run
 
       - uses: ./magicblock-validator/.github/actions/save-build-cache
         with:

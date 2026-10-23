@@ -16,11 +16,13 @@ Run CI's formatting, lint, and unit checks directly with Cargo:
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-RUST_BACKTRACE=1 cargo nextest run --no-capture
+RUST_BACKTRACE=1 cargo nextest run
 ```
 
-CI also runs RedSuite's Redshift correctness and Redhat security scenarios on
-every PR change. Redline benchmarks run only on published releases.
+Automatic CI runs for PRs and pushes to `master` or `dev` that change `.rs` or
+`.toml` files, including RedSuite's Redshift correctness and Redhat security
+scenarios. Manual runs and published releases bypass this filter. Redline
+benchmarks run only on published releases.
 
 ## Validator qualification
 
