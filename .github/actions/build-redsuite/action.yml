@@ -73,5 +73,6 @@ runs:
 
     - uses: ./magicblock-validator/.github/actions/save-build-cache
       with:
+        workspace: redsuite
         key: ${{ steps.build-env.outputs.save-key }}
         path: ${{ steps.build-env.outputs.cache-paths }}

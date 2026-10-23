@@ -6,10 +6,28 @@ inputs:
     description: Snapshot key from setup-build-env; empty skips saving
   path:
     description: Cache paths from setup-build-env
+  workspace:
+    description: Workspace path relative to github.workspace
+    default: magicblock-validator
 
 runs:
   using: composite
   steps:
+    - name: Prune old compilation artifacts
+      if: inputs.key != ''
+      shell: bash
+      env:
+        CACHE_WORKSPACE: ${{ inputs.workspace }}
+      run: |
+        # Retain recent workspace outputs so successive PR pushes can reuse them.
+        for profile in "$CACHE_WORKSPACE"/target/{debug,release} "$CACHE_WORKSPACE"/target/*/{debug,release}; do
+          for artifacts in "$profile"/{.fingerprint,build,deps}; do
+            if [ -d "$artifacts" ]; then
+              find "$artifacts" -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf -- {} +
+            fi
+          done
+        done
+
     - uses: actions/cache/save@v6
       if: inputs.key != ''
       with:
