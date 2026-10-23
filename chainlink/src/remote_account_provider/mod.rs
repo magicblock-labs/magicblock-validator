@@ -2518,13 +2518,14 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         tokio::spawn(async move {
             use RemoteAccount::*;
 
+            let mut pubkeys = pubkeys;
             let fetch_started_at = Instant::now();
             // Helper to notify all pending requests of fetch failure
-            let notify_error = |error_msg: &str| {
+            let notify_error = |pubkeys: &[Pubkey], error_msg: &str| {
                 let mut fetching = fetching_accounts.lock();
                 warn!(
                     pubkey_count = pubkeys.len(),
-                    pubkeys = %pubkeys_str(&pubkeys),
+                    pubkeys = %pubkeys_str(pubkeys),
                     min_context_slot = min_context_slot,
                     commitment = ?commitment,
                     fetch_entrypoint = %fetch_context.entrypoint(),
@@ -2535,7 +2536,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 );
                 inc_account_fetches_failed(pubkeys.len() as u64);
 
-                for pubkey in &pubkeys {
+                for pubkey in pubkeys {
                     // Update metrics
                     // Remove pending requests and send error
                     if let Some(generation) = generations.get(pubkey).copied()
@@ -2567,20 +2568,25 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 trace!(pubkeys = pubkeys_str(&pubkeys), "Fetching accounts");
             }
 
-            macro_rules! retry {
-                ($msg:expr) => {{
-                    trace!($msg);
-                    remaining_retries -= 1;
-                    if remaining_retries <= 0 {
-                        let err_msg = format!("Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}");
-                        notify_error(&err_msg);
-                        return;
-                    }
-                    tokio::time::sleep(RPC_FETCH_RETRY_DELAY).await;
-                    continue;
-                }};
-            }
-            let response = loop {
+            let (response_slot, response_value) = loop {
+                {
+                    let fetching = fetching_accounts.lock();
+                    pubkeys.retain(|pubkey| {
+                        fetching
+                            .get(pubkey)
+                            .is_some_and(|state| generations.get(pubkey) == Some(&state.generation))
+                    });
+                }
+                if pubkeys.is_empty() {
+                    return;
+                }
+                if remaining_retries == 0 {
+                    let err_msg = format!(
+                        "Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}"
+                    );
+                    notify_error(&pubkeys, &err_msg);
+                    return;
+                }
                 // We provide the min_context slot in order to _force_ the RPC to update
                 // its account cache. Otherwise we could just keep fetching the accounts
                 // until the context slot is high enough.
@@ -2607,122 +2613,69 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 })
                 .await
                 {
-                    Ok(Ok(res)) => {
-                        let (slot, value) = res;
-                        if slot < min_context_slot {
-                            retry!("Response slot {slot} < {min_context_slot}. Retrying...");
-                        } else {
-                            break (slot, value);
-                        }
+                    Ok(Ok((slot, value))) if slot >= min_context_slot => break (slot, value),
+                    Ok(Ok((slot, _))) => {
+                        trace!("Response slot {slot} < {min_context_slot}. Retrying...");
                     }
-                    Ok(Err(err)) => match *err.kind {
-                        ErrorKind::RpcError(rpc_err) => {
-                            match rpc_err {
-                                RpcError::ForUser(ref rpc_user_err) => {
-                                    // When an account is not present for the desired
-                                    // min-context slot then we normally get the below
-                                    // handled `RpcResponseError`, but may also get the
-                                    // following error from the RPC.
-                                    // See test::ixtest_existing_account_for_future_slot
-                                    // ```
-                                    // RpcError(
-                                    //   ForUser(
-                                    //       "AccountNotFound: \
-                                    // pubkey=DaeruQ4SukTQaJA5muyv51MQZok7oaCAF8fAW19mbJv5: \
-                                    //        RPC response error -32016: \
-                                    //        Minimum context slot has not been reached; ",
-                                    //   ),
-                                    // )
-                                    // ```
-                                    retry!("Fetching accounts failed: {rpc_user_err:?}");
-                                }
-                                RpcError::RpcResponseError { code, message, data } => {
-                                    if code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
-                                        || code == HELIUS_CONTEXT_SLOT_NOT_REACHED
-                                    {
-                                        retry!(
-                                            "Minimum context slot {min_context_slot} not reached for {commitment:?}. code={code}, message={message}, data={data:?}"
-                                        );
-                                    } else {
-                                        let err =
-                                            RpcError::RpcResponseError { code, message, data };
-                                        let err_msg = format!(
-                                            "RpcError fetching accounts {}: {err:?}",
-                                            pubkeys_str(&pubkeys)
-                                        );
-                                        notify_error(&err_msg);
-                                        return;
-                                    }
-                                }
-                                err => {
-                                    let err_msg = format!(
-                                        "RpcError fetching accounts {}: {err:?}",
-                                        pubkeys_str(&pubkeys)
-                                    );
-                                    notify_error(&err_msg);
-                                    return;
-                                }
-                            }
+                    Ok(Err(err)) => match err.kind.as_ref() {
+                        // Providers also report a lagging context as a ForUser error.
+                        ErrorKind::RpcError(RpcError::ForUser(message)) => {
+                            trace!("Fetching accounts failed: {message:?}");
+                        }
+                        ErrorKind::RpcError(RpcError::RpcResponseError { code, message, data })
+                            if *code == JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED
+                                || *code == HELIUS_CONTEXT_SLOT_NOT_REACHED =>
+                        {
+                            trace!(
+                                "Minimum context slot {min_context_slot} not reached for {commitment:?}. code={code}, message={message}, data={data:?}"
+                            );
                         }
                         ErrorKind::Custom(message)
                             if message.to_ascii_lowercase().contains("minimum context slot") =>
                         {
-                            retry!(
+                            trace!(
                                 "Minimum context slot {min_context_slot} not reached for {commitment:?}: {message}"
                             );
                         }
                         _ => {
-                            let err_msg = format!(
-                                "RpcError fetching accounts {}: {err:?}",
-                                pubkeys_str(&pubkeys)
-                            );
-                            notify_error(&err_msg);
+                            let err_msg = match err.kind.as_ref() {
+                                ErrorKind::RpcError(error) => format!(
+                                    "RpcError fetching accounts {}: {error:?}",
+                                    pubkeys_str(&pubkeys)
+                                ),
+                                _ => format!(
+                                    "RpcError fetching accounts {}: {err:?}",
+                                    pubkeys_str(&pubkeys)
+                                ),
+                            };
+                            notify_error(&pubkeys, &err_msg);
                             return;
                         }
                     },
                     Err(_) => {
                         let attempt = RPC_FETCH_MAX_RETRIES - remaining_retries + 1;
                         warn!(
-                                pubkey_count = pubkeys.len(),
-                                pubkeys = %pubkeys_str(&pubkeys),
-                                attempt = attempt,
-                                max_retries = RPC_FETCH_MAX_RETRIES,
-                                remaining_retries = remaining_retries.saturating_sub(1),
-                                timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
-                                elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
-                                min_context_slot = min_context_slot,
-                                commitment = ?commitment,
-                                fetch_entrypoint = %fetch_context.entrypoint(),
-                        fetch_reason = %fetch_context.reason(),
-                                "RPC call timeout. Retrying..."
-                            );
-                        remaining_retries -= 1;
-                        if remaining_retries == 0 {
-                            let err_msg = format!(
-                                "Max retries {RPC_FETCH_MAX_RETRIES} reached, giving up on fetching accounts: {pubkeys:?}"
-                            );
-                            notify_error(&err_msg);
-                            return;
-                        }
-                        time::sleep(RPC_FETCH_RETRY_DELAY).await;
-                        continue;
+                            pubkey_count = pubkeys.len(),
+                            pubkeys = %pubkeys_str(&pubkeys),
+                            attempt,
+                            max_retries = RPC_FETCH_MAX_RETRIES,
+                            remaining_retries = remaining_retries.saturating_sub(1),
+                            timeout_ms = RPC_FETCH_TIMEOUT.as_millis() as u64,
+                            elapsed_ms = fetch_started_at.elapsed().as_millis() as u64,
+                            min_context_slot,
+                            ?commitment,
+                            fetch_entrypoint = %fetch_context.entrypoint(),
+                            fetch_reason = %fetch_context.reason(),
+                            "RPC call timeout. Retrying..."
+                        );
+                        trace!("RPC call timed out");
                     }
                 };
+                remaining_retries -= 1;
+                if remaining_retries > 0 {
+                    time::sleep(RPC_FETCH_RETRY_DELAY).await;
+                }
             };
-
-            // The retry loop above already re-requests when the response slot is
-            // behind min_context_slot. If we still observe a lagging slot here,
-            // fail waiters like the cardinality mismatch path below and like
-            // `fetch_multi_rpc_only` (return Err instead of panicking).
-            let (response_slot, response_value) = response;
-            if response_slot < min_context_slot {
-                let err_msg = format!(
-                    "Response slot {response_slot} < {min_context_slot} fetching accounts {}",
-                    pubkeys_str(&pubkeys)
-                );
-                notify_error(&err_msg);
-                return;
-            }
 
             if response_value.len() != pubkeys.len() {
                 let err_msg = format!(
@@ -2731,7 +2684,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                     pubkeys.len(),
                     pubkeys_str(&pubkeys)
                 );
-                notify_error(&err_msg);
+                notify_error(&pubkeys, &err_msg);
                 return;
             }
 

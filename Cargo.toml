@@ -84,6 +84,7 @@ task-scheduler = { package = "magicblock-task-scheduler", path = "task-scheduler
 accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
 engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
 keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
+magic-root-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
 ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
 nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
 replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "3f52268d2ece23a9ab02b1d0361765c586441646" }
