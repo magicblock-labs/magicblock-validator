@@ -141,7 +141,9 @@ impl BaseTask for CommitFinalizeTask {
     }
 
     fn compute_units(&self) -> u32 {
-        120_000
+        // Buffer decoding and diff application scale with the account image.
+        let bytes = u32::try_from(self.committed_account.account.data.len()).unwrap_or(u32::MAX);
+        120_000u32.saturating_add(bytes.saturating_mul(32))
     }
 
     fn accounts_size_budget(&self) -> u32 {
