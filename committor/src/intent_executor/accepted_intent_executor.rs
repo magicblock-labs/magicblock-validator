@@ -5,7 +5,6 @@ use mbv_core::traits::ActionsCallbackScheduler;
 use program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_signer::Signer;
-use tracing::trace;
 
 use crate::{
     intent_executor::{
@@ -13,20 +12,15 @@ use crate::{
         IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::{two_stage::Initialized, utils::requires_uniqueness_nonce},
-        utils::{
-            build_commit_finalize_tasks, execute_single_stage_flow, execute_two_stage_flow,
-            report_and_close_intent,
-        },
+        strategy_executor::{transaction::TransactionExecutor, utils::requires_uniqueness_nonce},
+        utils::{build_commit_finalize_tasks, report_and_close_intent},
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         TaskBuilderImpl,
         task_builder::TasksBuilder,
         task_info_fetcher::{ResetType, TaskInfoFetcher},
-        task_strategist::{
-            StrategyExecutionMode, TaskStrategist, TransactionStrategy, TwoStageExecutionMode,
-        },
+        task_strategist::{StrategyExecutionMode, TaskStrategist},
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -81,9 +75,15 @@ where
                 &self.authority.pubkey(),
                 Some(intent_bundle.intent_id),
             )?;
-            return self
-                .single_stage_execution_flow(intent_bundle, strategy, execution_report)
-                .await;
+            return TransactionExecutor::new(
+                &self.ctx,
+                execution_report,
+                intent_bundle.intent_id,
+                &all_committed_pubkeys,
+                StrategyExecutionMode::SingleStage(strategy),
+            )
+            .execute(|| self.time_left())
+            .await;
         };
 
         // Build tasks for commit & finalize stages
@@ -94,72 +94,25 @@ where
             requires_uniqueness_nonce(&commit_tasks).then_some(intent_bundle.intent_id);
 
         // Build execution strategy
-        match TaskStrategist::build_execution_strategy(
+        let strategy = TaskStrategist::build_execution_strategy(
             commit_tasks,
             finalize_tasks,
             &self.authority.pubkey(),
             uniqueness_nonce,
-        )? {
-            StrategyExecutionMode::SingleStage(strategy) => {
-                trace!("Single stage execution");
-                self.single_stage_execution_flow(intent_bundle, strategy, execution_report)
-                    .await
-            }
-            StrategyExecutionMode::TwoStage(TwoStageExecutionMode {
-                commit_stage,
-                finalize_stage,
-            }) => {
-                trace!("Two stage execution");
-                self.two_stage_execution_flow(
-                    intent_bundle,
-                    commit_stage,
-                    finalize_stage,
-                    execution_report,
-                )
-                .await
-            }
-        }
+        )?;
+        TransactionExecutor::new(
+            &self.ctx,
+            execution_report,
+            intent_bundle.intent_id,
+            &all_committed_pubkeys,
+            strategy,
+        )
+        .execute(|| self.time_left())
+        .await
     }
 
     fn time_left(&self) -> Option<Duration> {
         self.actions_timeout.checked_sub(self.started_at.elapsed())
-    }
-
-    /// Starting execution from single stage
-    pub async fn single_stage_execution_flow(
-        &mut self,
-        intent_bundle: ScheduledIntentBundle,
-        transaction_strategy: TransactionStrategy,
-        execution_report: &mut IntentExecutionReport,
-    ) -> IntentExecutorResult<ExecutionOutput> {
-        execute_single_stage_flow(
-            &self.ctx,
-            &self.authority,
-            intent_bundle,
-            transaction_strategy,
-            execution_report,
-            || self.time_left(),
-        )
-        .await
-    }
-
-    pub async fn two_stage_execution_flow(
-        &mut self,
-        intent_bundle: ScheduledIntentBundle,
-        commit_strategy: TransactionStrategy,
-        finalize_strategy: TransactionStrategy,
-        execution_report: &mut IntentExecutionReport,
-    ) -> IntentExecutorResult<ExecutionOutput> {
-        let state = Initialized::new(commit_strategy, finalize_strategy);
-        execute_two_stage_flow(
-            &self.ctx,
-            state,
-            &self.authority,
-            intent_bundle,
-            execution_report,
-            || self.time_left(),
-        )
-        .await
     }
 }
 
