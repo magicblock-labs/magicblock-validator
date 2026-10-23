@@ -9,10 +9,11 @@ pub use types::CommittedAccount;
 mod scheduled;
 pub mod types;
 
-/// The first commit is included in the delegation session; ER charges after it.
-/// A current nonce of 0 is free; a nonce of 1 or higher incurs the commit fee.
-/// This allowance does not depend on the remaining balance of the DLP accounts.
-pub const ACTUAL_COMMIT_LIMIT: u64 = 1;
+/// Commits that are covered by User's dlp PDAs
+///
+/// NOTE: Higher DLP fees may exhaust the deposit earlier; retain the existing
+/// allowance until a separate pricing change is agreed and communicated.
+pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
 /// Matches DLP v2 pricing; the pinned API v3.1.0 still has the old fee.
 pub const COMMIT_FEE_LAMPORTS: u64 = 1_000_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
