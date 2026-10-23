@@ -1,18 +1,17 @@
 use engine::Engine;
 use std::time::Duration;
-use tracing::warn;
+use tracing::{debug, warn};
 
-use fastwebsockets::{CloseCode, Frame, OpCode, Payload, WebSocket, WebSocketError};
+use fastwebsockets::{CloseCode, Frame, OpCode, WebSocket, WebSocketError};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
-use json::Value;
 use tokio::{
     sync::mpsc::{self, Receiver},
     time::{self, Instant},
 };
 use tokio_util::sync::CancellationToken;
 
-use super::dispatch::{SubResult, WsDispatcher};
+use super::dispatch::WsDispatcher;
 use crate::{
     error::RpcError,
     requests::payload::{ResponseErrorPayload, ResponsePayload},
@@ -68,112 +67,115 @@ impl ConnectionHandler {
     /// - **Shutdown**: Listens for the global server shutdown signal.
     ///
     /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
-    pub(super) async fn run(mut self) {
+    pub(super) async fn run(self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         const PING_PERIOD: Duration = Duration::from_secs(30);
+        let Self {
+            cancel,
+            ws,
+            mut dispatcher,
+            mut updates_rx,
+        } = self;
+        let (mut reader, mut writer) = ws.split(tokio::io::split);
+        reader.set_auto_pong(false);
         let mut last_activity = Instant::now();
         let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
         tokio::pin!(next_ping);
 
-        loop {
-            tokio::select! {
-                // Prioritize fast system shutdown
-                biased;
-
-                // 0. We force shutdown the connection, without close frame
-                _ = self.cancel.cancelled() => break,
-
-
-                // 1. Handle an incoming frame from the client's WebSocket.
-                Ok(frame) = self.ws.read_frame() => {
-                    // Record inbound client activity
-                    last_activity = Instant::now();
-                    // Reschedule the next ping
-                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
-
-                    if frame.opcode != OpCode::Text && frame.opcode != OpCode::Binary {
-                        continue;
-                    }
-
-                    // Parse the JSON RPC request.
-                    let parsed = json::from_slice(&frame.payload).map_err(RpcError::parse_error);
-                    let request = match parsed {
-                        Ok(r) => r,
-                        Err(error) => {
-                            let _ = self.report_failure(None, error).await;
-                            continue;
+        'connection: loop {
+            // Reading consumes frame headers before awaiting the remaining bytes.
+            // Keep that future alive while writing notifications or keepalives.
+            let mut close_reply: Option<Frame<'static>> = None;
+            let result = {
+                // Preserve the parser's close validation and flush its reply through
+                // the single writer once reading completes. Pongs are handled below.
+                let mut defer_close = |frame| {
+                    close_reply = Some(frame);
+                    std::future::ready(Ok::<_, WebSocketError>(()))
+                };
+                let read = reader.read_frame(&mut defer_close);
+                tokio::pin!(read);
+                loop {
+                    tokio::select! {
+                        // Prioritize shutdown even while a frame is incomplete.
+                        biased;
+                        _ = cancel.cancelled() => break 'connection,
+                        result = &mut read => break result,
+                        _ = &mut next_ping => {
+                            if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
+                                let frame = Frame::close(
+                                    CloseCode::Policy.into(),
+                                    b"connection inactive for too long"
+                                );
+                                let _ = writer.write_frame(frame).await;
+                                break 'connection;
+                            }
+                            let frame = Frame::new(true, OpCode::Ping, None, b"".as_ref().into());
+                            if writer.write_frame(frame).await.is_err() {
+                                break 'connection;
+                            };
+                            next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                         }
-                    };
 
-                    // Dispatch the request and report the outcome to the client.
-                    let success = match self.dispatcher.dispatch(&request).await {
-                        Ok(r) => self.report_success(&request.id, r).await,
-                        Err(e) => self.report_failure(Some(&request.id), e).await,
-                    };
-
-                    // If we fail to send the response, terminate the connection.
-                    if !success { break };
-                }
-
-                // 2. Handle the periodic keep-alive timer (scheduled relative to last activity).
-                _ = &mut next_ping => {
-                    // If the connection has been idle for too long, close it.
-                    if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
-                        let frame = Frame::close(
-                            CloseCode::Policy.into(),
-                            b"connection inactive for too long"
-                        );
-                        let _ = self.ws.write_frame(frame).await;
-                        break;
-                    }
-                    // Otherwise, send a standard WebSocket PING frame.
-                    let frame = Frame::new(true, OpCode::Ping, None, b"".as_ref().into());
-                    if self.ws.write_frame(frame).await.is_err() {
-                        break;
-                    };
-                    // Schedule the next ping
-                    next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
-                }
-
-                // 3. Handle a new subscription notification from a forwarding task.
-                Some(update) = self.updates_rx.recv() => {
-                    if self.send(update.as_ref()).await.is_err() {
-                        break;
+                        Some(update) = updates_rx.recv() => {
+                            if writer.write_frame(Frame::text(update.as_ref().into())).await.is_err() {
+                                break 'connection;
+                            }
+                        }
                     }
                 }
-
-                else => {
+            };
+            if let Some(reply) = close_reply
+                && writer.write_frame(reply).await.is_err()
+            {
+                break;
+            }
+            let frame = match result {
+                Ok(frame) => frame,
+                Err(error) => {
+                    if matches!(error, WebSocketError::UnexpectedEOF) {
+                        debug!(?error, "WebSocket peer disconnected");
+                    } else {
+                        warn!(?error, "WebSocket read failed");
+                    }
                     break;
                 }
+            };
+            last_activity = Instant::now();
+            next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
+            match frame.opcode {
+                OpCode::Close => return,
+                OpCode::Ping => {
+                    if writer.write_frame(Frame::pong(frame.payload)).await.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+                OpCode::Text | OpCode::Binary => {}
+                _ => continue,
+            }
+            let parsed = json::from_slice(&frame.payload).map_err(RpcError::parse_error);
+            let response = match parsed {
+                Ok(request) => dispatcher
+                    .dispatch(&request)
+                    .await
+                    .and_then(|result| ResponsePayload::encode_no_context(&request.id, result))
+                    .or_else(|error| ResponseErrorPayload::encode(Some(&request.id), error)),
+                Err(error) => ResponseErrorPayload::encode(None, error),
+            };
+            let payload = match response {
+                Ok(payload) => payload,
+                Err(error) => {
+                    warn!(?error, "failed to serialize WebSocket error");
+                    break;
+                }
+            };
+            if writer.write_frame(Frame::text(payload.0.into())).await.is_err() {
+                break;
             }
         }
         // send a close frame (best effort) to the client
         let frame = Frame::close(CloseCode::Away.into(), b"server is shutting down");
-        let _ = self.ws.write_frame(frame).await;
-    }
-
-    /// Formats and sends a standard JSON-RPC success response to the client.
-    async fn report_success(&mut self, id: &Value, result: SubResult) -> bool {
-        match ResponsePayload::encode_no_context(id, result) {
-            Ok(payload) => self.send(payload.0).await.is_ok(),
-            Err(error) => self.report_failure(Some(id), error).await,
-        }
-    }
-
-    async fn report_failure(&mut self, id: Option<&Value>, error: RpcError) -> bool {
-        match ResponseErrorPayload::encode(id, error) {
-            Ok(payload) => self.send(payload.0).await.is_ok(),
-            Err(error) => {
-                warn!(?error, "failed to serialize WebSocket error");
-                false
-            }
-        }
-    }
-
-    /// A low-level helper to write a payload as a WebSocket text frame.
-    #[inline]
-    async fn send(&mut self, payload: impl Into<Payload<'_>>) -> Result<(), WebSocketError> {
-        let frame = Frame::text(payload.into());
-        self.ws.write_frame(frame).await
+        let _ = writer.write_frame(frame).await;
     }
 }
