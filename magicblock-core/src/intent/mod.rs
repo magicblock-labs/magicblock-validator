@@ -10,10 +10,12 @@ mod scheduled;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs
+///
+/// NOTE: Higher DLP fees may exhaust the deposit earlier; retain the existing
+/// allowance until a separate pricing change is agreed and communicated.
 pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Fixed fee per commit.
-/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
-pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Matches DLP v2 pricing; the pinned API v3.1.0 still has the old fee.
+pub const COMMIT_FEE_LAMPORTS: u64 = 1_000_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
