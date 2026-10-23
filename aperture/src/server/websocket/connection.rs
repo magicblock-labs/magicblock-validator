@@ -79,6 +79,8 @@ impl ConnectionHandler {
         let (mut reader, mut writer) = ws.split(tokio::io::split);
         reader.set_auto_pong(false);
         let mut last_activity = Instant::now();
+        let mut last_request = json::Value::default();
+        let mut replies = 0_u64;
         let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
         tokio::pin!(next_ping);
 
@@ -111,14 +113,16 @@ impl ConnectionHandler {
                                 break 'connection;
                             }
                             let frame = Frame::new(true, OpCode::Ping, None, b"".as_ref().into());
-                            if writer.write_frame(frame).await.is_err() {
+                            if let Err(error) = writer.write_frame(frame).await {
+                                warn!(?error, %last_request, replies, "WebSocket ping failed");
                                 break 'connection;
                             };
                             next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                         }
 
                         Some(update) = updates_rx.recv() => {
-                            if writer.write_frame(Frame::text(update.as_ref().into())).await.is_err() {
+                            if let Err(error) = writer.write_frame(Frame::text(update.as_ref().into())).await {
+                                warn!(?error, %last_request, replies, "WebSocket notification failed");
                                 break 'connection;
                             }
                         }
@@ -136,7 +140,7 @@ impl ConnectionHandler {
                     if matches!(error, WebSocketError::UnexpectedEOF) {
                         debug!(?error, "WebSocket peer disconnected");
                     } else {
-                        warn!(?error, "WebSocket read failed");
+                        warn!(?error, %last_request, replies, "WebSocket read failed");
                     }
                     break;
                 }
@@ -156,11 +160,15 @@ impl ConnectionHandler {
             }
             let parsed = json::from_slice(&frame.payload).map_err(RpcError::parse_error);
             let response = match parsed {
-                Ok(request) => dispatcher
-                    .dispatch(&request)
-                    .await
-                    .and_then(|result| ResponsePayload::encode_no_context(&request.id, result))
-                    .or_else(|error| ResponseErrorPayload::encode(Some(&request.id), error)),
+                Ok(request) => {
+                    let result = dispatcher.dispatch(&request).await;
+                    last_request = request.id;
+                    result
+                        .and_then(|result| {
+                            ResponsePayload::encode_no_context(&last_request, result)
+                        })
+                        .or_else(|error| ResponseErrorPayload::encode(Some(&last_request), error))
+                }
                 Err(error) => ResponseErrorPayload::encode(None, error),
             };
             let payload = match response {
@@ -170,9 +178,11 @@ impl ConnectionHandler {
                     break;
                 }
             };
-            if writer.write_frame(Frame::text(payload.0.into())).await.is_err() {
+            if let Err(error) = writer.write_frame(Frame::text(payload.0.into())).await {
+                warn!(?error, %last_request, replies, "WebSocket reply failed");
                 break;
             }
+            replies += 1;
         }
         // send a close frame (best effort) to the client
         let frame = Frame::close(CloseCode::Away.into(), b"server is shutting down");
