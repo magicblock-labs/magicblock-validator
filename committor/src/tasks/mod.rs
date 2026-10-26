@@ -13,19 +13,23 @@ pub mod task_info_fetcher;
 pub mod task_strategist;
 pub mod utils;
 
-pub use task_builder::TaskBuilderImpl;
+pub use task_builder::TaskBuilder;
 
 use crate::tasks::commit_finalize_task::CommitFinalizeTask;
 
 #[derive(Clone, Debug)]
-pub enum BaseTaskImpl {
+pub enum Task {
     CommitFinalize(CommitFinalizeTask),
     Undelegate(UndelegateTask),
     BaseAction(BaseActionTask),
 }
 
-impl BaseTask for BaseTaskImpl {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
+impl Task {
+    pub fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
+        self.instruction(validator).accounts.iter().map(|meta| meta.pubkey).collect()
+    }
+
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
             Self::CommitFinalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
@@ -33,14 +37,15 @@ impl BaseTask for BaseTaskImpl {
         }
     }
 
-    fn try_optimize_tx_size(&mut self) -> bool {
+    /// Switches inline commit data to buffer delivery. Returns whether the task changed.
+    pub fn try_use_buffer(&mut self) -> bool {
         match self {
-            Self::CommitFinalize(value) => value.try_optimize_tx_size(),
+            Self::CommitFinalize(value) => value.try_use_buffer(),
             _ => false,
         }
     }
 
-    fn compute_units(&self) -> u32 {
+    pub fn compute_units(&self) -> u32 {
         match self {
             Self::CommitFinalize(value) => value.compute_units(),
             Self::BaseAction(value) => value.compute_units(),
@@ -48,7 +53,7 @@ impl BaseTask for BaseTaskImpl {
         }
     }
 
-    fn accounts_size_budget(&self) -> u32 {
+    pub fn accounts_size_budget(&self) -> u32 {
         match self {
             Self::CommitFinalize(value) => value.accounts_size_budget(),
             Self::BaseAction(value) => value.accounts_size_budget(),
@@ -67,7 +72,7 @@ impl BaseTask for BaseTaskImpl {
     }
 }
 
-impl LabelValue for BaseTaskImpl {
+impl LabelValue for Task {
     fn value(&self) -> &str {
         match self {
             Self::CommitFinalize(task) => {
@@ -82,30 +87,6 @@ impl LabelValue for BaseTaskImpl {
             Self::BaseAction(BaseActionTask::V2(_)) => "args_action_v2",
         }
     }
-}
-
-/// A trait representing a task that can be executed on Base layer
-pub trait BaseTask: Send + Sync + Clone {
-    /// Gets all pubkeys that involved in Task's instruction
-    fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
-        self.instruction(validator).accounts.iter().map(|meta| meta.pubkey).collect()
-    }
-
-    /// Gets instruction for task execution
-    fn instruction(&self, validator: &Pubkey) -> Instruction;
-
-    /// Attempts to optimize the task for smaller transaction size by switching
-    /// to a buffer-based delivery. Returns `true` if optimization was applied.
-    ///
-    /// Deprecated: will be removed in the future. Optimization is a concern of
-    /// the transaction strategist, not the task itself.
-    fn try_optimize_tx_size(&mut self) -> bool;
-
-    /// Returns [`Task`] budget
-    fn compute_units(&self) -> u32;
-
-    /// Returns the max accounts-data-size that can be used with SetLoadedAccountsDataSizeLimit
-    fn accounts_size_budget(&self) -> u32;
 }
 
 #[derive(Clone, Debug)]
@@ -136,7 +117,7 @@ impl UndelegateTask {
     }
 }
 
-impl From<UndelegateTask> for BaseTaskImpl {
+impl From<UndelegateTask> for Task {
     fn from(value: UndelegateTask) -> Self {
         Self::Undelegate(value)
     }
@@ -261,7 +242,7 @@ impl From<BaseActionTaskV1> for BaseActionTask {
     }
 }
 
-impl From<BaseActionTask> for BaseTaskImpl {
+impl From<BaseActionTask> for Task {
     fn from(value: BaseActionTask) -> Self {
         Self::BaseAction(value)
     }
@@ -340,7 +321,7 @@ mod callback_tests {
                 BaseActionTask::V2(BaseActionTaskV2 { action, source_program: other }),
             ] {
                 let mut strategy = TransactionStrategy {
-                    optimized_tasks: vec![BaseTaskImpl::BaseAction(task)],
+                    tasks: vec![Task::BaseAction(task)],
                     ..Default::default()
                 };
                 let callbacks = strategy.extract_action_callbacks();
@@ -399,7 +380,7 @@ fn test_close_buffer_limit() {
     use tracing::info;
 
     use crate::{
-        tasks::{buffer_task::CleanupTask, utils::TransactionUtils},
+        tasks::{buffer_task::BufferCleanup, utils::TransactionUtils},
         test_utils,
         utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
     };
@@ -414,8 +395,8 @@ fn test_close_buffer_limit() {
 
     // Each task unique: commit_id increments; pubkey is new_unique each time
     let base_commit_id = 101u64;
-    let ixs_iter = (0..CleanupTask::max_tx_fit_count_with_budget()).map(|i| {
-        let task = CleanupTask {
+    let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
+        let task = BufferCleanup {
             commit_id: base_commit_id + i as u64,
             pubkey: Pubkey::new_unique(),
         };
@@ -432,8 +413,8 @@ fn test_close_buffer_limit() {
     assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
 
     // One more unique task should overflow
-    let overflow_task = CleanupTask {
-        commit_id: base_commit_id + CleanupTask::max_tx_fit_count_with_budget() as u64,
+    let overflow_task = BufferCleanup {
+        commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
         pubkey: Pubkey::new_unique(),
     };
     let uniqueness_noop = ixs.pop().expect("uniqueness noop");

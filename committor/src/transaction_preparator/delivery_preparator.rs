@@ -26,8 +26,8 @@ use tracing::{error, info};
 use crate::{
     ComputeBudgetConfig,
     tasks::{
-        BaseTaskImpl,
-        buffer_task::{CleanupTask, PreparationTask},
+        Task,
+        buffer_task::{BufferCleanup, BufferPreparation},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
     },
@@ -66,15 +66,15 @@ impl DeliveryPreparator {
         // Record identities before preparation can be cancelled. Only successful
         // intent execution may close these buffers, including partial writes.
         cleanup.buffers = strategy
-            .optimized_tasks
+            .tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::CommitFinalize(task) => CleanupTask::from_commit_finalize(task),
+                Task::CommitFinalize(task) => BufferCleanup::from_commit_finalize(task),
                 _ => None,
             })
             .collect();
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures = strategy.optimized_tasks.iter().map(|task| async move {
+        let preparation_futures = strategy.tasks.iter().map(|task| async move {
             let _timer = metrics::observe_committor_intent_task_preparation_time(task);
             self.prepare_task_handling_errors(authority, task, uniqueness_nonce).await
         });
@@ -103,12 +103,12 @@ impl DeliveryPreparator {
     pub async fn prepare_task(
         &self,
         authority: &Keypair,
-        task: &BaseTaskImpl,
+        task: &Task,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
-            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                PreparationTask::from_commit_finalize(commit_finalize_task)
+            Task::CommitFinalize(commit_finalize_task) => {
+                BufferPreparation::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
@@ -132,7 +132,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task_handling_errors(
         &self,
         authority: &Keypair,
-        task: &BaseTaskImpl,
+        task: &Task,
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self.prepare_task(authority, task, uniqueness_nonce).await;
@@ -148,8 +148,8 @@ impl DeliveryPreparator {
 
         // Preparation failed due to buffer existing - cleanup and retry
         let preparation_task = match task {
-            BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                PreparationTask::from_commit_finalize(commit_finalize_task)
+            Task::CommitFinalize(commit_finalize_task) => {
+                BufferPreparation::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
         };
@@ -167,11 +167,10 @@ impl DeliveryPreparator {
     }
 
     /// Initializes buffer account for future writes
-    #[allow(clippy::let_and_return)]
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &BufferPreparation,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
@@ -185,13 +184,9 @@ impl DeliveryPreparator {
             .enumerate()
             .map(|(i, ixs)| {
                 let mut ixs_with_budget = if i == 0 {
-                    let init_budget_ixs =
-                        self.compute_budget_config.buffer_init.instructions(ixs.len());
-                    init_budget_ixs
+                    self.compute_budget_config.buffer_init.instructions(ixs.len())
                 } else {
-                    let realloc_budget_ixs =
-                        self.compute_budget_config.buffer_realloc.instructions(ixs.len());
-                    realloc_budget_ixs
+                    self.compute_budget_config.buffer_realloc.instructions(ixs.len())
                 };
                 ixs_with_budget.extend(ixs);
                 ixs_with_budget
@@ -222,7 +217,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask,
+        preparation_task: &BufferPreparation,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
@@ -422,16 +417,16 @@ impl DeliveryPreparator {
     async fn cleanup_buffers(
         &self,
         authority: &Keypair,
-        cleanup_tasks: &[CleanupTask],
+        cleanup_tasks: &[BufferCleanup],
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         if cleanup_tasks.is_empty() {
             return Ok(());
         }
 
-        let close_futs = cleanup_tasks.chunks(CleanupTask::max_tx_fit_count_with_budget()).map(
-            |cleanup_tasks| {
-                let compute_units = cleanup_tasks[0].compute_units() * cleanup_tasks.len() as u32;
+        let close_futs =
+            cleanup_tasks.chunks(BufferCleanup::MAX_PER_TRANSACTION).map(|cleanup_tasks| {
+                let compute_units = BufferCleanup::COMPUTE_UNITS * cleanup_tasks.len() as u32;
                 let mut instructions = vec![
                     ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
                     ComputeBudgetInstruction::set_compute_unit_price(
@@ -448,8 +443,7 @@ impl DeliveryPreparator {
                             .await,
                     )
                 }
-            },
-        );
+            });
 
         join_all(close_futs).await.into_iter().try_for_each(|(cleanup_tasks, res)| {
             res.inspect_err(|err| {

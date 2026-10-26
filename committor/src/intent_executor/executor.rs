@@ -24,8 +24,8 @@ use crate::{
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta, progress::PendingExecution},
     tasks::{
-        task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
-        task_info_fetcher::{AccountSnapshot, ResetType, TaskInfoFetcher},
+        task_builder::{TaskBuilder, TaskBuilderError},
+        task_info_fetcher::{AccountSnapshot, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionPlan, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparator,
@@ -126,7 +126,7 @@ where
         let pending = PendingExecution::from_status(&self.status);
         if pending.is_none() && committed_pubkeys.is_empty() {
             // Standalone actions use one transaction with a per-intent uniqueness nonce.
-            let tasks = TaskBuilderImpl::commit_tasks(&self.ctx.task_info_fetcher, intent).await?;
+            let tasks = TaskBuilder::commit_tasks(&self.ctx.task_info_fetcher, intent).await?;
             return Ok(
                 TaskStrategist::build_strategy(tasks, &authority, Some(intent.intent_id))?.into(),
             );
@@ -175,7 +175,7 @@ where
         }
 
         // The commit is confirmed; only actions and undelegation remain.
-        let tasks = TaskBuilderImpl::follow_up_tasks(&self.ctx.task_info_fetcher, intent).await?;
+        let tasks = TaskBuilder::follow_up_tasks(&self.ctx.task_info_fetcher, intent).await?;
         let uniqueness_nonce = self.follow_up_uniqueness_nonce(intent).await?;
         Ok(TaskStrategist::build_strategy(
             tasks,
@@ -232,11 +232,11 @@ where
 
         if result.is_err() {
             // We can't know what landed on chain, resync everything.
-            self.ctx.task_info_fetcher.reset(ResetType::Specific(&pubkeys));
+            self.ctx.task_info_fetcher.invalidate_nonces(&pubkeys);
         } else if !undelegated_pubkeys.is_empty() {
             // Keep other nonces cached: a chain re-fetch can race the just-landed
             // commit and reuse a nonce (buffer PDA collision).
-            self.ctx.task_info_fetcher.reset(ResetType::Specific(&undelegated_pubkeys));
+            self.ctx.task_info_fetcher.invalidate_nonces(&undelegated_pubkeys);
         }
         if let Ok(output) = &result {
             let output = *output;

@@ -7,22 +7,17 @@ use crate::{
     intent_executor::{
         ExecutionOutput, IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
-        strategy_executor::error::TransactionStrategyExecutionError,
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
-    tasks::{
-        BaseTaskImpl,
-        task_builder::{TaskBuilderImpl, TasksBuilder},
-        task_info_fetcher::TaskInfoFetcher,
-    },
+    tasks::{Task, task_builder::TaskBuilder, task_info_fetcher::TaskInfoFetcher},
 };
 
 pub(in crate::intent_executor) async fn build_intent_tasks<F: TaskInfoFetcher>(
     intent_bundle: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<F>,
-) -> IntentExecutorResult<(Vec<BaseTaskImpl>, Vec<BaseTaskImpl>)> {
-    let commit_tasks_fut = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
-    let follow_up_tasks_fut = TaskBuilderImpl::follow_up_tasks(task_info_fetcher, intent_bundle);
+) -> IntentExecutorResult<(Vec<Task>, Vec<Task>)> {
+    let commit_tasks_fut = TaskBuilder::commit_tasks(task_info_fetcher, intent_bundle);
+    let follow_up_tasks_fut = TaskBuilder::follow_up_tasks(task_info_fetcher, intent_bundle);
     let (commit_tasks, follow_up_tasks) = join(commit_tasks_fut, follow_up_tasks_fut).await;
 
     Ok((commit_tasks?, follow_up_tasks?))
@@ -70,15 +65,11 @@ fn is_terminal_execution_error(err: &IntentExecutorError) -> bool {
         | IntentExecutorError::FailedPreparation(_)
         | IntentExecutorError::SchedulerError(_)
         | IntentExecutorError::PoisonedIntentError => false,
-        IntentExecutorError::FailedExecution(err) => is_terminal_strategy_error(err),
+        IntentExecutorError::FailedExecution(err) => !err.is_transient(),
         IntentExecutorError::TaskBuilderError(err) => !err.is_transient(),
         IntentExecutorError::EmptyIntentError
         | IntentExecutorError::FailedToFitError
         | IntentExecutorError::CompileError(_)
         | IntentExecutorError::SignerError(_) => true,
     }
-}
-
-fn is_terminal_strategy_error(err: &TransactionStrategyExecutionError) -> bool {
-    !err.is_transient()
 }

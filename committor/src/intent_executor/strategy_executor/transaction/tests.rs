@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-fn commit() -> BaseTaskImpl {
+fn commit() -> Task {
     let mut task = create_commit_finalize_task(
         2,
         true,
@@ -35,8 +35,8 @@ fn commit() -> BaseTaskImpl {
     task.into()
 }
 
-fn undelegate() -> BaseTaskImpl {
-    BaseTaskImpl::Undelegate(UndelegateTask {
+fn undelegate() -> Task {
+    Task::Undelegate(UndelegateTask {
         delegated_account: ACCOUNT,
         owner_program: Pubkey::new_unique(),
         rent_reimbursement: Pubkey::new_unique(),
@@ -44,19 +44,19 @@ fn undelegate() -> BaseTaskImpl {
     })
 }
 
-fn action() -> BaseTaskImpl {
+fn action() -> Task {
     create_action_tasks(&[base_action()]).next().unwrap()
 }
 
-fn strategy(tasks: Vec<BaseTaskImpl>) -> TransactionStrategy {
+fn strategy(tasks: Vec<Task>) -> TransactionStrategy {
     TransactionStrategy {
-        optimized_tasks: tasks,
+        tasks,
         lookup_tables_keys: vec![RESERVED_ALT_KEY],
         ..Default::default()
     }
 }
 
-fn split(follow_up: Vec<BaseTaskImpl>) -> TransactionPlan {
+fn split(follow_up: Vec<Task>) -> TransactionPlan {
     TransactionPlan {
         current: strategy(vec![commit()]),
         follow_up: Some(strategy(follow_up)),
@@ -138,9 +138,9 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
             assert!(prepared.iter().all(|tasks| !tasks.is_empty()));
             assert!(
                 prepared.is_empty()
-                    || prepared.iter().any(|tasks| tasks
+                    || prepared
                         .iter()
-                        .any(|task| matches!(task, BaseTaskImpl::BaseAction(_)))),
+                        .any(|tasks| tasks.iter().any(|task| matches!(task, Task::BaseAction(_)))),
                 "timeout must retain actions"
             );
             match result.confirmed_commit {
@@ -233,14 +233,11 @@ async fn recovery_preserves_progress_and_resources() {
         {
             let prepared = executor.transaction_preparator.prepared.lock().unwrap();
             assert_eq!(prepared.len(), expected_preparations);
-            assert!(matches!(
-                prepared[0].as_slice(),
-                [BaseTaskImpl::CommitFinalize(_)]
-            ));
+            assert!(matches!(prepared[0].as_slice(), [Task::CommitFinalize(_)]));
             if expected_preparations == 2 {
                 assert!(matches!(
                     prepared[1].as_slice(),
-                    [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
+                    [Task::Undelegate(_), Task::BaseAction(_)]
                 ));
             }
             assert!(executor.actions_callback_executor.0.lock().unwrap().is_empty());
@@ -303,17 +300,17 @@ async fn recovery_preserves_progress_and_resources() {
         let callback_destinations: Vec<_> = tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::BaseAction(task) => {
+                Task::BaseAction(task) => {
                     Some(task.action().callback.as_ref().unwrap().destination_program)
                 }
                 _ => None,
             })
             .collect();
-        let undelegation_failed = matches!(tasks[failed_task], BaseTaskImpl::Undelegate(_));
+        let undelegation_failed = matches!(tasks[failed_task], Task::Undelegate(_));
         let instruction = TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize + failed_task;
         let error = format!(r#"{{"InstructionError":[{instruction},{{"Custom":1}}]}}"#);
         let mut ctx = executor(vec![], Some(&error));
-        let has_commits = tasks.iter().any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)));
+        let has_commits = tasks.iter().any(|task| matches!(task, Task::CommitFinalize(_)));
         if !has_commits {
             Arc::get_mut(&mut ctx.outbox_client).unwrap().expected_commit_nonces.clear();
         }
@@ -369,9 +366,9 @@ async fn recovery_preserves_progress_and_resources() {
             if let Some(remaining) = remaining {
                 assert_eq!(prepared[1].len(), remaining);
                 if confirmed {
-                    assert!(matches!(prepared[1][0], BaseTaskImpl::Undelegate(_)));
+                    assert!(matches!(prepared[1][0], Task::Undelegate(_)));
                 } else {
-                    assert!(matches!(prepared[1][0], BaseTaskImpl::CommitFinalize(_)));
+                    assert!(matches!(prepared[1][0], Task::CommitFinalize(_)));
                 }
             }
             assert_eq!(report.cleanup.len(), prepared.len());

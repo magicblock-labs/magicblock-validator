@@ -6,11 +6,11 @@ use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tracing::error;
 
-use crate::{intent_executor::error::InternalError, tasks::BaseTaskImpl};
+use crate::{intent_executor::error::InternalError, tasks::Task};
 
 /// Errors from a settlement transaction on the base layer.
 #[derive(thiserror::Error, Debug)]
-pub enum TransactionStrategyExecutionError {
+pub enum TransactionExecutionError {
     #[error("User supplied actions are ill-formed: {0}. {1:?}")]
     ActionsError(#[source] TransactionError, Option<Signature>),
     #[error("Invalid undelegation: {0}. {1:?}")]
@@ -29,13 +29,13 @@ pub enum TransactionStrategyExecutionError {
     InternalError(#[from] InternalError),
 }
 
-impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
+impl From<MagicBlockRpcClientError> for TransactionExecutionError {
     fn from(value: MagicBlockRpcClientError) -> Self {
         Self::InternalError(InternalError::from(value))
     }
 }
 
-impl TransactionStrategyExecutionError {
+impl TransactionExecutionError {
     /// Domain errors and reported on-chain failures have a definitive outcome.
     /// A transport error alone does not establish whether the transaction landed.
     pub fn is_rejected(&self) -> bool {
@@ -97,11 +97,11 @@ impl TransactionStrategyExecutionError {
 
     /// Convert [`TransactionError`] into known errors that can be handled
     /// Otherwise return original [`TransactionError`]
-    /// [`TransactionStrategyExecutionError`]
+    /// [`TransactionExecutionError`]
     pub fn try_from_transaction_error(
         err: TransactionError,
         signature: Option<Signature>,
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         task_instruction_offset: u8,
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
@@ -122,12 +122,12 @@ impl TransactionStrategyExecutionError {
             transaction_err @ TransactionError::InstructionError(
                 _,
                 InstructionError::MaxInstructionTraceLengthExceeded,
-            ) => Ok(TransactionStrategyExecutionError::CpiLimitError(
+            ) => Ok(TransactionExecutionError::CpiLimitError(
                 transaction_err,
                 signature,
             )),
             err @ TransactionError::MaxLoadedAccountsDataSizeExceeded => Ok(
-                TransactionStrategyExecutionError::LoadedAccountsDataSizeExceeded(err, signature),
+                TransactionExecutionError::LoadedAccountsDataSizeExceeded(err, signature),
             ),
             // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
             TransactionError::InstructionError(index, instruction_err) => {
@@ -143,9 +143,9 @@ impl TransactionStrategyExecutionError {
                 };
 
                 match (task, instruction_err) {
-                    (BaseTaskImpl::CommitFinalize(_), instruction_err) => match instruction_err {
+                    (Task::CommitFinalize(_), instruction_err) => match instruction_err {
                         InstructionError::Custom(NONCE_OUT_OF_ORDER) => {
-                            Ok(TransactionStrategyExecutionError::CommitIDError(
+                            Ok(TransactionExecutionError::CommitIDError(
                                 tx_err_helper(InstructionError::Custom(NONCE_OUT_OF_ORDER)),
                                 signature,
                             ))
@@ -161,20 +161,20 @@ impl TransactionStrategyExecutionError {
                         )
                         | InstructionError::Custom(
                             COMMIT_RECORD_ALREADY_INITIALIZED,
-                        )) => Ok(TransactionStrategyExecutionError::UnfinalizedAccountError(
+                        )) => Ok(TransactionExecutionError::UnfinalizedAccountError(
                             tx_err_helper(instruction_err),
                             signature,
                         )),
                         err => Err(tx_err_helper(err)),
                     },
-                    (BaseTaskImpl::BaseAction(_), instruction_err) => {
-                        Ok(TransactionStrategyExecutionError::ActionsError(
+                    (Task::BaseAction(_), instruction_err) => {
+                        Ok(TransactionExecutionError::ActionsError(
                             tx_err_helper(instruction_err),
                             signature,
                         ))
                     }
-                    (BaseTaskImpl::Undelegate(_), instruction_err) => {
-                        Ok(TransactionStrategyExecutionError::UndelegationError(
+                    (Task::Undelegate(_), instruction_err) => {
+                        Ok(TransactionExecutionError::UndelegationError(
                             tx_err_helper(instruction_err),
                             signature,
                         ))
@@ -190,7 +190,7 @@ impl TransactionStrategyExecutionError {
     }
 }
 
-impl metrics::LabelValue for TransactionStrategyExecutionError {
+impl metrics::LabelValue for TransactionExecutionError {
     fn value(&self) -> &str {
         match self {
             Self::ActionsError(_, _) => "actions_failed",
@@ -206,18 +206,18 @@ impl metrics::LabelValue for TransactionStrategyExecutionError {
 }
 
 pub(crate) struct IntentTransactionErrorMapper<'a> {
-    pub tasks: &'a [BaseTaskImpl],
+    pub tasks: &'a [Task],
     pub task_instruction_offset: u8,
 }
 
 impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
-    type ExecutionError = TransactionStrategyExecutionError;
+    type ExecutionError = TransactionExecutionError;
     fn try_map(
         &self,
         error: TransactionError,
         signature: Option<Signature>,
     ) -> Result<Self::ExecutionError, TransactionError> {
-        TransactionStrategyExecutionError::try_from_transaction_error(
+        TransactionExecutionError::try_from_transaction_error(
             error,
             signature,
             self.tasks,
@@ -226,9 +226,9 @@ impl TransactionErrorMapper for IntentTransactionErrorMapper<'_> {
     }
 }
 
-impl From<&TransactionStrategyExecutionError> for ActionError {
-    fn from(value: &TransactionStrategyExecutionError) -> Self {
-        if let TransactionStrategyExecutionError::ActionsError(err, signature) = value {
+impl From<&TransactionExecutionError> for ActionError {
+    fn from(value: &TransactionExecutionError) -> Self {
+        if let TransactionExecutionError::ActionsError(err, signature) = value {
             Self::ActionsError(err.clone(), *signature)
         } else {
             Self::IntentFailedError(value.to_string())

@@ -14,7 +14,7 @@ use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
 
 use crate::tasks::{
-    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, BaseTask, BaseTaskImpl,
+    BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, Task,
     commit_delivery::CommitDelivery,
     commit_finalize_task::CommitFinalizeTask,
     task_strategist::{TaskStrategistError, TaskStrategistResult},
@@ -28,12 +28,12 @@ use crate::tasks::{
 // and updated continuously.
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
-/// Builds a [`BaseTaskImpl`] for each `action`, used by both
-/// [`crate::tasks::task_builder::TaskBuilderImpl`] (real task construction)
+/// Builds a [`Task`] for each `action`, used by both
+/// [`crate::tasks::task_builder::TaskBuilder`] (real task construction)
 /// and [`crate::tasks::intent_size_validator::IntentSizeValidator`] (size
 /// estimation) -- actions carry no unknowns that need fetching, so both
 /// build them identically.
-pub fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = BaseTaskImpl> + '_ {
+pub fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = Task> + '_ {
     actions.iter().map(|action| {
         let task = match action.source_program {
             Some(source_program) => BaseActionTask::V2(BaseActionTaskV2 {
@@ -96,7 +96,7 @@ impl TransactionUtils {
     }
 
     pub fn unique_involved_pubkeys(
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         validator: &Pubkey,
         budget_instructions: &[Instruction],
     ) -> Vec<Pubkey> {
@@ -113,36 +113,13 @@ impl TransactionUtils {
         all_pubkeys.into_iter().collect::<Vec<_>>()
     }
 
-    pub fn tasks_instructions(validator: &Pubkey, tasks: &[BaseTaskImpl]) -> Vec<Instruction> {
+    pub fn tasks_instructions(validator: &Pubkey, tasks: &[Task]) -> Vec<Instruction> {
         tasks.iter().map(|task| task.instruction(validator)).collect()
-    }
-
-    pub fn assemble_tasks_tx(
-        authority: &Keypair,
-        tasks: &[BaseTaskImpl],
-        compute_unit_price: u64,
-        lookup_tables: &[AddressLookupTableAccount],
-    ) -> TaskStrategistResult<VersionedTransaction> {
-        if lookup_tables.is_empty() {
-            return Self::assemble_tasks_v1_tx_with_uniqueness_nonce(
-                authority,
-                tasks,
-                compute_unit_price,
-                None,
-            );
-        }
-        Self::assemble_tasks_tx_with_uniqueness_nonce(
-            authority,
-            tasks,
-            compute_unit_price,
-            lookup_tables,
-            None,
-        )
     }
 
     pub fn assemble_tasks_tx_with_uniqueness_nonce(
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         compute_unit_price: u64,
         lookup_tables: &[AddressLookupTableAccount],
         uniqueness_nonce: Option<u64>,
@@ -162,7 +139,7 @@ impl TransactionUtils {
     /// Builds a native v1 transaction without compute-budget instructions or lookup tables.
     pub(crate) fn assemble_tasks_v1_tx_with_uniqueness_nonce(
         authority: &Keypair,
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         compute_unit_price: u64,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<VersionedTransaction> {
@@ -232,7 +209,7 @@ impl TransactionUtils {
         }
     }
 
-    pub fn tasks_compute_units(tasks: &[BaseTaskImpl], uniqueness_nonce: Option<u64>) -> u32 {
+    pub fn tasks_compute_units(tasks: &[Task], uniqueness_nonce: Option<u64>) -> u32 {
         // Empty recovery stages can still execute the uniqueness no-op.
         let overhead = uniqueness_nonce.map_or(0, |_| Self::UNIQUENESS_NOOP_COMPUTE_UNITS);
         tasks.iter().fold(overhead, |sum, task| {
@@ -240,7 +217,7 @@ impl TransactionUtils {
         })
     }
 
-    pub fn tasks_accounts_size_budget(tasks: &[BaseTaskImpl]) -> u32 {
+    pub fn tasks_accounts_size_budget(tasks: &[Task]) -> u32 {
         if tasks.is_empty() {
             return 0;
         }
@@ -258,7 +235,7 @@ impl TransactionUtils {
     }
 
     fn tasks_accounts_size_budget_with_uniqueness_nonce(
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         uniqueness_nonce: Option<u64>,
     ) -> u32 {
         let budget = Self::tasks_accounts_size_budget(tasks);

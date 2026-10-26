@@ -9,7 +9,7 @@ use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::tasks::{BaseTask, BaseTaskImpl, commit_delivery::CommitDelivery};
+use crate::tasks::{Task, commit_delivery::CommitDelivery};
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
 /// instruction.
@@ -94,10 +94,8 @@ impl CommitFinalizeTask {
             CommitDelivery::StateInBuffer | CommitDelivery::DiffInBuffer { .. }
         )
     }
-}
 
-impl BaseTask for CommitFinalizeTask {
-    fn instruction(&self, validator: &Pubkey) -> Instruction {
+    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery {
             CommitDelivery::StateInArgs => self.commit_finalize_ix(validator, None),
             CommitDelivery::StateInBuffer => self.commit_finalize_from_buffer_ix(validator, None),
@@ -110,7 +108,7 @@ impl BaseTask for CommitFinalizeTask {
         }
     }
 
-    fn try_optimize_tx_size(&mut self) -> bool {
+    pub fn try_use_buffer(&mut self) -> bool {
         let delivery = std::mem::replace(&mut self.delivery, CommitDelivery::StateInArgs);
         match delivery {
             CommitDelivery::StateInArgs => {
@@ -128,11 +126,11 @@ impl BaseTask for CommitFinalizeTask {
         }
     }
 
-    fn compute_units(&self) -> u32 {
+    pub fn compute_units(&self) -> u32 {
         120_000
     }
 
-    fn accounts_size_budget(&self) -> u32 {
+    pub fn accounts_size_budget(&self) -> u32 {
         match &self.delivery {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => {
                 commit_finalize_size_budget(AccountSizeClass::Dynamic(
@@ -146,7 +144,7 @@ impl BaseTask for CommitFinalizeTask {
     }
 }
 
-impl From<CommitFinalizeTask> for BaseTaskImpl {
+impl From<CommitFinalizeTask> for Task {
     fn from(value: CommitFinalizeTask) -> Self {
         Self::CommitFinalize(value)
     }

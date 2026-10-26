@@ -18,14 +18,14 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct PreparationTask {
+pub struct BufferPreparation {
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks: Chunks,
     buffer_data: Vec<u8>,
 }
 
-impl PreparationTask {
+impl BufferPreparation {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
@@ -75,25 +75,21 @@ impl PreparationTask {
     }
 
     /// Returns realloc instruction required for Buffer preparation
-    #[allow(clippy::let_and_return)]
     pub fn realloc_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let buffer_account_size = self.buffer_data.len() as u64;
-        let realloc_instructions = create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
+        create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
             authority: *authority,
             pubkey: self.pubkey,
             buffer_account_size,
             commit_id: self.commit_id,
-        });
-
-        realloc_instructions
+        })
     }
 
-    /// Returns realloc instruction required for Buffer preparation
-    #[allow(clippy::let_and_return)]
+    /// Returns instructions that write the buffer data in chunks.
     pub fn write_instructions(&self, authority: &Pubkey) -> Vec<Instruction> {
         let chunks_iter =
             ChangesetChunks::new(&self.chunks, self.chunks.chunk_size()).iter(&self.buffer_data);
-        let write_instructions = chunks_iter
+        chunks_iter
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {
                     authority: *authority,
@@ -103,13 +99,11 @@ impl PreparationTask {
                     commit_id: self.commit_id,
                 })
             })
-            .collect::<Vec<_>>();
-
-        write_instructions
+            .collect()
     }
 
-    pub fn cleanup_task(&self) -> CleanupTask {
-        CleanupTask {
+    pub fn cleanup_task(&self) -> BufferCleanup {
+        BufferCleanup {
             pubkey: self.pubkey,
             commit_id: self.commit_id,
         }
@@ -117,12 +111,12 @@ impl PreparationTask {
 }
 
 #[derive(Clone, Debug)]
-pub struct CleanupTask {
+pub struct BufferCleanup {
     pub pubkey: Pubkey,
     pub commit_id: u64,
 }
 
-impl CleanupTask {
+impl BufferCleanup {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
             CommitDelivery::StateInBuffer | CommitDelivery::DiffInBuffer { .. } => Some(Self {
@@ -141,24 +135,11 @@ impl CleanupTask {
         })
     }
 
-    /// Returns compute units required to close a buffer and its chunks account.
-    pub fn compute_units(&self) -> u32 {
-        30_000
-    }
+    /// Compute units required to close a buffer and its chunks account.
+    pub const COMPUTE_UNITS: u32 = 30_000;
 
-    /// Returns a number of [`CleanupTask`]s that is possible to fit in single
-    pub const fn max_tx_fit_count_with_budget() -> usize {
-        8
-    }
-
-    pub fn chunks_pda(&self, authority: &Pubkey) -> Pubkey {
-        pdas::chunks_pda(
-            authority,
-            &self.pubkey,
-            self.commit_id.to_le_bytes().as_slice(),
-        )
-        .0
-    }
+    /// Maximum number of buffer cleanup instructions that fit in one transaction.
+    pub const MAX_PER_TRANSACTION: usize = 8;
 
     pub fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
         pdas::buffer_pda(
@@ -194,7 +175,7 @@ mod tests {
 
         let authority = Keypair::new();
         let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
-        let preparation_task = PreparationTask {
+        let preparation_task = BufferPreparation {
             commit_id: 1,
             pubkey: Pubkey::new_unique(),
             chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),

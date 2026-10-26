@@ -34,13 +34,13 @@ const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
 /// Implementation of `OutboxClient` that uses ER internals.
 ///
-/// Accept/set-stage/close still go through the RPC client (aperture) with
-/// backoff retries; `notify_commit_sent` submits directly through the engine.
+/// Accept/set-stage go through the RPC client (aperture) with backoff retries;
+/// `notify_commit_sent` submits directly through the engine and closes the intent.
 pub struct InternalOutboxClient {
     /// Engine handle: reads MagicContext, provides blockhash, and submits the
     /// `ScheduledCommitSent` notification directly.
     engine: Engine,
-    /// RPC client for sending accept/set-stage/close transactions to the ER
+    /// RPC client for sending accept/set-stage transactions to the ER
     rpc_client: Arc<RpcClient>,
 }
 
@@ -294,29 +294,6 @@ impl OutboxClient for InternalOutboxClient {
                 signature = ?tx.get_signature(),
                 error = ?err,
                 "Failed to set intent execution stage"
-            )
-        })
-        .map_err(Into::into)
-    }
-
-    async fn close_intent(&self, intent_id: u64) -> Result<(), Self::Error> {
-        let tx = InstructionUtils::close_outbox_intent(intent_id, self.engine.blockhash());
-
-        self.send_with_backoff(
-            ExponentialBackoff {
-                max_elapsed_time: Some(Duration::from_secs(25)),
-                max_interval: Duration::from_secs(5),
-                ..ExponentialBackoff::default()
-            },
-            &tx,
-        )
-        .await
-        .inspect_err(|err| {
-            error!(
-                intent_id,
-                signature = ?tx.get_signature(),
-                error = ?err,
-                "Failed to close intent"
             )
         })
         .map_err(Into::into)

@@ -26,11 +26,9 @@ use crate::{
     intent_executor::{
         ExecutionOutput,
         error::{IntentExecutorError, IntentExecutorResult, InternalError},
-        strategy_executor::error::{
-            IntentTransactionErrorMapper, TransactionStrategyExecutionError,
-        },
+        strategy_executor::error::{IntentTransactionErrorMapper, TransactionExecutionError},
     },
-    tasks::{BaseTaskImpl, utils::TransactionUtils},
+    tasks::{Task, utils::TransactionUtils},
     transaction_preparator::error::TransactionPreparatorError,
 };
 
@@ -48,12 +46,11 @@ impl IntentExecutionClient {
     // Temporary compatibility for commit-only transactions; remove with #1801.
     /// Repairs a pre-upgrade commit without restoring the removed Finalize task.
     /// Retry the same signed transaction, never a fresh signature after an uncertain send.
-    pub(in crate::intent_executor) async fn finalize_account(
+    pub(in crate::intent_executor) async fn finalize_legacy_commit(
         &self,
         authority: &Keypair,
         account: Pubkey,
-    ) -> Result<Result<Signature, TransactionStrategyExecutionError>, TransactionPreparatorError>
-    {
+    ) -> Result<Result<Signature, TransactionExecutionError>, TransactionPreparatorError> {
         let instruction =
             delegation_program_api::instruction_builder::finalize(authority.pubkey(), account);
         let budgets = TransactionUtils::budget_instructions(120_000, self.compute_unit_price, 0);
@@ -94,7 +91,7 @@ impl IntentExecutionClient {
             if record.is_none_or(|record| record.owner != delegation_program_api::id()) {
                 continue;
             }
-            self.finalize_account(authority, pubkey)
+            self.finalize_legacy_commit(authority, pubkey)
                 .await
                 .map_err(IntentExecutorError::FailedPreparation)?
                 .map_err(IntentExecutorError::FailedExecution)?;
@@ -111,8 +108,8 @@ impl IntentExecutionClient {
     pub(in crate::intent_executor) async fn send_signed_tx_with_retries(
         &self,
         transaction: &VersionedTransaction,
-        tasks: &[BaseTaskImpl],
-    ) -> Result<(), TransactionStrategyExecutionError> {
+        tasks: &[Task],
+    ) -> Result<(), TransactionExecutionError> {
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
 
@@ -243,12 +240,12 @@ struct IntentErrorMapper<TxMap> {
 
 impl<TxMap> SendErrorMapper<MagicBlockRpcClientError> for IntentErrorMapper<TxMap>
 where
-    TxMap: TransactionErrorMapper<ExecutionError = TransactionStrategyExecutionError>,
+    TxMap: TransactionErrorMapper<ExecutionError = TransactionExecutionError>,
 {
-    type ExecutionError = TransactionStrategyExecutionError;
+    type ExecutionError = TransactionExecutionError;
     fn map(&self, error: MagicBlockRpcClientError) -> Self::ExecutionError {
         if error.is_transaction_too_large() {
-            TransactionStrategyExecutionError::TransactionTooLargeError(error.into())
+            TransactionExecutionError::TransactionTooLargeError(error.into())
         } else {
             map_magicblock_client_error(&self.transaction_error_mapper, error)
         }
@@ -256,9 +253,9 @@ where
 
     fn decide_flow(&self, err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
         match err {
-            TransactionStrategyExecutionError::InternalError(
-                InternalError::MagicBlockRpcClientError(err),
-            ) => decide_rpc_error_flow(err),
+            TransactionExecutionError::InternalError(InternalError::MagicBlockRpcClientError(
+                err,
+            )) => decide_rpc_error_flow(err),
             _ => ControlFlow::Break(()),
         }
     }
