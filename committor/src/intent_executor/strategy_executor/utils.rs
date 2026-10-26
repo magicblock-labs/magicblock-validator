@@ -80,10 +80,10 @@ where
         }
 
         // Resolve a previously sent transaction before skipping an empty follow-up.
-        if let Some(commit_signature) = state.commit_signature {
-            if state.transaction_strategy.optimized_tasks.is_empty() {
-                return Ok(Ok(commit_signature));
-            }
+        if let Some(commit_signature) = state.commit_signature
+            && state.transaction_strategy.optimized_tasks.is_empty()
+        {
+            return Ok(Ok(commit_signature));
         }
 
         *state.current_attempt += 1;
@@ -148,19 +148,19 @@ where
         intent_client.invalidate_cached_blockhash().await;
         state.execution_report.dispose(cleanup);
 
-        if let Some(commit_signature) = state.commit_signature {
-            if state.transaction_strategy.optimized_tasks.is_empty() {
-                // Failed actions can leave no work after a confirmed commit.
-                // Keep undelegation failures visible even when patching removes all tasks.
-                if matches!(
-                    execution_err,
-                    TransactionStrategyExecutionError::ActionsError(..)
-                ) {
-                    state.execution_report.add_patched_error(execution_err);
-                    return Ok(Ok(commit_signature));
-                }
-                return Ok(Err(execution_err));
+        if let Some(commit_signature) = state.commit_signature
+            && state.transaction_strategy.optimized_tasks.is_empty()
+        {
+            // Failed actions can leave no work after a confirmed commit.
+            // Keep undelegation failures visible even when patching removes all tasks.
+            if matches!(
+                execution_err,
+                TransactionStrategyExecutionError::ActionsError(..)
+            ) {
+                state.execution_report.add_patched_error(execution_err);
+                return Ok(Ok(commit_signature));
             }
+            return Ok(Err(execution_err));
         }
 
         if *state.current_attempt >= STAGE_LOOP_CEILING {
