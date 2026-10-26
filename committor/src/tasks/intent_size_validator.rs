@@ -15,7 +15,7 @@ use crate::{
     utils::{MAX_TRANSACTION_V1_WIRE_SIZE, MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
-/// Estimates whether an intent's commit and finalize stages fit the supported
+/// Estimates whether an intent's commit and follow-up transactions fit the supported
 /// transaction formats without fetching base-layer state or commit metadata.
 ///
 /// Unlike [`crate::tasks::task_builder::TaskBuilderImpl`], admission cannot compute
@@ -33,7 +33,7 @@ impl IntentSizeValidator {
     /// Returns whether both estimated stages fit v1 or the v0 + ALT fallback.
     /// A rejection applies to these estimates, not every possible delivery plan.
     pub fn fits(intent: &MagicIntentBundle) -> bool {
-        Self::commit_fits(intent) && Self::finalize_fits(intent)
+        Self::commit_fits(intent) && Self::follow_up_fits(intent)
     }
 
     /// Checks the commit-stage tasks fit. Always assumes a uniqueness noop
@@ -42,9 +42,9 @@ impl IntentSizeValidator {
         Self::tasks_fit(Self::commit_tasks(intent), Some(0))
     }
 
-    /// Checks the finalize-stage tasks fit; same worst-case noop assumption.
-    fn finalize_fits(intent: &MagicIntentBundle) -> bool {
-        Self::tasks_fit(Self::finalize_tasks(intent), Some(0))
+    /// Checks the follow-up tasks fit; same worst-case noop assumption.
+    fn follow_up_fits(intent: &MagicIntentBundle) -> bool {
+        Self::tasks_fit(Self::follow_up_tasks(intent), Some(0))
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
@@ -70,12 +70,12 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Builds the finalize-stage tasks used for the size estimate, mirroring
-    /// [`crate::tasks::task_builder::TaskBuilderImpl::finalize_tasks`] but
+    /// Builds the follow-up tasks used for the size estimate, mirroring
+    /// [`crate::tasks::task_builder::TaskBuilderImpl::follow_up_tasks`] but
     /// without fetching rent payers. [`Self::tasks_fit`] assigns distinct
     /// placeholder keys before compiling these tasks, accounting for each
     /// unknown payer's contribution to the transaction size and account count.
-    fn finalize_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
+    fn follow_up_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
         fn undelegate_task(account: &CommittedAccount) -> BaseTaskImpl {
             UndelegateTask {
                 delegated_account: account.pubkey,
@@ -88,7 +88,7 @@ impl IntentSizeValidator {
             .into()
         }
 
-        fn commit_type_finalize_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        fn commit_type_follow_up_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
             let mut tasks = Vec::new();
             if let CommitType::WithBaseActions { base_actions, .. } = commit_type {
                 tasks.extend(create_action_tasks(base_actions));
@@ -99,11 +99,11 @@ impl IntentSizeValidator {
         let mut tasks = Vec::new();
 
         if let Some(ref commit) = intent.commit {
-            tasks.extend(commit_type_finalize_tasks(commit));
+            tasks.extend(commit_type_follow_up_tasks(commit));
         }
 
         if let Some(ref cau) = intent.commit_and_undelegate {
-            tasks.extend(commit_type_finalize_tasks(&cau.commit_action));
+            tasks.extend(commit_type_follow_up_tasks(&cau.commit_action));
             tasks.extend(cau.commit_action.get_committed_accounts().iter().map(undelegate_task));
             if let UndelegateType::WithBaseActions(actions) = &cau.undelegate_action {
                 tasks.extend(create_action_tasks(actions));
@@ -134,7 +134,7 @@ impl IntentSizeValidator {
     /// in the instruction args and never changes instruction size, so which
     /// value we pass here doesn't matter. What actually differs between a
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
-    /// built in [`Self::finalize_tasks`].
+    /// built in [`Self::follow_up_tasks`].
     fn commit_finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
         let mut task =
             create_commit_finalize_task(0, false, account.clone(), Some(account.account.clone()));
@@ -145,7 +145,7 @@ impl IntentSizeValidator {
     }
 
     /// Builds the commit-stage tasks for `commit_type`'s accounts.
-    /// `WithBaseActions` actions are excluded: they run in the finalize
+    /// `WithBaseActions` actions are excluded: they run in the follow-up
     /// stage, not the commit stage.
     fn commit_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
         commit_type
@@ -321,7 +321,7 @@ mod tests {
                         (true, true) => intent.commit_finalize_and_undelegate = Some(action),
                     }
                     let commits = IntentSizeValidator::commit_tasks(&intent);
-                    let finalizes = IntentSizeValidator::finalize_tasks(&intent);
+                    let follow_ups = IntentSizeValidator::follow_up_tasks(&intent);
                     assert_eq!(commits.len(), 1 + usize::from(combined));
                     let BaseTaskImpl::CommitFinalize(task) = &commits[0] else {
                         panic!("admission must estimate combined commits");
@@ -331,7 +331,7 @@ mod tests {
                         data_len > 256
                     );
                     assert_eq!(
-                        finalizes.len(),
+                        follow_ups.len(),
                         usize::from(!combined) + usize::from(undelegate)
                     );
                     assert!(IntentSizeValidator::fits(&intent));
@@ -384,7 +384,7 @@ mod tests {
         };
         let actual_payers = [Pubkey::new_unique(), Pubkey::new_unique()];
         let actual_tasks = |intent: &MagicIntentBundle| {
-            let mut tasks = IntentSizeValidator::finalize_tasks(intent);
+            let mut tasks = IntentSizeValidator::follow_up_tasks(intent);
             let mut payers = actual_payers.iter();
             for task in &mut tasks {
                 if let BaseTaskImpl::Undelegate(task) = task {
@@ -438,7 +438,7 @@ mod tests {
             assert!(!IntentSizeValidator::fits(&above_boundary));
 
             // Sharing the old default payer would incorrectly admit this case.
-            let original = IntentSizeValidator::finalize_tasks(&above_boundary);
+            let original = IntentSizeValidator::follow_up_tasks(&above_boundary);
             assert!(IntentSizeValidator::tasks_fit_v1(
                 &authority,
                 &original,

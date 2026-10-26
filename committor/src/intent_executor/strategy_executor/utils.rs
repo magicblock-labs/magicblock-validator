@@ -19,9 +19,13 @@ use crate::{
         IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
+        progress::TransactionProgress,
         strategy_executor::{error::TransactionStrategyExecutionError, patcher::Patcher},
     },
-    outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
+    outbox::{
+        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        progress::PendingExecution,
+    },
     tasks::{
         BaseTaskImpl,
         task_builder::TaskBuilderError,
@@ -55,7 +59,6 @@ pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
     intent_id: u64,
     make_outbox_stage: impl Fn(PendingTransaction) -> ExecutionStage,
     recover_outbox_pending: fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
-    map_preparation_err: fn(TransactionPreparatorError) -> IntentExecutorError,
     state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
 where
@@ -73,9 +76,15 @@ where
         }
 
         if let &mut Some(ref pending) = state.pending_transaction {
+            state.execution_report.progress.transaction =
+                TransactionProgress::Submitted(pending.signature);
             if resolve_pending_signature(intent_client, pending).await? {
+                state.execution_report.progress.transaction =
+                    TransactionProgress::Confirmed(pending.signature);
                 break Ok(Ok(pending.signature));
             }
+            state.execution_report.progress.transaction =
+                TransactionProgress::Rejected(pending.signature);
             *state.pending_transaction = None;
         }
 
@@ -96,13 +105,15 @@ where
             state.transaction_strategy,
         )
         .await
-        .map_err(map_preparation_err)?;
+        .map_err(IntentExecutorError::FailedPreparation)?;
 
         // Record in outbox before sending
         let pending = PendingTransaction {
             signature: *prepared_transaction.get_signature(),
             blockhash: *prepared_transaction.get_recent_blockhash(),
         };
+        state.execution_report.progress.transaction =
+            TransactionProgress::Prepared(pending.signature);
         let recovery_commit_nonces =
             recovery_commit_nonces(&state.transaction_strategy.optimized_tasks);
         outbox_client
@@ -117,6 +128,8 @@ where
         // Now record locally signature of tx we about to send
         // Precaution for timeout in between
         *state.pending_transaction = Some(pending);
+        state.execution_report.progress.transaction =
+            TransactionProgress::Submitted(pending.signature);
         let signature = &pending.signature;
 
         // Send signed tx
@@ -131,9 +144,16 @@ where
         *state.pending_transaction = None;
 
         let execution_err = match execution_result {
-            Ok(()) => return Ok(Ok(*signature)),
+            Ok(()) => {
+                state.execution_report.progress.transaction =
+                    TransactionProgress::Confirmed(*signature);
+                return Ok(Ok(*signature));
+            }
             Err(err) => err,
         };
+        if execution_err.is_rejected() {
+            state.execution_report.progress.transaction = TransactionProgress::Rejected(*signature);
+        }
         let flow = patcher
             .patch(
                 &execution_err,
@@ -194,35 +214,28 @@ where
     }
 }
 
-pub(in crate::intent_executor) fn single_stage_pending(
+pub(in crate::intent_executor) fn combined_pending(
     status: &OutboxIntentBundleStatus,
 ) -> Option<PendingTransaction> {
-    match status {
-        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(pending)) => Some(*pending),
-        _ => None,
-    }
+    PendingExecution::from_status(status)
+        .filter(|progress| progress.confirmed_commit.is_none() && !progress.has_follow_up)
+        .map(|progress| progress.transaction)
 }
 
 pub(in crate::intent_executor) fn committing_pending(
     status: &OutboxIntentBundleStatus,
 ) -> Option<PendingTransaction> {
-    match status {
-        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
-            program::outbox::TwoStageProgress::Committing(pending),
-        )) => Some(*pending),
-        _ => None,
-    }
+    PendingExecution::from_status(status)
+        .filter(|progress| progress.has_follow_up)
+        .map(|progress| progress.transaction)
 }
 
-pub(in crate::intent_executor) fn finalizing_pending(
+pub(in crate::intent_executor) fn follow_up_pending(
     status: &OutboxIntentBundleStatus,
 ) -> Option<PendingTransaction> {
-    match status {
-        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(
-            program::outbox::TwoStageProgress::Finalizing { finalize, .. },
-        )) => Some(*finalize),
-        _ => None,
-    }
+    PendingExecution::from_status(status)
+        .filter(|progress| progress.confirmed_commit.is_some())
+        .map(|progress| progress.transaction)
 }
 
 pub(in crate::intent_executor) fn recovery_commit_nonces(
@@ -499,12 +512,12 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         .optimized_tasks
         .iter()
         .rposition(|el| matches!(el, BaseTaskImpl::CommitFinalize(_)));
-    let (mut commit_stage_tasks, mut finalize_stage_tasks) = (vec![], vec![]);
+    let (mut commit_stage_tasks, mut follow_up_tasks) = (vec![], vec![]);
     for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
         if Some(i) <= last_commit_ind {
             commit_stage_tasks.push(el);
         } else {
-            finalize_stage_tasks.push(el);
+            follow_up_tasks.push(el);
         }
     }
 
@@ -523,18 +536,18 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
-    let finalize_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
+    let follow_up_alt_pubkeys = if strategy.lookup_tables_keys.is_empty() {
         vec![]
     } else {
         TaskStrategist::collect_lookup_table_keys(
             authority,
-            &finalize_stage_tasks,
+            &follow_up_tasks,
             strategy.uniqueness_nonce,
         )
     };
-    let finalize_strategy = TransactionStrategy {
-        optimized_tasks: finalize_stage_tasks,
-        lookup_tables_keys: finalize_alt_pubkeys,
+    let follow_up_strategy = TransactionStrategy {
+        optimized_tasks: follow_up_tasks,
+        lookup_tables_keys: follow_up_alt_pubkeys,
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
@@ -545,7 +558,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         uniqueness_nonce: None,
     };
 
-    (commit_strategy, finalize_strategy, to_cleanup)
+    (commit_strategy, follow_up_strategy, to_cleanup)
 }
 
 /// Handles undelegation error, stripping away actions
