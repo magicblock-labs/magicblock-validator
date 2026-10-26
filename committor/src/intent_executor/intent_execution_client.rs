@@ -276,3 +276,37 @@ impl SendErrorMapper<MagicBlockRpcClientError> for DefaultGetErrorMapper {
         decide_rpc_error_flow(mapped_error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::intent_executor::test_utils::send_transaction_error;
+
+    #[test]
+    fn send_errors_preserve_split_recovery() {
+        let mapper = IntentErrorMapper {
+            transaction_error_mapper: IntentTransactionErrorMapper {
+                tasks: &[],
+                task_instruction_offset: 0,
+            },
+        };
+        for (error, splits) in [
+            (send_transaction_error("base64 encoded too large"), true),
+            (
+                send_transaction_error(
+                    "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)",
+                ),
+                true,
+            ),
+            (send_transaction_error("connection reset"), false),
+            (
+                MagicBlockRpcClientError::LookupTableDeserialize(
+                    solana_instruction::error::InstructionError::GenericError,
+                ),
+                false,
+            ),
+        ] {
+            assert_eq!(mapper.map(error).is_recoverable_by_splitting(), splits);
+        }
+    }
+}

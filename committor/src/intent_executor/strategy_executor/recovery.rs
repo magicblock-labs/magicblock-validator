@@ -96,7 +96,17 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
                     .iter()
                     .any(|task| matches!(task, BaseTaskImpl::Undelegate(_))) =>
             {
-                handle_undelegation_error(&self.authority.pubkey(), strategy)
+                let mut removed = handle_undelegation_error(&self.authority.pubkey(), strategy);
+                // Report only discarded actions; retained actions still need to execute.
+                let callbacks = removed.extract_action_callbacks();
+                if !callbacks.is_empty() {
+                    report.add_callback_report(self.callback_scheduler.schedule(
+                        callbacks,
+                        err.signature(),
+                        Err(ActionError::from(err)),
+                    ));
+                }
+                removed
             }
             _ => return Ok(ControlFlow::Break(())),
         };

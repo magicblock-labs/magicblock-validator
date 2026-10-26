@@ -14,12 +14,15 @@ use program::{
     outbox::{ExecutionStage, TwoStageProgress},
     outbox_intent_bundles::OutboxIntentBundle,
 };
-use rpc_client::MagicblockRpcClient;
+use rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::{mock_sender::MocksMap, nonblocking::rpc_client::RpcClient};
-use solana_rpc_client_api::request::RpcRequest;
+use solana_rpc_client_api::{
+    client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
+    request::{RpcError, RpcRequest, RpcResponseErrorData},
+};
 use solana_signature::Signature;
 use solana_signer::Signer;
 
@@ -47,6 +50,17 @@ use crate::{
 
 pub(super) const ACCOUNT: Pubkey = Pubkey::new_from_array([7; 32]);
 pub(super) const RESERVED_ALT_KEY: Pubkey = Pubkey::new_from_array([9; 32]);
+
+pub(super) fn send_transaction_error(message: &str) -> MagicBlockRpcClientError {
+    MagicBlockRpcClientError::SendTransaction(Box::new(RpcClientError {
+        request: Some(RpcRequest::SendTransaction),
+        kind: Box::new(RpcClientErrorKind::RpcError(RpcError::RpcResponseError {
+            code: -32602,
+            message: message.to_string(),
+            data: RpcResponseErrorData::Empty,
+        })),
+    }))
+}
 
 pub(super) fn base_action() -> BaseAction {
     let source_program = Pubkey::new_unique();
@@ -213,7 +227,7 @@ impl TransactionPreparator for RecordingPreparator {
     }
 }
 
-type CallbackResults = Vec<(Option<Signature>, ActionResult)>;
+type CallbackResults = Vec<(Option<Signature>, ActionResult, Pubkey)>;
 
 #[derive(Clone, Default)]
 pub(super) struct Callbacks(pub Arc<Mutex<CallbackResults>>);
@@ -227,8 +241,12 @@ impl ActionsCallbackScheduler for Callbacks {
     ) -> Vec<Result<Signature, CallbackScheduleError>> {
         callbacks
             .into_iter()
-            .map(|_| {
-                self.0.lock().unwrap().push((signature, result.clone()));
+            .map(|callback| {
+                self.0.lock().unwrap().push((
+                    signature,
+                    result.clone(),
+                    callback.destination_program,
+                ));
                 Ok(Signature::new_unique())
             })
             .collect()
