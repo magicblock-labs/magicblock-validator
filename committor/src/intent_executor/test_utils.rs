@@ -153,6 +153,7 @@ pub(super) enum Preparation {
 pub(super) struct RecordingPreparator {
     pub steps: Arc<Mutex<VecDeque<Preparation>>>,
     pub prepared: Arc<Mutex<Vec<Vec<BaseTaskImpl>>>>,
+    pub uniqueness_nonces: Arc<Mutex<Vec<Option<u64>>>>,
     pub cleaned: Arc<Mutex<Vec<(Vec<Pubkey>, bool)>>>,
 }
 
@@ -164,6 +165,7 @@ impl TransactionPreparator for RecordingPreparator {
         strategy: &mut TransactionStrategy,
     ) -> PreparatorResult<VersionedMessage> {
         self.prepared.lock().unwrap().push(strategy.optimized_tasks.clone());
+        self.uniqueness_nonces.lock().unwrap().push(strategy.uniqueness_nonce);
         // Represent a reservation made before preparation succeeds or fails.
         strategy.lookup_tables_keys = vec![RESERVED_ALT_KEY];
         let step = self.steps.lock().unwrap().pop_front().unwrap_or(Preparation::Ready);

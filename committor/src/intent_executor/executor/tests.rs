@@ -113,6 +113,8 @@ async fn intent_execution_preserves_recovery_and_completion() {
     for (status, resolution, failure, expected_tasks, actions_only) in [
         (&accepted, Confirmed, None, combined_tasks, false),
         (&accepted, Confirmed, None, &[(0, 0, 1)], true),
+        (&combined, Rejected, None, &[(0, 0, 1)], true),
+        (&combined, Expired, None, &[(0, 0, 1)], true),
         (&combined, Confirmed, None, &[], false),
         (&combined, Rejected, None, combined_tasks, false),
         (&combined, Expired, None, combined_tasks, false),
@@ -286,6 +288,12 @@ async fn intent_execution_preserves_recovery_and_completion() {
             actual_tasks, expected_tasks,
             "{status:?}, {resolution:?}, {failure:?}"
         );
+        if actions_only {
+            assert_eq!(
+                *preparator.uniqueness_nonces.lock().unwrap(),
+                vec![Some(42)]
+            );
+        }
         assert_eq!(
             *outbox.reports.lock().unwrap(),
             if failure == PreparationFailure || resolution == Unavailable {
