@@ -31,18 +31,13 @@ impl TransactionStrategy {
     /// In case old strategy used ALTs recalculate old value
     /// NOTE: this can be used when full revaluation is unnecessary, like:
     /// some tasks were reset, number of tasks didn't increase
-    pub fn dummy_revaluate_alts(&mut self, authority: &Pubkey) -> Vec<Pubkey> {
-        if self.lookup_tables_keys.is_empty() {
-            vec![]
-        } else {
-            std::mem::replace(
-                &mut self.lookup_tables_keys,
-                TaskStrategist::collect_lookup_table_keys(
-                    authority,
-                    &self.optimized_tasks,
-                    self.uniqueness_nonce,
-                ),
-            )
+    pub fn refresh_lookup_table_keys(&mut self, authority: &Pubkey) {
+        if self.uses_alts() {
+            self.lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
+                authority,
+                &self.optimized_tasks,
+                self.uniqueness_nonce,
+            );
         }
     }
 
@@ -59,23 +54,12 @@ impl TransactionStrategy {
             .collect()
     }
 
-    /// Handles actions error, stripping away actions
-    /// Returns [`TransactionStrategy`] to be cleaned up
-    pub fn remove_actions(&mut self, authority: &Pubkey) -> TransactionStrategy {
-        // Strip away actions
-        let (optimized_tasks, action_tasks) = self
-            .optimized_tasks
-            .drain(..)
-            .partition(|el| !matches!(el, BaseTaskImpl::BaseAction(_)));
-        self.optimized_tasks = optimized_tasks;
-
-        let old_alts = self.dummy_revaluate_alts(authority);
-
-        TransactionStrategy {
-            optimized_tasks: action_tasks,
-            lookup_tables_keys: old_alts,
-            uniqueness_nonce: self.uniqueness_nonce,
-        }
+    /// Removes failed actions and returns their callbacks.
+    pub fn remove_actions(&mut self, authority: &Pubkey) -> Vec<BaseActionCallback> {
+        let callbacks = self.extract_action_callbacks();
+        self.optimized_tasks.retain(|task| !matches!(task, BaseTaskImpl::BaseAction(_)));
+        self.refresh_lookup_table_keys(authority);
+        callbacks
     }
 
     pub fn has_actions_callbacks(&self) -> bool {

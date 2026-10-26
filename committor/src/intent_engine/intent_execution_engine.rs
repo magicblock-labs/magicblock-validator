@@ -504,6 +504,7 @@ mod tests {
         test_utils,
         transaction_preparator::{
             TransactionPreparator,
+            cleanup_resources::CleanupResources,
             delivery_preparator::{BufferExecutionError, DeliveryPreparatorResult},
             error::PreparatorResult,
         },
@@ -517,14 +518,15 @@ mod tests {
             &self,
             _authority: &Keypair,
             _transaction_strategy: &mut TransactionStrategy,
+            _cleanup: &mut CleanupResources,
         ) -> PreparatorResult<VersionedMessage> {
             panic!("mock transaction preparator should not prepare a strategy")
         }
 
-        async fn cleanup_for_strategy(
+        async fn cleanup_resources(
             &self,
             _authority: &Keypair,
-            _transaction_strategy: &TransactionStrategy,
+            _resources: &CleanupResources,
             _close_buffers: bool,
         ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
             Ok(())
