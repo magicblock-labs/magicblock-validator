@@ -10,10 +10,9 @@ use tracing::info;
 
 use super::{
     error::TransactionStrategyExecutionError,
-    patcher::{CommitStagePatcher, FinalizeStagePatcher, SingleStagePatcher},
+    recovery::TransactionRecovery,
     utils::{
-        ExecutionState, combined_pending, committing_pending, follow_up_pending,
-        handle_actions_result, handle_cpi_limit_error, stage_execution_loop,
+        ExecutionState, handle_actions_result, handle_cpi_limit_error, transaction_execution_loop,
     },
 };
 use crate::{
@@ -208,63 +207,32 @@ where
             execution_report: self.report,
             commit_signature: confirmed_commit,
         };
-        if has_follow_up {
-            stage_execution_loop(
-                &ctx.authority,
-                &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
-                &ctx.transaction_preparator,
-                CommitStagePatcher {
-                    authority: &ctx.authority,
-                    intent_client: &ctx.intent_client,
-                    intent_id: self.intent_id,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                    task_info_fetcher: &ctx.task_info_fetcher,
-                    committed_pubkeys: self.committed_pubkeys,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                committing_pending,
-                state,
-            )
-            .await
-        } else if confirmed_commit.is_some() {
-            stage_execution_loop(
-                &ctx.authority,
-                &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
-                &ctx.transaction_preparator,
-                FinalizeStagePatcher {
-                    authority: &ctx.authority,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                follow_up_pending,
-                state,
-            )
-            .await
-        } else {
-            stage_execution_loop(
-                &ctx.authority,
-                &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
-                &ctx.transaction_preparator,
-                SingleStagePatcher {
-                    authority: &ctx.authority,
-                    intent_client: &ctx.intent_client,
-                    intent_id: self.intent_id,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                    task_info_fetcher: &ctx.task_info_fetcher,
-                    committed_pubkeys: self.committed_pubkeys,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                combined_pending,
-                state,
-            )
-            .await
-        }
+        transaction_execution_loop(
+            &ctx.authority,
+            &ctx.intent_client,
+            ctx.outbox_client.as_ref(),
+            &ctx.transaction_preparator,
+            TransactionRecovery {
+                authority: &ctx.authority,
+                intent_client: &ctx.intent_client,
+                intent_id: self.intent_id,
+                callback_scheduler: &ctx.actions_callback_executor,
+                task_info_fetcher: &ctx.task_info_fetcher,
+                committed_pubkeys: self.committed_pubkeys,
+            },
+            self.intent_id,
+            make_outbox_stage,
+            |status| {
+                PendingExecution::from_status(status)
+                    .filter(|pending| {
+                        pending.has_follow_up == has_follow_up
+                            && pending.confirmed_commit.is_some() == confirmed_commit.is_some()
+                    })
+                    .map(|pending| pending.transaction)
+            },
+            state,
+        )
+        .await
     }
 
     fn execute_callbacks(&mut self, signature: Option<Signature>, result: Result<(), ActionError>) {
