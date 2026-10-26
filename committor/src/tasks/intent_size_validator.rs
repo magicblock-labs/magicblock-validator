@@ -7,7 +7,7 @@ use solana_signer::Signer;
 
 use crate::{
     tasks::{
-        BaseTask, BaseTaskImpl, UndelegateTask,
+        Task, UndelegateTask,
         commit_delivery::CommitDelivery,
         task_strategist::TaskStrategist,
         utils::{TransactionUtils, create_action_tasks, create_commit_finalize_task},
@@ -18,7 +18,7 @@ use crate::{
 /// Estimates whether an intent's commit and follow-up transactions fit the supported
 /// transaction formats without fetching base-layer state or commit metadata.
 ///
-/// Unlike [`crate::tasks::task_builder::TaskBuilderImpl`], admission cannot compute
+/// Unlike [`crate::tasks::task_builder::TaskBuilder`], admission cannot compute
 /// the actual account diff. It estimates larger accounts using buffers, reserves
 /// distinct keys for unknown rent payers, and includes a uniqueness noop in each
 /// stage. Each stage is checked against v1, then v0 with full ALT coverage.
@@ -50,9 +50,8 @@ impl IntentSizeValidator {
     /// Builds the commit-stage tasks used for the size estimate: real
     /// standalone/base actions, and an estimated `CommitFinalize`
     /// task for each committed account.
-    fn commit_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
-        let mut tasks: Vec<BaseTaskImpl> =
-            create_action_tasks(&intent.standalone_actions).collect();
+    fn commit_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
+        let mut tasks: Vec<Task> = create_action_tasks(&intent.standalone_actions).collect();
 
         if let Some(ref commit) = intent.commit {
             tasks.extend(Self::commit_type_tasks(commit));
@@ -71,12 +70,12 @@ impl IntentSizeValidator {
     }
 
     /// Builds the follow-up tasks used for the size estimate, mirroring
-    /// [`crate::tasks::task_builder::TaskBuilderImpl::follow_up_tasks`] but
+    /// [`crate::tasks::task_builder::TaskBuilder::follow_up_tasks`] but
     /// without fetching rent payers. [`Self::tasks_fit`] assigns distinct
     /// placeholder keys before compiling these tasks, accounting for each
     /// unknown payer's contribution to the transaction size and account count.
-    fn follow_up_tasks(intent: &MagicIntentBundle) -> Vec<BaseTaskImpl> {
-        fn undelegate_task(account: &CommittedAccount) -> BaseTaskImpl {
+    fn follow_up_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
+        fn undelegate_task(account: &CommittedAccount) -> Task {
             UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
@@ -88,7 +87,7 @@ impl IntentSizeValidator {
             .into()
         }
 
-        fn commit_type_follow_up_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+        fn commit_type_follow_up_tasks(commit_type: &CommitType) -> Vec<Task> {
             let mut tasks = Vec::new();
             if let CommitType::WithBaseActions { base_actions, .. } = commit_type {
                 tasks.extend(create_action_tasks(base_actions));
@@ -135,11 +134,11 @@ impl IntentSizeValidator {
     /// value we pass here doesn't matter. What actually differs between a
     /// commit and a commit-and-undelegate is the extra `UndelegateTask`
     /// built in [`Self::follow_up_tasks`].
-    fn commit_finalize_task(account: &CommittedAccount) -> BaseTaskImpl {
+    fn commit_finalize_task(account: &CommittedAccount) -> Task {
         let mut task =
             create_commit_finalize_task(0, false, account.clone(), Some(account.account.clone()));
         if matches!(task.delivery, CommitDelivery::DiffInArgs { .. }) {
-            task.try_optimize_tx_size();
+            task.try_use_buffer();
         }
         task.into()
     }
@@ -147,7 +146,7 @@ impl IntentSizeValidator {
     /// Builds the commit-stage tasks for `commit_type`'s accounts.
     /// `WithBaseActions` actions are excluded: they run in the follow-up
     /// stage, not the commit stage.
-    fn commit_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
+    fn commit_type_tasks(commit_type: &CommitType) -> Vec<Task> {
         commit_type
             .get_committed_accounts()
             .iter()
@@ -155,8 +154,8 @@ impl IntentSizeValidator {
             .collect()
     }
 
-    fn commit_finalize_type_tasks(commit_type: &CommitType) -> Vec<BaseTaskImpl> {
-        let mut tasks: Vec<BaseTaskImpl> = commit_type
+    fn commit_finalize_type_tasks(commit_type: &CommitType) -> Vec<Task> {
+        let mut tasks: Vec<Task> = commit_type
             .get_committed_accounts()
             .iter()
             .map(Self::commit_finalize_task)
@@ -169,7 +168,7 @@ impl IntentSizeValidator {
 
     /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any) fit through
     /// either v1 or the v0 + ALT fallback.
-    fn tasks_fit(mut tasks: Vec<BaseTaskImpl>, uniqueness_nonce: Option<u64>) -> bool {
+    fn tasks_fit(mut tasks: Vec<Task>, uniqueness_nonce: Option<u64>) -> bool {
         if TransactionUtils::tasks_compute_units(&tasks, uniqueness_nonce) > 1_400_000 {
             return false;
         }
@@ -184,11 +183,11 @@ impl IntentSizeValidator {
     /// make the estimate smaller. Only admission tasks use these placeholders;
     /// execution gets the actual payers from delegation metadata.
     fn assign_unknown_rent_payers(
-        tasks: &mut [BaseTaskImpl],
+        tasks: &mut [Task],
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) {
-        if !tasks.iter().any(|task| matches!(task, BaseTaskImpl::Undelegate(_))) {
+        if !tasks.iter().any(|task| matches!(task, Task::Undelegate(_))) {
             return;
         }
 
@@ -209,7 +208,7 @@ impl IntentSizeValidator {
         // candidate is skipped once, so the work is bounded by the stage's keys.
         let mut counter = 0_u64;
         for task in tasks {
-            if let BaseTaskImpl::Undelegate(task) = task {
+            if let Task::Undelegate(task) = task {
                 loop {
                     let mut bytes = [0; 32];
                     bytes[..8].copy_from_slice(&counter.to_le_bytes());
@@ -224,11 +223,7 @@ impl IntentSizeValidator {
         }
     }
 
-    fn tasks_fit_v1(
-        placeholder: &Keypair,
-        tasks: &[BaseTaskImpl],
-        uniqueness_nonce: Option<u64>,
-    ) -> bool {
+    fn tasks_fit_v1(placeholder: &Keypair, tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
         TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
             placeholder,
             tasks,
@@ -241,7 +236,7 @@ impl IntentSizeValidator {
 
     fn tasks_fit_v0_with_alts(
         placeholder: &Keypair,
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         uniqueness_nonce: Option<u64>,
     ) -> bool {
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
@@ -323,7 +318,7 @@ mod tests {
                     let commits = IntentSizeValidator::commit_tasks(&intent);
                     let follow_ups = IntentSizeValidator::follow_up_tasks(&intent);
                     assert_eq!(commits.len(), 1 + usize::from(combined));
-                    let BaseTaskImpl::CommitFinalize(task) = &commits[0] else {
+                    let Task::CommitFinalize(task) = &commits[0] else {
                         panic!("admission must estimate combined commits");
                     };
                     assert_eq!(
@@ -387,13 +382,13 @@ mod tests {
             let mut tasks = IntentSizeValidator::follow_up_tasks(intent);
             let mut payers = actual_payers.iter();
             for task in &mut tasks {
-                if let BaseTaskImpl::Undelegate(task) = task {
+                if let Task::Undelegate(task) = task {
                     task.rent_reimbursement = *payers.next().unwrap();
                 }
             }
             tasks
         };
-        let wire_size = |tasks: &[BaseTaskImpl]| {
+        let wire_size = |tasks: &[Task]| {
             serialized_transaction_size(
                 &TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                     &authority,
@@ -404,11 +399,11 @@ mod tests {
                 .unwrap(),
             )
         };
-        let payer_keys = |tasks: &[BaseTaskImpl]| {
+        let payer_keys = |tasks: &[Task]| {
             tasks
                 .iter()
                 .filter_map(|task| match task {
-                    BaseTaskImpl::Undelegate(task) => Some(task.rent_reimbursement),
+                    Task::Undelegate(task) => Some(task.rent_reimbursement),
                     _ => None,
                 })
                 .collect::<Vec<_>>()

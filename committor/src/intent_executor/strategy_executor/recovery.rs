@@ -12,12 +12,12 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         strategy_executor::{
-            error::TransactionStrategyExecutionError,
+            error::TransactionExecutionError,
             utils::{handle_actions_result, handle_commit_id_error, handle_undelegation_error},
         },
     },
     tasks::{
-        BaseTaskImpl,
+        Task,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::TransactionStrategy,
     },
@@ -37,32 +37,27 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
     /// Follow-ups cannot repair commits, and standalone actions cannot be replayed.
     pub(in crate::intent_executor) async fn recover(
         &self,
-        err: &TransactionStrategyExecutionError,
+        err: &TransactionExecutionError,
         strategy: &mut TransactionStrategy,
         report: &mut IntentExecutionReport,
     ) -> IntentExecutorResult<ControlFlow<()>> {
         let can_repair_commits = report.progress.confirmed_commit.is_none()
             && !self.committed_pubkeys.is_empty()
-            && strategy
-                .optimized_tasks
-                .iter()
-                .any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)));
+            && strategy.tasks.iter().any(|task| matches!(task, Task::CommitFinalize(_)));
         if !can_repair_commits && report.progress.confirmed_commit.is_none() {
             return Ok(ControlFlow::Break(()));
         }
 
         match err {
-            TransactionStrategyExecutionError::ActionsError(err, signature) => {
-                handle_actions_result(
-                    &self.authority.pubkey(),
-                    self.callback_scheduler,
-                    report,
-                    strategy,
-                    *signature,
-                    Err(ActionError::ActionsError(err.clone(), *signature)),
-                )
-            }
-            TransactionStrategyExecutionError::CommitIDError(_, _) if can_repair_commits => {
+            TransactionExecutionError::ActionsError(err, signature) => handle_actions_result(
+                &self.authority.pubkey(),
+                self.callback_scheduler,
+                report,
+                strategy,
+                *signature,
+                Err(ActionError::ActionsError(err.clone(), *signature)),
+            ),
+            TransactionExecutionError::CommitIDError(_, _) if can_repair_commits => {
                 handle_commit_id_error(
                     &self.authority.pubkey(),
                     self.task_info_fetcher,
@@ -72,28 +67,23 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
                 )
                 .await?
             }
-            TransactionStrategyExecutionError::UnfinalizedAccountError(_, _)
-                if can_repair_commits =>
-            {
+            TransactionExecutionError::UnfinalizedAccountError(_, _) if can_repair_commits => {
                 let task_index = err.task_index(strategy.task_instruction_offset());
-                let Some(BaseTaskImpl::CommitFinalize(task)) =
-                    task_index.and_then(|index| strategy.optimized_tasks.get(index as usize))
+                let Some(Task::CommitFinalize(task)) =
+                    task_index.and_then(|index| strategy.tasks.get(index as usize))
                 else {
                     error!(?task_index, error = ?err, "RPC returned unexpected commit task index");
                     return Ok(ControlFlow::Break(()));
                 };
                 // Keep the pre-upgrade DLP bridge until #1801's rollout is complete.
                 self.intent_client
-                    .finalize_account(self.authority, task.committed_account.pubkey)
+                    .finalize_legacy_commit(self.authority, task.committed_account.pubkey)
                     .await
                     .map_err(IntentExecutorError::FailedPreparation)?
                     .map_err(IntentExecutorError::FailedExecution)?;
             }
-            TransactionStrategyExecutionError::UndelegationError(_, _)
-                if strategy
-                    .optimized_tasks
-                    .iter()
-                    .any(|task| matches!(task, BaseTaskImpl::Undelegate(_))) =>
+            TransactionExecutionError::UndelegationError(_, _)
+                if strategy.tasks.iter().any(|task| matches!(task, Task::Undelegate(_))) =>
             {
                 // Report only discarded actions; retained actions still need to execute.
                 let callbacks = handle_undelegation_error(&self.authority.pubkey(), strategy);

@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use async_trait::async_trait;
 use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
 use mbv_core::intent::{CommitAndUndelegate, CommitType, UndelegateType, types::CommittedAccount};
 use program::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -10,28 +9,13 @@ use solana_signature::Signature;
 use tracing::error;
 
 use crate::tasks::{
-    BaseTaskImpl, UndelegateTask,
+    Task, UndelegateTask,
     task_info_fetcher::{TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult},
     utils::{COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks, create_commit_finalize_task},
 };
 
-#[async_trait]
-pub trait TasksBuilder {
-    // Creates tasks for commit stage
-    async fn commit_tasks<C: TaskInfoFetcher>(
-        commit_id_fetcher: &Arc<C>,
-        base_intent: &ScheduledIntentBundle,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
-
-    // Create remaining actions and undelegation tasks
-    async fn follow_up_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
-        base_intent: &ScheduledIntentBundle,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
-}
-
-/// Necessary info for commit stage task creation
-pub struct CommitStageTaskInfo {
+/// Nonces and base account snapshots needed to build commit tasks.
+struct CommitInputs {
     /// commit nonce for a given address
     commit_nonces: HashMap<Pubkey, u64>,
     /// Base account state for diff calculation
@@ -39,9 +23,9 @@ pub struct CommitStageTaskInfo {
 }
 
 /// Task builder
-pub struct TaskBuilderImpl;
+pub struct TaskBuilder;
 
-impl TaskBuilderImpl {
+impl TaskBuilder {
     async fn fetch_commit_nonces<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
         accounts: &[CommittedAccount],
@@ -85,11 +69,11 @@ impl TaskBuilderImpl {
         .collect()
     }
 
-    async fn fetch_commit_stage_info<C: TaskInfoFetcher>(
+    async fn fetch_commit_inputs<C: TaskInfoFetcher>(
         intent_bundle: &ScheduledIntentBundle,
         task_info_fetcher: &Arc<C>,
-    ) -> TaskBuilderResult<CommitStageTaskInfo> {
-        // Fetch necessary data for BaseTasks creation
+    ) -> TaskBuilderResult<CommitInputs> {
+        // Fetch necessary data for commit task creation.
         let all_committed_accounts = intent_bundle.get_all_committed_accounts();
         // Get commit nonces and base accounts
         let min_context_slot = all_committed_accounts
@@ -111,17 +95,14 @@ impl TaskBuilderImpl {
             Default::default()
         });
 
-        Ok(CommitStageTaskInfo { commit_nonces, base_accounts })
+        Ok(CommitInputs { commit_nonces, base_accounts })
     }
-}
 
-#[async_trait]
-impl TasksBuilder for TaskBuilderImpl {
-    /// Returns [`BaseTaskImpl`]s for Commit stage
-    async fn commit_tasks<C: TaskInfoFetcher>(
+    /// Builds commits and actions that can run before the follow-up transaction.
+    pub async fn commit_tasks<C: TaskInfoFetcher>(
         task_info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+    ) -> TaskBuilderResult<Vec<Task>> {
         let mut tasks = Vec::new();
         // Add standalone actions first
         tasks.extend(create_action_tasks(
@@ -129,10 +110,10 @@ impl TasksBuilder for TaskBuilderImpl {
         ));
 
         // Fetch data necessary for task creation
-        let CommitStageTaskInfo {
+        let CommitInputs {
             mut commit_nonces,
             mut base_accounts,
-        } = Self::fetch_commit_stage_info(intent_bundle, task_info_fetcher).await?;
+        } = Self::fetch_commit_inputs(intent_bundle, task_info_fetcher).await?;
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
@@ -178,16 +159,16 @@ impl TasksBuilder for TaskBuilderImpl {
     }
 
     /// Returns tasks for remaining actions and undelegation
-    async fn follow_up_tasks<C: TaskInfoFetcher>(
+    pub async fn follow_up_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
-    ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+    ) -> TaskBuilderResult<Vec<Task>> {
         // Helper to create an undelegate task
         fn undelegate_task(
             account: &CommittedAccount,
             rent_reimbursement: &Pubkey,
             include_undelegation_request: bool,
-        ) -> BaseTaskImpl {
+        ) -> Task {
             UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
@@ -198,7 +179,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        fn create_follow_up_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
+        fn create_follow_up_tasks(commit: &CommitType) -> Vec<Task> {
             match commit {
                 CommitType::Standalone(_) => Vec::new(),
                 CommitType::WithBaseActions { base_actions, .. } => {
@@ -212,7 +193,7 @@ impl TasksBuilder for TaskBuilderImpl {
         fn create_undelegate_tasks(
             commit_and_undelegate: &CommitAndUndelegate,
             delegation_metadata: &HashMap<Pubkey, DelegationMetadata>,
-        ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
+        ) -> TaskBuilderResult<Vec<Task>> {
             let accounts = commit_and_undelegate.get_committed_accounts();
 
             let mut tasks = accounts
@@ -271,7 +252,7 @@ fn build_commit_tasks(
     allow_undelegation: bool,
     commit_nonces: &mut HashMap<Pubkey, u64>,
     base_accounts: &mut HashMap<Pubkey, Account>,
-) -> Vec<BaseTaskImpl> {
+) -> Vec<Task> {
     commit_type
         .get_committed_accounts()
         .iter()
