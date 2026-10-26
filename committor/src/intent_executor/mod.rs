@@ -1,41 +1,31 @@
-pub mod accepted_intent_executor;
 pub mod cleanup_handle;
 pub mod error;
+pub(crate) mod executor;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
-pub mod single_stage_intent_executor;
 pub mod strategy_executor;
-pub mod two_stage_intent_executor;
 pub mod utils;
 
-use std::{sync::Arc, time::Duration};
+#[cfg(test)]
+mod test_utils;
+
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use mbv_core::traits::{ActionsCallbackScheduler, CallbackScheduleError};
+use mbv_core::traits::CallbackScheduleError;
 use metrics::metrics;
-use program::{
-    magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    outbox_intent_bundles::OutboxIntentBundleStatus,
-};
+use program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use strategy_executor::error::TransactionStrategyExecutionError;
 
 use crate::{
     intent_executor::{
-        accepted_intent_executor::AcceptedIntentExecutor,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        single_stage_intent_executor::SingleStageIntentExecutor,
-        two_stage_intent_executor::TwoStageIntentExecutor,
     },
-    outbox::OutboxClient,
-    tasks::{
-        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
-        task_strategist::TransactionStrategy,
-    },
-    transaction_preparator::TransactionPreparator,
+    tasks::{task_info_fetcher::CacheTaskInfoFetcher, task_strategist::TransactionStrategy},
 };
 
 #[async_trait]
@@ -47,34 +37,6 @@ pub trait IntentExecutor<T>: Send + Sync + 'static {
         self: Box<Self>,
         base_intent: ScheduledIntentBundle,
     ) -> (IntentExecutionResult, CleanupHandle<T>);
-}
-
-pub fn build_stage_intent_executor<T, F, A, O>(
-    ctx: IntentExecutorCtx<T, F, A, O>,
-    status: OutboxIntentBundleStatus,
-    actions_timeout: Duration,
-) -> Box<dyn IntentExecutor<T>>
-where
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
-    A: ActionsCallbackScheduler,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
-{
-    match status {
-        OutboxIntentBundleStatus::Accepted => {
-            Box::new(AcceptedIntentExecutor::new(ctx, actions_timeout))
-                as Box<dyn IntentExecutor<T> + 'static>
-        }
-        OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(sig)) => {
-            Box::new(SingleStageIntentExecutor::new(ctx, actions_timeout, sig))
-                as Box<dyn IntentExecutor<T> + 'static>
-        }
-        OutboxIntentBundleStatus::Executing(ExecutionStage::TwoStage(value)) => {
-            Box::new(TwoStageIntentExecutor::new(ctx, actions_timeout, value))
-                as Box<dyn IntentExecutor<T> + 'static>
-        }
-    }
 }
 
 pub struct IntentExecutorCtx<T, F, A, O> {
