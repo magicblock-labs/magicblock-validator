@@ -283,11 +283,26 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 }
 
 #[cfg(test)]
-mod callback_tests {
+mod tests {
+    use delegation_program_api::{
+        discriminator::DlpDiscriminator, pda::undelegation_request_pda_from_delegated_account,
+    };
     use mbv_core::intent::ProgramArgs;
+    use solana_compute_budget_interface::ComputeBudgetInstruction;
+    use solana_keypair::Keypair;
+    use solana_signer::Signer;
+    use solana_transaction::Transaction;
+    use tracing::info;
 
     use super::*;
-    use crate::tasks::task_strategist::TransactionStrategy;
+    use crate::{
+        tasks::{
+            buffer_task::BufferCleanup, task_strategist::TransactionStrategy,
+            utils::TransactionUtils,
+        },
+        test_utils,
+        utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
+    };
 
     /// Only A-to-A responses reach the signing scheduler, even for persisted
     /// mismatches, missing provenance, or a separately supplied V2 source B.
@@ -336,16 +351,6 @@ mod callback_tests {
             }
         }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use delegation_program_api::{
-        discriminator::DlpDiscriminator, pda::undelegation_request_pda_from_delegated_account,
-    };
-    use solana_pubkey::Pubkey;
-
-    use super::UndelegateTask;
 
     #[test]
     fn test_undelegate_task_uses_request_account_when_included() {
@@ -369,58 +374,46 @@ mod tests {
         assert!(ix.accounts[12].is_writable);
         assert!(!ix.accounts[12].is_signer);
     }
-}
 
-#[test]
-fn test_close_buffer_limit() {
-    use solana_compute_budget_interface::ComputeBudgetInstruction;
-    use solana_keypair::Keypair;
-    use solana_signer::Signer;
-    use solana_transaction::Transaction;
-    use tracing::info;
+    #[test]
+    fn test_close_buffer_limit() {
+        test_utils::init_test_logger();
 
-    use crate::{
-        tasks::{buffer_task::BufferCleanup, utils::TransactionUtils},
-        test_utils,
-        utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
-    };
+        let authority = Keypair::new();
 
-    test_utils::init_test_logger();
+        // Budget ixs (fixed)
+        let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(30_000);
+        let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(101);
 
-    let authority = Keypair::new();
+        // Each task unique: commit_id increments; pubkey is new_unique each time
+        let base_commit_id = 101u64;
+        let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
+            let task = BufferCleanup {
+                commit_id: base_commit_id + i as u64,
+                pubkey: Pubkey::new_unique(),
+            };
+            task.instruction(&authority.pubkey())
+        });
 
-    // Budget ixs (fixed)
-    let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(30_000);
-    let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(101);
+        let mut ixs: Vec<_> =
+            [compute_budget_ix, compute_unit_price_ix].into_iter().chain(ixs_iter).collect();
+        ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
 
-    // Each task unique: commit_id increments; pubkey is new_unique each time
-    let base_commit_id = 101u64;
-    let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
-        let task = BufferCleanup {
-            commit_id: base_commit_id + i as u64,
+        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+        let tx_size = serialized_transaction_size(&tx);
+        info!(transaction_size = tx_size, "Cleanup task transaction size");
+        assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
+
+        // One more unique task should overflow
+        let overflow_task = BufferCleanup {
+            commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
             pubkey: Pubkey::new_unique(),
         };
-        task.instruction(&authority.pubkey())
-    });
+        let uniqueness_noop = ixs.pop().expect("uniqueness noop");
+        ixs.push(overflow_task.instruction(&authority.pubkey()));
+        ixs.push(uniqueness_noop);
 
-    let mut ixs: Vec<_> =
-        [compute_budget_ix, compute_unit_price_ix].into_iter().chain(ixs_iter).collect();
-    ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
-
-    let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    let tx_size = serialized_transaction_size(&tx);
-    info!(transaction_size = tx_size, "Cleanup task transaction size");
-    assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
-
-    // One more unique task should overflow
-    let overflow_task = BufferCleanup {
-        commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
-        pubkey: Pubkey::new_unique(),
-    };
-    let uniqueness_noop = ixs.pop().expect("uniqueness noop");
-    ixs.push(overflow_task.instruction(&authority.pubkey()));
-    ixs.push(uniqueness_noop);
-
-    let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-    assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+        assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+    }
 }

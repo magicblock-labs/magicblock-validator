@@ -535,9 +535,10 @@ pub enum IntentSchedulerError {
 
 pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
 
-/// Set of simple tests
 #[cfg(test)]
-mod simple_test {
+mod tests {
+    use mbv_core::intent::{MagicIntentBundle, types::CommittedAccount};
+    use solana_account::Account;
     use solana_pubkey::pubkey;
 
     use super::*;
@@ -600,19 +601,6 @@ mod simple_test {
         // 1 intent executing, NUM_INTENTS - 1 are blocked
         assert_eq!(scheduler.intents_blocked() as u64, NUM_INTENTS - 1);
     }
-}
-
-/// Set of simple completion tests
-#[cfg(test)]
-mod completion_simple_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
-    }
 
     #[test]
     fn test_completion_unblocks_intents() {
@@ -667,18 +655,6 @@ mod completion_simple_test {
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(expected_msg3, msg3);
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod complex_blocking_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     /// Case:
@@ -847,18 +823,6 @@ mod complex_blocking_test {
         assert!(next_intents.contains(&msg5));
         assert_eq!(scheduler.intents_blocked(), 0);
     }
-}
-
-#[cfg(test)]
-mod edge_cases_test {
-    use mbv_core::intent::MagicIntentBundle;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
-    }
 
     #[test]
     fn test_intent_without_pubkeys() {
@@ -870,20 +834,6 @@ mod edge_cases_test {
         // Should execute immediately since it has no pubkeys
         assert!(scheduler.schedule(msg.clone()).is_some());
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod complete_error_test {
-    use mbv_core::intent::types::CommittedAccount;
-    use solana_account::Account;
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     #[test]
@@ -1005,13 +955,6 @@ mod complete_error_test {
             Err(IntentSchedulerError::CompletingBlockedIntentError)
         ));
     }
-}
-
-#[cfg(test)]
-mod intent_bundle_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
 
     /// Bundle contains BOTH Commit and CommitAndUndelegate.
     /// Scheduler must treat committed pubkeys as UNION across both.
@@ -1083,18 +1026,6 @@ mod intent_bundle_test {
         assert!(next2 == msg2 || next2 == msg3);
         assert_ne!(next1, next2);
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod poisoned_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     /// # Case 1 — poison propagates through a chain, but spares an
