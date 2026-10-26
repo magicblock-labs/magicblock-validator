@@ -132,11 +132,12 @@ pub struct CleanupTask {
 impl CleanupTask {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
-            CommitDelivery::StateInBuffer { prepared: true }
-            | CommitDelivery::DiffInBuffer { prepared: true, .. } => Some(Self {
-                commit_id: task.commit_id,
-                pubkey: task.committed_account.pubkey,
-            }),
+            CommitDelivery::StateInBuffer { .. } | CommitDelivery::DiffInBuffer { .. } => {
+                Some(Self {
+                    commit_id: task.commit_id,
+                    pubkey: task.committed_account.pubkey,
+                })
+            }
             _ => None,
         }
     }
@@ -149,7 +150,7 @@ impl CleanupTask {
         })
     }
 
-    /// Returns compute units required to execute [`crate::tasks::CleanupTask`]
+    /// Returns compute units required to close a buffer and its chunks account.
     pub fn compute_units(&self) -> u32 {
         30_000
     }

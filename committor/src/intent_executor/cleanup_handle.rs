@@ -1,14 +1,16 @@
+use std::collections::HashSet;
+
 use futures_util::future::join_all;
 use solana_keypair::Keypair;
 
-use crate::{
-    tasks::task_strategist::TransactionStrategy,
-    transaction_preparator::{TransactionPreparator, delivery_preparator::BufferExecutionError},
+use crate::transaction_preparator::{
+    TransactionPreparator, cleanup_resources::CleanupResources,
+    delivery_preparator::BufferExecutionError,
 };
 
 pub struct CleanupHandle<T> {
     authority: Keypair,
-    junk: Vec<TransactionStrategy>,
+    resources: Vec<CleanupResources>,
     /// When false (execution failed), only releases ALT reservations without
     /// closing buffer PDAs — avoids a race condition where a concurrent
     /// executor may still be using them.
@@ -19,22 +21,28 @@ pub struct CleanupHandle<T> {
 impl<T: TransactionPreparator> CleanupHandle<T> {
     pub(crate) fn new(
         authority: Keypair,
-        junk: Vec<TransactionStrategy>,
+        resources: Vec<CleanupResources>,
         close_buffers: bool,
         transaction_preparator: T,
     ) -> Self {
         Self {
-            junk,
+            resources,
             close_buffers,
             authority,
             transaction_preparator,
         }
     }
 
-    pub async fn clean(self) -> Result<(), BufferExecutionError> {
+    pub async fn clean(mut self) -> Result<(), BufferExecutionError> {
         let close_buffers = self.close_buffers;
-        let cleanup_futs = self.junk.iter().map(|to_cleanup| {
-            self.transaction_preparator.cleanup_for_strategy(
+        // Retries can prepare the same buffer again. Close it once, but release
+        // every ALT reservation, even when separate attempts used identical keys.
+        let mut buffers = HashSet::new();
+        for resources in &mut self.resources {
+            resources.buffers.retain(|task| buffers.insert((task.pubkey, task.commit_id)));
+        }
+        let cleanup_futs = self.resources.iter().map(|to_cleanup| {
+            self.transaction_preparator.cleanup_resources(
                 &self.authority,
                 to_cleanup,
                 close_buffers,
