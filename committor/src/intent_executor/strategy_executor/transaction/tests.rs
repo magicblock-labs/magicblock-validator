@@ -9,6 +9,7 @@ use solana_rpc_client_api::request::RpcRequest;
 use super::*;
 use crate::{
     intent_executor::test_utils::*,
+    outbox::ScheduledBaseIntentMeta,
     tasks::{
         UndelegateTask,
         utils::{TransactionUtils, create_action_tasks, create_commit_finalize_task},
