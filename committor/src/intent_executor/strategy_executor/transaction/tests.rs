@@ -189,7 +189,7 @@ async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
 }
 
 #[tokio::test]
-async fn execution_failure_surrenders_current_and_pending_resources() {
+async fn recovery_preserves_progress_and_resources() {
     let nonce_error = format!(
         r#"{{"InstructionError":[{},{{"Custom":{}}}]}}"#,
         TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT,
@@ -256,6 +256,81 @@ async fn execution_failure_surrenders_current_and_pending_resources() {
                 .filter(|strategy| strategy.lookup_tables_keys.contains(&RESERVED_ALT_KEY))
                 .count(),
             expected_preparations,
+        );
+    }
+
+    // Rejected actions and undelegations can leave commits or follow-up work.
+    // Action-only intents must fail without sending a replacement transaction.
+    for (tasks, confirmed, failed_task, succeeds, remaining) in [
+        (vec![commit(), action()], false, 1, true, Some(1)),
+        (vec![action()], false, 0, false, None),
+        (vec![undelegate(), action()], true, 1, true, Some(1)),
+        (vec![action()], true, 0, true, None),
+        (
+            vec![commit(), undelegate(), action()],
+            false,
+            1,
+            true,
+            Some(1),
+        ),
+        (vec![undelegate(), action()], true, 0, false, None),
+    ] {
+        let instruction = TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize + failed_task;
+        let error = format!(r#"{{"InstructionError":[{instruction},{{"Custom":1}}]}}"#);
+        let mut ctx = executor(vec![], Some(&error));
+        let has_commits = tasks.iter().any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)));
+        if !has_commits {
+            std::sync::Arc::get_mut(&mut ctx.outbox_client)
+                .unwrap()
+                .expected_commit_nonces
+                .clear();
+        }
+        let mut report = IntentExecutionReport::default();
+        let earlier_commit = Signature::new_unique();
+        let runner = if confirmed {
+            TransactionExecutor::resume_follow_up(
+                &ctx,
+                &mut report,
+                42,
+                earlier_commit,
+                strategy(tasks),
+            )
+        } else {
+            TransactionExecutor::new(
+                &ctx,
+                &mut report,
+                42,
+                if has_commits { &[ACCOUNT] } else { &[] },
+                strategy(tasks).into(),
+            )
+        };
+        let result = runner.execute(|| Some(Duration::from_secs(60))).await;
+        assert_eq!(
+            result.is_ok(),
+            succeeds,
+            "confirmed={confirmed}, task={failed_task}: {result:?}"
+        );
+        assert_eq!(
+            report.progress.confirmed_commit,
+            confirmed.then_some(earlier_commit)
+        );
+        let prepared = ctx.transaction_preparator.prepared.lock().unwrap();
+        assert_eq!(prepared.len(), 1 + usize::from(remaining.is_some()));
+        if let Some(remaining) = remaining {
+            assert_eq!(prepared[1].len(), remaining);
+            if confirmed {
+                assert!(matches!(prepared[1][0], BaseTaskImpl::Undelegate(_)));
+            } else {
+                assert!(matches!(prepared[1][0], BaseTaskImpl::CommitFinalize(_)));
+            }
+        }
+        assert_eq!(
+            report
+                .junk
+                .iter()
+                .filter(|strategy| !strategy.lookup_tables_keys.is_empty())
+                .count(),
+            prepared.len()
         );
     }
 }

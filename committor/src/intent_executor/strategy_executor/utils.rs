@@ -20,12 +20,11 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
         progress::TransactionProgress,
-        strategy_executor::{error::TransactionStrategyExecutionError, patcher::Patcher},
+        strategy_executor::{
+            error::TransactionStrategyExecutionError, recovery::TransactionRecovery,
+        },
     },
-    outbox::{
-        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
-        progress::PendingExecution,
-    },
+    outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
     tasks::{
         BaseTaskImpl,
         task_builder::TaskBuilderError,
@@ -35,7 +34,7 @@ use crate::{
     transaction_preparator::{TransactionPreparator, error::TransactionPreparatorError},
 };
 
-const STAGE_LOOP_CEILING: u8 = 10;
+const TRANSACTION_LOOP_CEILING: u8 = 10;
 
 /// How long to wait between re-checks of a pending signature that is still
 /// within its blockhash's valid window (i.e. it might still land).
@@ -50,29 +49,31 @@ pub(in crate::intent_executor) struct ExecutionState<'a> {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::intent_executor) async fn stage_execution_loop<'a, T, O, P>(
+pub(in crate::intent_executor) async fn transaction_execution_loop<'a, T, O, F, A>(
     authority: &Keypair,
     intent_client: &IntentExecutionClient,
     outbox_client: &O,
     transaction_preparator: &T,
-    mut patcher: P,
+    recovery: TransactionRecovery<'_, F, A>,
     intent_id: u64,
     make_outbox_stage: impl Fn(PendingTransaction) -> ExecutionStage,
-    recover_outbox_pending: fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
+    recover_outbox_pending: impl Fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
     state: ExecutionState<'a>,
 ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>>
 where
     T: TransactionPreparator,
     O: OutboxClient,
     O::Error: Into<IntentExecutorError>,
-    P: Patcher,
+    F: TaskInfoFetcher,
+    A: ActionsCallbackScheduler,
 {
     let mut reconciled_outbox = false;
     loop {
         if state.pending_transaction.is_none() && !reconciled_outbox {
             reconciled_outbox = true;
             *state.pending_transaction =
-                recover_pending_from_outbox(outbox_client, intent_id, recover_outbox_pending).await;
+                recover_pending_from_outbox(outbox_client, intent_id, &recover_outbox_pending)
+                    .await;
         }
 
         if let &mut Some(ref pending) = state.pending_transaction {
@@ -154,8 +155,8 @@ where
         if execution_err.is_rejected() {
             state.execution_report.progress.transaction = TransactionProgress::Rejected(*signature);
         }
-        let flow = patcher
-            .patch(
+        let flow = recovery
+            .recover(
                 &execution_err,
                 state.transaction_strategy,
                 state.execution_report,
@@ -183,7 +184,7 @@ where
             return Ok(Err(execution_err));
         }
 
-        if *state.current_attempt >= STAGE_LOOP_CEILING {
+        if *state.current_attempt >= TRANSACTION_LOOP_CEILING {
             error!("CRITICAL! Recursion ceiling reached");
             return Ok(Err(execution_err));
         } else {
@@ -195,7 +196,7 @@ where
 async fn recover_pending_from_outbox<O>(
     outbox_client: &O,
     intent_id: u64,
-    recover_outbox_pending: fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
+    recover_outbox_pending: impl Fn(&OutboxIntentBundleStatus) -> Option<PendingTransaction>,
 ) -> Option<PendingTransaction>
 where
     O: OutboxClient,
@@ -212,30 +213,6 @@ where
             None
         }
     }
-}
-
-pub(in crate::intent_executor) fn combined_pending(
-    status: &OutboxIntentBundleStatus,
-) -> Option<PendingTransaction> {
-    PendingExecution::from_status(status)
-        .filter(|progress| progress.confirmed_commit.is_none() && !progress.has_follow_up)
-        .map(|progress| progress.transaction)
-}
-
-pub(in crate::intent_executor) fn committing_pending(
-    status: &OutboxIntentBundleStatus,
-) -> Option<PendingTransaction> {
-    PendingExecution::from_status(status)
-        .filter(|progress| progress.has_follow_up)
-        .map(|progress| progress.transaction)
-}
-
-pub(in crate::intent_executor) fn follow_up_pending(
-    status: &OutboxIntentBundleStatus,
-) -> Option<PendingTransaction> {
-    PendingExecution::from_status(status)
-        .filter(|progress| progress.confirmed_commit.is_some())
-        .map(|progress| progress.transaction)
 }
 
 pub(in crate::intent_executor) fn recovery_commit_nonces(
@@ -389,30 +366,6 @@ pub(in crate::intent_executor) async fn resolve_pending_signature(
             sleep(PENDING_SIGNATURE_POLL_INTERVAL).await;
         };
     }
-}
-
-pub async fn prepare_and_execute_strategy<T>(
-    client: &IntentExecutionClient,
-    authority: &Keypair,
-    transaction_preparator: &T,
-    transaction_strategy: &mut TransactionStrategy,
-) -> Result<Result<Signature, TransactionStrategyExecutionError>, TransactionPreparatorError>
-where
-    T: TransactionPreparator,
-{
-    let prepared_message = transaction_preparator
-        .prepare_for_strategy(authority, transaction_strategy)
-        .await?;
-
-    let execution_result = client
-        .execute_message_with_retries(
-            authority,
-            prepared_message,
-            &transaction_strategy.optimized_tasks,
-        )
-        .await;
-
-    Ok(execution_result)
 }
 
 /// Handles out of sync commit id error, fixes current strategy
