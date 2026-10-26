@@ -143,33 +143,32 @@ where
 
         let (mut commit_tasks, follow_up_tasks) =
             build_commit_finalize_tasks(intent, &self.ctx.task_info_fetcher).await?;
+        // Resumed standalone actions still need their per-intent uniqueness nonce.
+        let nonce = (committed_pubkeys.is_empty() || requires_uniqueness_nonce(&commit_tasks))
+            .then_some(intent.intent_id);
         // Resumed work must respect the mode already recorded in the outbox.
         match &self.status {
             OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(_)) => {
                 commit_tasks.extend(follow_up_tasks);
-                let nonce = requires_uniqueness_nonce(&commit_tasks).then_some(intent.intent_id);
                 Ok(StrategyExecutionMode::SingleStage(
                     TaskStrategist::build_strategy(commit_tasks, &authority, nonce)?,
                 ))
             }
-            status => {
-                let nonce = requires_uniqueness_nonce(&commit_tasks).then_some(intent.intent_id);
-                Ok(match status {
-                    OutboxIntentBundleStatus::Accepted => TaskStrategist::build_execution_strategy(
-                        commit_tasks,
-                        follow_up_tasks,
-                        &authority,
-                        nonce,
-                    )?,
-                    _ => TaskStrategist::build_two_stage(
-                        commit_tasks,
-                        follow_up_tasks,
-                        &authority,
-                        nonce,
-                    )?
-                    .into(),
-                })
-            }
+            status => Ok(match status {
+                OutboxIntentBundleStatus::Accepted => TaskStrategist::build_execution_strategy(
+                    commit_tasks,
+                    follow_up_tasks,
+                    &authority,
+                    nonce,
+                )?,
+                _ => TaskStrategist::build_two_stage(
+                    commit_tasks,
+                    follow_up_tasks,
+                    &authority,
+                    nonce,
+                )?
+                .into(),
+            }),
         }
     }
 
