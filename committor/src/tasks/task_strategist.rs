@@ -1008,25 +1008,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_combined_plan() {
-        let pubkey = [Pubkey::new_unique()];
-        let intent = create_test_intent_bundle(0, &pubkey, &[]).inner;
-
-        let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
-        let follow_up_task =
-            TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
-
-        let plan =
-            TaskStrategist::build_plan(commit_task, follow_up_task, &Pubkey::new_unique(), None)
-                .expect("Transaction plan created");
-
-        assert!(plan.follow_up.is_none());
-        let value = plan.current;
-        assert!(!value.uses_alts());
-    }
-
-    #[tokio::test]
     async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;

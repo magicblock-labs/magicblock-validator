@@ -13,7 +13,6 @@ use super::*;
 use crate::{
     intent_engine::intent_scheduler::create_test_intent_bundle,
     intent_executor::{intent_execution_client::IntentExecutionClient, test_utils::*},
-    outbox::{ScheduledBaseIntentMeta, utils::build_sent_commit},
     tasks::{
         BaseTaskImpl,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcherResult},
@@ -191,7 +190,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
         }
-        let meta = ScheduledBaseIntentMeta::new(&intent);
         let info = Arc::new(CacheTaskInfoFetcher::new(InfoFetcher));
         // Seed both nonces so completion must retain one and invalidate the other.
         info.fetch_current_commit_nonces(&[(ACCOUNT, 0), (undelegated, 0)], 0)
@@ -320,14 +318,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
                 vec![Some(42)]
             );
         }
-        assert_eq!(
-            *outbox.reports.lock().unwrap(),
-            if failure == PreparationFailure || resolution == Unavailable {
-                vec![]
-            } else {
-                vec![true]
-            }
-        );
         assert_eq!(callbacks.0.lock().unwrap().len(), usize::from(actions_only));
         assert_eq!(result.callbacks_report.len(), usize::from(actions_only));
         assert_eq!(
@@ -338,14 +328,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
             info.peek_commit_nonce(&undelegated).await.is_some(),
             kind != CommitAndUndelegate
         );
-        let sent = build_sent_commit(
-            meta,
-            &result.inner,
-            &IntentExecutionReport {
-                progress: result.progress,
-                ..Default::default()
-            },
-        );
         let mut expected_signatures = vec![];
         if let Some(stage) = outbox.stages.lock().unwrap().last() {
             if let ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, .. }) = stage {
@@ -354,9 +336,21 @@ async fn intent_execution_preserves_recovery_and_completion() {
             expected_signatures.push(stage.pending_transaction().signature);
         }
         assert_eq!(
-            sent.chain_signatures, expected_signatures,
+            result.progress.signatures(result.inner.as_ref().err()).collect::<Vec<_>>(),
+            expected_signatures,
             "{status:?}, {resolution:?}, {failure:?}"
         );
+        {
+            let reports = outbox.reports.lock().unwrap();
+            assert_eq!(
+                reports.len(),
+                usize::from(failure != PreparationFailure && resolution != Unavailable)
+            );
+            if let Some(sent) = reports.first() {
+                assert!(sent.error_message.is_none());
+                assert_eq!(sent.chain_signatures, expected_signatures);
+            }
+        }
         if result.is_err() {
             assert!(!result.is_retriable(true));
         }

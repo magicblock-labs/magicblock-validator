@@ -60,15 +60,13 @@ impl TransactionStrategyExecutionError {
         }
     }
 
-    pub fn is_cpi_limit_error(&self) -> bool {
+    pub fn is_recoverable_by_splitting(&self) -> bool {
         matches!(
             self,
-            Self::CpiLimitError(_, _) | Self::LoadedAccountsDataSizeExceeded(_, _)
+            Self::CpiLimitError(_, _)
+                | Self::LoadedAccountsDataSizeExceeded(_, _)
+                | Self::TransactionTooLargeError(_)
         )
-    }
-
-    pub fn is_recoverable_by_splitting(&self) -> bool {
-        self.is_cpi_limit_error() || matches!(self, Self::TransactionTooLargeError(_))
     }
 
     pub fn task_index(&self, task_instruction_offset: u8) -> Option<u8> {
