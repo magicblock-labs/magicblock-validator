@@ -536,6 +536,55 @@ pub enum IntentSchedulerError {
 pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
 
 #[cfg(test)]
+pub(crate) fn create_test_intent_bundle(
+    id: u64,
+    commit_pubkeys: &[Pubkey],
+    commit_and_undelegate_pubkeys: &[Pubkey],
+) -> OutboxIntentBundle {
+    use mbv_core::intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
+    };
+    use program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_account::Account;
+    use solana_hash::Hash;
+
+    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
+        keys.iter()
+            .copied()
+            .map(|pubkey| CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            })
+            .collect()
+    };
+
+    let mut intent = ScheduledIntentBundle {
+        intent_id: id,
+        slot: 0,
+        blockhash: Hash::default(),
+        sent_transaction: Default::default(),
+        payer: Pubkey::default(),
+        intent_bundle: MagicIntentBundle::default(),
+    };
+
+    if !commit_pubkeys.is_empty() {
+        intent.intent_bundle.commit = Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
+    }
+
+    if !commit_and_undelegate_pubkeys.is_empty() {
+        intent.intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(to_accounts(commit_and_undelegate_pubkeys)),
+            undelegate_action: UndelegateType::Standalone,
+        });
+    }
+
+    let bump = outbox_intent_pda_with_bump(id).1;
+    OutboxIntentBundle::accepted(intent, bump)
+}
+
+#[cfg(test)]
 mod tests {
     use mbv_core::intent::{MagicIntentBundle, types::CommittedAccount};
     use solana_account::Account;
@@ -1361,53 +1410,4 @@ mod tests {
              already landed"
         );
     }
-}
-
-#[cfg(test)]
-pub(crate) fn create_test_intent_bundle(
-    id: u64,
-    commit_pubkeys: &[Pubkey],
-    commit_and_undelegate_pubkeys: &[Pubkey],
-) -> OutboxIntentBundle {
-    use mbv_core::intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
-        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
-    };
-    use program::magic_scheduled_base_intent::ScheduledIntentBundle;
-    use solana_account::Account;
-    use solana_hash::Hash;
-
-    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
-        keys.iter()
-            .copied()
-            .map(|pubkey| CommittedAccount {
-                pubkey,
-                account: Account::default(),
-                remote_slot: Default::default(),
-            })
-            .collect()
-    };
-
-    let mut intent = ScheduledIntentBundle {
-        intent_id: id,
-        slot: 0,
-        blockhash: Hash::default(),
-        sent_transaction: Default::default(),
-        payer: Pubkey::default(),
-        intent_bundle: MagicIntentBundle::default(),
-    };
-
-    if !commit_pubkeys.is_empty() {
-        intent.intent_bundle.commit = Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
-    }
-
-    if !commit_and_undelegate_pubkeys.is_empty() {
-        intent.intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(to_accounts(commit_and_undelegate_pubkeys)),
-            undelegate_action: UndelegateType::Standalone,
-        });
-    }
-
-    let bump = outbox_intent_pda_with_bump(id).1;
-    OutboxIntentBundle::accepted(intent, bump)
 }
