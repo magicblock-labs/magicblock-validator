@@ -529,7 +529,7 @@ mod tests {
         assert_eq!(strategy.optimized_tasks.len(), 1);
         assert!(matches!(
             commit_delivery(&strategy.optimized_tasks[0]),
-            CommitDelivery::StateInBuffer { .. }
+            CommitDelivery::StateInBuffer
         ));
     }
 
@@ -545,7 +545,7 @@ mod tests {
 
         assert!(matches!(
             commit_delivery(&strategy.optimized_tasks[0]),
-            CommitDelivery::StateInBuffer { .. }
+            CommitDelivery::StateInBuffer
         ));
         assert!(strategy.lookup_tables_keys.is_empty());
     }
@@ -621,7 +621,7 @@ mod tests {
         for optimized_task in &strategy.optimized_tasks {
             assert!(matches!(
                 commit_delivery(optimized_task),
-                CommitDelivery::StateInBuffer { .. }
+                CommitDelivery::StateInBuffer
             ));
         }
         assert!(strategy.lookup_tables_keys.is_empty());
@@ -660,7 +660,7 @@ mod tests {
         for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize] {
             assert!(matches!(
                 commit_delivery(optimized_task),
-                CommitDelivery::StateInBuffer { .. }
+                CommitDelivery::StateInBuffer
             ));
         }
         assert!(!strategy.lookup_tables_keys.is_empty());
@@ -800,7 +800,7 @@ mod tests {
         ));
         assert!(matches!(
             commit_delivery(&tasks[1]),
-            CommitDelivery::StateInBuffer { .. }
+            CommitDelivery::StateInBuffer
         ));
     }
 
@@ -826,7 +826,7 @@ mod tests {
                 BaseTaskImpl::Undelegate(_),
                 BaseTaskImpl::BaseAction(_),
                 BaseTaskImpl::Undelegate(_),
-            ] if matches!(task.delivery, CommitDelivery::StateInBuffer { .. })
+            ] if matches!(task.delivery, CommitDelivery::StateInBuffer)
         ));
         assert!(strategy.lookup_tables_keys.is_empty());
     }
@@ -984,7 +984,7 @@ mod tests {
                     panic!("format fallback must retain CommitFinalize");
                 };
                 assert_eq!(
-                    matches!(task.delivery, CommitDelivery::StateInBuffer { .. }),
+                    matches!(task.delivery, CommitDelivery::StateInBuffer),
                     data_len > 4096
                 );
             }

@@ -8,7 +8,7 @@ use solana_account::Account;
 #[derive(Clone, Debug)]
 pub enum CommitDelivery {
     StateInArgs,
-    StateInBuffer { prepared: bool },
+    StateInBuffer,
     DiffInArgs { base_account: Account },
-    DiffInBuffer { base_account: Account, prepared: bool },
+    DiffInBuffer { base_account: Account },
 }

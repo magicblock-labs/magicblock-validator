@@ -31,7 +31,7 @@ fn commit() -> BaseTaskImpl {
         },
         None,
     );
-    task.delivery = CommitDelivery::StateInBuffer { prepared: false };
+    task.delivery = CommitDelivery::StateInBuffer;
     task.into()
 }
 
@@ -51,6 +51,7 @@ fn action() -> BaseTaskImpl {
 fn strategy(tasks: Vec<BaseTaskImpl>) -> TransactionStrategy {
     TransactionStrategy {
         optimized_tasks: tasks,
+        lookup_tables_keys: vec![RESERVED_ALT_KEY],
         ..Default::default()
     }
 }

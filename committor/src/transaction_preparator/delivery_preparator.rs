@@ -59,7 +59,7 @@ impl DeliveryPreparator {
     pub async fn prepare_for_delivery(
         &self,
         authority: &Keypair,
-        strategy: &mut TransactionStrategy,
+        strategy: &TransactionStrategy,
         cleanup: &mut CleanupResources,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         cleanup.uniqueness_nonce = strategy.uniqueness_nonce;
@@ -74,8 +74,8 @@ impl DeliveryPreparator {
             })
             .collect();
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures = strategy.optimized_tasks.iter_mut().map(|task| async move {
-            let _timer = metrics::observe_committor_intent_task_preparation_time(&*task);
+        let preparation_futures = strategy.optimized_tasks.iter().map(|task| async move {
+            let _timer = metrics::observe_committor_intent_task_preparation_time(task);
             self.prepare_task_handling_errors(authority, task, uniqueness_nonce).await
         });
 
@@ -103,7 +103,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task(
         &self,
         authority: &Keypair,
-        task: &mut BaseTaskImpl,
+        task: &BaseTaskImpl,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
@@ -124,7 +124,6 @@ impl DeliveryPreparator {
         self.write_buffer_with_retries(authority, &preparation_task, uniqueness_nonce)
             .await?;
 
-        preparation_task.done();
         Ok(())
     }
 
@@ -133,7 +132,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task_handling_errors(
         &self,
         authority: &Keypair,
-        task: &mut BaseTaskImpl,
+        task: &BaseTaskImpl,
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self.prepare_task(authority, task, uniqueness_nonce).await;
@@ -172,7 +171,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &PreparationTask,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
@@ -223,7 +222,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &PreparationTask,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
