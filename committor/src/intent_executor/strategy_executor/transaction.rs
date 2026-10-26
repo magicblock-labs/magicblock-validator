@@ -130,8 +130,8 @@ where
             // Combined execution reports all terminal errors to callbacks.
             // Split execution leaves preparation/outbox/patch failures to the caller.
             let report_callbacks = self.is_combined() || result.is_ok();
-            let result = result.and_then(|result| {
-                result.map_err(|err| {
+            let result = match result {
+                Ok(result) => result.map_err(|err| {
                     if self.follow_up.is_some() {
                         IntentExecutorError::from_commit_execution_error(err)
                     } else {
@@ -140,8 +140,9 @@ where
                             self.commit_signature,
                         )
                     }
-                })
-            });
+                }),
+                Err(err) => Err(err),
+            };
 
             if let Some(follow_up) = &mut self.follow_up {
                 // A nonce retry can turn this into a first commit; both transactions
@@ -190,10 +191,10 @@ where
         if self.current.has_actions_callbacks()
             || self.follow_up.as_ref().is_some_and(TransactionStrategy::has_actions_callbacks)
         {
-            if let Some(time_left) = time_left {
-                if let Ok(result) = timeout(time_left, self.execute_current()).await {
-                    return result;
-                }
+            if let Some(time_left) = time_left
+                && let Ok(result) = timeout(time_left, self.execute_current()).await
+            {
+                return result;
             }
             // Only callbacks expire. Keep actions and resolve any pending transaction
             // before preparing another one, since the cancelled send may still land.
