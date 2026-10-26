@@ -120,7 +120,7 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
             assert!(
                 matches!(
                     callbacks.as_slice(),
-                    [(None, Err(ActionError::TimeoutError))]
+                    [(None, Err(ActionError::TimeoutError), _)]
                 ),
                 "{phase}, pending={has_pending_transaction}"
             );
@@ -261,20 +261,40 @@ async fn recovery_preserves_progress_and_resources() {
 
     // Rejected actions and undelegations can leave commits or follow-up work.
     // Action-only intents must fail without sending a replacement transaction.
-    for (tasks, confirmed, failed_task, succeeds, remaining) in [
-        (vec![commit(), action()], false, 1, true, Some(1)),
-        (vec![action()], false, 0, false, None),
-        (vec![undelegate(), action()], true, 1, true, Some(1)),
-        (vec![action()], true, 0, true, None),
+    let failed = &[(0, false)][..];
+    for (tasks, confirmed, failed_task, succeeds, remaining, expected_callbacks) in [
+        (vec![commit(), action()], false, 1, true, Some(1), failed),
+        (vec![action()], false, 0, false, None, failed),
+        (vec![undelegate(), action()], true, 1, true, Some(1), failed),
+        (vec![action()], true, 0, true, None, failed),
         (
             vec![commit(), undelegate(), action()],
             false,
             1,
             true,
             Some(1),
+            failed,
         ),
-        (vec![undelegate(), action()], true, 0, false, None),
+        (vec![undelegate(), action()], true, 0, false, None, failed),
+        (
+            vec![commit(), action(), undelegate(), action()],
+            false,
+            2,
+            true,
+            Some(2),
+            &[(1, false), (0, true)],
+        ),
     ] {
+        let callback_destinations: Vec<_> = tasks
+            .iter()
+            .filter_map(|task| match task {
+                BaseTaskImpl::BaseAction(task) => {
+                    Some(task.action().callback.as_ref().unwrap().destination_program)
+                }
+                _ => None,
+            })
+            .collect();
+        let undelegation_failed = matches!(tasks[failed_task], BaseTaskImpl::Undelegate(_));
         let instruction = TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize + failed_task;
         let error = format!(r#"{{"InstructionError":[{instruction},{{"Custom":1}}]}}"#);
         let mut ctx = executor(vec![], Some(&error));
@@ -314,6 +334,27 @@ async fn recovery_preserves_progress_and_resources() {
             report.progress.confirmed_commit,
             confirmed.then_some(earlier_commit)
         );
+        {
+            let callbacks = ctx.actions_callback_executor.0.lock().unwrap();
+            assert_eq!(callbacks.len(), expected_callbacks.len());
+            for ((signature, result, destination), &(index, succeeds)) in
+                callbacks.iter().zip(expected_callbacks)
+            {
+                assert_eq!(*destination, callback_destinations[index]);
+                assert_eq!(result.is_ok(), succeeds);
+                if undelegation_failed && !succeeds {
+                    assert!(matches!(result, Err(ActionError::IntentFailedError(_))));
+                    assert_eq!(
+                        *signature,
+                        Some(
+                            ctx.outbox_client.stages.lock().unwrap()[0]
+                                .pending_transaction()
+                                .signature
+                        )
+                    );
+                }
+            }
+        }
         let prepared = ctx.transaction_preparator.prepared.lock().unwrap();
         assert_eq!(prepared.len(), 1 + usize::from(remaining.is_some()));
         if let Some(remaining) = remaining {
