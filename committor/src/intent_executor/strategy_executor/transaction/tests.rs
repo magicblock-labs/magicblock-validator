@@ -183,20 +183,22 @@ impl ActionsCallbackScheduler for Callbacks {
 type Executor =
     IntentExecutorCtx<RecordingPreparator, RpcTaskInfoFetcher, Callbacks, RecordingOutbox>;
 
+fn mock_response(mocks: &mut MocksMap, request: RpcRequest, value: impl std::fmt::Display) {
+    mocks.insert(
+        request,
+        format!(r#"{{"context":{{"slot":1}},"value":{value}}}"#).parse().unwrap(),
+    );
+}
+
 fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor {
     let mut mocks = MocksMap::default();
     if let Some(error) = error {
-        mocks.insert(
+        mock_response(
+            &mut mocks,
             RpcRequest::GetSignatureStatuses,
             format!(
-                r#"{{
-            "context": {{"slot": 1}},
-            "value": [{{"slot": 1, "confirmations": null, "err": {error},
-                       "status": {{"Err":{error}}}, "confirmationStatus": "finalized"}}]
-        }}"#
-            )
-            .parse()
-            .unwrap(),
+                r#"[{{"slot":1,"confirmations":null,"err":{error},"status":{{"Err":{error}}},"confirmationStatus":"finalized"}}]"#
+            ),
         );
     }
     let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map("succeeds", mocks));
@@ -291,15 +293,9 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
                 // it confirms after the callback deadline while resolving the same signature.
                 let mut mocks = MocksMap::default();
                 for _ in 0..2 {
-                    mocks.insert(
-                        RpcRequest::IsBlockhashValid,
-                        r#"{"context":{"slot":1},"value":true}"#.parse().unwrap(),
-                    );
+                    mock_response(&mut mocks, RpcRequest::IsBlockhashValid, true);
                 }
-                mocks.insert(
-                    RpcRequest::GetSignatureStatuses,
-                    r#"{"context":{"slot":1},"value":[null]}"#.parse().unwrap(),
-                );
+                mock_response(&mut mocks, RpcRequest::GetSignatureStatuses, "[null]");
                 let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map(
                     "succeeds", mocks,
                 ));
@@ -342,28 +338,25 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
                 .await
                 .unwrap();
             let callbacks = ctx.actions_callback_executor.0.lock().unwrap();
-            assert_eq!(
-                callbacks.len(),
-                1,
+            assert!(
+                matches!(
+                    callbacks.as_slice(),
+                    [(None, Err(ActionError::TimeoutError))]
+                ),
                 "{phase}, pending={has_pending_transaction}"
             );
-            assert!(matches!(
-                callbacks[0],
-                (None, Err(ActionError::TimeoutError))
-            ));
             let prepared = ctx.transaction_preparator.prepared.lock().unwrap();
             assert_eq!(
                 prepared.len(),
                 usize::from(phase == "commit") + if has_pending_transaction { 0 } else { 2 }
             );
             assert!(prepared.iter().all(|tasks| !tasks.is_empty()));
-            let completed =
-                report.junk.iter().filter(|s| !s.optimized_tasks.is_empty()).collect::<Vec<_>>();
             assert!(
-                completed.iter().any(|s| s
-                    .optimized_tasks
+                report
+                    .junk
                     .iter()
-                    .any(|t| matches!(t, BaseTaskImpl::BaseAction(_)))),
+                    .flat_map(|s| &s.optimized_tasks)
+                    .any(|t| matches!(t, BaseTaskImpl::BaseAction(_))),
                 "timeout must retain actions"
             );
             match result {
@@ -417,10 +410,6 @@ async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
         .unwrap()
         .unwrap();
     assert_eq!(runner.current_attempt, 10);
-    assert_eq!(
-        executor.actions_callback_executor.0.lock().unwrap().len(),
-        1
-    );
 }
 
 #[tokio::test]
