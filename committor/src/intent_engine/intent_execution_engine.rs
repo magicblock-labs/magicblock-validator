@@ -517,7 +517,7 @@ mod tests {
         async fn prepare_for_strategy(
             &self,
             _authority: &Keypair,
-            _transaction_strategy: &mut TransactionStrategy,
+            _transaction_strategy: &TransactionStrategy,
             _cleanup: &mut CleanupResources,
         ) -> PreparatorResult<VersionedMessage> {
             panic!("mock transaction preparator should not prepare a strategy")

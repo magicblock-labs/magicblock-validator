@@ -179,13 +179,12 @@ impl TransactionPreparator for RecordingPreparator {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        strategy: &mut TransactionStrategy,
+        strategy: &TransactionStrategy,
         cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage> {
         self.prepared.lock().unwrap().push(strategy.optimized_tasks.clone());
         self.uniqueness_nonces.lock().unwrap().push(strategy.uniqueness_nonce);
         // Represent a reservation made before preparation succeeds or fails.
-        strategy.lookup_tables_keys = vec![RESERVED_ALT_KEY];
         cleanup.alt_reservation.insert(RESERVED_ALT_KEY);
         cleanup.uniqueness_nonce = strategy.uniqueness_nonce;
         cleanup.buffers = strategy

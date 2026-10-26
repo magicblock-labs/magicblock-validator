@@ -136,7 +136,6 @@ where
                     result.as_ref().map(|_| ()).map_err(ActionError::from),
                 );
             }
-            drop(mem::take(&mut self.current));
 
             match result {
                 Ok(signature) => {
@@ -235,7 +234,7 @@ where
                 &ctx.intent_client,
                 &ctx.authority,
                 &ctx.transaction_preparator,
-                &mut self.current,
+                &self.current,
                 cleanup,
             )
             .await

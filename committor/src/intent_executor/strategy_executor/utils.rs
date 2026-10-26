@@ -53,7 +53,7 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
     client: &IntentExecutionClient,
     authority: &Keypair,
     transaction_preparator: &T,
-    transaction_strategy: &mut TransactionStrategy,
+    transaction_strategy: &TransactionStrategy,
     cleanup: &mut CleanupResources,
 ) -> Result<VersionedTransaction, TransactionPreparatorError> {
     let mut prepared_message = transaction_preparator
@@ -231,11 +231,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
             let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
                 continue;
             };
-            if commit_id == &task.commit_id {
-                continue;
-            }
-
-            task.reset_commit_id(*commit_id);
+            task.commit_id = *commit_id;
         }
     }
 

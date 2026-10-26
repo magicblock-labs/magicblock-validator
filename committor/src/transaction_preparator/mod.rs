@@ -27,7 +27,7 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        transaction_strategy: &mut TransactionStrategy,
+        transaction_strategy: &TransactionStrategy,
         cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage>;
 
@@ -73,30 +73,23 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        tx_strategy: &mut TransactionStrategy,
+        tx_strategy: &TransactionStrategy,
         cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage> {
         if !tx_strategy.uses_alts() {
             // Validate the final representation before preparing buffers.
-            TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+            let message = TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 tx_strategy.uniqueness_nonce,
-            )?;
+            )?
+            .message;
             self.delivery_preparator
                 .prepare_for_delivery(authority, tx_strategy, cleanup)
                 .await?;
             metrics::observe_committor_intent_alt_count(0);
-            return Ok(
-                TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
-                    authority,
-                    &tx_strategy.optimized_tasks,
-                    self.compute_budget_config.compute_unit_price,
-                    tx_strategy.uniqueness_nonce,
-                )?
-                .message,
-            );
+            return Ok(message);
         }
 
         // If message won't fit, there's no reason to prepare anything
