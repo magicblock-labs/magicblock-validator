@@ -13,24 +13,17 @@ pub(crate) fn build_sent_commit(
 ) -> SentCommit {
     let error_message = result.as_ref().err().map(|err| format!("{:?}", err));
 
-    let chain_signatures = match result {
-        Ok(output) => match output {
-            ExecutionOutput::SingleStage(sig) => vec![*sig],
-            ExecutionOutput::TwoStage {
-                commit_signature,
-                finalize_signature,
-            } => vec![*commit_signature, *finalize_signature],
-        },
-        Err(err) => {
-            error!(
-                "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
-                meta.id, meta.slot, meta.blockhash, err
-            );
-            err.base_signatures()
-                .map(|(commit, finalize)| finalize.map(|f| vec![commit, f]).unwrap_or(vec![commit]))
-                .unwrap_or_default()
-        }
-    };
+    if let Err(err) = result {
+        error!(
+            "Failed to commit intent: {}, slot: {}, blockhash: {}. {:?}",
+            meta.id, meta.slot, meta.blockhash, err
+        );
+    }
+    let progress = result
+        .as_ref()
+        .map(|output| output.progress())
+        .unwrap_or(execution_report.progress);
+    let chain_signatures = progress.signatures(result.as_ref().err()).collect();
 
     let patched_errors = execution_report
         .patched_errors()

@@ -8,7 +8,7 @@ use tracing::error;
 
 use crate::{intent_executor::error::InternalError, tasks::BaseTaskImpl};
 
-/// Those are the errors that may occur during Commit/Finalize stages on Base layer
+/// Errors from a settlement transaction on the base layer.
 #[derive(thiserror::Error, Debug)]
 pub enum TransactionStrategyExecutionError {
     #[error("User supplied actions are ill-formed: {0}. {1:?}")]
@@ -36,6 +36,21 @@ impl From<MagicBlockRpcClientError> for TransactionStrategyExecutionError {
 }
 
 impl TransactionStrategyExecutionError {
+    /// Domain errors and reported on-chain failures have a definitive outcome.
+    /// A transport error alone does not establish whether the transaction landed.
+    pub fn is_rejected(&self) -> bool {
+        match self {
+            Self::InternalError(InternalError::MagicBlockRpcClientError(err)) => {
+                matches!(
+                    err.as_ref(),
+                    MagicBlockRpcClientError::SentTransactionError(..)
+                )
+            }
+            Self::InternalError(_) => false,
+            _ => true,
+        }
+    }
+
     /// On-chain domain errors are deterministic (and already have dedicated
     /// recovery paths); only internal transport failures are transient.
     pub fn is_transient(&self) -> bool {
@@ -52,7 +67,7 @@ impl TransactionStrategyExecutionError {
         )
     }
 
-    pub fn is_recoverable_by_two_stage(&self) -> bool {
+    pub fn is_recoverable_by_splitting(&self) -> bool {
         self.is_cpi_limit_error() || matches!(self, Self::TransactionTooLargeError(_))
     }
 

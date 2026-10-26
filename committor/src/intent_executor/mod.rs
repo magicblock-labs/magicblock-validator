@@ -3,6 +3,7 @@ pub mod error;
 pub(crate) mod executor;
 pub mod intent_execution_client;
 pub(crate) mod intent_executor_factory;
+pub mod progress;
 pub mod strategy_executor;
 pub mod utils;
 
@@ -15,6 +16,7 @@ use async_trait::async_trait;
 use mbv_core::traits::CallbackScheduleError;
 use metrics::metrics;
 use program::magic_scheduled_base_intent::ScheduledIntentBundle;
+use progress::{ExecutionProgress, TransactionProgress};
 use solana_keypair::Keypair;
 use solana_signature::Signature;
 use strategy_executor::error::TransactionStrategyExecutionError;
@@ -50,27 +52,27 @@ pub struct IntentExecutorCtx<T, F, A, O> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum ExecutionOutput {
-    // TODO: with arrival of challenge window remove SingleStage
-    // Protocol requires 2 stage: Commit, Finalize
-    // SingleStage - optimization for timebeing
-    SingleStage(Signature),
-    TwoStage {
-        /// Commit stage signature
-        commit_signature: Signature,
-        /// Finalize stage signature
-        finalize_signature: Signature,
-    },
+pub struct ExecutionOutput {
+    pub confirmed_commit: Option<Signature>,
+    pub signature: Signature,
+}
+
+impl ExecutionOutput {
+    pub fn progress(self) -> ExecutionProgress {
+        ExecutionProgress {
+            confirmed_commit: self.confirmed_commit,
+            transaction: TransactionProgress::Confirmed(self.signature),
+        }
+    }
 }
 
 impl metrics::LabelValue for ExecutionOutput {
     fn value(&self) -> &str {
-        match self {
-            Self::SingleStage(_) => "single_stage_succeeded",
-            Self::TwoStage {
-                commit_signature: _,
-                finalize_signature: _,
-            } => "two_stage_succeeded",
+        // Keep existing dashboard labels while the internal stage types disappear.
+        if self.confirmed_commit.is_some() {
+            "two_stage_succeeded"
+        } else {
+            "single_stage_succeeded"
         }
     }
 }
@@ -78,6 +80,7 @@ impl metrics::LabelValue for ExecutionOutput {
 pub struct IntentExecutionResult {
     /// Final result of Intent Execution
     pub inner: IntentExecutorResult<ExecutionOutput>,
+    pub progress: ExecutionProgress,
     /// Errors patched along the way
     pub patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Callbacks result
@@ -94,14 +97,11 @@ impl IntentExecutionResult {
     /// guard and can double-execute if their transaction landed unobserved,
     /// so they only retry pre-send failures.
     pub fn is_retriable(&self, has_dedup_guard: bool) -> bool {
-        let send_stage_failure = matches!(
-            &self.inner,
-            Err(IntentExecutorError::FailedToCommitError { .. })
-                | Err(IntentExecutorError::FailedToFinalizeError { .. })
-        );
-        self.callbacks_report.is_empty()
-            && matches!(&self.inner, Err(err) if err.is_transient())
-            && (has_dedup_guard || !send_stage_failure)
+        let Err(err) = &self.inner else { return false };
+        if !self.callbacks_report.is_empty() || !self.progress.can_retry() || !err.is_transient() {
+            return false;
+        }
+        has_dedup_guard || !matches!(err, IntentExecutorError::FailedExecution(_))
     }
 
     pub fn is_err(&self) -> bool {
@@ -115,6 +115,7 @@ impl IntentExecutionResult {
 
 #[derive(Default)]
 pub struct IntentExecutionReport {
+    pub progress: ExecutionProgress,
     /// Junk that needs to be cleaned up
     junk: Vec<TransactionStrategy>,
     /// Errors we patched trying to recover intent
