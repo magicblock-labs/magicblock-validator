@@ -149,12 +149,14 @@ pub(super) enum Preparation {
     Wait,
 }
 
+type CleanupRecords = Vec<(Vec<Pubkey>, bool)>;
+
 #[derive(Clone, Default)]
 pub(super) struct RecordingPreparator {
     pub steps: Arc<Mutex<VecDeque<Preparation>>>,
     pub prepared: Arc<Mutex<Vec<Vec<BaseTaskImpl>>>>,
     pub uniqueness_nonces: Arc<Mutex<Vec<Option<u64>>>>,
-    pub cleaned: Arc<Mutex<Vec<(Vec<Pubkey>, bool)>>>,
+    pub cleaned: Arc<Mutex<CleanupRecords>>,
 }
 
 #[async_trait]
