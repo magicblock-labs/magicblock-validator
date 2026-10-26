@@ -235,7 +235,11 @@ impl ActionsCallbackScheduler for Callbacks {
 pub(super) type Executor =
     IntentExecutorCtx<RecordingPreparator, RpcTaskInfoFetcher, Callbacks, RecordingOutbox>;
 
-pub(super) fn mock_response(mocks: &mut MocksMap, request: RpcRequest, value: impl std::fmt::Display) {
+pub(super) fn mock_response(
+    mocks: &mut MocksMap,
+    request: RpcRequest,
+    value: impl std::fmt::Display,
+) {
     mocks.insert(
         request,
         format!(r#"{{"context":{{"slot":1}},"value":{value}}}"#).parse().unwrap(),

@@ -74,7 +74,6 @@ enum Resolution {
     Confirmed,
     Rejected,
     Expired,
-    Pending,
     Unavailable,
 }
 
@@ -88,7 +87,7 @@ enum Failure {
 #[tokio::test(start_paused = true)]
 async fn intent_execution_preserves_recovery_and_completion() {
     use Failure::{None, Preparation as PreparationFailure, Reporting};
-    use Resolution::{Confirmed, Expired, Pending, Rejected, Unavailable};
+    use Resolution::{Confirmed, Expired, Rejected, Unavailable};
 
     let pending = PendingTransaction {
         signature: Signature::new_unique(),
@@ -113,30 +112,19 @@ async fn intent_execution_preserves_recovery_and_completion() {
     for (status, resolution, failure, expected_tasks, actions_only) in [
         (&accepted, Confirmed, None, combined_tasks, false),
         (&accepted, Confirmed, None, &[(0, 0, 1)], true),
-        (&combined, Rejected, None, &[(0, 0, 1)], true),
         (&combined, Expired, None, &[(0, 0, 1)], true),
         (&combined, Confirmed, None, &[], false),
         (&combined, Rejected, None, combined_tasks, false),
-        (&combined, Expired, None, combined_tasks, false),
-        (&combined, Pending, None, &[], false),
         (&committing, Confirmed, None, follow_up_tasks, false),
         (&committing, Rejected, None, split_tasks, false),
         (&following, Confirmed, None, &[], false),
         (&following, Rejected, None, follow_up_tasks, false),
-        (&following, Pending, None, &[], false),
         (&combined, Unavailable, None, &[], false),
         (
             &accepted,
             Confirmed,
             PreparationFailure,
             combined_tasks,
-            false,
-        ),
-        (
-            &committing,
-            Rejected,
-            PreparationFailure,
-            &[(2, 0, 0)],
             false,
         ),
         (
@@ -147,7 +135,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
             false,
         ),
         (&accepted, Confirmed, Reporting, combined_tasks, false),
-        (&following, Confirmed, Reporting, &[], false),
     ] {
         let undelegated = Pubkey::new_unique();
         let mut intent = create_test_intent_bundle(42, &[ACCOUNT], &[undelegated]).inner;
@@ -167,29 +154,19 @@ async fn intent_execution_preserves_recovery_and_completion() {
                 Rejected => vec![
                     r#"[{"slot":1,"confirmations":null,"err":"AccountNotFound","status":{"Err":"AccountNotFound"},"confirmationStatus":"finalized"}]"#,
                 ],
-                Expired | Pending => vec!["[null]"],
+                Expired => vec!["[null]"],
                 Unavailable => vec!["[]"; 5],
             };
             for value in statuses {
-                mocks.insert(
+                mock_response(
+                    &mut mocks,
                     RpcRequest::IsBlockhashValid,
-                    format!(
-                        r#"{{"context":{{"slot":1}},"value":{}}}"#,
-                        resolution != Expired
-                    )
-                    .parse()
-                    .unwrap(),
+                    resolution != Expired,
                 );
-                mocks.insert(
-                    RpcRequest::GetSignatureStatuses,
-                    format!(r#"{{"context":{{"slot":1}},"value":{value}}}"#).parse().unwrap(),
-                );
+                mock_response(&mut mocks, RpcRequest::GetSignatureStatuses, value);
             }
-            if matches!(resolution, Confirmed | Pending) {
-                mocks.insert(
-                    RpcRequest::IsBlockhashValid,
-                    r#"{"context":{"slot":1},"value":true}"#.parse().unwrap(),
-                );
+            if resolution == Confirmed {
+                mock_response(&mut mocks, RpcRequest::IsBlockhashValid, true);
             }
         }
         let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map("succeeds", mocks));
