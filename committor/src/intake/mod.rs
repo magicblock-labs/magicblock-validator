@@ -1,10 +1,11 @@
-mod size;
+mod intent_limits;
 pub(crate) mod worker;
+
+pub use intent_limits::is_intent_within_limits;
 
 use crate::shared::account_state::{
     AccountSnapshot, CachedTaskInfoProvider, TaskInfoProvider, TaskInfoProviderResult,
 };
-use mbv_core::intent::MagicIntentBundle;
 use solana_pubkey::Pubkey;
 use std::{collections::HashMap, sync::Arc};
 
@@ -22,9 +23,4 @@ impl CommitIdProvider {
     ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
         self.0.fetch_current_commit_nonces(accounts, min_context_slot).await
     }
-}
-
-/// Returns whether the intent's estimated transactions fit the supported formats.
-pub fn intent_fits(intent: &MagicIntentBundle) -> bool {
-    size::IntentSizeValidator::fits(intent)
 }

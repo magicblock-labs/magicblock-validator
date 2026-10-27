@@ -30,7 +30,7 @@ pub(crate) const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 
 /// Builds a [`Task`] for each `action`, used by both
 /// [`crate::execution::task_builder::TaskBuilder`] (real task construction)
-/// and [`crate::intake::size::IntentSizeValidator`] (size
+/// and [`crate::is_intent_within_limits`] (size
 /// estimation) -- actions carry no unknowns that need fetching, so both
 /// build them identically.
 pub(crate) fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = Task> + '_ {
