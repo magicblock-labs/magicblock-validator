@@ -355,73 +355,11 @@ pub(in crate::execution) fn handle_actions_result<A>(
 mod tests {
     use std::collections::HashMap;
 
-    use async_trait::async_trait;
-    use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
     use mbv_core::intent::types::CommittedAccount;
     use solana_account::Account;
 
     use super::*;
-    use crate::shared::{
-        account_state::{AccountSnapshot, TaskInfoProviderResult},
-        tasks::utils::create_commit_finalize_task,
-    };
-
-    /// Reports commit id 1 except for one unchanged account at commit id 5.
-    struct FreshDelegationProvider(Option<Pubkey>);
-
-    #[async_trait]
-    impl TaskInfoProvider for FreshDelegationProvider {
-        async fn fetch_next_commit_nonces(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-            Ok(accounts
-                .iter()
-                .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 }))
-                .collect())
-        }
-
-        async fn fetch_current_commit_nonces(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-            Ok(accounts
-                .iter()
-                .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 }))
-                .collect())
-        }
-
-        async fn fetch_delegation_metadata(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
-            Ok(accounts
-                .iter()
-                .map(|(pubkey, _)| {
-                    (
-                        *pubkey,
-                        DelegationMetadata {
-                            last_commit_id: 0,
-                            undelegation_requester: UndelegationRequester::None,
-                            seeds: vec![],
-                            rent_payer: *pubkey,
-                        },
-                    )
-                })
-                .collect())
-        }
-
-        async fn get_base_accounts(
-            &self,
-            _: &[Pubkey],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
-            Ok(Default::default())
-        }
-    }
+    use crate::{shared::tasks::utils::create_commit_finalize_task, test_utils::MockInfoProvider};
 
     #[tokio::test]
     async fn test_mixed_commit_id_recovery_sets_uniqueness_nonce() {
@@ -458,7 +396,10 @@ mod tests {
             uniqueness_nonce: None,
         };
 
-        let provider = CachedTaskInfoProvider::new(FreshDelegationProvider(Some(unchanged_pubkey)));
+        let provider = CachedTaskInfoProvider::new(MockInfoProvider {
+            commit_ids: HashMap::from([(unchanged_pubkey, 4)]),
+            ..Default::default()
+        });
         handle_commit_id_error(
             &Pubkey::new_unique(),
             &provider,

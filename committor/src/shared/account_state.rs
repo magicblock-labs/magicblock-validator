@@ -490,51 +490,37 @@ impl CachedTaskInfoProvider {
 
         CacheInnerGuard { inner: &self.cache, nonce_locks }
     }
-}
 
-#[async_trait]
-impl TaskInfoProvider for CachedTaskInfoProvider {
-    /// Returns next ids for requested accounts
-    /// If key isn't in cache, it will be requested
-    async fn fetch_next_commit_nonces(
+    async fn commit_ids(
         &self,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
+        advance: bool,
     ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
         if accounts.is_empty() {
             return Ok(HashMap::new());
         }
         let snapshot_slots = snapshot_slots_by_pubkey(accounts);
-
-        // Acquire locks on requested nonces
         let pubkeys: Vec<Pubkey> = accounts.iter().map(|(pk, _)| *pk).collect();
         let locks_guard = self.acquire_nonce_locks(&pubkeys);
-
-        // Acquire per-account locks sequentially in sorted order (see sort above).
-        // join_all would poll all futures concurrently, allowing partial acquisition
-        // and producing the classic A→B / B→A deadlock across concurrent callers.
         let nonce_guards = locks_guard.lock().await;
+        let mut result = HashMap::with_capacity(nonce_guards.len());
         let (mut existing, mut missing) = (vec![], vec![]);
         for (pubkey, guard) in nonce_guards {
             if *guard == u64::MAX {
                 missing.push((pubkey, guard));
+            } else if advance {
+                // Allocation retains these locks until missing IDs have been fetched.
+                existing.push((pubkey, guard));
             } else {
-                existing.push((pubkey, guard))
-            }
-        }
-
-        // If all in cache - great! return
-        if missing.is_empty() {
-            let mut result = HashMap::with_capacity(existing.len());
-            for (pubkey, mut guard) in existing {
-                *guard += 1;
+                // Reads release cached-account locks before fetching missing IDs.
                 result.insert(*pubkey, *guard);
             }
-            return Ok(result);
         }
 
-        // Fetch missing nonces in cache
-        let fetched_nonces = {
+        let fetched_nonces = if missing.is_empty() {
+            HashMap::new()
+        } else {
             let missing_accounts: Vec<AccountSnapshot> =
                 missing.iter().map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey])).collect();
             self.inner
@@ -542,23 +528,29 @@ impl TaskInfoProvider for CachedTaskInfoProvider {
                 .await?
         };
 
-        // We don't care if anything changed in between with cache - just update and return our ids.
-        let mut result = HashMap::with_capacity(existing.len());
         for (pubkey, mut guard) in existing {
             *guard += 1;
             result.insert(*pubkey, *guard);
         }
         for (pubkey, mut guard) in missing {
-            if let Some(&nonce) = fetched_nonces.get(pubkey) {
-                *guard = nonce + 1;
-                result.insert(*pubkey, *guard);
-                Ok(())
-            } else {
-                Err(TaskInfoProviderError::AccountNotFoundError(*pubkey))
-            }?;
+            let nonce = fetched_nonces
+                .get(pubkey)
+                .ok_or(TaskInfoProviderError::AccountNotFoundError(*pubkey))?;
+            *guard = nonce + u64::from(advance);
+            result.insert(*pubkey, *guard);
         }
-
         Ok(result)
+    }
+}
+
+#[async_trait]
+impl TaskInfoProvider for CachedTaskInfoProvider {
+    async fn fetch_next_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        self.commit_ids(accounts, min_context_slot, true).await
     }
 
     async fn fetch_current_commit_nonces(
@@ -566,54 +558,7 @@ impl TaskInfoProvider for CachedTaskInfoProvider {
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
     ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        if accounts.is_empty() {
-            return Ok(HashMap::new());
-        }
-        let snapshot_slots = snapshot_slots_by_pubkey(accounts);
-
-        // Acquire locks on requested nonces
-        let pubkeys: Vec<Pubkey> = accounts.iter().map(|(pk, _)| *pk).collect();
-        let locks_guard = self.acquire_nonce_locks(&pubkeys);
-
-        // Acquire per-account locks sequentially in sorted order (see sort above).
-        let nonce_guards = locks_guard.lock().await;
-        let mut missing = vec![];
-        let mut result = HashMap::with_capacity(nonce_guards.len());
-        for (pubkey, guard) in nonce_guards {
-            if *guard == u64::MAX {
-                missing.push((pubkey, guard));
-            } else {
-                result.insert(*pubkey, *guard);
-            }
-        }
-
-        if missing.is_empty() {
-            return Ok(result);
-        }
-
-        // Fetch missing nonces in cache
-        let fetched_nonces = {
-            let missing_accounts: Vec<AccountSnapshot> =
-                missing.iter().map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey])).collect();
-            self.inner
-                .fetch_current_commit_nonces(&missing_accounts, min_context_slot)
-                .await?
-        };
-
-        // Store the on-chain nonce as-is (no +1): recording current state, not
-        // reserving the next slot. A subsequent fetch_next_commit_nonces call will
-        // increment from here correctly.
-        for (pubkey, mut guard) in missing {
-            if let Some(&nonce) = fetched_nonces.get(pubkey) {
-                *guard = nonce;
-                result.insert(*pubkey, nonce);
-                Ok(())
-            } else {
-                Err(TaskInfoProviderError::AccountNotFoundError(*pubkey))
-            }?
-        }
-
-        Ok(result)
+        self.commit_ids(accounts, min_context_slot, false).await
     }
 
     async fn fetch_delegation_metadata(
@@ -913,7 +858,8 @@ mod tests {
     #[tokio::test]
     async fn fetch_current_no_increment() {
         let pk = Pubkey::new_unique();
-        let provider = ProviderBuilder::new(vec![10]).build();
+        let cold = Pubkey::new_unique();
+        let provider = ProviderBuilder::new(vec![10, 20]).build();
 
         let r1 = provider.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r1[&pk], 10); // stored as-is
@@ -921,6 +867,14 @@ mod tests {
         // Cache hit: still 10, fetch_current never increments
         let r2 = provider.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
         assert_eq!(r2[&pk], 10);
+
+        let accounts = [(pk, 0), (cold, 0)];
+        let mixed = provider.fetch_current_commit_nonces(&accounts, 0).await.unwrap();
+        assert_eq!(mixed, HashMap::from([(pk, 10), (cold, 20)]));
+
+        // Reading and filling the cache must not reserve the next IDs.
+        let next = provider.fetch_next_commit_nonces(&accounts, 0).await.unwrap();
+        assert_eq!(next, HashMap::from([(pk, 11), (cold, 21)]));
     }
 
     #[tokio::test]
@@ -988,12 +942,12 @@ mod tests {
     }
 
     /// Provider mock
-    struct MockInfoProvider {
+    struct QueuedInfoProvider {
         nonces: Mutex<VecDeque<u64>>,
         delay: Option<Duration>,
     }
 
-    impl MockInfoProvider {
+    impl QueuedInfoProvider {
         fn new(nonces: Vec<u64>) -> Self {
             Self {
                 nonces: Mutex::new(nonces.into()),
@@ -1008,7 +962,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl TaskInfoProvider for MockInfoProvider {
+    impl TaskInfoProvider for QueuedInfoProvider {
         async fn fetch_next_commit_nonces(
             &self,
             accounts: &[AccountSnapshot],
@@ -1067,14 +1021,14 @@ mod tests {
     }
 
     struct ProviderBuilder {
-        inner: MockInfoProvider,
+        inner: QueuedInfoProvider,
         capacity: Option<NonZeroUsize>,
     }
 
     impl ProviderBuilder {
         fn new(nonces: Vec<u64>) -> Self {
             Self {
-                inner: MockInfoProvider::new(nonces),
+                inner: QueuedInfoProvider::new(nonces),
                 capacity: None,
             }
         }
