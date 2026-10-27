@@ -30,18 +30,8 @@ use crate::shared::{
 /// allow. Passing the estimate also does not guarantee execution succeeds:
 /// preparation and base-layer execution still enforce their own requirements.
 pub fn is_intent_within_limits(intent: &MagicIntentBundle) -> bool {
-    commit_fits(intent) && follow_up_fits(intent)
-}
-
-/// Checks the commit-stage tasks fit. Always assumes a uniqueness noop
-/// is present - worst case, since we can't rule it out ahead of time.
-fn commit_fits(intent: &MagicIntentBundle) -> bool {
-    tasks_fit(commit_tasks(intent), Some(0))
-}
-
-/// Checks the follow-up tasks fit; same worst-case noop assumption.
-fn follow_up_fits(intent: &MagicIntentBundle) -> bool {
-    tasks_fit(follow_up_tasks(intent), Some(0))
+    // Reserve a uniqueness noop in both transactions, since it may be needed.
+    tasks_fit(commit_tasks(intent), Some(0)) && tasks_fit(follow_up_tasks(intent), Some(0))
 }
 
 /// Builds the commit-stage tasks used for the size estimate: real

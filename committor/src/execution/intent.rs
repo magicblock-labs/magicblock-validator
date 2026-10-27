@@ -19,7 +19,7 @@ use crate::{
             runner::TransactionExecutor,
             utils::{requires_uniqueness_nonce, resolve_pending_signature},
         },
-        utils::{build_intent_tasks, report_and_close_intent},
+        utils::report_and_close_intent,
     },
     shared::{
         account_state::{AccountSnapshot, TaskInfoProvider},
@@ -103,8 +103,12 @@ impl ExecutionContext {
             );
         }
 
-        let (mut commit_tasks, follow_up_tasks) =
-            build_intent_tasks(intent, &self.task_info_provider).await?;
+        let (commit_tasks, follow_up_tasks) = futures_util::future::join(
+            TaskBuilder::commit_tasks(&self.task_info_provider, intent),
+            TaskBuilder::follow_up_tasks(&self.task_info_provider, intent),
+        )
+        .await;
+        let (mut commit_tasks, follow_up_tasks) = (commit_tasks?, follow_up_tasks?);
         // Resumed standalone actions still need their per-intent uniqueness nonce.
         let nonce = (committed_pubkeys.is_empty() || requires_uniqueness_nonce(&commit_tasks))
             .then_some(intent.intent_id);

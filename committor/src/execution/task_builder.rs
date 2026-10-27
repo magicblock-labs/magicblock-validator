@@ -9,7 +9,7 @@ use solana_signature::Signature;
 use tracing::error;
 
 use crate::shared::{
-    account_state::{TaskInfoProvider, TaskInfoProviderError, TaskInfoProviderResult},
+    account_state::{TaskInfoProvider, TaskInfoProviderError},
     tasks::{
         Task, UndelegateTask,
         utils::{COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks, create_commit_finalize_task},
@@ -28,35 +28,6 @@ struct CommitInputs {
 pub(crate) struct TaskBuilder;
 
 impl TaskBuilder {
-    async fn fetch_commit_nonces<C: TaskInfoProvider>(
-        task_info_provider: &Arc<C>,
-        accounts: &[CommittedAccount],
-        min_context_slot: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        let committed_accounts = accounts
-            .iter()
-            .map(|account| (account.pubkey, account.remote_slot))
-            .collect::<Vec<_>>();
-
-        task_info_provider
-            .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
-            .await
-    }
-
-    async fn fetch_diffable_accounts<C: TaskInfoProvider>(
-        task_info_provider: &Arc<C>,
-        accounts: &[CommittedAccount],
-        min_context_slot: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
-        let diffable_pubkeys = accounts
-            .iter()
-            .filter(|account| account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD)
-            .map(|account| account.pubkey)
-            .collect::<Vec<_>>();
-
-        task_info_provider.get_base_accounts(&diffable_pubkeys, min_context_slot).await
-    }
-
     fn get_follow_up_metadata_accounts(
         intent_bundle: &ScheduledIntentBundle,
     ) -> Vec<(Pubkey, u64)> {
@@ -83,17 +54,18 @@ impl TaskBuilder {
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
+        let committed_accounts = all_committed_accounts
+            .iter()
+            .map(|account| (account.pubkey, account.remote_slot))
+            .collect::<Vec<_>>();
+        let diffable_pubkeys = all_committed_accounts
+            .iter()
+            .filter(|account| account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD)
+            .map(|account| account.pubkey)
+            .collect::<Vec<_>>();
         let (commit_ids, base_accounts) = tokio::join!(
-            Self::fetch_commit_nonces(
-                task_info_provider,
-                &all_committed_accounts,
-                min_context_slot
-            ),
-            Self::fetch_diffable_accounts(
-                task_info_provider,
-                &all_committed_accounts,
-                min_context_slot
-            )
+            task_info_provider.fetch_next_commit_nonces(&committed_accounts, min_context_slot),
+            task_info_provider.get_base_accounts(&diffable_pubkeys, min_context_slot)
         );
         let commit_nonces = commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let base_accounts = base_accounts.unwrap_or_else(|err| {

@@ -239,24 +239,15 @@ impl IntentExecutor {
                 intent
             },
             _ = self.execution_capacity_changed.notified() => None,
-            result = Self::get_new_intent(intent_stream), if can_receive => {
-                let intent = result?;
+            result = intent_stream.next(), if can_receive => {
+                let intent = result
+                    .ok_or(IntentScheduleError::ChannelClosed)?
+                    .map_err(IntentScheduleError::DBError)?;
                 self.scheduler.lock().schedule(intent)
             },
         };
 
         Ok(intent)
-    }
-
-    /// Returns [`ScheduledIntentBundle`] from external channel
-    async fn get_new_intent(
-        intent_stream: &mut IntentStream,
-    ) -> Result<OutboxIntentBundle, IntentScheduleError> {
-        intent_stream
-            .next()
-            .await
-            .ok_or(IntentScheduleError::ChannelClosed)?
-            .map_err(IntentScheduleError::DBError)
     }
 
     /// Completes one intent and releases its execution permit.
