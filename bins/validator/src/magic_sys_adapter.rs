@@ -1,6 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
-use committor::{AccountSnapshot, IntentAdmission, TaskInfoFetcherResult};
+use committor::{AccountSnapshot, CommitIdProvider, TaskInfoProviderResult, intent_fits};
 use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
@@ -14,7 +14,7 @@ use tracing::error;
 #[derive(Clone)]
 pub(crate) struct MagicSysAdapter {
     handle: tokio::runtime::Handle,
-    admission: IntentAdmission,
+    commit_id_provider: CommitIdProvider,
 }
 
 impl MagicSysAdapter {
@@ -27,23 +27,26 @@ impl MagicSysAdapter {
 
     const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-    pub(crate) fn new(handle: tokio::runtime::Handle, admission: IntentAdmission) -> Self {
-        Self { handle, admission }
+    pub(crate) fn new(
+        handle: tokio::runtime::Handle,
+        commit_id_provider: CommitIdProvider,
+    ) -> Self {
+        Self { handle, commit_id_provider }
     }
 
     fn fetch_current_commit_nonces_sync(
         &self,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
-    ) -> std::sync::mpsc::Receiver<TaskInfoFetcherResult<HashMap<Pubkey, u64>>> {
+    ) -> std::sync::mpsc::Receiver<TaskInfoProviderResult<HashMap<Pubkey, u64>>> {
         let (sender, receiver) = std::sync::mpsc::channel();
-        let admission = self.admission.clone();
+        let provider = self.commit_id_provider.clone();
         let accounts = accounts.to_owned();
 
         // This is required to switch from TransactionExecutor runtime
         // blocking on it would cause a panic
         self.handle.spawn(async move {
-            let result = admission.fetch_current_commit_nonces(&accounts, min_context_slot).await;
+            let result = provider.current_commit_ids(&accounts, min_context_slot).await;
             if let Err(err) = sender.send(result) {
                 error!(error = ?err, "Failed to send result back");
             }
@@ -85,7 +88,7 @@ impl MagicSys for MagicSysAdapter {
     }
 
     fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError> {
-        if self.admission.fits(intent) {
+        if intent_fits(intent) {
             Ok(())
         } else {
             Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))

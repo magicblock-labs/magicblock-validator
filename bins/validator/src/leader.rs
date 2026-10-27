@@ -112,7 +112,7 @@ impl Leader {
         timer.record("Committor service initialized");
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             tokio::runtime::Handle::current(),
-            committor.admission(),
+            committor.commit_id_provider(),
         )));
         timer.record("Magic syscall adapter initialized");
 

@@ -200,7 +200,7 @@ mod tests {
                 },
                 task_builder::TaskBuilderError,
             },
-            shared::account_state::TaskInfoFetcherError,
+            shared::account_state::TaskInfoProviderError,
         };
 
         fn transient_rpc_client_error() -> MagicBlockRpcClientError {
@@ -218,7 +218,7 @@ mod tests {
         // RPC-side commit-id fetch failures are transient
         let err =
             super::IntentExecutorError::TaskBuilderError(TaskBuilderError::CommitTasksBuildError(
-                TaskInfoFetcherError::MagicBlockRpcClientError(Box::new(
+                TaskInfoProviderError::MagicBlockRpcClientError(Box::new(
                     transient_rpc_client_error(),
                 )),
             ));
@@ -226,7 +226,7 @@ mod tests {
 
         // Not-found on fetch is transient (may be a stale RPC read)
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::FollowUpTasksBuildError(TaskInfoFetcherError::AccountNotFoundError(
+            TaskBuilderError::FollowUpTasksBuildError(TaskInfoProviderError::AccountNotFoundError(
                 solana_pubkey::Pubkey::new_unique(),
             )),
         );
@@ -235,7 +235,7 @@ mod tests {
         // A delegation created after the committed snapshot is terminal
         let err = super::IntentExecutorError::TaskBuilderError(
             TaskBuilderError::FollowUpTasksBuildError(
-                TaskInfoFetcherError::DelegationSessionChangedError {
+                TaskInfoProviderError::DelegationSessionChangedError {
                     delegated_account: solana_pubkey::Pubkey::new_unique(),
                     delegation_slot: 2,
                     snapshot_slot: 1,

@@ -36,7 +36,7 @@ use crate::{
         },
     },
     shared::{
-        account_state::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
+        account_state::{CachedTaskInfoProvider, RpcTaskInfoProvider},
         outbox::OutboxClient,
         tasks::{
             Task, buffer_task::BufferCleanup, task_strategist::TransactionStrategy,
@@ -293,7 +293,7 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
         authority: Keypair::new(),
         intent_client: crate::execution::client::IntentExecutionClient::new(rpc.clone(), 0),
         transaction_preparator: Arc::new(transaction_preparator.clone()),
-        task_info_fetcher: Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(rpc))),
+        task_info_provider: Arc::new(CachedTaskInfoProvider::new(RpcTaskInfoProvider::new(rpc))),
         outbox_client: outbox_client.clone(),
         actions_callback_executor: Arc::new(actions_callback_executor.clone()),
         actions_timeout: std::time::Duration::from_secs(60),

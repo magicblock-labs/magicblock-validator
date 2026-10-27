@@ -24,7 +24,7 @@ use crate::{
         utils::{build_intent_tasks, report_and_close_intent},
     },
     shared::{
-        account_state::{AccountSnapshot, TaskInfoFetcher},
+        account_state::{AccountSnapshot, TaskInfoProvider},
         outbox::{ScheduledBaseIntentMeta, progress::PendingExecution},
         tasks::task_strategist::{TaskStrategist, TransactionPlan, TransactionStrategy},
     },
@@ -99,14 +99,14 @@ impl ExecutionContext {
         let pending = PendingExecution::from_status(status);
         if pending.is_none() && committed_pubkeys.is_empty() {
             // Standalone actions use one transaction with a per-intent uniqueness nonce.
-            let tasks = TaskBuilder::commit_tasks(&self.task_info_fetcher, intent).await?;
+            let tasks = TaskBuilder::commit_tasks(&self.task_info_provider, intent).await?;
             return Ok(
                 TaskStrategist::build_strategy(tasks, &authority, Some(intent.intent_id))?.into(),
             );
         }
 
         let (mut commit_tasks, follow_up_tasks) =
-            build_intent_tasks(intent, &self.task_info_fetcher).await?;
+            build_intent_tasks(intent, &self.task_info_provider).await?;
         // Resumed standalone actions still need their per-intent uniqueness nonce.
         let nonce = (committed_pubkeys.is_empty() || requires_uniqueness_nonce(&commit_tasks))
             .then_some(intent.intent_id);
@@ -135,7 +135,7 @@ impl ExecutionContext {
             .collect();
         if !accounts.is_empty() {
             let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
-            self.task_info_fetcher
+            self.task_info_provider
                 .fetch_delegation_metadata(&accounts, min_context_slot)
                 .await
                 .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
@@ -144,7 +144,7 @@ impl ExecutionContext {
         }
 
         // The commit is confirmed; only actions and undelegation remain.
-        let tasks = TaskBuilder::follow_up_tasks(&self.task_info_fetcher, intent).await?;
+        let tasks = TaskBuilder::follow_up_tasks(&self.task_info_provider, intent).await?;
         let uniqueness_nonce = self.follow_up_uniqueness_nonce(intent).await?;
         Ok(TaskStrategist::build_strategy(
             tasks,
@@ -167,7 +167,7 @@ impl ExecutionContext {
         }
         let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
         let nonces = self
-            .task_info_fetcher
+            .task_info_provider
             .fetch_current_commit_nonces(&accounts, min_context_slot)
             .await
             .map_err(TaskBuilderError::CommitTasksBuildError)?;
@@ -195,11 +195,11 @@ impl ExecutionContext {
 
         if result.is_err() {
             // We can't know what landed on chain, resync everything.
-            self.task_info_fetcher.invalidate_nonces(&pubkeys);
+            self.task_info_provider.invalidate_nonces(&pubkeys);
         } else if !undelegated_pubkeys.is_empty() {
             // Keep other nonces cached: a chain re-fetch can race the just-landed
             // commit and reuse a nonce (buffer PDA collision).
-            self.task_info_fetcher.invalidate_nonces(&undelegated_pubkeys);
+            self.task_info_provider.invalidate_nonces(&undelegated_pubkeys);
         }
         let result = IntentExecutionResult {
             inner: result,

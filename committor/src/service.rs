@@ -22,9 +22,9 @@ use crate::{
         client::IntentExecutionClient, preparation::Preparator, queue::IntentQueue,
         stream::IntentStream,
     },
-    intake::{IntentAdmission, worker::IntentIntake},
+    intake::{CommitIdProvider, worker::IntentIntake},
     shared::{
-        account_state::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
+        account_state::{CachedTaskInfoProvider, RpcTaskInfoProvider},
         outbox::{
             outbox_client::InternalOutboxClient,
             outbox_intent_bundles_reader::OutboxIntentBundlesReaderError,
@@ -61,7 +61,7 @@ impl CommittorService {
             config.websocket_uri,
         );
         let tables = TableMania::new(rpc.clone(), &authority, None);
-        let task_info_fetcher = Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(
+        let task_info_provider = Arc::new(CachedTaskInfoProvider::new(RpcTaskInfoProvider::new(
             rpc.clone(),
         )));
         let outbox = Arc::new(InternalOutboxClient::new(engine.clone(), er_rpc));
@@ -79,7 +79,7 @@ impl CommittorService {
                 tables.clone(),
                 config.compute_budget_config,
             )),
-            task_info_fetcher: task_info_fetcher.clone(),
+            task_info_provider: task_info_provider.clone(),
             outbox_client: outbox.clone(),
             actions_callback_executor: callbacks,
             actions_timeout: config.actions_timeout,
@@ -96,7 +96,7 @@ impl CommittorService {
             queue: Arc::new(IntentQueue {
                 chainlink,
                 outbox_client: outbox,
-                task_info_fetcher,
+                task_info_provider,
                 backlog,
                 intent_sender: sender,
             }),
@@ -110,8 +110,8 @@ impl CommittorService {
         }
     }
 
-    pub fn admission(&self) -> IntentAdmission {
-        IntentAdmission(self.context.task_info_fetcher.clone())
+    pub fn commit_id_provider(&self) -> CommitIdProvider {
+        CommitIdProvider(self.context.task_info_provider.clone())
     }
 
     pub async fn run(self, mut shutdown: ShutdownHandle) {

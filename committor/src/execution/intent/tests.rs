@@ -15,20 +15,20 @@ use crate::{
         client::IntentExecutionClient, scheduler::create_test_intent_bundle, test_utils::*,
     },
     shared::{
-        account_state::{CacheTaskInfoFetcher, TaskInfoFetcherResult},
+        account_state::{CachedTaskInfoProvider, TaskInfoProviderResult},
         tasks::Task,
     },
 };
 
-struct InfoFetcher;
+struct InfoProvider;
 
 #[async_trait]
-impl TaskInfoFetcher for InfoFetcher {
+impl TaskInfoProvider for InfoProvider {
     async fn fetch_next_commit_nonces(
         &self,
         _: &[AccountSnapshot],
         _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
         unreachable!("the cache allocates the next nonce")
     }
 
@@ -36,7 +36,7 @@ impl TaskInfoFetcher for InfoFetcher {
         &self,
         accounts: &[AccountSnapshot],
         _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
         Ok(accounts.iter().map(|(key, _)| (*key, 1)).collect())
     }
 
@@ -44,7 +44,7 @@ impl TaskInfoFetcher for InfoFetcher {
         &self,
         accounts: &[AccountSnapshot],
         _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
         Ok(accounts
             .iter()
             .map(|(key, _)| {
@@ -65,7 +65,7 @@ impl TaskInfoFetcher for InfoFetcher {
         &self,
         keys: &[Pubkey],
         _: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
         assert!(keys.is_empty(), "small test accounts need no diff lookup");
         Ok(HashMap::new())
     }
@@ -191,7 +191,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
         }
-        let info = Arc::new(CacheTaskInfoFetcher::new(InfoFetcher));
+        let info = Arc::new(CachedTaskInfoProvider::new(InfoProvider));
         // Seed both nonces so completion must retain one and invalidate the other.
         info.fetch_current_commit_nonces(&[(ACCOUNT, 0), (undelegated, 0)], 0)
             .await
@@ -244,7 +244,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
             authority: base.context.authority,
             intent_client: IntentExecutionClient::new(rpc, 0),
             transaction_preparator: Arc::new(base.transaction_preparator),
-            task_info_fetcher: info.clone(),
+            task_info_provider: info.clone(),
             outbox_client: outbox.clone(),
             actions_callback_executor: Arc::new(base.actions_callback_executor),
             actions_timeout: Duration::from_secs(60),

@@ -2,7 +2,7 @@ use super::backlog::BacklogDB;
 use crate::{
     service::CommittorServiceError,
     shared::{
-        account_state::{AccountSnapshot, CacheTaskInfoFetcher, TaskInfoFetcher},
+        account_state::{AccountSnapshot, CachedTaskInfoProvider, TaskInfoProvider},
         outbox::outbox_client::InternalOutboxClient,
     },
 };
@@ -21,7 +21,7 @@ use tracing::error;
 pub(crate) struct IntentQueue {
     pub chainlink: Arc<ProdChainlink>,
     pub outbox_client: Arc<InternalOutboxClient>,
-    pub task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    pub task_info_provider: Arc<CachedTaskInfoProvider>,
     pub backlog: Arc<Mutex<dyn BacklogDB>>,
     pub intent_sender: Sender<OutboxIntentBundle>,
 }
@@ -184,7 +184,7 @@ impl IntentQueue {
         let min_context_slot =
             committed_accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
         let current_nonces = match self
-            .task_info_fetcher
+            .task_info_provider
             .fetch_current_commit_nonces(&committed_accounts, min_context_slot)
             .await
         {

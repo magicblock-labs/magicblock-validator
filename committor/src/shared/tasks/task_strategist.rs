@@ -358,7 +358,7 @@ mod tests {
     use crate::{
         execution::{scheduler::create_test_intent_bundle, task_builder::TaskBuilder},
         shared::{
-            account_state::{AccountSnapshot, TaskInfoFetcher, TaskInfoFetcherResult},
+            account_state::{AccountSnapshot, TaskInfoProvider, TaskInfoProviderResult},
             tasks::{
                 BaseActionTask, BaseActionTaskV1, UndelegateTask,
                 commit_delivery::CommitDelivery,
@@ -370,18 +370,18 @@ mod tests {
     };
 
     #[derive(Default)]
-    struct MockInfoFetcher {
+    struct MockInfoProvider {
         delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
         base_accounts: HashMap<Pubkey, Account>,
     }
 
     #[async_trait::async_trait]
-    impl TaskInfoFetcher for MockInfoFetcher {
+    impl TaskInfoProvider for MockInfoProvider {
         async fn fetch_next_commit_nonces(
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
             Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
         }
 
@@ -389,7 +389,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
             Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
         }
 
@@ -397,7 +397,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| {
@@ -423,7 +423,7 @@ mod tests {
             &self,
             _pubkeys: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
             Ok(self.base_accounts.clone())
         }
     }
@@ -826,7 +826,7 @@ mod tests {
     async fn test_follow_up_tasks_include_request_for_owner_program_undelegate() {
         let delegated_account = Pubkey::new_unique();
         let intent = create_test_intent_bundle(0, &[], &[delegated_account]).inner;
-        let info_fetcher = Arc::new(MockInfoFetcher {
+        let info_provider = Arc::new(MockInfoProvider {
             delegation_metadata: HashMap::from([(
                 delegated_account,
                 (UndelegationRequester::OwnerProgram, delegated_account),
@@ -834,7 +834,7 @@ mod tests {
             ..Default::default()
         });
 
-        let tasks = TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+        let tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 
         let Task::Undelegate(task) = &tasks[0] else {
             panic!("expected undelegate task");
@@ -862,7 +862,7 @@ mod tests {
                     accounts[0].account.data = vec![1; if use_diff { 1024 } else { 40 }];
                     let mut base = accounts[0].account.clone();
                     base.data[0] = 0;
-                    let info_fetcher = Arc::new(MockInfoFetcher {
+                    let info_provider = Arc::new(MockInfoProvider {
                         base_accounts: if use_diff {
                             HashMap::from([(pubkey, base)])
                         } else {
@@ -899,9 +899,9 @@ mod tests {
                     };
                     intent.intent_bundle = base_intent.into();
                     let mut commits =
-                        TaskBuilder::commit_tasks(&info_fetcher, &intent).await.unwrap();
+                        TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
                     let follow_ups =
-                        TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+                        TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
                     assert_eq!(commits.len(), 1 + usize::from(combined));
                     let Task::CommitFinalize(task) = &mut commits[0] else {
                         panic!("all commit intents must use CommitFinalize");
@@ -961,9 +961,9 @@ mod tests {
                         .collect();
                 }
                 intent.intent_bundle.standalone_actions.push(action.action);
-                let fetcher = Arc::new(MockInfoFetcher::default());
-                let commits = TaskBuilder::commit_tasks(&fetcher, &intent).await.unwrap();
-                let follow_ups = TaskBuilder::follow_up_tasks(&fetcher, &intent).await.unwrap();
+                let provider = Arc::new(MockInfoProvider::default());
+                let commits = TaskBuilder::commit_tasks(&provider, &intent).await.unwrap();
+                let follow_ups = TaskBuilder::follow_up_tasks(&provider, &intent).await.unwrap();
                 assert!(follow_ups.is_empty());
                 let plan =
                     TaskStrategist::build_plan(commits, follow_ups, &Pubkey::new_unique(), Some(1))
@@ -986,9 +986,9 @@ mod tests {
     async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
-        let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_tasks = TaskBuilder::commit_tasks(&info_fetcher, &intent).await.unwrap();
-        let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+        let info_provider = Arc::new(MockInfoProvider::default());
+        let commit_tasks = TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
+        let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 
         // Six commits and six undelegations need 1.44M CU together;
         // each group fits separately with 720K CU.
