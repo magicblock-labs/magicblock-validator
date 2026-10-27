@@ -5,7 +5,8 @@ the base chain. Start with [`CommittorService`](src/service.rs): it constructs
 and supervises intake, execution, and cleanup. The validator starts this service
 and gives its `CommitIdProvider` to the Magic Program syscall adapter. This thin
 wrapper exposes only current commit IDs from the cache shared with execution.
-The adapter calls `intent_fits` separately for size checks.
+The adapter calls `is_intent_within_limits` separately for transaction size and
+compute-unit checks.
 
 ## Before and after acceptance
 

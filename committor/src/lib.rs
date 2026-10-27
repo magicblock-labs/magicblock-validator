@@ -9,7 +9,7 @@ mod shared;
 mod test_utils;
 
 pub use config::{CommittorConfig, DEFAULT_ACTIONS_TIMEOUT};
-pub use intake::{CommitIdProvider, intent_fits};
+pub use intake::{CommitIdProvider, is_intent_within_limits};
 pub use service::CommittorService;
 pub use shared::{
     account_state::{AccountSnapshot, TaskInfoProviderError, TaskInfoProviderResult},

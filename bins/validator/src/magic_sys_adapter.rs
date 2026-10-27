@@ -1,6 +1,8 @@
 use std::{collections::HashMap, time::Duration};
 
-use committor::{AccountSnapshot, CommitIdProvider, TaskInfoProviderResult, intent_fits};
+use committor::{
+    AccountSnapshot, CommitIdProvider, TaskInfoProviderResult, is_intent_within_limits,
+};
 use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
@@ -88,7 +90,7 @@ impl MagicSys for MagicSysAdapter {
     }
 
     fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError> {
-        if intent_fits(intent) {
+        if is_intent_within_limits(intent) {
             Ok(())
         } else {
             Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))
