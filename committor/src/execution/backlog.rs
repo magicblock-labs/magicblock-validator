@@ -1,0 +1,116 @@
+use std::{cell::RefCell, collections::VecDeque};
+
+use engine::Engine;
+use mbv_core::intent::outbox::outbox_intent_pda;
+use metrics::metrics;
+#[cfg(test)]
+use parking_lot::Mutex;
+use program::outbox_intent_bundles::OutboxIntentBundle;
+use solana_account::ReadableAccount;
+
+/// Queues intents that overflow the in-memory execution channel, preserving
+/// FIFO order until the committor can process them. Implementations only
+/// need to track ordering (e.g. by id) - the intent bundle itself already
+/// lives durably in the outbox account on-chain.
+pub(crate) trait BacklogDB: Send + 'static {
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()>;
+
+    /// Returns the oldest (first stored) intent bundle
+    fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>>;
+    fn is_empty(&self) -> bool;
+}
+
+pub(crate) struct AccountsDbIntentBacklog {
+    engine: Engine,
+    queue: RefCell<VecDeque<u64>>,
+}
+
+impl AccountsDbIntentBacklog {
+    pub(crate) fn new(engine: Engine) -> Self {
+        Self {
+            engine,
+            queue: RefCell::new(VecDeque::new()),
+        }
+    }
+}
+
+impl BacklogDB for AccountsDbIntentBacklog {
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
+        let mut queue = self.queue.borrow_mut();
+        queue.extend(intent_bundles.into_iter().map(|el| el.inner.intent_id));
+
+        metrics::set_committor_intents_backlog_count(queue.len() as i64);
+        Ok(())
+    }
+
+    fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>> {
+        let mut queue = self.queue.borrow_mut();
+        let Some(id) = queue.pop_front() else {
+            return Ok(None);
+        };
+        metrics::set_committor_intents_backlog_count(queue.len() as i64);
+        drop(queue);
+
+        let intent_pda = outbox_intent_pda(id);
+        let outbox_intent = self
+            .engine
+            .accounts()
+            .loader()
+            .read(&intent_pda, |account| {
+                OutboxIntentBundle::try_from_bytes(account.data())
+            })?
+            .ok_or(Error::IntentNotFound(id))??;
+        Ok(Some(outbox_intent))
+    }
+
+    fn is_empty(&self) -> bool {
+        self.queue.borrow().is_empty()
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct DummyDB {
+    db: Mutex<VecDeque<OutboxIntentBundle>>,
+}
+
+#[cfg(test)]
+impl Default for DummyDB {
+    fn default() -> Self {
+        Self { db: Mutex::new(VecDeque::new()) }
+    }
+}
+
+#[cfg(test)]
+impl DummyDB {
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+}
+
+#[cfg(test)]
+impl BacklogDB for DummyDB {
+    fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
+        self.db.lock().extend(intent_bundles);
+        Ok(())
+    }
+
+    fn pop_intent_bundle(&self) -> DBResult<Option<OutboxIntentBundle>> {
+        Ok(self.db.lock().pop_front())
+    }
+
+    fn is_empty(&self) -> bool {
+        self.db.lock().is_empty()
+    }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum Error {
+    #[error("Failed to find intent in AccountsDB, id: {0}")]
+    IntentNotFound(u64),
+    #[error("Failed to deserialize Outbox Account")]
+    Deserialize(#[from] wincode::ReadError),
+    #[error("AccountsDbError: {0}")]
+    AccountsDb(#[from] accountsdb::AccountsDBError),
+}
+
+pub(crate) type DBResult<T, E = Error> = Result<T, E>;

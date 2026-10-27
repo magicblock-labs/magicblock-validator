@@ -5,7 +5,7 @@
 ///
 /// This respects the RUST_LOG environment variable.
 /// Example: `RUST_LOG=trace cargo test`
-pub fn init_test_logger() {
+pub(crate) fn init_test_logger() {
     // Repeated across tests in a process, so failures to install are expected
     // and ignored: the first caller wins.
     let _ = tracing_subscriber::fmt()
