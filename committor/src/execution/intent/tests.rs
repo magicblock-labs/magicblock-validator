@@ -1,9 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
-use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
 use program::outbox::{ExecutionStage, PendingTransaction, TwoStageProgress};
 use rpc_client::MagicblockRpcClient;
-use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::{mock_sender::MocksMap, nonblocking::rpc_client::RpcClient};
 use solana_rpc_client_api::request::RpcRequest;
@@ -14,62 +12,9 @@ use crate::{
     execution::{
         client::IntentExecutionClient, scheduler::create_test_intent_bundle, test_utils::*,
     },
-    shared::{
-        account_state::{CachedTaskInfoProvider, TaskInfoProviderResult},
-        tasks::Task,
-    },
+    shared::{account_state::CachedTaskInfoProvider, tasks::Task},
+    test_utils::MockInfoProvider,
 };
-
-struct InfoProvider;
-
-#[async_trait]
-impl TaskInfoProvider for InfoProvider {
-    async fn fetch_next_commit_nonces(
-        &self,
-        _: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        unreachable!("the cache allocates the next nonce")
-    }
-
-    async fn fetch_current_commit_nonces(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        Ok(accounts.iter().map(|(key, _)| (*key, 1)).collect())
-    }
-
-    async fn fetch_delegation_metadata(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
-        Ok(accounts
-            .iter()
-            .map(|(key, _)| {
-                (
-                    *key,
-                    DelegationMetadata {
-                        last_commit_id: 1,
-                        undelegation_requester: UndelegationRequester::None,
-                        seeds: vec![],
-                        rent_payer: *key,
-                    },
-                )
-            })
-            .collect())
-    }
-
-    async fn get_base_accounts(
-        &self,
-        keys: &[Pubkey],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
-        assert!(keys.is_empty(), "small test accounts need no diff lookup");
-        Ok(HashMap::new())
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Resolution {
@@ -191,7 +136,10 @@ async fn intent_execution_preserves_recovery_and_completion() {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
         }
-        let info = Arc::new(CachedTaskInfoProvider::new(InfoProvider));
+        let info = Arc::new(CachedTaskInfoProvider::new(MockInfoProvider {
+            default_commit_id: 1,
+            ..Default::default()
+        }));
         // Seed both nonces so completion must retain one and invalidate the other.
         info.fetch_current_commit_nonces(&[(ACCOUNT, 0), (undelegated, 0)], 0)
             .await

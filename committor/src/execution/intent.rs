@@ -2,8 +2,6 @@
 use std::time::Duration;
 use std::time::Instant;
 
-#[cfg(test)]
-use async_trait::async_trait;
 use program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent_bundles::OutboxIntentBundleStatus,

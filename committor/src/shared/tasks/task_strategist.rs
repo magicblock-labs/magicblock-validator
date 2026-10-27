@@ -342,10 +342,7 @@ pub(crate) type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use delegation_program_api::{
-        discriminator::DlpDiscriminator,
-        state::{DelegationMetadata, UndelegationRequester},
-    };
+    use delegation_program_api::{discriminator::DlpDiscriminator, state::UndelegationRequester};
     use mbv_core::intent::{
         BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent, ProgramArgs, UndelegateType,
         types::CommittedAccount,
@@ -357,76 +354,14 @@ mod tests {
     use super::*;
     use crate::{
         execution::{scheduler::create_test_intent_bundle, task_builder::TaskBuilder},
-        shared::{
-            account_state::{AccountSnapshot, TaskInfoProvider, TaskInfoProviderResult},
-            tasks::{
-                BaseActionTask, BaseActionTaskV1, UndelegateTask,
-                commit_delivery::CommitDelivery,
-                commit_finalize_task::CommitFinalizeTask,
-                utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_finalize_task},
-            },
+        shared::tasks::{
+            BaseActionTask, BaseActionTaskV1, UndelegateTask,
+            commit_delivery::CommitDelivery,
+            commit_finalize_task::CommitFinalizeTask,
+            utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_finalize_task},
         },
-        test_utils,
+        test_utils::{self, MockInfoProvider},
     };
-
-    #[derive(Default)]
-    struct MockInfoProvider {
-        delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
-        base_accounts: HashMap<Pubkey, Account>,
-    }
-
-    #[async_trait::async_trait]
-    impl TaskInfoProvider for MockInfoProvider {
-        async fn fetch_next_commit_nonces(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-            Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
-        }
-
-        async fn fetch_current_commit_nonces(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-            Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, 0)).collect())
-        }
-
-        async fn fetch_delegation_metadata(
-            &self,
-            accounts: &[AccountSnapshot],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
-            Ok(accounts
-                .iter()
-                .map(|(pubkey, _)| {
-                    let (undelegation_requester, rent_payer) = self
-                        .delegation_metadata
-                        .get(pubkey)
-                        .copied()
-                        .unwrap_or((UndelegationRequester::None, *pubkey));
-                    (
-                        *pubkey,
-                        DelegationMetadata {
-                            last_commit_id: 0,
-                            undelegation_requester,
-                            seeds: vec![],
-                            rent_payer,
-                        },
-                    )
-                })
-                .collect())
-        }
-
-        async fn get_base_accounts(
-            &self,
-            _pubkeys: &[Pubkey],
-            _: u64,
-        ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
-            Ok(self.base_accounts.clone())
-        }
-    }
 
     // Helper to create a simple commit task
     fn create_test_commit_task(
@@ -863,8 +798,9 @@ mod tests {
                     let mut base = accounts[0].account.clone();
                     base.data[0] = 0;
                     let info_provider = Arc::new(MockInfoProvider {
+                        next_commit_id: Some(0),
                         base_accounts: if use_diff {
-                            HashMap::from([(pubkey, base)])
+                            HashMap::from([(pubkey, Some(base))])
                         } else {
                             HashMap::new()
                         },
@@ -945,7 +881,8 @@ mod tests {
     async fn test_combined_commit_delivery_formats_without_follow_up() {
         for data_len in [40, 10_240] {
             for use_alts in [false, true] {
-                let mut intent = create_test_intent_bundle(0, &[Pubkey::new_unique()], &[]).inner;
+                let pubkey = Pubkey::new_unique();
+                let mut intent = create_test_intent_bundle(0, &[pubkey], &[]).inner;
                 intent.intent_bundle.commit.as_mut().unwrap().get_committed_accounts_mut()[0]
                     .account
                     .data = vec![1; data_len];
@@ -961,7 +898,11 @@ mod tests {
                         .collect();
                 }
                 intent.intent_bundle.standalone_actions.push(action.action);
-                let provider = Arc::new(MockInfoProvider::default());
+                let provider = Arc::new(MockInfoProvider {
+                    next_commit_id: Some(0),
+                    base_accounts: HashMap::from([(pubkey, None)]),
+                    ..Default::default()
+                });
                 let commits = TaskBuilder::commit_tasks(&provider, &intent).await.unwrap();
                 let follow_ups = TaskBuilder::follow_up_tasks(&provider, &intent).await.unwrap();
                 assert!(follow_ups.is_empty());
@@ -986,7 +927,10 @@ mod tests {
     async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
-        let info_provider = Arc::new(MockInfoProvider::default());
+        let info_provider = Arc::new(MockInfoProvider {
+            next_commit_id: Some(0),
+            ..Default::default()
+        });
         let commit_tasks = TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
         let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 
