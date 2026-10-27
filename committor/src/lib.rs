@@ -9,9 +9,9 @@ mod shared;
 mod test_utils;
 
 pub use config::{CommittorConfig, DEFAULT_ACTIONS_TIMEOUT};
-pub use intake::IntentAdmission;
+pub use intake::{CommitIdProvider, intent_fits};
 pub use service::CommittorService;
 pub use shared::{
-    account_state::{AccountSnapshot, TaskInfoFetcherError, TaskInfoFetcherResult},
+    account_state::{AccountSnapshot, TaskInfoProviderError, TaskInfoProviderResult},
     compute_budget::ComputeBudgetConfig,
 };

@@ -41,7 +41,7 @@ impl super::runner::TransactionExecutor<'_> {
             TransactionExecutionError::CommitIDError(_, _) if can_repair_commits => {
                 handle_commit_id_error(
                     &self.ctx.authority.pubkey(),
-                    &self.ctx.task_info_fetcher,
+                    &self.ctx.task_info_provider,
                     self.committed_pubkeys,
                     &mut self.current,
                     self.intent_id,

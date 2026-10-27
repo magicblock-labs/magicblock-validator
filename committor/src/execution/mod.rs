@@ -24,14 +24,14 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         preparation::cleanup_resources::CleanupResources,
     },
-    shared::account_state::CacheTaskInfoFetcher,
+    shared::account_state::CachedTaskInfoProvider,
 };
 
 pub(crate) struct ExecutionContext {
     pub authority: Keypair,
     pub intent_client: IntentExecutionClient,
     pub transaction_preparator: Arc<dyn preparation::TransactionPreparator>,
-    pub task_info_fetcher: Arc<CacheTaskInfoFetcher>,
+    pub task_info_provider: Arc<CachedTaskInfoProvider>,
     pub outbox_client: Arc<dyn crate::shared::outbox::OutboxClient>,
     pub actions_callback_executor: Arc<dyn mbv_core::traits::ActionsCallbackScheduler>,
     pub actions_timeout: std::time::Duration,

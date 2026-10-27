@@ -3,7 +3,9 @@
 Delivers the leader's account commits, undelegations, and associated actions to
 the base chain. Start with [`CommittorService`](src/service.rs): it constructs
 and supervises intake, execution, and cleanup. The validator starts this service
-and gives its admission handle to the Magic Program syscall adapter.
+and gives its `CommitIdProvider` to the Magic Program syscall adapter. This thin
+wrapper exposes only current commit IDs from the cache shared with execution.
+The adapter calls `intent_fits` separately for size checks.
 
 ## Before and after acceptance
 
@@ -17,8 +19,8 @@ User transaction → admission checks → MagicContext
                          account ordering → execution → report and cleanup
 ```
 
-- [`intake/`](src/intake): size checks, nonce lookup, and accepting scheduled
-  intents. Admission and execution share the same nonce cache.
+- [`intake/`](src/intake): size checks, commit ID lookup, and accepting scheduled
+  intents.
 - [`execution/`](src/execution): restart recovery, account ordering, task building,
   transaction preparation and sending, confirmation, callbacks, and cleanup.
 - [`shared/`](src/shared): account state, task and transaction representation,

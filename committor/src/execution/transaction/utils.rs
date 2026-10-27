@@ -25,7 +25,7 @@ use crate::{
         task_builder::TaskBuilderError,
     },
     shared::{
-        account_state::{CacheTaskInfoFetcher, TaskInfoFetcher},
+        account_state::{CachedTaskInfoProvider, TaskInfoProvider},
         tasks::{
             Task,
             task_strategist::{TaskStrategist, TransactionStrategy},
@@ -190,7 +190,7 @@ pub(in crate::execution) async fn resolve_pending_signature(
 /// Handles out of sync commit id error, fixes current strategy
 pub(in crate::execution) async fn handle_commit_id_error(
     authority: &Pubkey,
-    task_info_fetcher: &CacheTaskInfoFetcher,
+    task_info_provider: &CachedTaskInfoProvider,
     committed_pubkeys: &[Pubkey],
     strategy: &mut TransactionStrategy,
     intent_id: u64,
@@ -215,10 +215,10 @@ pub(in crate::execution) async fn handle_commit_id_error(
         })
         .collect();
 
-    // We reset TaskInfoFetcher for all committed accounts
+    // We reset TaskInfoProvider for all committed accounts
     // We re-fetch them to fix out of sync tasks
-    task_info_fetcher.invalidate_nonces(committed_pubkeys);
-    let commit_ids = task_info_fetcher
+    task_info_provider.invalidate_nonces(committed_pubkeys);
+    let commit_ids = task_info_provider
         .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
         .await
         .map_err(TaskBuilderError::CommitTasksBuildError)?;
@@ -362,20 +362,20 @@ mod tests {
 
     use super::*;
     use crate::shared::{
-        account_state::{AccountSnapshot, TaskInfoFetcherResult},
+        account_state::{AccountSnapshot, TaskInfoProviderResult},
         tasks::utils::create_commit_finalize_task,
     };
 
     /// Reports commit id 1 except for one unchanged account at commit id 5.
-    struct FreshDelegationFetcher(Option<Pubkey>);
+    struct FreshDelegationProvider(Option<Pubkey>);
 
     #[async_trait]
-    impl TaskInfoFetcher for FreshDelegationFetcher {
+    impl TaskInfoProvider for FreshDelegationProvider {
         async fn fetch_next_commit_nonces(
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 5 } else { 1 }))
@@ -386,7 +386,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| (*pubkey, if self.0 == Some(*pubkey) { 4 } else { 0 }))
@@ -397,7 +397,7 @@ mod tests {
             &self,
             accounts: &[AccountSnapshot],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, DelegationMetadata>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
             Ok(accounts
                 .iter()
                 .map(|(pubkey, _)| {
@@ -418,7 +418,7 @@ mod tests {
             &self,
             _: &[Pubkey],
             _: u64,
-        ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
             Ok(Default::default())
         }
     }
@@ -458,10 +458,10 @@ mod tests {
             uniqueness_nonce: None,
         };
 
-        let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(unchanged_pubkey)));
+        let provider = CachedTaskInfoProvider::new(FreshDelegationProvider(Some(unchanged_pubkey)));
         handle_commit_id_error(
             &Pubkey::new_unique(),
-            &fetcher,
+            &provider,
             &[pubkey, unchanged_pubkey],
             &mut strategy,
             42,

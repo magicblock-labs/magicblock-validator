@@ -9,7 +9,7 @@ use solana_signature::Signature;
 use tracing::error;
 
 use crate::shared::{
-    account_state::{TaskInfoFetcher, TaskInfoFetcherError, TaskInfoFetcherResult},
+    account_state::{TaskInfoProvider, TaskInfoProviderError, TaskInfoProviderResult},
     tasks::{
         Task, UndelegateTask,
         utils::{COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks, create_commit_finalize_task},
@@ -28,33 +28,33 @@ struct CommitInputs {
 pub(crate) struct TaskBuilder;
 
 impl TaskBuilder {
-    async fn fetch_commit_nonces<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
+    async fn fetch_commit_nonces<C: TaskInfoProvider>(
+        task_info_provider: &Arc<C>,
         accounts: &[CommittedAccount],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, u64>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
         let committed_accounts = accounts
             .iter()
             .map(|account| (account.pubkey, account.remote_slot))
             .collect::<Vec<_>>();
 
-        task_info_fetcher
+        task_info_provider
             .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
             .await
     }
 
-    async fn fetch_diffable_accounts<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
+    async fn fetch_diffable_accounts<C: TaskInfoProvider>(
+        task_info_provider: &Arc<C>,
         accounts: &[CommittedAccount],
         min_context_slot: u64,
-    ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
         let diffable_pubkeys = accounts
             .iter()
             .filter(|account| account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD)
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
 
-        task_info_fetcher.get_base_accounts(&diffable_pubkeys, min_context_slot).await
+        task_info_provider.get_base_accounts(&diffable_pubkeys, min_context_slot).await
     }
 
     fn get_follow_up_metadata_accounts(
@@ -71,9 +71,9 @@ impl TaskBuilder {
         .collect()
     }
 
-    async fn fetch_commit_inputs<C: TaskInfoFetcher>(
+    async fn fetch_commit_inputs<C: TaskInfoProvider>(
         intent_bundle: &ScheduledIntentBundle,
-        task_info_fetcher: &Arc<C>,
+        task_info_provider: &Arc<C>,
     ) -> TaskBuilderResult<CommitInputs> {
         // Fetch necessary data for commit task creation.
         let all_committed_accounts = intent_bundle.get_all_committed_accounts();
@@ -84,9 +84,13 @@ impl TaskBuilder {
             .max()
             .unwrap_or(0);
         let (commit_ids, base_accounts) = tokio::join!(
-            Self::fetch_commit_nonces(task_info_fetcher, &all_committed_accounts, min_context_slot),
+            Self::fetch_commit_nonces(
+                task_info_provider,
+                &all_committed_accounts,
+                min_context_slot
+            ),
             Self::fetch_diffable_accounts(
-                task_info_fetcher,
+                task_info_provider,
                 &all_committed_accounts,
                 min_context_slot
             )
@@ -101,8 +105,8 @@ impl TaskBuilder {
     }
 
     /// Builds commits and actions that can run before the follow-up transaction.
-    pub(crate) async fn commit_tasks<C: TaskInfoFetcher>(
-        task_info_fetcher: &Arc<C>,
+    pub(crate) async fn commit_tasks<C: TaskInfoProvider>(
+        task_info_provider: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Task>> {
         let mut tasks = Vec::new();
@@ -115,7 +119,7 @@ impl TaskBuilder {
         let CommitInputs {
             mut commit_nonces,
             mut base_accounts,
-        } = Self::fetch_commit_inputs(intent_bundle, task_info_fetcher).await?;
+        } = Self::fetch_commit_inputs(intent_bundle, task_info_provider).await?;
 
         // Create tasks per intent type
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
@@ -161,8 +165,8 @@ impl TaskBuilder {
     }
 
     /// Returns tasks for remaining actions and undelegation
-    pub(crate) async fn follow_up_tasks<C: TaskInfoFetcher>(
-        info_fetcher: &Arc<C>,
+    pub(crate) async fn follow_up_tasks<C: TaskInfoProvider>(
+        info_provider: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Task>> {
         // Helper to create an undelegate task
@@ -227,7 +231,7 @@ impl TaskBuilder {
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let delegation_metadata = info_fetcher
+        let delegation_metadata = info_provider
             .fetch_delegation_metadata(&follow_up_metadata_accounts, min_context_slot)
             .await
             .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
@@ -268,7 +272,7 @@ fn build_commit_tasks(
 
 fn take_commit_nonce(commit_nonces: &mut HashMap<Pubkey, u64>, pubkey: Pubkey) -> u64 {
     commit_nonces.remove(&pubkey).unwrap_or_else(|| {
-        // This shall not ever happen since TaskInfoFetcher
+        // This shall not ever happen since TaskInfoProvider
         // returns commit ids for all pubkeys or throws
         // If it does occur, it will be patched and retried by IntentExecutor
         error!(pubkey = %pubkey, "Commit id absent for pubkey");
@@ -288,9 +292,9 @@ fn delegation_metadata_for_pubkey(
 #[derive(thiserror::Error, Debug)]
 pub enum TaskBuilderError {
     #[error("CommitIdFetchError: {0}")]
-    CommitTasksBuildError(#[source] TaskInfoFetcherError),
+    CommitTasksBuildError(#[source] TaskInfoProviderError),
     #[error("FollowUpTasksBuildError: {0}")]
-    FollowUpTasksBuildError(#[source] TaskInfoFetcherError),
+    FollowUpTasksBuildError(#[source] TaskInfoProviderError),
     #[error("Missing delegation metadata for {0}")]
     MissingDelegationMetadata(Pubkey),
 }

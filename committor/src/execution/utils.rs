@@ -10,18 +10,18 @@ use crate::{
         task_builder::TaskBuilder,
     },
     shared::{
-        account_state::TaskInfoFetcher,
+        account_state::TaskInfoProvider,
         outbox::{OutboxClient, ScheduledBaseIntentMeta},
         tasks::Task,
     },
 };
 
-pub(in crate::execution) async fn build_intent_tasks<F: TaskInfoFetcher>(
+pub(in crate::execution) async fn build_intent_tasks<F: TaskInfoProvider>(
     intent_bundle: &ScheduledIntentBundle,
-    task_info_fetcher: &Arc<F>,
+    task_info_provider: &Arc<F>,
 ) -> IntentExecutorResult<(Vec<Task>, Vec<Task>)> {
-    let commit_tasks_fut = TaskBuilder::commit_tasks(task_info_fetcher, intent_bundle);
-    let follow_up_tasks_fut = TaskBuilder::follow_up_tasks(task_info_fetcher, intent_bundle);
+    let commit_tasks_fut = TaskBuilder::commit_tasks(task_info_provider, intent_bundle);
+    let follow_up_tasks_fut = TaskBuilder::follow_up_tasks(task_info_provider, intent_bundle);
     let (commit_tasks, follow_up_tasks) = join(commit_tasks_fut, follow_up_tasks_fut).await;
 
     Ok((commit_tasks?, follow_up_tasks?))
