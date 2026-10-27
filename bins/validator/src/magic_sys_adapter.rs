@@ -1,8 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
-use committor::{
-    AccountSnapshot, CommitIdProvider, TaskInfoProviderResult, is_intent_within_limits,
-};
+use committor::{CommitIdProvider, is_intent_within_limits};
 use mbv_core::{
     intent::{MagicIntentBundle, types::CommittedAccount},
     traits::MagicSys,
@@ -20,8 +18,8 @@ pub(crate) struct MagicSysAdapter {
 }
 
 impl MagicSysAdapter {
-    /// Returned when the sync channel is disconnected (sender dropped).
-    const RECV_ERR: u32 = 0xE000_0000;
+    /// Returned when the fetch task panics or is cancelled.
+    const TASK_ERR: u32 = 0xE000_0000;
     /// Returned when waiting for the nonce fetch times out.
     const TIMEOUT_ERR: u32 = 0xE000_0001;
     /// Returned when the fetch of current commit nonces fails.
@@ -34,27 +32,6 @@ impl MagicSysAdapter {
         commit_id_provider: CommitIdProvider,
     ) -> Self {
         Self { handle, commit_id_provider }
-    }
-
-    fn fetch_current_commit_nonces_sync(
-        &self,
-        accounts: &[AccountSnapshot],
-        min_context_slot: u64,
-    ) -> std::sync::mpsc::Receiver<TaskInfoProviderResult<HashMap<Pubkey, u64>>> {
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let provider = self.commit_id_provider.clone();
-        let accounts = accounts.to_owned();
-
-        // This is required to switch from TransactionExecutor runtime
-        // blocking on it would cause a panic
-        self.handle.spawn(async move {
-            let result = provider.current_commit_ids(&accounts, min_context_slot).await;
-            if let Err(err) = sender.send(result) {
-                error!(error = ?err, "Failed to send result back");
-            }
-        });
-
-        receiver
     }
 }
 
@@ -72,18 +49,22 @@ impl MagicSys for MagicSysAdapter {
             commits.iter().map(|account| (account.pubkey, account.remote_slot)).collect();
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
-        let receiver = self.fetch_current_commit_nonces_sync(&accounts, min_context_slot);
-        receiver
-            .recv_timeout(Self::FETCH_TIMEOUT)
-            .map_err(|err| match err {
-                std::sync::mpsc::RecvTimeoutError::Timeout => {
-                    error!("Timed out waiting for commit nonces from CommittorService");
-                    InstructionError::Custom(Self::TIMEOUT_ERR)
-                }
-                std::sync::mpsc::RecvTimeoutError::Disconnected => {
-                    error!("CommittorService channel disconnected while waiting for commit nonces");
-                    InstructionError::Custom(Self::RECV_ERR)
-                }
+        let provider = self.commit_id_provider.clone();
+        let fetch = self
+            .handle
+            .spawn(async move { provider.current_commit_ids(&accounts, min_context_slot).await });
+
+        // Engine calls this syscall on a dedicated OS thread. Keep the fetch
+        // spawned to isolate panics and let it finish even if this wait times out.
+        self.handle
+            .block_on(async { tokio::time::timeout(Self::FETCH_TIMEOUT, fetch).await })
+            .map_err(|_| {
+                error!("Timed out waiting for commit nonces from CommittorService");
+                InstructionError::Custom(Self::TIMEOUT_ERR)
+            })?
+            .map_err(|err| {
+                error!(error = ?err, "Commit nonce fetch task failed");
+                InstructionError::Custom(Self::TASK_ERR)
             })?
             .inspect_err(|err| error!(error = ?err, "Failed to fetch current commit nonces"))
             .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
