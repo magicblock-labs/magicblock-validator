@@ -25,7 +25,7 @@ pub trait MagicSys: Sync + Send + 'static {
 }
 
 /// Interface for service handling callback execution/scheduling
-pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
+pub trait ActionsCallbackScheduler: Send + Sync + 'static {
     /// Schedules callback txs.
     /// Returns signature or construction error per callback.
     fn schedule(

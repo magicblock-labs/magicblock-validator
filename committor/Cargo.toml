@@ -14,7 +14,6 @@ doctest = false
 accountsdb = { workspace = true }
 async-trait = { workspace = true }
 backoff = { workspace = true }
-borsh = { workspace = true }
 engine = { workspace = true }
 futures-util = { workspace = true }
 lru = { workspace = true }
@@ -29,7 +28,6 @@ parking_lot = { workspace = true }
 table-mania = { workspace = true }
 nucleus = { workspace = true }
 pin-project = { workspace = true }
-rusqlite = { workspace = true, features = ["fallible_uint"] }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-commitment-config = { workspace = true }
@@ -51,18 +49,17 @@ solana-transaction-error = { workspace = true }
 solana-transaction-status-client-types = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["rt"] }
 tokio-stream = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+tracing-subscriber = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
 program = { workspace = true, features = ["dev-context-only-utils"] }
 rand = { workspace = true }
 solana-signature = { workspace = true, features = ["rand"] }
-tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
