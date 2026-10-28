@@ -81,14 +81,14 @@ services = { package = "magicblock-services", path = "services" }
 table-mania = { package = "magicblock-table-mania", path = "table-mania" }
 task-scheduler = { package = "magicblock-task-scheduler", path = "task-scheduler" }
 
-accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-magic-root-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
+accountsdb = { package = "magicblock-accountsdb", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+engine = { package = "magicblock-engine", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+keeper = { package = "magicblock-keeper", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+magic-root-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+ledger = { package = "magicblock-ledger", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+nucleus = { package = "magicblock-engine-nucleus", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+replicator = { package = "magicblock-replicator", git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+v42-calculator-interface = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
 
 agave-geyser-plugin-interface = { version = "=4.2.2" }
 agave-precompiles = { version = "=4.2.2", features = ["agave-unstable-api"] }
@@ -248,8 +248,8 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 [patch.crates-io]
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 
-agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
-solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "b2b89fde93e0383823da4fc90e21a87ea5db53be" }
+agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+solana-account = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+solana-program-runtime = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }
+solana-transaction-context = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "9ea2303afa50cb3526eb07a954845ff18f553cb3" }

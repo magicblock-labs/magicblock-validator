@@ -33,7 +33,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: 3.0.0
+        ref: 6ac8d2393fb5c8d719fbfc72367123ae0fc6e3ed
         path: redsuite
         persist-credentials: false
 
