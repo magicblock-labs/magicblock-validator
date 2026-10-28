@@ -91,7 +91,7 @@ async fn test_deleg_after_subscribe_case2() {
         info!("3. Delegate account to us");
 
         slot = rpc_client.set_slot(slot + 11);
-        let acc = account_shared_with_owner_and_slot(&acc, delegation_program_api::id(), slot);
+        let acc = account_shared_with_owner_and_slot(&acc, dpi::id(), slot);
         let delegation_record =
             add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, program_pubkey);
         let expected = AccountBuilder::from(AccountSharedData::from(acc.owned()))

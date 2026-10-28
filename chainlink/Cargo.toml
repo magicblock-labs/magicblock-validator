@@ -16,7 +16,7 @@ lru = { workspace = true }
 aml = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
-delegation-program-api = { workspace = true }
+dpi = { workspace = true }
 magic-program-api = { workspace = true }
 metrics = { workspace = true }
 nucleus = { workspace = true, features = ["runtime"] }

@@ -342,7 +342,7 @@ pub(crate) type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use delegation_program_api::{discriminator::DlpDiscriminator, state::UndelegationRequester};
+    use dpi::legacy::{discriminator::DlpDiscriminator, state::UndelegationRequester};
     use mbv_core::intent::{
         BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent, ProgramArgs, UndelegateType,
         types::CommittedAccount,
@@ -857,8 +857,8 @@ mod tests {
                             .data
                             .starts_with(&DlpDiscriminator::CommitFinalizeFromBuffer.to_vec())
                     );
-                    assert_eq!(inline_ix.program_id, delegation_program_api::id());
-                    assert_eq!(buffer_ix.program_id, delegation_program_api::id());
+                    assert_eq!(inline_ix.program_id, dpi::id());
+                    assert_eq!(buffer_ix.program_id, dpi::id());
                     assert_eq!(
                         follow_ups.len(),
                         usize::from(!combined) + 2 * usize::from(undelegate)

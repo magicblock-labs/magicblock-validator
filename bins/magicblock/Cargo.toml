@@ -16,7 +16,7 @@ isocountry = { workspace = true }
 json = { workspace = true }
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "64c7c5e3", default-features = false }
 config = { workspace = true }
-delegation-program-api = { workspace = true }
+dpi = { workspace = true }
 rand = { workspace = true }
 solana-commitment-config = { workspace = true }
 solana-instruction = { workspace = true }

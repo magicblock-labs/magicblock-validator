@@ -105,17 +105,16 @@ impl TransactionExecutionError {
         task_instruction_offset: u8,
     ) -> Result<Self, TransactionError> {
         // Commit Nonce order error
-        const NONCE_OUT_OF_ORDER: u32 =
-            delegation_program_api::error::DlpError::NonceOutOfOrder as u32;
+        const NONCE_OUT_OF_ORDER: u32 = dpi::error::DlpError::NonceOutOfOrder as u32;
         // Errors when commit state already exists
         const COMMIT_STATE_INVALID_ACCOUNT_OWNER: u32 =
-            delegation_program_api::error::DlpError::CommitStateInvalidAccountOwner as u32;
+            dpi::error::DlpError::CommitStateInvalidAccountOwner as u32;
         const COMMIT_STATE_ALREADY_INITIALIZED: u32 =
-            delegation_program_api::error::DlpError::CommitStateAlreadyInitialized as u32;
+            dpi::error::DlpError::CommitStateAlreadyInitialized as u32;
         const COMMIT_RECORD_INVALID_ACCOUNT_OWNER: u32 =
-            delegation_program_api::error::DlpError::CommitRecordInvalidAccountOwner as u32;
+            dpi::error::DlpError::CommitRecordInvalidAccountOwner as u32;
         const COMMIT_RECORD_ALREADY_INITIALIZED: u32 =
-            delegation_program_api::error::DlpError::CommitRecordAlreadyInitialized as u32;
+            dpi::error::DlpError::CommitRecordAlreadyInitialized as u32;
 
         match err {
             // Some tx may use too much CPIs and we can handle it in certain cases

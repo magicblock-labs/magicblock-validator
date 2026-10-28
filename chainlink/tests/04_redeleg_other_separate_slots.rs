@@ -39,8 +39,7 @@ async fn test_undelegate_redelegate_to_other_in_separate_slot() {
         info!("1. Account delegated to us");
 
         slot = rpc_client.set_slot(slot + 11);
-        let delegated_acc =
-            account_shared_with_owner_and_slot(&acc, delegation_program_api::id(), slot);
+        let delegated_acc = account_shared_with_owner_and_slot(&acc, dpi::id(), slot);
         rpc_client.add_account(pubkey, delegated_acc.into());
         let delegation_record =
             add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, program_pubkey);

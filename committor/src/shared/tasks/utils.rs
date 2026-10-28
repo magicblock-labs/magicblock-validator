@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use delegation_program_api::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
+use dpi::legacy::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
 use mbv_core::intent::{BaseAction, types::CommittedAccount};
 use solana_account::Account;
 use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;

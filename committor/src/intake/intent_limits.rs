@@ -410,7 +410,7 @@ mod tests {
             let mut known_keys =
                 TaskStrategist::collect_lookup_table_keys(&authority.pubkey(), &original, Some(0));
             known_keys.push(authority.pubkey());
-            known_keys.push(delegation_program_api::id());
+            known_keys.push(dpi::id());
             assert!(payers.iter().all(|payer| !known_keys.contains(payer)));
             assert_eq!(wire_size(&estimated), wire_size(&actual));
         }

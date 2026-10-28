@@ -7,7 +7,7 @@ use ::metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
 };
-use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
+use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
 use mbv_core::token_programs::is_ata;
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
 use solana_pubkey::Pubkey;
@@ -84,7 +84,7 @@ impl ClassifiedAccounts {
         let account = AccountBuilder::from(account);
         let state = account.read();
 
-        if state.owner() == delegation_program_api::id() {
+        if state.owner() == dpi::id() {
             self.owned_by_deleg.push((pubkey, account, slot));
             return None;
         }

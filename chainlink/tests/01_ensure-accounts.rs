@@ -1,7 +1,7 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use assert_matches::assert_matches;
-use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
+use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_empty_placeholder,
     assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
@@ -142,7 +142,7 @@ async fn existing_account_missing_delegation_record(ctx: &TestContext) {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             ..Default::default()
         },
     );
@@ -177,7 +177,7 @@ async fn write_existing_account_valid_delegation_record(ctx: &TestContext) {
     let owner = Pubkey::new_unique();
 
     let acc = Account {
-        owner: delegation_program_api::id(),
+        owner: dpi::id(),
         lamports: 1_000_000,
         ..Default::default()
     };
@@ -209,7 +209,7 @@ async fn write_existing_account_other_authority(ctx: &TestContext) {
 
     let pubkey = Pubkey::new_unique();
     let account = Account {
-        owner: delegation_program_api::id(),
+        owner: dpi::id(),
         ..Default::default()
     };
     rpc_client.add_account(pubkey, account);
@@ -250,7 +250,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
     rpc_client.add_account(
         pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             ..Default::default()
         },
     );
@@ -258,7 +258,7 @@ async fn write_existing_account_invalid_delegation_record(ctx: &TestContext) {
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data: vec![1, 2, 3],
             ..Default::default()
         },

@@ -1,11 +1,11 @@
 #[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::args::{
+use dpi::legacy::args::{
     EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
 };
 #[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
+use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
 #[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::state::DelegationRecord;
+use dpi::legacy::state::DelegationRecord;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
@@ -51,7 +51,7 @@ pub fn add_delegation_record_with_slot_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data: delegation_record_to_vec(&deleg_record),
             ..Default::default()
         },
@@ -94,7 +94,7 @@ pub fn add_delegation_record_with_actions_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -113,7 +113,7 @@ pub fn add_invalid_delegation_record_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data: invalid_data,
             ..Default::default()
         },

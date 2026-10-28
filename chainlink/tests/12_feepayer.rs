@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use delegation_program_api::pda::ephemeral_balance_pda_from_payer;
+use dpi::legacy::pda::ephemeral_balance_pda_from_payer;
 use engine::IntoTransactionView;
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,
@@ -48,7 +48,7 @@ async fn transaction_ensure_ignores_ephemeral_balance_pda() {
         balance,
         Account {
             lamports: 1_000_000,
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             ..Default::default()
         },
     );

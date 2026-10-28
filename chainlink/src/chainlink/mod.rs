@@ -540,8 +540,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 let delegated_on_base = remote_account.is_owned_by_delegation_program();
                 let account_on_er = match loader
                     .read(pubkey, |account| {
-                        account.is(AccountMode::Delegated)
-                            || account.owner().eq(&delegation_program_api::id())
+                        account.is(AccountMode::Delegated) || account.owner().eq(&dpi::id())
                     })
                     .ok()
                     .flatten()

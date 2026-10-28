@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use delegation_program_api::{
+use dpi::legacy::{
     args::{
         EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
     },
@@ -40,7 +40,7 @@ fn add_record(
     ctx.rpc_client.add_account(
         record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -72,7 +72,7 @@ async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
     let owner = Pubkey::new_unique();
     let remote = Account {
         lamports: 1_000_000,
-        owner: delegation_program_api::id(),
+        owner: dpi::id(),
         data: vec![1],
         ..Default::default()
     };
