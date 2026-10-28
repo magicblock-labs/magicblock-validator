@@ -26,11 +26,14 @@ use tracing::{error, info};
 use crate::{
     ComputeBudgetConfig,
     execution::preparation::cleanup_resources::CleanupResources,
-    shared::tasks::{
-        Task,
-        buffer_task::{BufferCleanup, BufferPreparation},
-        task_strategist::TransactionStrategy,
-        utils::TransactionUtils,
+    shared::{
+        account_state::DelegationProtocol,
+        tasks::{
+            Task,
+            buffer_task::{BufferCleanup, BufferPreparation},
+            task_strategist::TransactionStrategy,
+            utils::TransactionUtils,
+        },
     },
 };
 
@@ -108,6 +111,11 @@ impl Preparator {
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
             Task::CommitFinalize(commit_finalize_task) => {
+                if commit_finalize_task.is_buffer()
+                    && matches!(commit_finalize_task.protocol, DelegationProtocol::V2 { .. })
+                {
+                    return Err(InternalError::V2BufferCleanupUnavailable);
+                }
                 BufferPreparation::from_commit_finalize(commit_finalize_task)
             }
             _ => None,
@@ -523,6 +531,8 @@ impl From<MagicBlockRpcClientError> for BufferExecutionError {
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalError {
+    #[error("V2 buffer preparation requires DLP StateBuffer cleanup support")]
+    V2BufferCleanupUnavailable,
     #[error("0 retries was requested")]
     ZeroRetriesRequested,
     #[error("Chunks PDA does not exist for writing. pda: {0}")]
@@ -542,7 +552,7 @@ impl InternalError {
     /// count as transient alongside RPC and table-sync failures.
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::ZeroRetriesRequested | Self::Borsh(_) => false,
+            Self::V2BufferCleanupUnavailable | Self::ZeroRetriesRequested | Self::Borsh(_) => false,
             Self::ChunksPDAMissing(_) => true,
             Self::TableMania(err) => err.is_transient(),
             Self::MagicBlockRpcClient(err) => err.is_transient(),

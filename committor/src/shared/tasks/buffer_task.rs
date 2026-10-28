@@ -128,6 +128,9 @@ impl BufferCleanup {
     }
 
     pub(crate) fn instruction(&self, authority: &Pubkey) -> Instruction {
+        // CHECKPOINT: route v2 cleanup to DLP's StateBuffer close instruction once
+        // https://github.com/magicblock-labs/delegation-program/issues/270 is implemented.
+        // The legacy close instruction below cannot close DLP-owned StateBuffers.
         create_close_ix(CreateCloseIxArgs {
             authority: *authority,
             pubkey: self.pubkey,
