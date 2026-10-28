@@ -278,6 +278,7 @@ pub(in crate::execution) fn split_for_follow_up(
             &commit_tasks,
             strategy.uniqueness_nonce,
         )
+        .unwrap_or_else(|_| strategy.lookup_tables_keys.clone())
     };
     let commit_strategy = TransactionStrategy {
         tasks: commit_tasks,
@@ -293,6 +294,7 @@ pub(in crate::execution) fn split_for_follow_up(
             &follow_up_tasks,
             strategy.uniqueness_nonce,
         )
+        .unwrap_or_else(|_| strategy.lookup_tables_keys.clone())
     };
     let follow_up_strategy = TransactionStrategy {
         tasks: follow_up_tasks,

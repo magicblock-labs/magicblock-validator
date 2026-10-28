@@ -4121,6 +4121,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "wheels",
  "wincode",
 ]
 

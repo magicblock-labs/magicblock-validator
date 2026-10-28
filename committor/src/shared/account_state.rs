@@ -2,9 +2,8 @@ use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duratio
 
 use async_trait::async_trait;
 use delegation_program_interface::{
-    self as dpi, delegation_metadata_seeds_from_delegated_account,
-    delegation_record_seeds_from_delegated_account,
-    legacy::state::{DelegationMetadata, DelegationRecord},
+    self as dpi, DelegationCluster, DelegationState, UndelegationRequester,
+    legacy::state::DelegationRecord,
 };
 use lru::LruCache;
 use metrics::metrics;
@@ -20,6 +19,7 @@ use solana_rpc_client_api::{
 use solana_signature::Signature;
 use tokio::sync::{Mutex as TMutex, MutexGuard};
 use tracing::{error, info, warn};
+use wheels::layout::Decodable;
 
 const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 
@@ -28,6 +28,24 @@ const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
 /// The slot pins the delegation session: a delegation record created
 /// after it belongs to a newer delegation of the same account.
 pub type AccountSnapshot = (Pubkey, u64);
+
+/// The on-chain delegation format determines the settlement instructions.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum DelegationProtocol {
+    #[default]
+    Legacy,
+    V2 {
+        cluster: Pubkey,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct DelegationMetadata {
+    pub last_commit_id: u64,
+    pub undelegation_requester: UndelegationRequester,
+    pub rent_payer: Pubkey,
+    pub protocol: DelegationProtocol,
+}
 
 #[async_trait]
 pub(crate) trait TaskInfoProvider: Send + Sync + 'static {
@@ -75,69 +93,112 @@ impl RpcTaskInfoProvider {
         Self { rpc_client }
     }
 
-    /// Fetches [`DelegationMetadata`]s with some num of retries
+    /// Reads either layout, keeping each account's PDAs in one RPC snapshot.
     pub(crate) async fn fetch_metadata_with_retries(
         rpc_client: &MagicblockRpcClient,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
         max_retries: NonZeroUsize,
     ) -> TaskInfoProviderResult<Vec<DelegationMetadata>> {
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            match Self::fetch_metadata(rpc_client, accounts, min_context_slot).await {
+                Ok(metadata) => return Ok(metadata),
+                Err(err) if attempt == max_retries.get() || !err.is_transient() => return Err(err),
+                Err(err) => warn!(attempt, error = ?err, "Failed to read delegation metadata"),
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn fetch_metadata(
+        rpc_client: &MagicblockRpcClient,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<Vec<DelegationMetadata>> {
         if accounts.is_empty() {
             return Ok(Vec::new());
         }
-
-        // Fetch the delegation record alongside the metadata to pin the
-        // delegation session: a record created after the account's
-        // snapshot slot belongs to a newer delegation of the same
-        // account, and committing the old snapshot into it must fail
-        // terminally.
-        let pda_accounts: Vec<Pubkey> = accounts
+        let pdas: Vec<_> = accounts
             .iter()
-            .flat_map(|(delegated_account, _)| {
+            .flat_map(|(account, _)| {
                 [
-                    Pubkey::find_program_address(
-                        delegation_record_seeds_from_delegated_account!(delegated_account),
-                        &dpi::id(),
-                    )
-                    .0,
-                    Pubkey::find_program_address(
-                        delegation_metadata_seeds_from_delegated_account!(delegated_account),
-                        &dpi::id(),
-                    )
-                    .0,
+                    dpi::legacy::pda::delegation_record_pda_from_delegated_account(account),
+                    dpi::legacy::pda::delegation_metadata_pda_from_delegated_account(account),
+                    dpi::delegation_state_pda(account),
                 ]
             })
             .collect();
+        // 99 keeps all three PDAs in the same getMultipleAccounts response.
+        let fetched =
+            Self::fetch_optional_accounts(rpc_client, &pdas, min_context_slot, Some(99)).await?;
+        let mut metadata = Vec::with_capacity(accounts.len());
+        let mut clusters = Vec::new();
+        let mut cluster_min_slot = min_context_slot;
+        for ((triple, pdas), &(account, snapshot_slot)) in
+            fetched.chunks_exact(3).zip(pdas.chunks_exact(3)).zip(accounts)
+        {
+            let (delegation_slot, value) = parse_delegation_metadata(account, triple, pdas)?;
+            if snapshot_slot > 0 && delegation_slot > snapshot_slot {
+                return Err(TaskInfoProviderError::DelegationSessionChangedError {
+                    delegated_account: account,
+                    delegation_slot,
+                    snapshot_slot,
+                });
+            }
+            if let DelegationProtocol::V2 { cluster } = value.protocol {
+                clusters.push(cluster);
+                cluster_min_slot = cluster_min_slot.max(delegation_slot);
+            }
+            metadata.push(value);
+        }
+        clusters.sort_unstable();
+        clusters.dedup();
+        let cluster_accounts =
+            Self::fetch_optional_accounts(rpc_client, &clusters, cluster_min_slot, None).await?;
+        for (pubkey, account) in clusters.into_iter().zip(cluster_accounts) {
+            let account = account.ok_or(TaskInfoProviderError::AccountNotFoundError(pubkey))?;
+            validate_delegation_owner(pubkey, &account)?;
+            let cluster = DelegationCluster::decode(&account.data)
+                .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pubkey))?;
+            if cluster.discriminator() != DelegationCluster::DISCRIMINATOR
+                || dpi::delegation_cluster_pda(cluster.cluster_id()) != pubkey
+                || cluster.challenge_config().is_some()
+            {
+                return Err(TaskInfoProviderError::InvalidAccountDataError(pubkey));
+            }
+        }
+        Ok(metadata)
+    }
 
-        let fetched = Self::fetch_accounts_with_retries(
-            rpc_client,
-            &pda_accounts,
-            min_context_slot,
-            max_retries,
-        )
-        .await?;
-
-        fetched
-            .chunks_exact(2)
-            .zip(pda_accounts.chunks_exact(2))
-            .zip(accounts)
-            .map(|((pair, pdas), (delegated_account, snapshot_slot))| {
-                let record = DelegationRecord::try_from_bytes_with_discriminator(&pair[0].data)
-                    .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[0]))?;
-                // Snapshot slot 0 means the intent carries no snapshot
-                // provenance (synthetic/test intents); skip the session
-                // comparison since there is nothing to compare against.
-                if *snapshot_slot > 0 && record.delegation_slot > *snapshot_slot {
-                    return Err(TaskInfoProviderError::DelegationSessionChangedError {
-                        delegated_account: *delegated_account,
-                        delegation_slot: record.delegation_slot,
-                        snapshot_slot: *snapshot_slot,
-                    });
-                }
-                DelegationMetadata::try_from_bytes_with_discriminator(&pair[1].data)
-                    .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[1]))
-            })
-            .collect()
+    async fn fetch_optional_accounts(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_per_fetch: Option<usize>,
+    ) -> TaskInfoProviderResult<Vec<Option<Account>>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+        metrics::inc_task_info_fetcher_a_count();
+        let accounts = rpc_client
+            .get_multiple_accounts_with_config(
+                pubkeys,
+                RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    commitment: Some(rpc_client.commitment()),
+                    min_context_slot: Some(min_context_slot),
+                    ..Default::default()
+                },
+                max_per_fetch,
+            )
+            .await
+            .map_err(|err| TaskInfoProviderError::map_client_error(min_context_slot, err))?;
+        if accounts.len() != pubkeys.len() {
+            return Err(TaskInfoProviderError::AccountNotFoundError(pubkeys[0]));
+        }
+        Ok(accounts)
     }
 
     /// Fetches [`Account`]s with some num of retries
@@ -205,21 +266,8 @@ impl RpcTaskInfoProvider {
             return Ok(Vec::new());
         }
 
-        metrics::inc_task_info_fetcher_a_count();
-        let commitment = rpc_client.commitment();
-        let mut accounts = rpc_client
-            .get_multiple_accounts_with_config(
-                pubkeys,
-                RpcAccountInfoConfig {
-                    encoding: Some(UiAccountEncoding::Base64Zstd),
-                    commitment: Some(commitment),
-                    data_slice: None,
-                    min_context_slot: Some(min_context_slot),
-                },
-                None,
-            )
-            .await
-            .map_err(|err| TaskInfoProviderError::map_client_error(min_context_slot, err))?;
+        let mut accounts =
+            Self::fetch_optional_accounts(rpc_client, pubkeys, min_context_slot, None).await?;
 
         let accounts = pubkeys
             .iter()
@@ -239,6 +287,82 @@ impl RpcTaskInfoProvider {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(accounts)
+    }
+}
+
+fn validate_delegation_owner(pubkey: Pubkey, account: &Account) -> TaskInfoProviderResult<()> {
+    if account.owner != dpi::id() || account.executable {
+        return Err(TaskInfoProviderError::InvalidAccountDataError(pubkey));
+    }
+    Ok(())
+}
+
+fn parse_delegation_metadata(
+    delegated_account: Pubkey,
+    accounts: &[Option<Account>],
+    pdas: &[Pubkey],
+) -> TaskInfoProviderResult<(u64, DelegationMetadata)> {
+    match (&accounts[0], &accounts[1], &accounts[2]) {
+        (Some(record), Some(metadata), None) => {
+            validate_delegation_owner(pdas[0], record)?;
+            validate_delegation_owner(pdas[1], metadata)?;
+            let record = DelegationRecord::try_from_bytes_with_discriminator(&record.data)
+                .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[0]))?;
+            let metadata =
+                dpi::legacy::state::DelegationMetadata::try_from_bytes_with_discriminator(
+                    &metadata.data,
+                )
+                .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[1]))?;
+            let requester = match metadata.undelegation_requester {
+                dpi::legacy::state::UndelegationRequester::None => UndelegationRequester::None,
+                dpi::legacy::state::UndelegationRequester::Validator => {
+                    UndelegationRequester::Validator
+                }
+                dpi::legacy::state::UndelegationRequester::OwnerProgram => {
+                    UndelegationRequester::OwnerProgram
+                }
+            };
+            Ok((
+                record.delegation_slot,
+                DelegationMetadata {
+                    last_commit_id: metadata.last_commit_id,
+                    undelegation_requester: requester,
+                    rent_payer: metadata.rent_payer,
+                    protocol: DelegationProtocol::Legacy,
+                },
+            ))
+        }
+        (None, None, Some(state_account)) => {
+            validate_delegation_owner(pdas[2], state_account)?;
+            let state = DelegationState::decode(&state_account.data)
+                .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[2]))?;
+            if state.discriminator() != DelegationState::DISCRIMINATOR
+                || *state.delegated_account() != delegated_account
+            {
+                return Err(TaskInfoProviderError::InvalidAccountDataError(pdas[2]));
+            }
+            let requester = match state.undelegation_requester() {
+                0 => UndelegationRequester::None,
+                1 => UndelegationRequester::Validator,
+                2 => UndelegationRequester::OwnerProgram,
+                _ => return Err(TaskInfoProviderError::InvalidAccountDataError(pdas[2])),
+            };
+            Ok((
+                state.delegation_slot(),
+                DelegationMetadata {
+                    last_commit_id: state.last_commit_id(),
+                    undelegation_requester: requester,
+                    rent_payer: *state.rent_payer(),
+                    protocol: DelegationProtocol::V2 {
+                        cluster: *state.delegation_cluster(),
+                    },
+                },
+            ))
+        }
+        // Never silently pick one protocol when both layouts are present.
+        (_, _, Some(_)) => Err(TaskInfoProviderError::InvalidAccountDataError(pdas[2])),
+        (None, _, None) => Err(TaskInfoProviderError::AccountNotFoundError(pdas[0])),
+        (_, None, None) => Err(TaskInfoProviderError::AccountNotFoundError(pdas[1])),
     }
 }
 
@@ -1001,8 +1125,8 @@ mod tests {
                         *pubkey,
                         DelegationMetadata {
                             last_commit_id: 0,
-                            undelegation_requester: dpi::legacy::state::UndelegationRequester::None,
-                            seeds: vec![],
+                            undelegation_requester: UndelegationRequester::None,
+                            protocol: DelegationProtocol::Legacy,
                             rent_payer: *pubkey,
                         },
                     )

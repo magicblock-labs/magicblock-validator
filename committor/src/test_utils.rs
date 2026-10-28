@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 
-use delegation_program_interface::legacy::state::{DelegationMetadata, UndelegationRequester};
+use delegation_program_interface::UndelegationRequester;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 
-use crate::shared::account_state::{AccountSnapshot, TaskInfoProvider, TaskInfoProviderResult};
+use crate::shared::account_state::{
+    AccountSnapshot, DelegationMetadata, DelegationProtocol, TaskInfoProvider,
+    TaskInfoProviderResult,
+};
 
 #[derive(Default)]
 pub(crate) struct MockInfoProvider {
@@ -65,7 +68,7 @@ impl TaskInfoProvider for MockInfoProvider {
                     DelegationMetadata {
                         last_commit_id: self.default_commit_id,
                         undelegation_requester,
-                        seeds: vec![],
+                        protocol: DelegationProtocol::Legacy,
                         rent_payer,
                     },
                 )

@@ -38,6 +38,7 @@ fn commit() -> Task {
 
 fn undelegate() -> Task {
     Task::Undelegate(UndelegateTask {
+        protocol: Default::default(),
         delegated_account: ACCOUNT,
         owner_program: Pubkey::new_unique(),
         rent_reimbursement: Pubkey::new_unique(),
