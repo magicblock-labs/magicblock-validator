@@ -16,7 +16,7 @@ use solana_pubkey::Pubkey;
 use wheels::DataLayoutError;
 
 use crate::shared::{
-    account_state::DelegationProtocol,
+    account_state::DelegationVersion,
     tasks::{Task, commit_delivery::CommitDelivery},
 };
 
@@ -27,7 +27,7 @@ use crate::shared::{
 /// the chain (inline args vs buffer, full state vs diff).
 #[derive(Clone, Debug)]
 pub struct CommitFinalizeTask {
-    pub(crate) protocol: DelegationProtocol,
+    pub(crate) version: DelegationVersion,
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
@@ -50,7 +50,7 @@ impl CommitFinalizeTask {
             (self.committed_account.account.data.clone(), false)
         };
 
-        if let DelegationProtocol::V2 { cluster } = self.protocol {
+        if let DelegationVersion::V2 { cluster } = self.version {
             return dpi::instruction_builder::commit_finalize(
                 *validator,
                 cluster,
@@ -95,7 +95,7 @@ impl CommitFinalizeTask {
         validator: &Pubkey,
         base_account: Option<&Account>,
     ) -> Result<Instruction, DataLayoutError> {
-        if let DelegationProtocol::V2 { cluster } = self.protocol {
+        if let DelegationVersion::V2 { cluster } = self.version {
             return dpi::instruction_builder::commit_finalize_from_buffer(
                 *validator,
                 cluster,
@@ -162,7 +162,7 @@ impl CommitFinalizeTask {
 
     pub fn try_use_buffer(&mut self) -> bool {
         // An empty payload is already smaller inline than a buffer reference.
-        if matches!(self.protocol, DelegationProtocol::V2 { .. })
+        if matches!(self.version, DelegationVersion::V2 { .. })
             && self.committed_account.account.data.is_empty()
             && matches!(self.delivery, CommitDelivery::StateInArgs)
         {

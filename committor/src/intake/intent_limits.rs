@@ -64,7 +64,7 @@ fn commit_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
 fn follow_up_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
     fn undelegate_task(account: &CommittedAccount) -> Task {
         UndelegateTask {
-            protocol: Default::default(),
+            version: Default::default(),
             delegated_account: account.pubkey,
             owner_program: account.account.owner,
             // Assigned a distinct placeholder before the fit checks.
@@ -164,7 +164,7 @@ fn tasks_fit(mut tasks: Vec<Task>, uniqueness_nonce: Option<u64>) -> bool {
 
 /// Give unknown payers separate keys so account-key deduplication cannot
 /// make the estimate smaller. Only admission tasks use these placeholders;
-/// execution gets the actual payers from delegation metadata.
+/// execution gets the actual payers from delegation info.
 fn assign_unknown_rent_payers(
     tasks: &mut [Task],
     authority: &Pubkey,

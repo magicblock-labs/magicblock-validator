@@ -29,7 +29,7 @@ use crate::{
     ComputeBudgetConfig,
     execution::preparation::cleanup_resources::CleanupResources,
     shared::{
-        account_state::DelegationProtocol,
+        account_state::DelegationVersion,
         tasks::{
             Task,
             buffer_task::{BufferCleanup, BufferPreparation},
@@ -121,7 +121,7 @@ impl Preparator {
             return Ok(());
         };
 
-        if matches!(preparation_task.protocol, DelegationProtocol::V2 { .. }) {
+        if matches!(preparation_task.version, DelegationVersion::V2 { .. }) {
             return self.prepare_state_buffer(authority, &preparation_task, uniqueness_nonce).await;
         }
 
@@ -808,7 +808,7 @@ mod tests {
                 },
                 None,
             );
-            task.protocol = DelegationProtocol::V2 { cluster: Pubkey::new_unique() };
+            task.version = DelegationVersion::V2 { cluster: Pubkey::new_unique() };
             task.delivery = if use_diff {
                 CommitDelivery::DiffInBuffer {
                     base_account: Account {

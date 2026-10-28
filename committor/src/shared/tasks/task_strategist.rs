@@ -432,7 +432,7 @@ mod tests {
     // Helper to create an undelegate task
     fn create_test_undelegate_task() -> UndelegateTask {
         UndelegateTask {
-            protocol: Default::default(),
+            version: Default::default(),
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
@@ -771,7 +771,7 @@ mod tests {
         let delegated_account = Pubkey::new_unique();
         let intent = create_test_intent_bundle(0, &[], &[delegated_account]).inner;
         let info_provider = Arc::new(MockInfoProvider {
-            delegation_metadata: HashMap::from([(
+            delegation_info: HashMap::from([(
                 delegated_account,
                 (UndelegationRequester::OwnerProgram, delegated_account),
             )]),

@@ -14,14 +14,14 @@ use solana_instruction::Instruction;
 use wheels::DataLayoutError;
 
 use crate::shared::{
-    account_state::DelegationProtocol,
+    account_state::DelegationVersion,
     tasks::{commit_delivery::CommitDelivery, commit_finalize_task::CommitFinalizeTask},
     transaction::MAX_WRITE_CHUNK_SIZE,
 };
 
 #[derive(Debug)]
 pub(crate) struct BufferPreparation {
-    pub protocol: DelegationProtocol,
+    pub version: DelegationVersion,
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks: Chunks,
@@ -41,7 +41,7 @@ impl BufferPreparation {
         };
         let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
         Some(Self {
-            protocol: task.protocol,
+            version: task.version,
             commit_id: task.commit_id,
             pubkey: task.committed_account.pubkey,
             buffer_data,
@@ -84,15 +84,15 @@ impl BufferPreparation {
         authority: &Pubkey,
         start_offset: usize,
     ) -> Vec<Instruction> {
-        let instruction = |offset: usize, chunk: &[u8]| match self.protocol {
-            DelegationProtocol::Legacy => create_write_ix(CreateWriteIxArgs {
+        let instruction = |offset: usize, chunk: &[u8]| match self.version {
+            DelegationVersion::Legacy => create_write_ix(CreateWriteIxArgs {
                 authority: *authority,
                 pubkey: self.pubkey,
                 offset: offset as u32,
                 data_chunk: chunk.to_vec(),
                 commit_id: self.commit_id,
             }),
-            DelegationProtocol::V2 { .. } => dpi::instruction_builder::write_state_buffer(
+            DelegationVersion::V2 { .. } => dpi::instruction_builder::write_state_buffer(
                 *authority,
                 *authority,
                 self.pubkey,
@@ -104,7 +104,7 @@ impl BufferPreparation {
                 },
             ),
         };
-        if self.buffer_data.is_empty() && matches!(self.protocol, DelegationProtocol::V2 { .. }) {
+        if self.buffer_data.is_empty() && matches!(self.version, DelegationVersion::V2 { .. }) {
             return vec![instruction(0, &[])];
         }
         self.buffer_data[start_offset..]
@@ -118,7 +118,7 @@ impl BufferPreparation {
 
     pub(crate) fn cleanup_task(&self) -> BufferCleanup {
         BufferCleanup {
-            protocol: self.protocol,
+            version: self.version,
             pubkey: self.pubkey,
             commit_id: self.commit_id,
         }
@@ -127,7 +127,7 @@ impl BufferPreparation {
 
 #[derive(Clone, Debug)]
 pub(crate) struct BufferCleanup {
-    pub protocol: DelegationProtocol,
+    pub version: DelegationVersion,
     pub pubkey: Pubkey,
     pub commit_id: u64,
 }
@@ -136,7 +136,7 @@ impl BufferCleanup {
     pub(crate) fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
             CommitDelivery::StateInBuffer | CommitDelivery::DiffInBuffer { .. } => Some(Self {
-                protocol: task.protocol,
+                version: task.version,
                 commit_id: task.commit_id,
                 pubkey: task.committed_account.pubkey,
             }),
@@ -145,7 +145,7 @@ impl BufferCleanup {
     }
 
     pub(crate) fn instruction(&self, authority: &Pubkey) -> Result<Instruction, DataLayoutError> {
-        if matches!(self.protocol, DelegationProtocol::V2 { .. }) {
+        if matches!(self.version, DelegationVersion::V2 { .. }) {
             // The committor funds its own buffers, so it is also the stored rent payer.
             return dpi::instruction_builder::close_state_buffer(
                 *authority,
@@ -168,7 +168,7 @@ impl BufferCleanup {
     pub(crate) const MAX_PER_TRANSACTION: usize = 8;
 
     pub(crate) fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
-        if matches!(self.protocol, DelegationProtocol::V2 { .. }) {
+        if matches!(self.version, DelegationVersion::V2 { .. }) {
             return dpi::state_buffer_pda(&self.pubkey, self.commit_id, authority);
         }
         pdas::buffer_pda(
@@ -204,14 +204,14 @@ mod tests {
     fn test_max_write_with_uniqueness_nonce_fits() {
         test_utils::init_test_logger();
 
-        for protocol in [
-            DelegationProtocol::Legacy,
-            DelegationProtocol::V2 { cluster: Pubkey::new_unique() },
+        for version in [
+            DelegationVersion::Legacy,
+            DelegationVersion::V2 { cluster: Pubkey::new_unique() },
         ] {
             let authority = Keypair::new();
             let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
             let preparation_task = BufferPreparation {
-                protocol,
+                version,
                 commit_id: 1,
                 pubkey: Pubkey::new_unique(),
                 chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),
@@ -238,7 +238,7 @@ mod tests {
             info!(transaction_size, "Buffer write transaction size");
             assert!(
                 transaction_size <= MAX_TRANSACTION_WIRE_SIZE,
-                "{protocol:?}: {transaction_size}"
+                "{version:?}: {transaction_size}"
             );
         }
     }

@@ -71,7 +71,7 @@ pub(crate) fn create_commit_finalize_task(
     let delivery_details = commit_delivery(&account, base_account);
 
     CommitFinalizeTask {
-        protocol: Default::default(),
+        version: Default::default(),
         commit_id,
         allow_undelegation,
         committed_account: account,
