@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use json::{JsonValueTrait, Value};
+use json::Value;
 use keeper::testkit::{load_v42_lamports, signed_view, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, transfer};
 use solana_account::AccountMode;
@@ -20,25 +20,53 @@ use tokio::time::timeout;
 
 mod setup;
 
+/// Checks request IDs, method errors, and safe handling of deeply nested input.
 #[tokio::test]
-async fn test_unknown_http_and_websocket_methods() {
+async fn test_http_and_websocket_request_decoding() {
     let env = RpcTestEnv::new().await;
+    let client = reqwest::Client::new();
 
-    let response = reqwest::Client::new()
-        .post(env.rpc.url())
-        .json(&json::json!({
-            "jsonrpc": "2.0",
-            "method": "unknownHttpMethod",
-            "id": 1,
-        }))
-        .send()
-        .await
-        .expect("failed to send unknown HTTP method");
-    let body: Value = json::from_str(&response.text().await.expect("failed to read HTTP response"))
-        .expect("failed to parse HTTP response");
-    assert_eq!(body["id"].as_i64(), Some(1));
-    assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
-    assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
+    for id in [json::json!(1), json::json!("request"), Value::Null] {
+        let response = client
+            .post(env.rpc.url())
+            .json(&json::json!({
+                "jsonrpc": "2.0",
+                "method": "unknownHttpMethod",
+                "id": id.clone(),
+            }))
+            .send()
+            .await
+            .expect("failed to send unknown HTTP method");
+        let body: Value =
+            json::from_str(&response.text().await.expect("failed to read HTTP response"))
+                .expect("failed to parse HTTP response");
+        assert_eq!(body["id"], id);
+        assert_eq!(body["error"]["code"].as_i64(), Some(-32601));
+        assert_eq!(body["error"]["message"].as_str(), Some("Method not found"));
+    }
+
+    for (field, depth, rejected) in [("params", 256, true), ("extension", 65_536, false)] {
+        let nested = format!(
+            r#"{{"jsonrpc":"2.0","method":"getSlot","id":1,"{field}":{}{}}}"#,
+            "[".repeat(depth),
+            "]".repeat(depth),
+        );
+        let response = client
+            .post(env.rpc.url())
+            .body(nested)
+            .send()
+            .await
+            .expect("failed to send nested request");
+        let body: Value =
+            json::from_str(&response.text().await.expect("failed to read nested response"))
+                .expect("failed to parse nested response");
+        if rejected {
+            assert_eq!(body["error"]["code"].as_i64(), Some(-32700));
+        } else {
+            // Ignored fields use an iterative skip; deep values need not become a DOM.
+            assert!(body["result"].as_u64().is_some());
+        }
+    }
 
     let error = match env.pubsub.block_subscribe(RpcBlockSubscribeFilter::All, None).await {
         Ok(_) => panic!("unknown WebSocket method unexpectedly succeeded"),

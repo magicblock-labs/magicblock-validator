@@ -1,4 +1,5 @@
 use engine::Engine;
+use json::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
 
@@ -79,7 +80,7 @@ impl ConnectionHandler {
         let (mut reader, mut writer) = ws.split(tokio::io::split);
         reader.set_auto_pong(false);
         let mut last_activity = Instant::now();
-        let mut last_request = json::Value::default();
+        let mut last_request = Value::Null;
         let mut replies = 0_u64;
         let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
         tokio::pin!(next_ping);

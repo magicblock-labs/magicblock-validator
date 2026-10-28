@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 
-use json::JsonValueTrait;
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
 use solana_account::{AccountMode, accounts_equal};

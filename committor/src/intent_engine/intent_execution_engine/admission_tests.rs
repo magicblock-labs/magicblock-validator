@@ -288,11 +288,8 @@ async fn one_completion_dispatches_successors_in_dependency_order() {
     for (id, keys) in [(0, [a, c]), (1, [a, b])] {
         sender.send(create_test_intent_bundle(id, &keys, &[])).await.unwrap();
     }
-    let pending = vec![
-        create_test_intent_bundle(2, &[c], &[]),
-        create_test_intent_bundle(2, &[c], &[]),
-        create_test_intent_bundle(3, &[b], &[]),
-    ];
+    let pending =
+        vec![create_test_intent_bundle(2, &[c], &[]), create_test_intent_bundle(3, &[b], &[])];
     db.lock().store_intent_bundles(pending).unwrap();
     let inner = engine.scheduler.clone();
     let mut running = run(engine);

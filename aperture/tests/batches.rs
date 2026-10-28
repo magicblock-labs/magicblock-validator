@@ -1,6 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use json::{JsonContainerTrait, JsonValueTrait, Value};
+use json::Value;
 use keeper::testkit::store_v42;
 use setup::{RpcTestEnv, remote_account_claims_header};
 use solana_account::AccountMode;
@@ -13,7 +13,6 @@ async fn test_batch_requests() {
     let client = reqwest::Client::new();
     let rpc_url = env.rpc.url();
 
-    // Construct a batch request using serde_json macro
     let batch_request = json::json!([
         {"jsonrpc": "2.0", "method": "getVersion", "id": 1},
         {"jsonrpc": "2.0", "method": "getIdentity", "id": 2}
@@ -49,7 +48,7 @@ async fn test_batch_requests() {
         "Should contain a result object"
     );
     assert!(
-        res1["result"]["solana-core"].is_str(),
+        res1["result"]["solana-core"].is_string(),
         "Should contain solana-core version"
     );
 

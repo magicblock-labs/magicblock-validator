@@ -1,7 +1,7 @@
 //! Close ephemeral account instruction processor
 
 use magic_program_api::ephemeral;
-use solana_account::{AccountMode, WritableAccount};
+use solana_account::{AccountMode, StateFlags, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
@@ -26,12 +26,13 @@ pub(crate) fn process_close_ephemeral_account(
     let refund = ephemeral::rent_for(data_len)?;
     transfer_rent(transaction_context, -(refund as i64))?;
 
-    // Reset account to empty state
     let mut acc = ephemeral.borrow_mut()?;
     acc.set_lamports(0);
     acc.set_owner(system_program::id());
     acc.resize(0, 0);
     set_account_mode(invoke_context, &mut acc, AccountMode::Closed)?;
+    let flags = *acc.flags() & !StateFlags::RENT_FUNDED;
+    acc.set_flags(flags);
 
     ic_msg!(invoke_context, "Closed ephemeral, refunded: {}", refund);
     Ok(())

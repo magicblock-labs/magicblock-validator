@@ -1,8 +1,7 @@
 use std::fmt;
 
-use json::{Deserialize, Serialize};
 use serde::{
-    Deserializer, Serializer,
+    Deserialize, Deserializer, Serialize, Serializer,
     de::{self, Visitor},
     ser::Error as _,
 };

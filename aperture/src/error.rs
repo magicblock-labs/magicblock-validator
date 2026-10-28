@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use json::Serialize;
+use serde::Serialize;
 use solana_transaction_error::TransactionError;
 
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
@@ -36,12 +36,6 @@ pub(crate) struct RpcError {
 impl From<hyper::Error> for RpcError {
     fn from(value: hyper::Error) -> Self {
         Self::invalid_request(value)
-    }
-}
-
-impl From<json::Error> for RpcError {
-    fn from(value: json::Error) -> Self {
-        Self::parse_error(value)
     }
 }
 
