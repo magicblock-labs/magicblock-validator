@@ -56,6 +56,7 @@ tracing = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+json = { workspace = true }
 tracing-subscriber = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
 program = { workspace = true, features = ["dev-context-only-utils"] }

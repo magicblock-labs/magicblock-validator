@@ -396,35 +396,45 @@ mod tests {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(30_000);
         let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(101);
 
-        // Each task unique: commit_id increments; pubkey is new_unique each time
-        let base_commit_id = 101u64;
-        let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
-            let task = BufferCleanup {
-                commit_id: base_commit_id + i as u64,
+        for v2_count in 0..=BufferCleanup::MAX_PER_TRANSACTION {
+            // Each task unique: commit_id increments; pubkey is new_unique each time
+            let base_commit_id = 101u64;
+            let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
+                let task = BufferCleanup {
+                    protocol: if i < v2_count {
+                        DelegationProtocol::V2 { cluster: Pubkey::new_unique() }
+                    } else {
+                        DelegationProtocol::Legacy
+                    },
+                    commit_id: base_commit_id + i as u64,
+                    pubkey: Pubkey::new_unique(),
+                };
+                task.instruction(&authority.pubkey()).unwrap()
+            });
+
+            let mut ixs: Vec<_> = [compute_budget_ix.clone(), compute_unit_price_ix.clone()]
+                .into_iter()
+                .chain(ixs_iter)
+                .collect();
+            ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+            let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+            let tx_size = serialized_transaction_size(&tx);
+            info!(transaction_size = tx_size, "Cleanup task transaction size");
+            assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
+
+            // One more unique task should overflow
+            let overflow_task = BufferCleanup {
+                protocol: DelegationProtocol::Legacy,
+                commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
                 pubkey: Pubkey::new_unique(),
             };
-            task.instruction(&authority.pubkey())
-        });
+            let uniqueness_noop = ixs.pop().expect("uniqueness noop");
+            ixs.push(overflow_task.instruction(&authority.pubkey()).unwrap());
+            ixs.push(uniqueness_noop);
 
-        let mut ixs: Vec<_> =
-            [compute_budget_ix, compute_unit_price_ix].into_iter().chain(ixs_iter).collect();
-        ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
-
-        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-        let tx_size = serialized_transaction_size(&tx);
-        info!(transaction_size = tx_size, "Cleanup task transaction size");
-        assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
-
-        // One more unique task should overflow
-        let overflow_task = BufferCleanup {
-            commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
-            pubkey: Pubkey::new_unique(),
-        };
-        let uniqueness_noop = ixs.pop().expect("uniqueness noop");
-        ixs.push(overflow_task.instruction(&authority.pubkey()));
-        ixs.push(uniqueness_noop);
-
-        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-        assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+            let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+            assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+        }
     }
 }
