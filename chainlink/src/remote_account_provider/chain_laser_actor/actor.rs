@@ -742,8 +742,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
 
         let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&delegation_program_api::id());
+            || matches!(source, AccountUpdateSource::Program) && owner.eq(&dpi::id());
         if !should_forward {
             return;
         }

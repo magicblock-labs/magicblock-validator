@@ -183,7 +183,7 @@ async fn undelegation_completion_requires_newer_base_slot() {
     };
 
     let transient = AccountBuilder::from(remote_account(7))
-        .owner(delegation_program_api::id())
+        .owner(dpi::id())
         .mode(AccountMode::Undelegating)
         .slot(100)
         .build();

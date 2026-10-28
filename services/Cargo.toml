@@ -13,7 +13,7 @@ engine = { workspace = true }
 futures-util = { workspace = true }
 chainlink = { workspace = true }
 mbv-core = { workspace = true }
-delegation-program-api = { workspace = true }
+dpi = { workspace = true }
 magic-program-api = { workspace = true }
 metrics = { workspace = true }
 program = { workspace = true }

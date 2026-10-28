@@ -100,7 +100,7 @@ pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate:
     }
     .into();
 
-    let account_owner = if delegate { delegation_program_api::id() } else { EATA_PROGRAM_ID };
+    let account_owner = if delegate { dpi::id() } else { EATA_PROGRAM_ID };
 
     Account {
         owner: account_owner,

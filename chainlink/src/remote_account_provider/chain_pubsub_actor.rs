@@ -845,7 +845,7 @@ impl ChainPubsubActor {
                                         SubscriptionSource::Program,
                                     );
                                 let should_forward = is_directly_subscribed
-                                    || program_pubkey.eq(&delegation_program_api::id())
+                                    || program_pubkey.eq(&dpi::id())
                                         && sub_update.account.is_some();
 
                                 if should_forward {

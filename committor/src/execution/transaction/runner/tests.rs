@@ -222,7 +222,7 @@ async fn recovery_preserves_progress_and_resources() {
     let nonce_error = format!(
         r#"{{"InstructionError":[{},{{"Custom":{}}}]}}"#,
         TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT,
-        delegation_program_api::error::DlpError::NonceOutOfOrder as u32
+        dpi::error::DlpError::NonceOutOfOrder as u32
     );
     // A rejected reserved ID must stop execution without renumbering or rebuilding.
     for (steps, error) in [

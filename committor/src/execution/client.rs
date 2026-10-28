@@ -1,6 +1,6 @@
 use std::{ops::ControlFlow, time::Duration};
 
-use delegation_program_api::pda::commit_record_pda_from_delegated_account;
+use dpi::legacy::pda::commit_record_pda_from_delegated_account;
 use metrics::metrics;
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,
@@ -51,8 +51,7 @@ impl IntentExecutionClient {
         authority: &Keypair,
         account: Pubkey,
     ) -> Result<Result<Signature, TransactionExecutionError>, TransactionPreparatorError> {
-        let instruction =
-            delegation_program_api::instruction_builder::finalize(authority.pubkey(), account);
+        let instruction = dpi::legacy::instruction_builder::finalize(authority.pubkey(), account);
         let budgets = TransactionUtils::budget_instructions(120_000, self.compute_unit_price, 0);
         let mut transaction =
             TransactionUtils::assemble_tx_raw(authority, &[instruction], &budgets, &[])?;
@@ -88,7 +87,7 @@ impl IntentExecutionClient {
                     IntentExecutorError::FailedExecution(MagicBlockRpcClientError::from(err).into())
                 })?;
         for (&pubkey, record) in accounts.iter().zip(records) {
-            if record.is_none_or(|record| record.owner != delegation_program_api::id()) {
+            if record.is_none_or(|record| record.owner != dpi::id()) {
                 continue;
             }
             self.finalize_legacy_commit(authority, pubkey)

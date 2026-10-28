@@ -2,7 +2,7 @@ use std::{fmt, sync::Arc, time::Duration};
 
 use ::metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 use chainlink::{AccountStatusOnEr, ObservedUndelegationRequest, ProdChainlink};
-use delegation_program_api::pda::undelegation_request_pda_from_delegated_account;
+use dpi::legacy::pda::undelegation_request_pda_from_delegated_account;
 use engine::Engine;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use program::instruction_utils::InstructionUtils;
