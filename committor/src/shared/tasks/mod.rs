@@ -15,7 +15,7 @@ pub(crate) mod task_strategist;
 pub(crate) mod utils;
 
 use crate::shared::{
-    account_state::DelegationProtocol, tasks::commit_finalize_task::CommitFinalizeTask,
+    account_state::DelegationVersion, tasks::commit_finalize_task::CommitFinalizeTask,
 };
 
 #[derive(Clone, Debug)]
@@ -90,7 +90,7 @@ impl LabelValue for Task {
 
 #[derive(Clone, Debug)]
 pub struct UndelegateTask {
-    pub(crate) protocol: DelegationProtocol,
+    pub(crate) version: DelegationVersion,
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
@@ -99,7 +99,7 @@ pub struct UndelegateTask {
 
 impl UndelegateTask {
     pub fn instruction(&self, validator: &Pubkey) -> Result<Instruction, DataLayoutError> {
-        if let DelegationProtocol::V2 { cluster } = self.protocol {
+        if let DelegationVersion::V2 { cluster } = self.version {
             return dpi::instruction_builder::undelegate(
                 *validator,
                 self.delegated_account,
@@ -366,7 +366,7 @@ mod tests {
         let delegated_account = Pubkey::new_unique();
 
         let ix = UndelegateTask {
-            protocol: Default::default(),
+            version: Default::default(),
             delegated_account,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
@@ -401,10 +401,10 @@ mod tests {
             let base_commit_id = 101u64;
             let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
                 let task = BufferCleanup {
-                    protocol: if i < v2_count {
-                        DelegationProtocol::V2 { cluster: Pubkey::new_unique() }
+                    version: if i < v2_count {
+                        DelegationVersion::V2 { cluster: Pubkey::new_unique() }
                     } else {
-                        DelegationProtocol::Legacy
+                        DelegationVersion::Legacy
                     },
                     commit_id: base_commit_id + i as u64,
                     pubkey: Pubkey::new_unique(),
@@ -425,7 +425,7 @@ mod tests {
 
             // One more unique task should overflow
             let overflow_task = BufferCleanup {
-                protocol: DelegationProtocol::Legacy,
+                version: DelegationVersion::Legacy,
                 commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
                 pubkey: Pubkey::new_unique(),
             };

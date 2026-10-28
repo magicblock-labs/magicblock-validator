@@ -28,7 +28,7 @@ pub type AccountSnapshot = (Pubkey, u64);
 
 /// The on-chain delegation format determines the settlement instructions.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) enum DelegationProtocol {
+pub(crate) enum DelegationVersion {
     #[default]
     Legacy,
     V2 {
@@ -37,21 +37,21 @@ pub(crate) enum DelegationProtocol {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct DelegationMetadata {
+pub(crate) struct DelegationInfo {
     pub last_commit_id: u64,
     pub undelegation_requester: UndelegationRequester,
     pub rent_payer: Pubkey,
-    pub protocol: DelegationProtocol,
+    pub version: DelegationVersion,
 }
 
 #[async_trait]
 pub(crate) trait TaskInfoProvider: Send + Sync + 'static {
     /// Fetches delegation metadata keyed by delegated account pubkey.
-    async fn fetch_delegation_metadata(
+    async fn fetch_delegation_info(
         &self,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>>;
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationInfo>>;
 
     async fn get_base_accounts(
         &self,
@@ -80,7 +80,7 @@ impl RpcTaskInfoProvider {
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
         max_retries: NonZeroUsize,
-    ) -> TaskInfoProviderResult<Vec<DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<Vec<DelegationInfo>> {
         let mut attempt = 0;
         loop {
             attempt += 1;
@@ -97,7 +97,7 @@ impl RpcTaskInfoProvider {
         rpc_client: &MagicblockRpcClient,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
-    ) -> TaskInfoProviderResult<Vec<DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<Vec<DelegationInfo>> {
         if accounts.is_empty() {
             return Ok(Vec::new());
         }
@@ -106,7 +106,7 @@ impl RpcTaskInfoProvider {
             .flat_map(|(account, _)| {
                 [
                     dpi::legacy::pda::delegation_record_pda_from_delegated_account(account),
-                    dpi::legacy::pda::delegation_metadata_pda_from_delegated_account(account),
+                    dpi::legacy::pda::delegation_info_pda_from_delegated_account(account),
                     dpi::delegation_state_pda(account),
                 ]
             })
@@ -120,7 +120,7 @@ impl RpcTaskInfoProvider {
         for ((triple, pdas), &(account, snapshot_slot)) in
             fetched.chunks_exact(3).zip(pdas.chunks_exact(3)).zip(accounts)
         {
-            let (delegation_slot, value) = parse_delegation_metadata(account, triple, pdas)?;
+            let (delegation_slot, value) = parse_delegation_info(account, triple, pdas)?;
             if snapshot_slot > 0 && delegation_slot > snapshot_slot {
                 return Err(TaskInfoProviderError::DelegationSessionChangedError {
                     delegated_account: account,
@@ -128,7 +128,7 @@ impl RpcTaskInfoProvider {
                     snapshot_slot,
                 });
             }
-            if let DelegationProtocol::V2 { cluster } = value.protocol {
+            if let DelegationVersion::V2 { cluster } = value.version {
                 clusters.push(cluster);
                 cluster_min_slot = cluster_min_slot.max(delegation_slot);
             }
@@ -278,11 +278,11 @@ fn validate_delegation_owner(pubkey: Pubkey, account: &Account) -> TaskInfoProvi
     Ok(())
 }
 
-fn parse_delegation_metadata(
+fn parse_delegation_info(
     delegated_account: Pubkey,
     accounts: &[Option<Account>],
     pdas: &[Pubkey],
-) -> TaskInfoProviderResult<(u64, DelegationMetadata)> {
+) -> TaskInfoProviderResult<(u64, DelegationInfo)> {
     match (&accounts[0], &accounts[1], &accounts[2]) {
         (Some(record), Some(metadata), None) => {
             validate_delegation_owner(pdas[0], record)?;
@@ -305,11 +305,11 @@ fn parse_delegation_metadata(
             };
             Ok((
                 record.delegation_slot,
-                DelegationMetadata {
+                DelegationInfo {
                     last_commit_id: metadata.last_commit_id,
                     undelegation_requester: requester,
                     rent_payer: metadata.rent_payer,
-                    protocol: DelegationProtocol::Legacy,
+                    version: DelegationVersion::Legacy,
                 },
             ))
         }
@@ -330,11 +330,11 @@ fn parse_delegation_metadata(
             };
             Ok((
                 state.delegation_slot(),
-                DelegationMetadata {
+                DelegationInfo {
                     last_commit_id: state.last_commit_id(),
                     undelegation_requester: requester,
                     rent_payer: *state.rent_payer(),
-                    protocol: DelegationProtocol::V2 {
+                    version: DelegationVersion::V2 {
                         cluster: *state.delegation_cluster(),
                     },
                 },
@@ -349,11 +349,11 @@ fn parse_delegation_metadata(
 
 #[async_trait]
 impl TaskInfoProvider for RpcTaskInfoProvider {
-    async fn fetch_delegation_metadata(
+    async fn fetch_delegation_info(
         &self,
         accounts: &[AccountSnapshot],
         min_context_slot: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationInfo>> {
         Ok(accounts
             .iter()
             .map(|(pk, _)| *pk)

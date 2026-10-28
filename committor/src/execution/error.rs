@@ -247,9 +247,9 @@ mod tests {
         );
         assert!(!err.is_transient());
 
-        // Missing delegation metadata is deterministic
+        // Missing delegation info is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::MissingDelegationMetadata(solana_pubkey::Pubkey::new_unique()),
+            TaskBuilderError::MissingDelegationInfo(solana_pubkey::Pubkey::new_unique()),
         );
         assert!(!err.is_transient());
 
