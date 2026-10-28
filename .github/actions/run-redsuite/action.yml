@@ -33,7 +33,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: f334d93c8670039893ce622c6ae0b36248ef2764
+        ref: 3.0.0
         path: redsuite
         persist-credentials: false
 
@@ -66,7 +66,7 @@ runs:
       env:
         REDSUITE_FAMILY: ${{ inputs.family }}
         REDSUITE_CLONE_URL: ${{ inputs.clone-url }}
-        RUST_LOG: info,redsuite_core::check=debug
+        RUST_LOG: info
 
     - name: Upload stack logs
       if: always()
