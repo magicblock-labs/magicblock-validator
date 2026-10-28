@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use futures_util::future::join_all;
 use solana_keypair::Keypair;
+use solana_signer::Signer;
 
 use crate::execution::preparation::{
     TransactionPreparator, cleanup_resources::CleanupResources,
@@ -18,7 +19,9 @@ pub(super) async fn clean(
     // every ALT reservation, even when separate attempts used identical keys.
     let mut buffers = HashSet::new();
     for resources in &mut resources {
-        resources.buffers.retain(|task| buffers.insert((task.pubkey, task.commit_id)));
+        resources
+            .buffers
+            .retain(|task| buffers.insert(task.buffer_pda(&authority.pubkey())));
     }
     let cleanup_futs = resources.iter().map(|to_cleanup| {
         transaction_preparator.cleanup_resources(authority, to_cleanup, close_buffers)

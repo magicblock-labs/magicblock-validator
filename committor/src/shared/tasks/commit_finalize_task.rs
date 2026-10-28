@@ -161,10 +161,11 @@ impl CommitFinalizeTask {
     }
 
     pub fn try_use_buffer(&mut self) -> bool {
-        // CHECKPOINT: enable v2 buffers once their preparation and cleanup use DLP's
-        // StateBuffer instructions: https://github.com/magicblock-labs/delegation-program/issues/270.
-        // Until then, keep v2 payloads inline so we do not leave buffer rent behind.
-        if matches!(self.protocol, DelegationProtocol::V2 { .. }) {
+        // An empty payload is already smaller inline than a buffer reference.
+        if matches!(self.protocol, DelegationProtocol::V2 { .. })
+            && self.committed_account.account.data.is_empty()
+            && matches!(self.delivery, CommitDelivery::StateInArgs)
+        {
             return false;
         }
         let delivery = std::mem::replace(&mut self.delivery, CommitDelivery::StateInArgs);
