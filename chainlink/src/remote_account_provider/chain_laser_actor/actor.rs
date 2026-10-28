@@ -13,6 +13,7 @@ use ::metrics::metrics::{
     inc_program_subscription_account_updates_count,
 };
 use config::config::GrpcConfig;
+use delegation_program_interface as dpi;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError,
     grpc::{CommitmentLevel, SubscribeUpdate, subscribe_update::UpdateOneof},

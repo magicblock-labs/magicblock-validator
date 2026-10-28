@@ -1,5 +1,5 @@
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use dpi::{
+use delegation_program_interface::{
     decrypt::Decrypt,
     legacy::{
         args::PostDelegationActions, pda::delegation_record_pda_from_delegated_account,
@@ -248,9 +248,12 @@ where
 
 #[cfg(test)]
 mod tests {
-    use dpi::legacy::args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
+    use delegation_program_interface::{
+        self as dpi,
+        legacy::args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
+        },
     };
     use solana_instruction::{AccountMeta, Instruction};
     use solana_program::pubkey::Pubkey;

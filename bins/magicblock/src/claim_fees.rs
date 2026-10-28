@@ -2,7 +2,9 @@
 
 use anyhow::{Context, Result};
 use config::LeaderParams;
-use dpi::legacy::instruction_builder::validator_claim_fees;
+use delegation_program_interface::{
+    self as dpi, legacy::instruction_builder::validator_claim_fees,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;

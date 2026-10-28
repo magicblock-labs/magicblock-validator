@@ -5,6 +5,7 @@
 // ## Redelegate an Account that was delegated to us to Other - Same Slot
 // Materialization rules: ../README.md#materialization-and-ordering
 
+use delegation_program_interface as dpi;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated, assert_not_subscribed,
     assert_remain_undelegating, assert_subscribed_without_delegation_record,

@@ -1,3 +1,4 @@
+use delegation_program_interface as dpi;
 pub use mbv_core::token_programs::{
     EATA_PROGRAM_ID, EphemeralAta, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, derive_ata,
     derive_ata_with_token_program, derive_eata,

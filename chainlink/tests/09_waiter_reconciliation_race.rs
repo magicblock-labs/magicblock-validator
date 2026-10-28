@@ -2,13 +2,16 @@
 
 use std::time::Duration;
 
-use dpi::legacy::{
-    args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
     },
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
 };
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_not_subscribed,

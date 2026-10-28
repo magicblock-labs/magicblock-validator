@@ -1,8 +1,8 @@
 use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use dpi::{
-    delegation_metadata_seeds_from_delegated_account,
+use delegation_program_interface::{
+    self as dpi, delegation_metadata_seeds_from_delegated_account,
     delegation_record_seeds_from_delegated_account,
     legacy::state::{DelegationMetadata, DelegationRecord},
 };

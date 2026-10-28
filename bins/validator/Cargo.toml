@@ -17,7 +17,7 @@ chainlink = { workspace = true }
 committor = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
-dpi = { workspace = true }
+magicblock-delegation-program-interface = { workspace = true }
 ledger-deprecated = { workspace = true }
 metrics = { workspace = true }
 program = { workspace = true }

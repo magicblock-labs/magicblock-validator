@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use dpi::legacy::state::{DelegationMetadata, UndelegationRequester};
+use delegation_program_interface::legacy::state::{DelegationMetadata, UndelegationRequester};
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 

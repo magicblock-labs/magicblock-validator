@@ -236,6 +236,7 @@ fn tasks_fit_v0_with_alts(
 
 #[cfg(test)]
 mod tests {
+    use delegation_program_interface as dpi;
     use mbv_core::intent::{BaseAction, CommitAndUndelegate, ProgramArgs};
     use solana_account::Account;
 

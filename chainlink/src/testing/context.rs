@@ -5,6 +5,7 @@ use std::{
 };
 
 use aml::RiskService;
+use delegation_program_interface as dpi;
 use engine::{
     Engine,
     testkit::{Pacing, TestEngine},

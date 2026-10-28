@@ -1,3 +1,4 @@
+use delegation_program_interface as dpi;
 use solana_account::{Account, AccountBuilder, AccountSharedData, ReadableAccount};
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;

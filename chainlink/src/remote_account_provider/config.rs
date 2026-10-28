@@ -1,6 +1,7 @@
 use std::{collections::HashSet, time::Duration};
 
 use config::{config::GrpcConfig, consts::DEFAULT_RESUBSCRIPTION_DELAY_MS};
+use delegation_program_interface as dpi;
 use solana_pubkey::Pubkey;
 
 use super::{RemoteAccountProviderError, RemoteAccountProviderResult};

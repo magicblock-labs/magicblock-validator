@@ -20,7 +20,7 @@ lru = { workspace = true }
 chainlink = { workspace = true }
 committor-interface = { workspace = true }
 mbv-core = { workspace = true }
-dpi = { workspace = true }
+magicblock-delegation-program-interface = { workspace = true }
 metrics = { workspace = true }
 program = { workspace = true }
 rpc-client = { workspace = true }

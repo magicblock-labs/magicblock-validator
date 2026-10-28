@@ -1,4 +1,5 @@
-use dpi::{
+use delegation_program_interface::{
+    self as dpi,
     diff::compute_diff,
     legacy::{
         AccountSizeClass,
