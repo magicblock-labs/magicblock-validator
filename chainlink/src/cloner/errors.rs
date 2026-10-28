@@ -6,6 +6,8 @@ pub type ClonerResult<T> = Result<T, ClonerError>;
 
 #[derive(Debug, Error)]
 pub enum ClonerError {
+    #[error("cannot install ATA projection: {0}")]
+    InvalidAtaProjection(&'static str),
     #[error(transparent)]
     BincodeError(#[from] bincode::Error),
     #[error(transparent)]
@@ -49,8 +51,10 @@ pub enum ClonerError {
 impl ClonerError {
     /// Rescue requires confirmed execution failure or rejection before submission.
     /// Infrastructure and exceptional completion-task errors do not prove rollback.
+    /// Compare conflicts need reconciliation, not rescue undelegation.
     pub(crate) fn allows_rescue(&self) -> bool {
         match self {
+            Self::InvalidAtaProjection(_) => true,
             Self::FailedToCloneRegularAccount(_, error) => error.allows_rescue(),
             Self::Engine(
                 EngineError::TransactionExecution(_)
@@ -105,6 +109,7 @@ mod tests {
             );
         }
         assert!(!ClonerError::TransactionError(TransactionError::AccountNotFound).allows_rescue());
+        assert!(!ClonerError::Engine(EngineError::AccountChanged).allows_rescue());
     }
 
     /// Proves an exceptional completion-task cancellation is not rollback evidence.

@@ -26,7 +26,7 @@ use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;
 use lru::LruCache;
 use mbv_core::token_programs::{
-    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
+    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     normalize_native_token_account_for_local_clone,
 };
 use parking_lot::Mutex as PlMutex;
@@ -932,7 +932,8 @@ where
                 Ok(ProgramDataWatch::Installed)
             );
 
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) =
+            cloner::claim_materialization(&self.engine, request.pubkey, false).await?
         else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
@@ -985,14 +986,7 @@ where
         mut request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
-        if request.account.read().is(AccountMode::Delegated)
-            && is_ata(
-                &request.pubkey,
-                request.account.read().owner(),
-                request.account.read().data(),
-            )
-            .is_some()
-        {
+        if request.is_ata_projection() {
             request.account = normalize_native_token_account_for_local_clone(request.account)
                 .ok_or_else(|| {
                     ChainlinkError::InvalidTokenAccount(
@@ -1028,7 +1022,12 @@ where
             None
         };
 
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) = cloner::claim_materialization(
+            &self.engine,
+            request.pubkey,
+            request.is_ata_projection(),
+        )
+        .await?
         else {
             return Ok(());
         };
@@ -1059,7 +1058,12 @@ where
         // cancellation does not authorize another mutation. Reacquire and
         // reclassify before fallback so a concurrent materialization
         // cannot be overwritten or have its actions replayed.
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) = cloner::claim_materialization(
+            &self.engine,
+            request.pubkey,
+            request.is_ata_projection(),
+        )
+        .await?
         else {
             return Ok(());
         };
