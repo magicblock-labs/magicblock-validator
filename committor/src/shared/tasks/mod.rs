@@ -1,5 +1,8 @@
 use ::metrics::metrics::LabelValue;
-use dpi::legacy::{AccountSizeClass, args::CallHandlerArgs};
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{AccountSizeClass, args::CallHandlerArgs},
+};
 use mbv_core::intent::{BaseAction, BaseActionCallback};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -275,7 +278,7 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 
 #[cfg(test)]
 mod tests {
-    use dpi::legacy::{
+    use delegation_program_interface::legacy::{
         discriminator::DlpDiscriminator, pda::undelegation_request_pda_from_delegated_account,
     };
     use mbv_core::intent::ProgramArgs;

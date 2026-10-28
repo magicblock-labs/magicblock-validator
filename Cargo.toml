@@ -70,7 +70,7 @@ committor-interface = { package = "magicblock-committor-interface", path = "prog
 committor = { package = "magicblock-committor-service", path = "committor" }
 config = { package = "magicblock-config", path = "config" }
 mbv-core = { package = "magicblock-core", path = "core" }
-dpi = { package = "magicblock-delegation-program-interface", git = "https://github.com/magicblock-labs/delegation-program.git", rev = "356930ea1fe58908057bbe99293a0383b242a40b" }
+magicblock-delegation-program-interface = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "356930ea1fe58908057bbe99293a0383b242a40b" }
 ledger-deprecated = { package = "magicblock-ledger-deprecated", path = "ledger" }
 magic-program-api = { package = "magicblock-magic-program-api", path = "programs/magic-interface" }
 metrics = { package = "magicblock-metrics", path = "metrics" }

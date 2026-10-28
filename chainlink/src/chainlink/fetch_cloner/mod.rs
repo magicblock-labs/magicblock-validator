@@ -18,9 +18,12 @@ use ::metrics::metrics::{
 };
 use aml::RiskService;
 use config::config::{AllowedProgram, AmlCheckStrategy};
-use dpi::legacy::{
-    pda::delegation_record_pda_from_delegated_account,
-    state::{DelegationRecord, UndelegationRequest, discriminator::AccountDiscriminator},
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        pda::delegation_record_pda_from_delegated_account,
+        state::{DelegationRecord, UndelegationRequest, discriminator::AccountDiscriminator},
+    },
 };
 use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;

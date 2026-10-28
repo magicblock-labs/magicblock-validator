@@ -1,7 +1,9 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use assert_matches::assert_matches;
-use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
+use delegation_program_interface::{
+    self as dpi, legacy::pda::delegation_record_pda_from_delegated_account,
+};
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_empty_placeholder,
     assert_cloned_as_undelegated, assert_not_cloned, assert_not_subscribed,

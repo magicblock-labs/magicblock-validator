@@ -7,7 +7,9 @@ use ::metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
 };
-use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
+use delegation_program_interface::{
+    self as dpi, legacy::pda::delegation_record_pda_from_delegated_account,
+};
 use mbv_core::token_programs::is_ata;
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
 use solana_pubkey::Pubkey;

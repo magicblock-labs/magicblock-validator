@@ -1,6 +1,8 @@
 use std::{ops::ControlFlow, time::Duration};
 
-use dpi::legacy::pda::commit_record_pda_from_delegated_account;
+use delegation_program_interface::{
+    self as dpi, legacy::pda::commit_record_pda_from_delegated_account,
+};
 use metrics::metrics;
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,

@@ -6,6 +6,7 @@ use std::{
 use ::metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 use aml::RiskService;
 use config::config::ChainLinkConfig;
+use delegation_program_interface as dpi;
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;

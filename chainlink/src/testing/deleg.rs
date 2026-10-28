@@ -1,11 +1,14 @@
 #[cfg(any(test, feature = "dev-context"))]
-use dpi::legacy::args::{
-    EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
+    },
 };
-#[cfg(any(test, feature = "dev-context"))]
-use dpi::legacy::pda::delegation_record_pda_from_delegated_account;
-#[cfg(any(test, feature = "dev-context"))]
-use dpi::legacy::state::DelegationRecord;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]

@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use delegation_program_interface as dpi;
 use mbv_core::intent::types::CommittedAccount;
 use program::outbox::{ExecutionStage, TwoStageProgress};
 use rpc_client::MagicblockRpcClient;

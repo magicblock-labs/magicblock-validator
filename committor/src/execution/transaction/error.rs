@@ -1,3 +1,4 @@
+use delegation_program_interface as dpi;
 use mbv_core::traits::ActionError;
 use metrics::metrics;
 use rpc_client::{MagicBlockRpcClientError, utils::TransactionErrorMapper};

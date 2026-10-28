@@ -342,7 +342,10 @@ pub(crate) type TaskStrategistResult<T, E = TaskStrategistError> = Result<T, E>;
 mod tests {
     use std::{collections::HashMap, sync::Arc};
 
-    use dpi::legacy::{discriminator::DlpDiscriminator, state::UndelegationRequester};
+    use delegation_program_interface::{
+        self as dpi,
+        legacy::{discriminator::DlpDiscriminator, state::UndelegationRequester},
+    };
     use mbv_core::intent::{
         BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent, ProgramArgs, UndelegateType,
         types::CommittedAccount,

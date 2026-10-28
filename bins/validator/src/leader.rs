@@ -11,6 +11,7 @@ use chainlink::{
 };
 use committor::{CommittorConfig, CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT};
 use config::LeaderParams;
+use delegation_program_interface as dpi;
 use engine::Engine;
 use metrics::MetricsService;
 use nucleus::{
