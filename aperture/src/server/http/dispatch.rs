@@ -56,7 +56,7 @@ fn parse_body(body: RequestBody) -> RpcResult<RpcRequest> {
     } else {
         json::from_slice(bytes).map(RpcRequest::Multi)
     }
-    .map_err(Into::into)
+    .map_err(RpcError::parse_error)
 }
 
 /// Collects data frames under the HTTP body limit, ignoring trailers.

@@ -14,7 +14,7 @@ use std::{
 };
 
 use futures_util::future::try_join_all;
-use serde_json::json;
+use json::json;
 use signature_confirmer::{SignatureConfirmer, SignatureConfirmerConfig};
 use solana_account::Account;
 use solana_account_decoder_client_types::UiAccountEncoding;

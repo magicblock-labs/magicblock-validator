@@ -14,7 +14,6 @@ use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 
 use crate::{
-    errors::custom_error_codes,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
     utils::{
         account_actions::set_account_mode,
@@ -112,31 +111,13 @@ pub(crate) fn process_scheduled_commit_sent(
     invoke_context: &mut InvokeContext<'_, '_>,
     intent_id: u64,
 ) -> Result<(), InstructionError> {
-    // No replica gating here: on a replica this will fail (the commit was
-    // never registered in its local SENT_COMMITS map), but that's fine since
-    // this instruction only clears bookkeeping state, not AccountsDB - it has
-    // no effect on the replicated account state a replica needs to converge on.
     validate(&signers, invoke_context, intent_id)?;
 
-    // Only after we passed all checks do we remove the commit from the global hashmap
-    // Otherwise a malicious actor could remove a commit from the hashmap without
-    // signing as the validator
-    let commit = match SENT_COMMITS.write().remove(&intent_id) {
-        Some(commit) => commit,
-        None => {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommitSent ERR: commit with id {} not found",
-                intent_id
-            );
-            return Err(InstructionError::Custom(
-                custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
-            ));
-        }
-    };
-
-    // Log data
-    log_sent_commit(invoke_context, &commit);
+    // Commit logs are leader-local; replicas must still apply the signed cleanup.
+    let commit = SENT_COMMITS.write().remove(&intent_id);
+    if let Some(commit) = commit {
+        log_sent_commit(invoke_context, &commit);
+    }
     close_outbox_ephemeral_account(invoke_context)
 }
 
@@ -283,7 +264,7 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPr
 
 #[cfg(test)]
 mod tests {
-    use magic_program_api::{EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID};
+    use magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
     use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{Instruction, error::InstructionError};
@@ -394,59 +375,55 @@ mod tests {
         );
     }
 
+    /// Proves signed outbox cleanup does not depend on leader-local commit logs.
     #[test]
-    fn test_registered_all_checks_out() {
-        let commit = setup_registered_commit();
+    fn test_cleanup_with_or_without_local_registration() {
+        for registered in [false, true] {
+            let commit = setup_registered_commit();
+            if !registered {
+                SENT_COMMITS.write().remove(&commit.message_id);
+            }
 
-        let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
-        let bundle = OutboxIntentBundle::accepted(
-            ScheduledIntentBundle {
-                intent_id: commit.message_id,
-                slot: 0,
-                blockhash: Hash::default(),
-                sent_transaction: Transaction::default(),
-                payer: Pubkey::new_unique(),
-                intent_bundle: MagicIntentBundle::default(),
-            },
-            bump,
-        );
-        let data = bundle.try_to_bytes().unwrap();
-        let mut pda_account = AccountBuilder::from(AccountSharedData::new(
-            0,
-            data.len(),
-            &OUTBOX_INTENT_PROGRAM_ID,
-        ))
-        .mode(AccountMode::Magic)
-        .build::<AccountSharedData>();
-        pda_account.set_data_from_slice(&data);
-
-        let mut account_data = {
-            let mut map = HashMap::new();
-            // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor
-            let vault = AccountBuilder::from(AccountSharedData::new(10_000, 0, &crate::id()))
+            let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
+            let bundle = OutboxIntentBundle::accepted(
+                ScheduledIntentBundle {
+                    intent_id: commit.message_id,
+                    slot: 0,
+                    blockhash: Hash::default(),
+                    sent_transaction: Transaction::default(),
+                    payer: Pubkey::new_unique(),
+                    intent_bundle: MagicIntentBundle::default(),
+                },
+                bump,
+            );
+            let data = bundle.try_to_bytes().unwrap();
+            let pda_account = AccountBuilder::default()
+                .data(data)
+                .owner(OUTBOX_INTENT_PROGRAM_ID)
                 .mode(AccountMode::Magic)
-                .build::<AccountSharedData>();
-            map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
-            // Add outbox PDA as existing ephemeral account (created by accept)
-            map.insert(pda, pda_account);
-            map
-        };
+                .build();
+            let mut account_data = HashMap::from([(pda, pda_account)]);
 
-        ensure_started_validator(&mut account_data, None);
+            ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
+            let ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
 
-        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
-        process_outbox_intent_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+            let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
+            let pda_index = transaction_accounts.iter().position(|(key, _)| key == &pda).unwrap();
+            let accounts = process_outbox_intent_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+            assert!(accounts[pda_index].is(AccountMode::Closed));
+            assert!(accounts[pda_index].data().is_empty());
+            assert_eq!(accounts[pda_index].owner(), &system_program::id());
 
-        assert!(
-            get_scheduled_commit(commit.message_id).is_none(),
-            "removes scheduled commit data"
-        );
+            assert!(
+                get_scheduled_commit(commit.message_id).is_none(),
+                "removes scheduled commit data"
+            );
+        }
     }
 }

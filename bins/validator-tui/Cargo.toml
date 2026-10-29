@@ -16,7 +16,7 @@ percent-encoding = "2.3.2"
 ratatui = "0.30.2"
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
+json = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }

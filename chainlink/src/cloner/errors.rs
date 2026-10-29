@@ -6,6 +6,8 @@ pub type ClonerResult<T> = Result<T, ClonerError>;
 
 #[derive(Debug, Error)]
 pub enum ClonerError {
+    #[error("cannot install ATA projection: {0}")]
+    InvalidAtaProjection(&'static str),
     #[error(transparent)]
     BincodeError(#[from] bincode::Error),
     #[error(transparent)]
@@ -49,6 +51,7 @@ pub enum ClonerError {
 impl ClonerError {
     /// Rescue requires confirmed execution failure or rejection before submission.
     /// Infrastructure and exceptional completion-task errors do not prove rollback.
+    /// Compare conflicts need reconciliation, not rescue undelegation.
     pub(crate) fn allows_rescue(&self) -> bool {
         match self {
             Self::FailedToCloneRegularAccount(_, error) => error.allows_rescue(),
@@ -75,6 +78,12 @@ mod tests {
     /// through the regular-account wrapper; error text cannot authorize it.
     #[test]
     fn rescue_eligibility_requires_definitive_failure() {
+        let assert_policy = |error: ClonerError, expected| {
+            assert_eq!(error.allows_rescue(), expected, "{error:?}");
+            let wrapped =
+                ClonerError::FailedToCloneRegularAccount(Pubkey::new_unique(), Box::new(error));
+            assert_eq!(wrapped.allows_rescue(), expected, "{wrapped:?}");
+        };
         for error in [
             EngineError::Sanitization(
                 keeper::TransactionView::try_new_sanitized(Vec::new().into(), true).unwrap_err(),
@@ -85,26 +94,21 @@ mod tests {
             EngineError::Signature(solana_signer::SignerError::NotEnoughSigners),
             EngineError::SignatureVerification,
         ] {
-            let error = ClonerError::Engine(error);
-            assert!(error.allows_rescue());
-            assert!(
-                ClonerError::FailedToCloneRegularAccount(Pubkey::new_unique(), Box::new(error),)
-                    .allows_rescue()
-            );
+            assert_policy(ClonerError::Engine(error), true);
         }
-        for error in [
+        let rejected = [
             EngineError::ShuttingDown,
             EngineError::ServiceUnavailable(nucleus::shutdown::Service::Sequencer),
             EngineError::Internal("transaction execution failed".into()),
-        ] {
-            let error = ClonerError::Engine(error);
-            assert!(!error.allows_rescue());
-            assert!(
-                !ClonerError::FailedToCloneRegularAccount(Pubkey::new_unique(), Box::new(error),)
-                    .allows_rescue()
-            );
+            EngineError::AccountChanged,
+        ]
+        .map(ClonerError::Engine);
+        for error in rejected.into_iter().chain([
+            ClonerError::TransactionError(TransactionError::AccountNotFound),
+            ClonerError::InvalidAtaProjection("conflicting delegates"),
+        ]) {
+            assert_policy(error, false);
         }
-        assert!(!ClonerError::TransactionError(TransactionError::AccountNotFound).allows_rescue());
     }
 
     /// Proves an exceptional completion-task cancellation is not rollback evidence.

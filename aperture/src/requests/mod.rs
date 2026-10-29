@@ -1,4 +1,5 @@
-use json::{Array, Deserialize, JsonValueTrait, Value};
+use json::Value;
+use serde::Deserialize;
 
 use crate::{RpcResult, error::RpcError};
 
@@ -13,7 +14,7 @@ pub(crate) struct JsonRequest<M> {
     /// The name of the RPC method to be invoked.
     pub(crate) method: M,
     /// An optional array of positional parameter values for the method.
-    pub(crate) params: Option<Array>,
+    pub(crate) params: Option<Vec<Value>>,
 }
 /// Represents either a single JSON-RPC request or a batch of multiple requests.
 pub(crate) enum RpcRequest {
@@ -28,27 +29,22 @@ impl<M> JsonRequest<M> {
             .as_ref()
             .and_then(|params| params.get(index))
             .ok_or_else(|| RpcError::invalid_params(format!("missing parameter {index}")))?;
-        json::from_value(value).map_err(RpcError::invalid_params)
+        T::deserialize(value).map_err(RpcError::invalid_params)
     }
 
     pub(crate) fn optional<'a, T: Deserialize<'a>>(&'a self, index: usize) -> RpcResult<Option<T>> {
         self.params
             .as_ref()
             .and_then(|params| params.get(index))
-            .map(|value| {
-                if value.is_null() {
-                    Ok(None)
-                } else {
-                    json::from_value(value).map(Some).map_err(RpcError::invalid_params)
-                }
-            })
+            .filter(|value| !value.is_null())
+            .map(T::deserialize)
             .transpose()
-            .map(Option::flatten)
+            .map_err(RpcError::invalid_params)
     }
 }
 
 /// All supported JSON-RPC HTTP method names.
-#[derive(json::Deserialize, Debug, Copy, Clone)]
+#[derive(Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum JsonRpcHttpMethod {
     GetAccountInfo,
@@ -104,7 +100,7 @@ pub(crate) enum JsonRpcHttpMethod {
 }
 
 /// All supported JSON-RPC Websocket method names.
-#[derive(json::Deserialize, Debug, Copy, Clone)]
+#[derive(Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum JsonRpcWsMethod {
     AccountSubscribe,

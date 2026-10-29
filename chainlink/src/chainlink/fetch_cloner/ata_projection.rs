@@ -5,10 +5,14 @@ use delegation_program_api::state::DelegationRecord;
 use futures_util::future::{FutureExt, join_all};
 use mbv_core::token_programs::{
     AtaInfo, EATA_PROGRAM_ID, EphemeralAta, is_ata, try_derive_eata_address_and_bump,
-    try_derive_supported_ata_pubkeys,
+    try_derive_supported_ata_pubkeys, try_get_magic_ata_info,
 };
-use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
+use solana_account::{
+    AccountBuilder, AccountMode, AccountSharedData, ReadableAccount, WritableAccount,
+};
+use solana_program::{program_option::COption, program_pack::Pack};
 use solana_pubkey::Pubkey;
+use spl_token::state::Account as SplAccount;
 use tokio::task::JoinSet;
 use tracing::*;
 
@@ -175,44 +179,15 @@ where
     )?;
     let ata_pubkeys = derive_supported_ata_pubkeys(&wallet_owner, &mint);
 
-    // eATA updates only carry the projected balance fields. The base ATA is
-    // required so the clone preserves the actual token program owner and any
-    // Token-2022 account layout extensions.
-    let base_ata = {
-        let accessor = this.engine.accounts();
-        let loader = accessor.loader();
-        let mut base_ata = None;
-        for candidate_pubkey in ata_pubkeys.iter().copied() {
-            let reader = |account: &AccountSharedData| {
-                is_ata(&candidate_pubkey, *account.owner(), account.data())
-                    .is_some()
-                    .then(|| AccountBuilder::from(AccountSharedData::from(account.owned())))
-            };
-            if let Some(candidate_account) =
-                loader.read(&candidate_pubkey, reader).ok().flatten().flatten()
-            {
-                base_ata = Some((candidate_pubkey, candidate_account));
-                break;
-            }
-        }
-        base_ata
-    };
-    let (ata_pubkey, base_ata) = match base_ata {
-        Some(base_ata) => base_ata,
-        None => {
-            fetch_remote_base_ata(
-                this,
-                &ata_pubkeys,
-                eata_account.read().slot(),
-                companion_fetch_log_context,
-            )
-            .await?
-        }
-    };
+    let (ata_pubkey, base_ata) = resolve_ata_layout(
+        this,
+        &ata_pubkeys,
+        eata_account.read().slot(),
+        companion_fetch_log_context,
+    )
+    .await?;
 
-    // A local Magic ATA stays authoritative even when empty. Its owner must
-    // close it before a base-chain delegation can supply the local ATA image.
-    if base_ata.read().mode().requires_persistence() {
+    if base_ata.read().mode().requires_persistence() && !base_ata.read().is(AccountMode::Magic) {
         return None;
     }
     let source_slots =
@@ -233,7 +208,8 @@ where
     })
 }
 
-async fn fetch_remote_base_ata<T, U>(
+/// Prefers a base ATA image; a Magic layout is usable only after confirmed absence.
+async fn resolve_ata_layout<T, U>(
     this: &FetchCloner<T, U>,
     ata_pubkeys: &[Pubkey],
     min_context_slot: u64,
@@ -243,6 +219,37 @@ where
     T: ChainRpcClient,
     U: ChainPubsubClient,
 {
+    // eATA updates only carry the projected balance fields. The base ATA is
+    // required so the clone preserves the actual token program owner and any
+    // Token-2022 account layout extensions.
+    let mut magic_layout = None;
+    {
+        let accessor = this.engine.accounts();
+        let loader = accessor.loader();
+        for candidate_pubkey in ata_pubkeys.iter().copied() {
+            let reader = |account: &AccountSharedData| {
+                is_ata(&candidate_pubkey, *account.owner(), account.data())
+                    .is_some()
+                    .then(|| AccountSharedData::from(account.owned()))
+            };
+            let Some(mut account) = loader.read(&candidate_pubkey, reader).ok().flatten().flatten()
+            else {
+                continue;
+            };
+            if try_get_magic_ata_info(&candidate_pubkey, &account).is_some() {
+                // The snapshot supplies layout only; approval is read live during takeover.
+                let data = account.data_as_mut_slice();
+                let mut token = SplAccount::unpack(data.get(..SplAccount::LEN)?).ok()?;
+                token.delegate = COption::None;
+                token.delegated_amount = 0;
+                SplAccount::pack(token, &mut data[..SplAccount::LEN]).ok()?;
+                magic_layout = Some((candidate_pubkey, AccountBuilder::from(account)));
+            } else {
+                return Some((candidate_pubkey, AccountBuilder::from(account)));
+            }
+        }
+    }
+
     let remote_accounts = match this
         .remote_account_provider
         .try_get_multi_until_slots_match(
@@ -269,15 +276,19 @@ where
         }
     };
 
-    ata_pubkeys
-        .iter()
-        .copied()
-        .zip(remote_accounts)
-        .find_map(|(ata_pubkey, remote_account)| {
-            let account = remote_account.into_fresh_account()?;
-            is_ata(&ata_pubkey, *account.owner(), account.data())?;
-            Some((ata_pubkey, AccountBuilder::from(account)))
-        })
+    let mut all_absent = true;
+    for (pubkey, remote) in ata_pubkeys.iter().copied().zip(remote_accounts) {
+        match remote {
+            RemoteAccount::NotFound(_) => {}
+            RemoteAccount::Found(state) => {
+                all_absent = false;
+                if is_ata(&pubkey, *state.account.owner(), state.account.data()).is_some() {
+                    return Some((pubkey, AccountBuilder::from(state.account)));
+                }
+            }
+        }
+    }
+    if all_absent { magic_layout } else { None }
 }
 
 pub(super) async fn maybe_project_ata_from_subscription_update<T, U>(
