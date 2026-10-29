@@ -5,20 +5,9 @@ on:
     types: [published]
   workflow_dispatch:
   push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/*.toml'
-      - '.github/actions/run-redsuite/**'
-      - '.github/scripts/run-redsuite.sh'
+    branches: [V1, master]
   pull_request:
     types: [opened, reopened, synchronize]
-    paths:
-      - '**/*.rs'
-      - '**/*.toml'
-      - '.github/actions/run-redsuite/**'
-      - '.github/scripts/run-redsuite.sh'
-
 permissions:
   contents: read
 

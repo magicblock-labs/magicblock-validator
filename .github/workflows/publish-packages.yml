@@ -15,13 +15,14 @@ on:
       release_version:
         description: 'The release version'
         required: true
-        default: 'v0.1.0'
+        default: 'v2.0.0'
 
 permissions:
   contents: read
 
 env:
   RELEASE_VERSION: ${{ github.event.release.tag_name || inputs.release_version }}
+  NPM_CHANNEL: ${{ startsWith(github.event.release.tag_name || inputs.release_version, 'v1.') && 'legacy' || 'latest' }}
   DRY_RUN: ${{ github.event_name != 'release' }}
   RELEASE_BINARIES: magicblock-validator magicblock-verifier magicblock magicblock-validator-tui
 
@@ -56,7 +57,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Require a master commit carrying the tagged version
+      - name: Require a release-line commit carrying the tagged version
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -64,8 +65,13 @@ jobs:
         run: |
           set -euo pipefail
           problem=""
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
-            problem="${TAG} points at ${GITHUB_SHA}, which is not on master"
+          case "$TAG" in
+            v1.*) branch=V1 ;;
+            v2.*) branch=master ;;
+            *) echo "::error::Unsupported release line: $TAG"; exit 1 ;;
+          esac
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/$branch"; then
+            problem="${TAG} points at ${GITHUB_SHA}, which is not on $branch"
           elif ! version="v$(.github/scripts/workspace-version.sh)"; then
             problem="${TAG} points at a commit without a valid workspace version"
           elif [[ "$version" != "$TAG" ]]; then
@@ -73,9 +79,23 @@ jobs:
           fi
           if [[ -n "$problem" ]]; then
             gh release edit "$TAG" --draft=true
-            echo "::error::${problem}. The release is back in draft; release tags come from the Tag release workflow on master."
+            echo "::error::${problem}. The release is back in draft; release tags come from the matching release branch."
             exit 1
           fi
+
+  set-release-channel:
+    name: Set GitHub release channel
+    needs: verify-release
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Set latest policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release edit "$RELEASE_VERSION" --latest=${{ startsWith(github.event.release.tag_name, 'v2.') && 'true' || 'false' }}
 
   publish-binaries:
     name: Publish Binaries
@@ -223,9 +243,9 @@ jobs:
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
           if [ "${{ env.DRY_RUN }}" = "true" ]; then
             echo "Running npm publish in dry-run mode"
-            npm publish --access public --dry-run
+            npm publish --access public --tag "$NPM_CHANNEL" --dry-run
           else
-            npm publish --access public
+            npm publish --access public --tag "$NPM_CHANNEL"
           fi
 
   publish-wrapper-npm-package:
@@ -253,9 +273,9 @@ jobs:
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
           if [ "${{ env.DRY_RUN }}" = "true" ]; then
             echo "Running npm publish in dry-run mode"
-            npm publish --access public --dry-run
+            npm publish --access public --tag "$NPM_CHANNEL" --dry-run
           else
-            npm publish --access public
+            npm publish --access public --tag "$NPM_CHANNEL"
           fi
 
       - name: cargo publish
