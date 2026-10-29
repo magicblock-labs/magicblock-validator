@@ -1,16 +1,17 @@
 name: Tag release
 
-# Every workspace version is tagged once, on the master push that introduces it,
+# Every workspace version is tagged once, on the release-branch push that introduces it,
 # with a draft release to publish. Release tags are never created by hand.
 
 "on":
   push:
     branches:
       - master
+      - V1
   workflow_dispatch:
 
 concurrency:
-  group: release-tag
+  group: release-tag-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -21,11 +22,11 @@ jobs:
     name: Tag release
     runs-on: ubuntu-latest
     steps:
-      - name: Require master
-        if: github.ref_name != 'master'
+      - name: Require release branch
+        if: github.ref_name != 'master' && github.ref_name != 'V1'
         shell: bash
         run: |
-          echo "::error::Releases are tagged from master only; run this workflow on master."
+          echo "::error::Releases are tagged from V1 or master only."
           exit 1
 
       # A GitHub App token lets a tag ruleset restrict release tags to this workflow.
@@ -38,7 +39,7 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           permission-contents: write
 
-      - name: Checkout master
+      - name: Checkout release branch
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
@@ -53,9 +54,15 @@ jobs:
 
           tag="v$(.github/scripts/workspace-version.sh)"
 
+          case "$GITHUB_REF_NAME:$tag" in
+            V1:v1.*|master:v2.*) ;;
+            master:v1.*) echo "Waiting for the separate 2.0.0 release PR"; exit 0 ;;
+            *) echo "::error::Version does not match release branch"; exit 1 ;;
+          esac
+
           if tagged="$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}")"; then
             if ! git merge-base --is-ancestor "$tagged" HEAD; then
-              echo "::error::${tag} points at ${tagged}, which is not on master. Move it to the master commit that introduced ${tag}."
+              echo "::error::${tag} points at ${tagged}, which is not on ${GITHUB_REF_NAME}. Move it to the release-branch commit that introduced ${tag}."
               exit 1
             fi
             echo "${tag} is tagged at ${tagged}"
@@ -75,6 +82,6 @@ jobs:
           fi
 
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --draft --verify-tag --generate-notes --title "$tag"
+            gh release create "$tag" --draft --verify-tag --generate-notes --target "$GITHUB_REF_NAME" --latest=false --title "$tag"
             echo "Drafted release ${tag}; publish it to ship the packages" >> "$GITHUB_STEP_SUMMARY"
           fi

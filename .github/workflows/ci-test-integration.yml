@@ -6,36 +6,9 @@ concurrency:
 
 on:
   push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'Makefile'
-      - 'test-integration/**'
-      - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
-      - '.github/workflows/ci-test-integration.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+    branches: [V1, master]
   pull_request:
     types: [opened, reopened, synchronize]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'Makefile'
-      - 'test-integration/**'
-      - 'rust-toolchain.toml'
-      - 'test-integration/rust-toolchain.toml'
-      - '.github/workflows/ci-test-integration.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
-
 jobs:
   # These producer jobs exist purely to produce reusable artifacts so matrix
   # shards never invoke `cargo build` / `cargo build-sbf`. Keep the two host

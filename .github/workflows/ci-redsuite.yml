@@ -6,30 +6,9 @@ concurrency:
 
 on:
   push:
-    branches: [master, dev]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
+    branches: [V1, master]
   pull_request:
     types: [opened, reopened, synchronize]
-    paths:
-      - '**/*.rs'
-      - '**/Cargo.toml'
-      - '**/Cargo.lock'
-      - '**/build.rs'
-      - '**/*.proto'
-      - 'rust-toolchain.toml'
-      - '.github/workflows/ci-redsuite.yml'
-      - '.github/actions/setup-build-env/**'
-      - '.github/actions/setup-solana/**'
-
 permissions:
   contents: read
 
