@@ -20,6 +20,7 @@ runs:
       run: |
         {
           echo "REDSUITE_ROOT=$GITHUB_WORKSPACE/runroot"
+          echo "REDSUITE_DLP_SO=$GITHUB_WORKSPACE/runroot/target/deploy/delegation_program.so"
           echo "REDSUITE_YELLOWSTONE_DIR=$GITHUB_WORKSPACE/yellowstone-cache"
           echo "MAGICBLOCK_VALIDATOR_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-validator"
           echo "MAGICBLOCK_VERIFIER_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-verifier"
