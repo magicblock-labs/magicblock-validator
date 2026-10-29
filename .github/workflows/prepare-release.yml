@@ -9,7 +9,7 @@ name: Prepare release
         type: string
 
 concurrency:
-  group: prepare-release
+  group: prepare-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -22,11 +22,10 @@ jobs:
     runs-on: blacksmith-32vcpu-ubuntu-2404
     env:
       HOST_CARGO_JOBS: "8"
-      # Releases are always cut from master, regardless of the default branch.
-      RELEASE_BASE_BRANCH: master
+      RELEASE_BASE_BRANCH: ${{ github.ref_name }}
     steps:
       - name: Require release base branch
-        if: github.ref_name != env.RELEASE_BASE_BRANCH
+        if: github.ref_name != 'master' && github.ref_name != 'V1'
         shell: bash
         run: |
           echo "::error::Releases are cut from ${RELEASE_BASE_BRANCH}; run this workflow on ${RELEASE_BASE_BRANCH}."
@@ -39,18 +38,6 @@ jobs:
           path: magicblock-validator
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Require identical release workflows on dev
-        working-directory: magicblock-validator
-        shell: bash
-        run: |
-          if ! git diff --exit-code origin/dev HEAD -- \
-            .github/workflows/prepare-release.yml \
-            .github/workflows/release-tag.yml \
-            .github/scripts/workspace-version.sh; then
-            echo "::error::Release workflows differ between dev and ${RELEASE_BASE_BRANCH}; land the same change on both branches."
-            exit 1
-          fi
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         id: build-env
@@ -98,6 +85,11 @@ jobs:
 
             version="${new_major}.${new_minor}.${new_patch}"
           fi
+
+          case "$RELEASE_BASE_BRANCH:$version" in
+            V1:1.*|master:2.*) ;;
+            *) echo "::error::V1 requires 1.x; master requires 2.x (specify 2.0.0 for its first release)."; exit 1 ;;
+          esac
 
           release_branch="release/v${version}"
           remote_branch="$(git ls-remote --heads origin "refs/heads/${release_branch}")"
