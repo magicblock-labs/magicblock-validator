@@ -1,5 +1,5 @@
 name: Build or restore RedSuite
-description: Cache the portable CLI separately from Agave-specific SBF fixtures
+description: Cache the portable CLI separately from Agave-specific SBF fixtures and DLP
 
 runs:
   using: composite
@@ -8,7 +8,12 @@ runs:
       id: source
       shell: bash
       working-directory: redsuite
-      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      run: |
+        echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+        dlp_rev=$(sed -n 's/^magicblock-delegation-program-interface = .*rev = "\([^"]*\)".*/\1/p' ../magicblock-validator/Cargo.toml)
+        test -n "$dlp_rev"
+        test "$dlp_rev" = "$(sed -n 's/^magicblock-delegation-program-interface = .*rev = "\([^"]*\)".*/\1/p' Cargo.toml)"
+        echo "dlp-rev=$dlp_rev" >> "$GITHUB_OUTPUT"
 
     # Bump artifact versions when build flags or profiles change, not cache plumbing.
     - name: Restore RedSuite CLI
@@ -24,7 +29,7 @@ runs:
       with:
         path: redsuite-dist/deploy
         key: >-
-          redsuite-fixtures-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{
+          redsuite-fixtures-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{ steps.source.outputs.dlp-rev }}-${{
             hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
           }}
 
@@ -55,6 +60,15 @@ runs:
     - uses: ./magicblock-validator/.github/actions/setup-solana
       if: steps.fixtures.outputs.cache-hit != 'true'
 
+    - name: Checkout matching DLP program
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      uses: actions/checkout@v5
+      with:
+        repository: magicblock-labs/delegation-program
+        ref: ${{ steps.source.outputs.dlp-rev }}
+        path: delegation-program
+        persist-credentials: false
+
     - name: Build RedSuite fixtures
       if: steps.fixtures.outputs.cache-hit != 'true'
       shell: bash
@@ -63,6 +77,12 @@ runs:
         env -u REDSUITE_ROOT cargo xtask programs
         mkdir -p ../redsuite-dist/deploy
         cp target/deploy/*.so ../redsuite-dist/deploy/
+
+    - name: Build matching DLP program
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: delegation-program
+      run: cargo build-sbf --manifest-path program/Cargo.toml --sbf-out-dir ../redsuite-dist/deploy -- --locked
 
     - name: Save RedSuite fixtures
       if: steps.fixtures.outputs.cache-hit != 'true'
