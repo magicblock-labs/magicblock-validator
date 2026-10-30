@@ -3571,6 +3571,7 @@ dependencies = [
  "libz-sys",
  "lz4-sys",
  "rustflags",
+ "zstd-sys",
 ]
 
 [[package]]
