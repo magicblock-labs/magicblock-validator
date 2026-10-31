@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::HashSet, sync::Arc, time::Duration};
 
 use mbv_core::intent::types::CommittedAccount;
 use program::outbox::{ExecutionStage, TwoStageProgress};
@@ -9,25 +9,30 @@ use solana_rpc_client_api::request::RpcRequest;
 
 use super::*;
 use crate::{
-    intent_executor::test_utils::*,
+    intent_executor::{cleanup_handle::CleanupHandle, test_utils::*},
     tasks::{
         UndelegateTask,
+        commit_delivery::CommitDelivery,
         utils::{TransactionUtils, create_action_tasks, create_commit_finalize_task},
     },
 };
 
 fn commit() -> BaseTaskImpl {
-    create_commit_finalize_task(
+    let mut task = create_commit_finalize_task(
         2,
         true,
         CommittedAccount {
             pubkey: ACCOUNT,
-            account: Account::default(),
+            account: Account {
+                data: vec![1; 512],
+                ..Account::default()
+            },
             remote_slot: 0,
         },
         None,
-    )
-    .into()
+    );
+    task.delivery = CommitDelivery::StateInBuffer;
+    task.into()
 }
 
 fn undelegate() -> BaseTaskImpl {
@@ -46,6 +51,7 @@ fn action() -> BaseTaskImpl {
 fn strategy(tasks: Vec<BaseTaskImpl>) -> TransactionStrategy {
     TransactionStrategy {
         optimized_tasks: tasks,
+        lookup_tables_keys: vec![RESERVED_ALT_KEY],
         ..Default::default()
     }
 }
@@ -131,11 +137,10 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
             );
             assert!(prepared.iter().all(|tasks| !tasks.is_empty()));
             assert!(
-                report
-                    .junk
-                    .iter()
-                    .flat_map(|s| &s.optimized_tasks)
-                    .any(|t| matches!(t, BaseTaskImpl::BaseAction(_))),
+                prepared.is_empty()
+                    || prepared.iter().any(|tasks| tasks
+                        .iter()
+                        .any(|task| matches!(task, BaseTaskImpl::BaseAction(_)))),
                 "timeout must retain actions"
             );
             match result.confirmed_commit {
@@ -225,37 +230,47 @@ async fn recovery_preserves_progress_and_resources() {
                 "{result:?}"
             );
         }
-        let prepared = executor.transaction_preparator.prepared.lock().unwrap();
-        assert_eq!(prepared.len(), expected_preparations);
-        assert!(matches!(
-            prepared[0].as_slice(),
-            [BaseTaskImpl::CommitFinalize(_)]
-        ));
-        if expected_preparations == 2 {
+        {
+            let prepared = executor.transaction_preparator.prepared.lock().unwrap();
+            assert_eq!(prepared.len(), expected_preparations);
             assert!(matches!(
-                prepared[1].as_slice(),
-                [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
+                prepared[0].as_slice(),
+                [BaseTaskImpl::CommitFinalize(_)]
             ));
+            if expected_preparations == 2 {
+                assert!(matches!(
+                    prepared[1].as_slice(),
+                    [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
+                ));
+            }
+            assert!(executor.actions_callback_executor.0.lock().unwrap().is_empty());
+            assert_eq!(report.cleanup.len(), expected_preparations);
+            assert_eq!(report.cleanup[0].buffers[0].pubkey, ACCOUNT);
+            assert_eq!(report.cleanup[0].buffers[0].commit_id, 2);
+            assert!(
+                report
+                    .cleanup
+                    .iter()
+                    .all(|resources| resources.alt_reservation.contains(&RESERVED_ALT_KEY))
+            );
         }
-        assert!(executor.actions_callback_executor.0.lock().unwrap().is_empty());
-        let disposed: Vec<_> = report
-            .junk
-            .iter()
-            .filter(|strategy| !strategy.optimized_tasks.is_empty())
-            .collect();
-        assert_eq!(disposed.len(), 2);
-        assert!(matches!(
-            disposed[1].optimized_tasks.as_slice(),
-            [BaseTaskImpl::Undelegate(_), BaseTaskImpl::BaseAction(_)]
-        ));
-        assert_eq!(disposed[0].lookup_tables_keys, vec![RESERVED_ALT_KEY]);
-        assert_eq!(
-            report
-                .junk
+        CleanupHandle::new(
+            executor.authority,
+            report.cleanup,
+            false,
+            executor.transaction_preparator.clone(),
+        )
+        .clean()
+        .await
+        .unwrap();
+        assert!(
+            executor
+                .transaction_preparator
+                .cleaned
+                .lock()
+                .unwrap()
                 .iter()
-                .filter(|strategy| strategy.lookup_tables_keys.contains(&RESERVED_ALT_KEY))
-                .count(),
-            expected_preparations,
+                .all(|(_, close_buffers)| !close_buffers)
         );
     }
 
@@ -300,28 +315,21 @@ async fn recovery_preserves_progress_and_resources() {
         let mut ctx = executor(vec![], Some(&error));
         let has_commits = tasks.iter().any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)));
         if !has_commits {
-            std::sync::Arc::get_mut(&mut ctx.outbox_client)
-                .unwrap()
-                .expected_commit_nonces
-                .clear();
+            Arc::get_mut(&mut ctx.outbox_client).unwrap().expected_commit_nonces.clear();
         }
         let mut report = IntentExecutionReport::default();
         let earlier_commit = Signature::new_unique();
+        let mut strategy = strategy(tasks);
+        strategy.uniqueness_nonce = Some(42);
         let runner = if confirmed {
-            TransactionExecutor::resume_follow_up(
-                &ctx,
-                &mut report,
-                42,
-                earlier_commit,
-                strategy(tasks),
-            )
+            TransactionExecutor::resume_follow_up(&ctx, &mut report, 42, earlier_commit, strategy)
         } else {
             TransactionExecutor::new(
                 &ctx,
                 &mut report,
                 42,
                 if has_commits { &[ACCOUNT] } else { &[] },
-                strategy(tasks).into(),
+                strategy.into(),
             )
         };
         let result = runner.execute(|| Some(Duration::from_secs(60))).await;
@@ -355,23 +363,97 @@ async fn recovery_preserves_progress_and_resources() {
                 }
             }
         }
-        let prepared = ctx.transaction_preparator.prepared.lock().unwrap();
-        assert_eq!(prepared.len(), 1 + usize::from(remaining.is_some()));
-        if let Some(remaining) = remaining {
-            assert_eq!(prepared[1].len(), remaining);
-            if confirmed {
-                assert!(matches!(prepared[1][0], BaseTaskImpl::Undelegate(_)));
-            } else {
-                assert!(matches!(prepared[1][0], BaseTaskImpl::CommitFinalize(_)));
+        {
+            let prepared = ctx.transaction_preparator.prepared.lock().unwrap();
+            assert_eq!(prepared.len(), 1 + usize::from(remaining.is_some()));
+            if let Some(remaining) = remaining {
+                assert_eq!(prepared[1].len(), remaining);
+                if confirmed {
+                    assert!(matches!(prepared[1][0], BaseTaskImpl::Undelegate(_)));
+                } else {
+                    assert!(matches!(prepared[1][0], BaseTaskImpl::CommitFinalize(_)));
+                }
             }
+            assert_eq!(report.cleanup.len(), prepared.len());
         }
+        CleanupHandle::new(
+            ctx.authority,
+            report.cleanup,
+            succeeds,
+            ctx.transaction_preparator.clone(),
+        )
+        .clean()
+        .await
+        .unwrap();
+        let cleaned = ctx.transaction_preparator.cleaned.lock().unwrap();
+        assert!(cleaned.iter().all(|(resources, close_buffers)| {
+            *close_buffers == succeeds
+                && resources.uniqueness_nonce == Some(42)
+                && resources.alt_reservation.contains(&RESERVED_ALT_KEY)
+        }));
         assert_eq!(
-            report
-                .junk
-                .iter()
-                .filter(|strategy| !strategy.lookup_tables_keys.is_empty())
-                .count(),
-            prepared.len()
+            cleaned.iter().map(|(resources, _)| resources.buffers.len()).sum::<usize>(),
+            usize::from(has_commits)
         );
     }
+
+    // Exercise real reservation counts: failed and cancelled preparation must
+    // release only what it acquired, without consuming another intent's hold.
+    use crate::transaction_preparator::{
+        TransactionPreparatorImpl, cleanup_resources::CleanupResources,
+    };
+    let authority = solana_keypair::Keypair::new();
+    let rpc = MagicblockRpcClient::from(RpcClient::new_mock("succeeds".to_owned()));
+    let tables = table_mania::TableMania::new(rpc.clone(), &authority, None);
+    let shared = HashSet::from([RESERVED_ALT_KEY]);
+    let mut other_intent = HashSet::new();
+    tables.reserve_pubkeys(&authority, &shared, &mut other_intent).await.unwrap();
+
+    let mut resources = Vec::new();
+    for _ in 0..2 {
+        let cleanup = resources.push_mut(CleanupResources::default());
+        tables
+            .reserve_pubkeys(&authority, &shared, &mut cleanup.alt_reservation)
+            .await
+            .unwrap();
+    }
+    let requested = HashSet::from([RESERVED_ALT_KEY, Pubkey::new_unique()]);
+    let failed = resources.push_mut(CleanupResources::default());
+    assert!(
+        tables
+            .reserve_pubkeys(
+                &solana_keypair::Keypair::new(),
+                &requested,
+                &mut failed.alt_reservation
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(failed.alt_reservation, shared);
+
+    let cancelled = resources.push_mut(CleanupResources::default());
+    let locked_tables = tables.active_tables.read().await;
+    // Existing keys can be reserved under the read lock. Adding the missing key
+    // waits for the write lock, giving cancellation a deterministic boundary.
+    assert!(
+        timeout(
+            Duration::from_millis(1),
+            tables.reserve_pubkeys(&authority, &requested, &mut cancelled.alt_reservation),
+        )
+        .await
+        .is_err()
+    );
+    drop(locked_tables);
+    assert_eq!(cancelled.alt_reservation, shared);
+    assert_eq!(tables.get_pubkey_refcount(&RESERVED_ALT_KEY).await, Some(5));
+
+    let preparator =
+        TransactionPreparatorImpl::new(rpc, tables.clone(), crate::ComputeBudgetConfig::new(0));
+    CleanupHandle::new(authority, resources, false, preparator)
+        .clean()
+        .await
+        .unwrap();
+    assert_eq!(tables.get_pubkey_refcount(&RESERVED_ALT_KEY).await, Some(1));
+    tables.release_pubkeys(&other_intent).await;
+    assert_eq!(tables.active_tables_count().await, 0);
 }

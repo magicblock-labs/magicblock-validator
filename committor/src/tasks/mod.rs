@@ -4,9 +4,9 @@ use mbv_core::intent::{BaseAction, BaseActionCallback};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
+pub mod buffer_task;
 pub mod commit_delivery;
 pub mod commit_finalize_task;
-pub mod commit_stage_task;
 pub mod intent_size_validator;
 pub mod task_builder;
 pub mod task_info_fetcher;
@@ -399,7 +399,7 @@ fn test_close_buffer_limit() {
     use tracing::info;
 
     use crate::{
-        tasks::{commit_stage_task::CleanupTask, utils::TransactionUtils},
+        tasks::{buffer_task::CleanupTask, utils::TransactionUtils},
         test_utils,
         utils::{MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
     };

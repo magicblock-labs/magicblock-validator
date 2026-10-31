@@ -246,7 +246,7 @@ where
 
         let cleanup_handle = CleanupHandle::new(
             self.ctx.authority,
-            report.junk,
+            report.cleanup,
             result.is_ok(),
             self.ctx.transaction_preparator,
         );

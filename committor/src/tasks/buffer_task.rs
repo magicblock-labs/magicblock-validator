@@ -18,19 +18,18 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct PreparationTask<'a> {
+pub struct PreparationTask {
     pub commit_id: u64,
     pub pubkey: Pubkey,
     pub chunks: Chunks,
     buffer_data: Vec<u8>,
-    prepared: &'a mut bool,
 }
 
-impl<'a> PreparationTask<'a> {
-    pub fn from_commit_finalize(task: &'a mut CommitFinalizeTask) -> Option<Self> {
-        match &mut task.delivery {
+impl PreparationTask {
+    pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
+        match &task.delivery {
             CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
-            CommitDelivery::StateInBuffer { prepared } => {
+            CommitDelivery::StateInBuffer => {
                 let buffer_data = task.committed_account.account.data.clone();
                 let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
                 Some(Self {
@@ -38,10 +37,9 @@ impl<'a> PreparationTask<'a> {
                     pubkey: task.committed_account.pubkey,
                     buffer_data,
                     chunks,
-                    prepared,
                 })
             }
-            CommitDelivery::DiffInBuffer { base_account, prepared } => {
+            CommitDelivery::DiffInBuffer { base_account } => {
                 let diff = compute_diff(
                     base_account.data.as_ref(),
                     &task.committed_account.account.data,
@@ -53,7 +51,6 @@ impl<'a> PreparationTask<'a> {
                     pubkey: task.committed_account.pubkey,
                     buffer_data: diff,
                     chunks,
-                    prepared,
                 })
             }
         }
@@ -117,10 +114,6 @@ impl<'a> PreparationTask<'a> {
             commit_id: self.commit_id,
         }
     }
-
-    pub fn done(self) {
-        *self.prepared = true;
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -132,8 +125,7 @@ pub struct CleanupTask {
 impl CleanupTask {
     pub fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
         match &task.delivery {
-            CommitDelivery::StateInBuffer { prepared: true }
-            | CommitDelivery::DiffInBuffer { prepared: true, .. } => Some(Self {
+            CommitDelivery::StateInBuffer | CommitDelivery::DiffInBuffer { .. } => Some(Self {
                 commit_id: task.commit_id,
                 pubkey: task.committed_account.pubkey,
             }),
@@ -149,7 +141,7 @@ impl CleanupTask {
         })
     }
 
-    /// Returns compute units required to execute [`crate::tasks::CleanupTask`]
+    /// Returns compute units required to close a buffer and its chunks account.
     pub fn compute_units(&self) -> u32 {
         30_000
     }
@@ -202,13 +194,11 @@ mod tests {
 
         let authority = Keypair::new();
         let data = vec![0; MAX_WRITE_CHUNK_SIZE as usize];
-        let mut prepared = false;
         let preparation_task = PreparationTask {
             commit_id: 1,
             pubkey: Pubkey::new_unique(),
             chunks: Chunks::from_data_length(data.len(), MAX_WRITE_CHUNK_SIZE),
             buffer_data: data,
-            prepared: &mut prepared,
         };
         let write_instruction = preparation_task
             .write_instructions(&authority.pubkey())

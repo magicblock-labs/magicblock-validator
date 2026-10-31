@@ -7,18 +7,18 @@ use table_mania::TableMania;
 
 use crate::{
     ComputeBudgetConfig,
-    tasks::{
-        BaseTaskImpl, commit_stage_task::CleanupTask, task_strategist::TransactionStrategy,
-        utils::TransactionUtils,
-    },
+    tasks::{task_strategist::TransactionStrategy, utils::TransactionUtils},
     transaction_preparator::{
         delivery_preparator::{BufferExecutionError, DeliveryPreparator, DeliveryPreparatorResult},
         error::PreparatorResult,
     },
 };
 
+pub mod cleanup_resources;
 pub mod delivery_preparator;
 pub mod error;
+
+use cleanup_resources::CleanupResources;
 
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
@@ -27,15 +27,16 @@ pub trait TransactionPreparator: Send + Sync + 'static {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        transaction_strategy: &mut TransactionStrategy,
+        transaction_strategy: &TransactionStrategy,
+        cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage>;
 
-    /// Cleans up after strategy.
+    /// Releases the resources acquired by one preparation attempt.
     /// `close_buffers`: if false, only ALT reservations are released.
-    async fn cleanup_for_strategy(
+    async fn cleanup_resources(
         &self,
         authority: &Keypair,
-        transaction_strategy: &TransactionStrategy,
+        resources: &CleanupResources,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError>;
 }
@@ -72,27 +73,23 @@ impl TransactionPreparator for TransactionPreparatorImpl {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        tx_strategy: &mut TransactionStrategy,
+        tx_strategy: &TransactionStrategy,
+        cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage> {
         if !tx_strategy.uses_alts() {
             // Validate the final representation before preparing buffers.
-            TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+            let message = TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                 authority,
                 &tx_strategy.optimized_tasks,
                 self.compute_budget_config.compute_unit_price,
                 tx_strategy.uniqueness_nonce,
-            )?;
-            self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
+            )?
+            .message;
+            self.delivery_preparator
+                .prepare_for_delivery(authority, tx_strategy, cleanup)
+                .await?;
             metrics::observe_committor_intent_alt_count(0);
-            return Ok(
-                TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
-                    authority,
-                    &tx_strategy.optimized_tasks,
-                    self.compute_budget_config.compute_unit_price,
-                    tx_strategy.uniqueness_nonce,
-                )?
-                .message,
-            );
+            return Ok(message);
         }
 
         // If message won't fit, there's no reason to prepare anything
@@ -110,8 +107,10 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         }
 
         // Pre tx preparations. Create buffer accs + lookup tables
-        let lookup_tables =
-            self.delivery_preparator.prepare_for_delivery(authority, tx_strategy).await?;
+        let lookup_tables = self
+            .delivery_preparator
+            .prepare_for_delivery(authority, tx_strategy, cleanup)
+            .await?;
         metrics::observe_committor_intent_alt_count(lookup_tables.len());
 
         let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
@@ -126,30 +125,12 @@ impl TransactionPreparator for TransactionPreparatorImpl {
         Ok(message)
     }
 
-    async fn cleanup_for_strategy(
+    async fn cleanup_resources(
         &self,
         authority: &Keypair,
-        transaction_strategy: &TransactionStrategy,
+        resources: &CleanupResources,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        let cleanup_tasks: Vec<_> = transaction_strategy
-            .optimized_tasks
-            .iter()
-            .filter_map(|task| match task {
-                BaseTaskImpl::CommitFinalize(commit_finalize_task) => {
-                    CleanupTask::from_commit_finalize(commit_finalize_task)
-                }
-                _ => None,
-            })
-            .collect();
-        self.delivery_preparator
-            .cleanup(
-                authority,
-                &cleanup_tasks,
-                &transaction_strategy.lookup_tables_keys,
-                transaction_strategy.uniqueness_nonce,
-                close_buffers,
-            )
-            .await
+        self.delivery_preparator.cleanup(authority, resources, close_buffers).await
     }
 }

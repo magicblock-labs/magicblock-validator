@@ -27,10 +27,11 @@ use crate::{
     ComputeBudgetConfig,
     tasks::{
         BaseTaskImpl,
-        commit_stage_task::{CleanupTask, PreparationTask},
+        buffer_task::{CleanupTask, PreparationTask},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
     },
+    transaction_preparator::cleanup_resources::CleanupResources,
 };
 
 pub struct DeliveryPreparator {
@@ -58,18 +59,35 @@ impl DeliveryPreparator {
     pub async fn prepare_for_delivery(
         &self,
         authority: &Keypair,
-        strategy: &mut TransactionStrategy,
+        strategy: &TransactionStrategy,
+        cleanup: &mut CleanupResources,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
+        cleanup.uniqueness_nonce = strategy.uniqueness_nonce;
+        // Record identities before preparation can be cancelled. Only successful
+        // intent execution may close these buffers, including partial writes.
+        cleanup.buffers = strategy
+            .optimized_tasks
+            .iter()
+            .filter_map(|task| match task {
+                BaseTaskImpl::CommitFinalize(task) => CleanupTask::from_commit_finalize(task),
+                _ => None,
+            })
+            .collect();
         let uniqueness_nonce = strategy.uniqueness_nonce;
-        let preparation_futures = strategy.optimized_tasks.iter_mut().map(|task| async move {
-            let _timer = metrics::observe_committor_intent_task_preparation_time(&*task);
+        let preparation_futures = strategy.optimized_tasks.iter().map(|task| async move {
+            let _timer = metrics::observe_committor_intent_task_preparation_time(task);
             self.prepare_task_handling_errors(authority, task, uniqueness_nonce).await
         });
 
         let task_preparations = join_all(preparation_futures);
         let alts_preparations = async {
             let _timer = metrics::observe_committor_intent_alt_preparation_time();
-            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys).await
+            self.prepare_lookup_tables(
+                authority,
+                &strategy.lookup_tables_keys,
+                &mut cleanup.alt_reservation,
+            )
+            .await
         };
 
         let (res1, res2) = join(task_preparations, alts_preparations).await;
@@ -85,7 +103,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task(
         &self,
         authority: &Keypair,
-        task: &mut BaseTaskImpl,
+        task: &BaseTaskImpl,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let preparation_task = match task {
@@ -106,7 +124,6 @@ impl DeliveryPreparator {
         self.write_buffer_with_retries(authority, &preparation_task, uniqueness_nonce)
             .await?;
 
-        preparation_task.done();
         Ok(())
     }
 
@@ -115,7 +132,7 @@ impl DeliveryPreparator {
     pub async fn prepare_task_handling_errors(
         &self,
         authority: &Keypair,
-        task: &mut BaseTaskImpl,
+        task: &BaseTaskImpl,
         uniqueness_nonce: Option<u64>,
     ) -> Result<(), InternalError> {
         let res = self.prepare_task(authority, task, uniqueness_nonce).await;
@@ -154,7 +171,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &PreparationTask,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
         let authority_pubkey = authority.pubkey();
@@ -205,7 +222,7 @@ impl DeliveryPreparator {
     async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
-        preparation_task: &PreparationTask<'_>,
+        preparation_task: &PreparationTask,
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
@@ -346,13 +363,14 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         lookup_table_keys: &[Pubkey],
+        reserved: &mut HashSet<Pubkey>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>, InternalError> {
         if lookup_table_keys.is_empty() {
             return Ok(vec![]);
         }
 
         let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
-        self.table_mania.reserve_pubkeys(authority, &pubkeys).await?;
+        self.table_mania.reserve_pubkeys(authority, &pubkeys, reserved).await?;
 
         let alts = self
             .table_mania
@@ -379,23 +397,24 @@ impl DeliveryPreparator {
     pub async fn cleanup(
         &self,
         authority: &Keypair,
-        cleanup_tasks: &[CleanupTask],
-        lookup_table_keys: &[Pubkey],
-        uniqueness_nonce: Option<u64>,
+        resources: &CleanupResources,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        let alt_set = HashSet::from_iter(lookup_table_keys.iter().cloned());
-        let fut2 = self.table_mania.release_pubkeys(&alt_set);
+        let release_alts = async {
+            if !resources.alt_reservation.is_empty() {
+                self.table_mania.release_pubkeys(&resources.alt_reservation).await;
+            }
+        };
 
         if close_buffers {
             let (res, ()) = join(
-                self.cleanup_buffers(authority, cleanup_tasks, uniqueness_nonce),
-                fut2,
+                self.cleanup_buffers(authority, &resources.buffers, resources.uniqueness_nonce),
+                release_alts,
             )
             .await;
             res
         } else {
-            fut2.await;
+            release_alts.await;
             Ok(())
         }
     }
