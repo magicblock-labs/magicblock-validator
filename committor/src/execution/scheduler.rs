@@ -553,6 +553,7 @@ pub(crate) fn create_test_intent_bundle(
         keys.iter()
             .copied()
             .map(|pubkey| CommittedAccount {
+                commit_id: 1,
                 pubkey,
                 account: Account::default(),
                 remote_slot: Default::default(),
@@ -942,6 +943,7 @@ mod tests {
             .get_commit_intent_accounts_mut()
             .unwrap()
             .push(CommittedAccount {
+                commit_id: 1,
                 pubkey: pubkey3,
                 account: Account::default(),
                 remote_slot: Default::default(),

@@ -1,11 +1,5 @@
 use super::backlog::BacklogDB;
-use crate::{
-    service::CommittorServiceError,
-    shared::{
-        account_state::{AccountSnapshot, CachedTaskInfoProvider, TaskInfoProvider},
-        outbox::outbox_client::InternalOutboxClient,
-    },
-};
+use crate::{service::CommittorServiceError, shared::outbox::outbox_client::InternalOutboxClient};
 use chainlink::{AccountFetchEntrypoint, ProdChainlink};
 use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
@@ -21,7 +15,6 @@ use tracing::error;
 pub(crate) struct IntentQueue {
     pub chainlink: Arc<ProdChainlink>,
     pub outbox_client: Arc<InternalOutboxClient>,
-    pub task_info_provider: Arc<CachedTaskInfoProvider>,
     pub backlog: Arc<Mutex<dyn BacklogDB>>,
     pub intent_sender: Sender<OutboxIntentBundle>,
 }
@@ -121,7 +114,13 @@ impl IntentQueue {
             return false;
         }
 
-        self.has_valid_recovery_nonces(bundle).await
+        // Prepared task IDs must match their immutable scheduling reservations.
+        let accounts = bundle.get_all_committed_accounts();
+        bundle.recovery_commit_nonces().iter().all(|(pubkey, id)| {
+            accounts
+                .iter()
+                .any(|account| account.pubkey == *pubkey && account.commit_id == *id)
+        })
     }
     async fn is_same_delegation_session(&self, bundle: &OutboxIntentBundle) -> bool {
         let recovered_accounts = bundle.get_all_committed_accounts();
@@ -168,57 +167,6 @@ impl IntentQueue {
                 );
             }
             same_session
-        })
-    }
-    async fn has_valid_recovery_nonces(&self, bundle: &OutboxIntentBundle) -> bool {
-        let recovery_nonces = bundle.recovery_commit_nonces();
-        if recovery_nonces.is_empty() {
-            return true;
-        }
-
-        let committed_accounts = bundle
-            .get_all_committed_accounts()
-            .into_iter()
-            .map(|account| (account.pubkey, account.remote_slot))
-            .collect::<Vec<AccountSnapshot>>();
-        let min_context_slot =
-            committed_accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
-        let current_nonces = match self
-            .task_info_provider
-            .fetch_current_commit_nonces(&committed_accounts, min_context_slot)
-            .await
-        {
-            Ok(nonces) => nonces,
-            Err(err) => {
-                error!(
-                    intent_id = bundle.intent_id,
-                    error = ?err,
-                    "Skipping outbox recovery after commit nonce lookup failed"
-                );
-                return false;
-            }
-        };
-
-        recovery_nonces.iter().all(|(pubkey, recovery_commit_nonce)| {
-            let Some(current_commit_nonce) = current_nonces.get(pubkey) else {
-                error!(
-                    intent_id = bundle.intent_id,
-                    %pubkey,
-                    "Skipping outbox recovery because current commit nonce is missing"
-                );
-                return false;
-            };
-            let valid = recovery_commit_nonce >= current_commit_nonce;
-            if !valid {
-                error!(
-                    intent_id = bundle.intent_id,
-                    %pubkey,
-                    recovery_commit_nonce,
-                    current_commit_nonce,
-                    "Skipping stale outbox recovery because chain nonce has advanced"
-                );
-            }
-            valid
         })
     }
     async fn process_undelegation_requests(&self, pubkeys: Vec<Pubkey>) {
@@ -277,6 +225,7 @@ mod tests {
 
     fn committed_account(pubkey: Pubkey) -> CommittedAccount {
         CommittedAccount {
+            commit_id: 1,
             pubkey,
             account: Account::default(),
             remote_slot: Default::default(),

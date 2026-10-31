@@ -2,11 +2,8 @@
 
 Delivers the leader's account commits, undelegations, and associated actions to
 the base chain. Start with [`CommittorService`](src/service.rs): it constructs
-and supervises intake, execution, and cleanup. The validator starts this service
-and gives its `CommitIdProvider` to the Magic Program syscall adapter. This thin
-wrapper exposes only current commit IDs from the cache shared with execution.
-The adapter calls `is_intent_within_limits` separately for transaction size and
-compute-unit checks.
+and supervises intake, execution, and cleanup. The validator starts this service;
+scheduling itself runs in Engine on leaders and followers.
 
 ## Before and after acceptance
 
@@ -20,8 +17,7 @@ User transaction → admission checks → MagicContext
                          account ordering → execution → report and cleanup
 ```
 
-- [`intake/`](src/intake): size checks, commit ID lookup, and accepting scheduled
-  intents.
+- [`intake/`](src/intake): accepting scheduled intents.
 - [`execution/`](src/execution): restart recovery, account ordering, task building,
   transaction preparation and sending, confirmation, callbacks, and cleanup.
 - [`shared/`](src/shared): account state, task and transaction representation,
@@ -29,12 +25,17 @@ User transaction → admission checks → MagicContext
 
 Acceptance moves an intent from MagicContext into its outbox account. Only
 accepted intents enter execution. Startup queues recoverable outbox work before
-accepting fresh intents. Shared task representation does not make admission an
-execution guarantee: admission cannot calculate the actual base-account diff.
+accepting fresh intents. The shared [size estimate](../core/src/intent/limits.rs) cannot calculate the
+actual base-account diff, so scheduling is not an execution guarantee.
 
 Large payloads use [commit buffers](../programs/committor-interface/README.md)
 and [address lookup tables](../table-mania/README.md). Work affecting the same
 accounts is ordered while independent work can proceed concurrently.
+
+Scheduling reserves a commit ID in each committed account and captures it in the
+intent. Fees use those IDs, and retries never allocate replacements. A failed
+unsettled commit keeps its outbox; dependent work stays blocked for the rest of
+the process and can be recovered after restart.
 
 ## Completion and shutdown
 

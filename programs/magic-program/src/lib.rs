@@ -3,7 +3,6 @@
 mod ephemeral_accounts;
 pub mod errors;
 mod magic_context;
-pub mod magic_sys;
 mod schedule_task;
 pub use magic_context::MagicContext;
 mod intent_bundles;
@@ -14,7 +13,6 @@ mod utils;
 pub mod validator;
 pub use intent_bundles::{magic_scheduled_base_intent, schedule as schedule_transactions};
 pub use magic_program_api::*;
-pub use magic_sys::init_magic_sys;
 pub use outbox_intent::{
     outbox_intent_bundles,
     process_scheduled_commit_sent::{SentCommit, register_scheduled_commit_sent},

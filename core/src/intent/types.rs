@@ -12,15 +12,19 @@ pub struct CommittedAccount {
     pub pubkey: Pubkey,
     pub account: Account,
     pub remote_slot: u64,
+    /// Commit ID reserved atomically when this intent was scheduled.
+    pub commit_id: u64,
 }
 
 impl From<CommittedAccountRef> for CommittedAccount {
     fn from(value: CommittedAccountRef) -> Self {
         let remote_slot = value.1.slot();
+        let commit_id = value.1.nonce();
         Self {
             pubkey: value.0,
             account: value.1.into(),
             remote_slot,
+            commit_id,
         }
     }
 }
@@ -30,11 +34,13 @@ impl CommittedAccount {
     /// ATA -> eATA if applicable.
     pub fn from_account_shared(pubkey: Pubkey, account_shared: &AccountSharedData) -> Self {
         let remote_slot = account_shared.slot();
+        let commit_id = account_shared.nonce();
         if let Some((eata_pubkey, eata)) = try_remap_ata_to_eata(&pubkey, account_shared) {
             return CommittedAccount {
                 pubkey: eata_pubkey,
                 account: eata.into(),
                 remote_slot,
+                commit_id,
             };
         }
 
@@ -45,7 +51,12 @@ impl CommittedAccount {
             executable: account_shared.executable(),
             rent_epoch: account_shared.rent_epoch(),
         };
-        CommittedAccount { pubkey, account, remote_slot }
+        CommittedAccount {
+            pubkey,
+            account,
+            remote_slot,
+            commit_id,
+        }
     }
 }
 

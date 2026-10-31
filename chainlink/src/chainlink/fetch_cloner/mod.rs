@@ -1031,6 +1031,15 @@ where
         else {
             return Ok(());
         };
+        if request.account.read().is(AccountMode::Delegated)
+            && accessor
+                .skipped(AccountMode::Delegated, request.account.read().slot())
+                .is_none()
+        {
+            let commit_id =
+                delegation::initial_commit_id(self, &request, fetch_context.clone()).await?;
+            request.account = request.account.nonce(commit_id);
+        }
         let Some((source_program, dependencies)) = activation else {
             return self.submit_account(accessor, request, fetch_context).await.map_err(Into::into);
         };

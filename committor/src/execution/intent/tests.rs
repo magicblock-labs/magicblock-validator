@@ -12,7 +12,7 @@ use crate::{
     execution::{
         client::IntentExecutionClient, scheduler::create_test_intent_bundle, test_utils::*,
     },
-    shared::{account_state::CachedTaskInfoProvider, tasks::Task},
+    shared::tasks::Task,
     test_utils::MockInfoProvider,
 };
 
@@ -29,6 +29,7 @@ enum Failure {
     None,
     Preparation,
     Reporting,
+    CommitRejected,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -40,7 +41,7 @@ enum IntentKind {
 
 #[tokio::test(start_paused = true)]
 async fn intent_execution_preserves_recovery_and_completion() {
-    use Failure::{None, Preparation as PreparationFailure, Reporting};
+    use Failure::{CommitRejected, None, Preparation as PreparationFailure, Reporting};
     use IntentKind::{Actions, CommitAndUndelegate, CommitOnly};
     use Resolution::{Confirmed, Expired, Rejected, Unavailable};
 
@@ -73,6 +74,13 @@ async fn intent_execution_preserves_recovery_and_completion() {
             CommitAndUndelegate,
         ),
         (&accepted, Confirmed, None, &[(0, 0, 1)], Actions),
+        (
+            &accepted,
+            Confirmed,
+            CommitRejected,
+            combined_tasks,
+            CommitAndUndelegate,
+        ),
         (&combined, Expired, None, &[(0, 0, 1)], Actions),
         (&combined, Confirmed, None, &[], CommitAndUndelegate),
         (
@@ -136,14 +144,10 @@ async fn intent_execution_preserves_recovery_and_completion() {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
         }
-        let info = Arc::new(CachedTaskInfoProvider::new(MockInfoProvider {
+        let info = Arc::new(MockInfoProvider {
             default_commit_id: 1,
             ..Default::default()
-        }));
-        // Seed both nonces so completion must retain one and invalidate the other.
-        info.fetch_current_commit_nonces(&[(ACCOUNT, 0), (undelegated, 0)], 0)
-            .await
-            .unwrap();
+        });
         let mut mocks = MocksMap::default();
         if matches!(status, OutboxIntentBundleStatus::Executing(_)) {
             let statuses = match resolution {
@@ -166,6 +170,19 @@ async fn intent_execution_preserves_recovery_and_completion() {
                 mock_response(&mut mocks, RpcRequest::IsBlockhashValid, true);
             }
         }
+        if failure == CommitRejected {
+            let error = format!(
+                r#"{{"InstructionError":[2,{{"Custom":{}}}]}}"#,
+                delegation_program_api::error::DlpError::NonceOutOfOrder as u32
+            );
+            mock_response(
+                &mut mocks,
+                RpcRequest::GetSignatureStatuses,
+                format!(
+                    r#"[{{"slot":1,"confirmations":null,"err":{error},"status":{{"Err":{error}}},"confirmationStatus":"finalized"}}]"#
+                ),
+            );
+        }
         let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map("succeeds", mocks));
         let base = executor(
             if failure == PreparationFailure { vec![Preparation::Fail] } else { vec![] },
@@ -177,7 +194,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
             } else {
                 std::iter::once(ACCOUNT)
                     .chain(undelegations.iter().copied())
-                    .map(|key| (key, 2))
+                    .map(|key| (key, 1))
                     .collect()
             },
             fail_reporting: failure == Reporting,
@@ -211,6 +228,14 @@ async fn intent_execution_preserves_recovery_and_completion() {
             PreparationFailure => assert!(matches!(
                 result.inner,
                 Err(IntentExecutorError::FailedPreparation(_))
+            )),
+            CommitRejected => assert!(matches!(
+                result.inner,
+                Err(IntentExecutorError::FailedExecution(
+                    crate::execution::transaction::error::TransactionExecutionError::CommitIDError(
+                        ..
+                    )
+                ))
             )),
             Reporting => assert!(matches!(
                 result.inner,
@@ -266,14 +291,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
         }
         assert_eq!(callbacks.0.lock().unwrap().len(), usize::from(actions_only));
         assert_eq!(result.callbacks_reported, actions_only);
-        assert_eq!(
-            info.peek_commit_nonce(&ACCOUNT).await.is_some(),
-            succeeds || actions_only
-        );
-        assert_eq!(
-            info.peek_commit_nonce(&undelegated).await.is_some(),
-            kind != CommitAndUndelegate
-        );
         let mut expected_signatures = vec![];
         if let Some(stage) = outbox.stages.lock().unwrap().last() {
             if let ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, .. }) = stage {
@@ -290,7 +307,11 @@ async fn intent_execution_preserves_recovery_and_completion() {
             let reports = outbox.reports.lock().unwrap();
             assert_eq!(
                 reports.len(),
-                usize::from(failure != PreparationFailure && resolution != Unavailable)
+                usize::from(
+                    failure != PreparationFailure
+                        && failure != CommitRejected
+                        && resolution != Unavailable
+                )
             );
             if let Some(sent) = reports.first() {
                 assert!(sent.error_message.is_none());

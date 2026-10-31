@@ -27,6 +27,11 @@ fn add_delegation_record_with_failing_action(
     delegated_pubkey: Pubkey,
     owner: Pubkey,
 ) {
+    magicblock_chainlink::testing::deleg::add_delegation_metadata_for(
+        &ctx.rpc_client,
+        delegated_pubkey,
+        0,
+    );
     let record = DelegationRecord {
         authority: ctx.validator_pubkey,
         owner,

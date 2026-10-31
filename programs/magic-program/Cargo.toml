@@ -44,6 +44,9 @@ thiserror = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+engine = { workspace = true, features = ["testkit"] }
+keeper = { workspace = true, features = ["testkit"] }
+tokio = { workspace = true }
 assert_matches = { workspace = true }
 chainlink = { workspace = true, features = ["dev-context"] }
 rand = { workspace = true }

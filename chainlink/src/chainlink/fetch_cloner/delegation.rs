@@ -243,6 +243,82 @@ where
     res
 }
 
+/// Seed only a newly materialized session. Existing protected images are skipped
+/// by the engine, so later observations cannot overwrite ER reservations.
+pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
+    this: &FetchCloner<T, U>,
+    request: &crate::cloner::AccountCloneRequest,
+    fetch_context: metrics::AccountFetchContext,
+) -> ChainlinkResult<u64> {
+    use delegation_program_api::{
+        pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
+    };
+    let image = request.account.read();
+    let delegated_pubkey = if request.is_ata_projection() {
+        super::ata_projection::derive_eata_pubkey_from_ata_account(
+            &request.pubkey,
+            &request.account,
+        )
+        .ok_or(ChainlinkError::InvalidDelegationRecord(
+            request.pubkey,
+            ProgramError::InvalidAccountData,
+        ))?
+    } else {
+        request.pubkey
+    };
+    let record_pubkey = delegation_record_pda_from_delegated_account(&delegated_pubkey);
+    let metadata_pubkey = delegation_metadata_pda_from_delegated_account(&delegated_pubkey);
+    let accounts = this
+        .remote_account_provider
+        .try_get_multi_until_slots_match(
+            &[record_pubkey, metadata_pubkey],
+            Some(MatchSlotsConfig {
+                min_context_slot: Some(request.source_slots().view),
+                ..MatchSlotsConfig::new(ChainlinkCompanionFetchKind::DelegationRecord)
+            }),
+            fetch_context,
+        )
+        .await;
+    let releases: Vec<_> = [record_pubkey, metadata_pubkey]
+        .into_iter()
+        .filter(|key| !this.contains_account(key))
+        .map(|pubkey| SubscriptionRelease::Pubkey {
+            pubkey,
+            reason: SubscriptionReason::DirectAccount,
+        })
+        .collect();
+    release_subs(&this.remote_account_provider, releases).await;
+    let accounts = accounts?;
+    let invalid =
+        || ChainlinkError::InvalidDelegationRecord(record_pubkey, ProgramError::InvalidAccountData);
+    let [record, metadata] = accounts.as_slice() else {
+        return Err(invalid());
+    };
+    let record = record.fresh_account().ok_or_else(invalid)?;
+    let metadata = metadata.fresh_account().ok_or_else(invalid)?;
+    if record.owner() != &delegation_program_api::id()
+        || metadata.owner() != &delegation_program_api::id()
+    {
+        return Err(invalid());
+    }
+    let data = record
+        .data()
+        .get(..DelegationRecord::size_with_discriminator())
+        .ok_or_else(invalid)?;
+    let record =
+        DelegationRecord::try_from_bytes_with_discriminator(data).map_err(|_| invalid())?;
+    let expected_owner = if request.is_ata_projection() { EATA_PROGRAM_ID } else { image.owner() };
+    if record.authority != this.validator_pubkey
+        || record.owner != expected_owner
+        || record.delegation_slot != image.slot()
+    {
+        return Err(invalid());
+    }
+    let metadata = DelegationMetadata::try_from_bytes_with_discriminator(metadata.data())
+        .map_err(|_| invalid())?;
+    Ok(metadata.last_commit_id)
+}
+
 #[cfg(test)]
 mod tests {
     use delegation_program_api::args::{

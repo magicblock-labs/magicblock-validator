@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use magic_program_api::args::{
     BaseActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs,
@@ -29,7 +29,7 @@ use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     instruction_utils::InstructionUtils,
-    magic_sys::validate_intent_size,
+    schedule_transactions::{reserve_commit_id, validate_intent_size},
     utils::accounts::{
         InstructionAccount, get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
@@ -118,13 +118,10 @@ impl ScheduledIntentBundle {
     }
 
     /// Calculates fee for intent
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
+    pub fn calculate_fee(&self) -> Result<u64, InstructionError> {
         const SCHEDULING_FEE: u64 = 0;
 
-        Ok(SCHEDULING_FEE + self.intent_bundle.calculate_fee(commit_nonces)?)
+        Ok(SCHEDULING_FEE + self.intent_bundle.calculate_fee()?)
     }
 
     /// Returns all accounts that will be committed on Base layer,
@@ -210,7 +207,7 @@ impl ScheduledIntentBundle {
 /// Constructs a type from its wire [`Args`] representation.
 ///
 /// The corresponding data types live in [`mbv_core::intent::types`]
-/// since they need to be shared with `MagicSys` implementors, but the
+/// so scheduling and settlement can share them, but the
 /// construction logic stays here since it depends on [`ConstructionContext`]
 /// (`InvokeContext`, `ic_msg!`, etc.) which only exists on-chain. A local
 /// trait lets us `impl` construction for those foreign types.
@@ -568,6 +565,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
+                        reserve_commit_id(&account)?;
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(pubkey, &account))
                     })
@@ -583,6 +581,7 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
+                        reserve_commit_id(&account)?;
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(pubkey, &account))
                     })
@@ -669,7 +668,6 @@ pub(crate) fn validate_commit_schedule_permissions(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
 
     use mbv_core::intent::types::CommittedAccount;
     use solana_account::Account;
@@ -677,8 +675,9 @@ mod tests {
 
     use super::*;
 
-    fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
+    fn make_committed_account(pubkey: Pubkey, commit_id: u64) -> CommittedAccount {
         CommittedAccount {
+            commit_id,
             pubkey,
             account: Account::default(),
             remote_slot: 0,
@@ -719,13 +718,16 @@ mod tests {
             intent_bundle: MagicIntentBundle {
                 commit: Some(CommitType::WithBaseActions {
                     committed_accounts: vec![
-                        make_committed_account(pk1),
-                        make_committed_account(pk2),
+                        make_committed_account(pk1, ACTUAL_COMMIT_LIMIT + 1),
+                        make_committed_account(pk2, ACTUAL_COMMIT_LIMIT),
                     ],
                     base_actions: vec![make_base_action(200_000)],
                 }),
                 commit_and_undelegate: Some(CommitAndUndelegate {
-                    commit_action: CommitType::Standalone(vec![make_committed_account(pk3)]),
+                    commit_action: CommitType::Standalone(vec![make_committed_account(
+                        pk3,
+                        ACTUAL_COMMIT_LIMIT + 1,
+                    )]),
                     undelegate_action: UndelegateType::WithBaseActions(vec![make_base_action(
                         100_000,
                     )]),
@@ -736,13 +738,7 @@ mod tests {
             },
         };
 
-        let nonces = HashMap::from([
-            (pk1, ACTUAL_COMMIT_LIMIT),     // next commit exceeds limit → charged
-            (pk2, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
-            (pk3, ACTUAL_COMMIT_LIMIT),     // next commit exceeds limit → charged
-        ]);
-
-        let fee = bundle.calculate_fee(&nonces).unwrap();
+        let fee = bundle.calculate_fee().unwrap();
 
         // commit: pk1 (100_000) + action 200k CUs (10_000) = 110_000
         // cau:    pk3 (100_000) + undelegate action 100k CUs (5_000) = 105_000

@@ -31,6 +31,7 @@ fn remote_account() -> Account {
 
 fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pubkey {
     let record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
+    magicblock_chainlink::testing::deleg::add_delegation_metadata_for(&ctx.rpc_client, pubkey, 0);
     let record = DelegationRecord {
         authority: ctx.validator_pubkey,
         owner: V42_ID,
