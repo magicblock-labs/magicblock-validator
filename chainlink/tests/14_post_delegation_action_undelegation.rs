@@ -2,13 +2,16 @@
 
 use std::time::Duration;
 
-use delegation_program_api::{
-    args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
     },
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
 };
 use magicblock_chainlink::testing::{context::TestContext, init_logger};
 use solana_account::Account;
@@ -49,7 +52,7 @@ fn add_delegation_record_with_failing_action(
             program_id: 1,
             accounts: vec![MaybeEncryptedAccountMeta::ClearText(
                 // account index 0 -> the delegated target, as signer
-                delegation_program_api::compact::AccountMeta::new_readonly(0, true),
+                dpi::compact::AccountMeta::new_readonly(0, true),
             )],
             data: MaybeEncryptedIxData {
                 prefix: vec![INVALID_V42_INSTRUCTION],
@@ -64,7 +67,7 @@ fn add_delegation_record_with_failing_action(
     ctx.rpc_client.add_account(
         delegation_record_pda_from_delegated_account(&delegated_pubkey),
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -88,7 +91,7 @@ async fn failing_post_delegation_action_is_rejected() {
         Account {
             lamports: 1_000_000,
             data: vec![1, 2, 3, 4],
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             executable: false,
             rent_epoch: 0,
         },

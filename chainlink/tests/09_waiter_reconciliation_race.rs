@@ -2,13 +2,16 @@
 
 use std::time::Duration;
 
-use delegation_program_api::{
-    args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
     },
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
 };
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_not_subscribed,
@@ -24,7 +27,7 @@ fn remote_account() -> Account {
     Account {
         lamports: 1_000_000,
         data: 10_i64.to_le_bytes().to_vec(),
-        owner: delegation_program_api::id(),
+        owner: dpi::id(),
         ..Default::default()
     }
 }
@@ -48,12 +51,8 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 2,
             accounts: vec![
-                MaybeEncryptedAccountMeta::ClearText(
-                    delegation_program_api::compact::AccountMeta::new(0, false),
-                ),
-                MaybeEncryptedAccountMeta::ClearText(
-                    delegation_program_api::compact::AccountMeta::new(1, false),
-                ),
+                MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new(0, false)),
+                MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new(1, false)),
             ],
             data: MaybeEncryptedIxData {
                 prefix: action.data,
@@ -65,7 +64,7 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
     ctx.rpc_client.add_account(
         record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -160,7 +159,7 @@ async fn transient_redelegation_subscription_executes_action_once() {
             AccountBuilder::default()
                 .lamports(1_000_000)
                 .data(10_i64.to_le_bytes().to_vec())
-                .owner(delegation_program_api::id())
+                .owner(dpi::id())
                 .mode(AccountMode::Undelegating)
                 .slot(CURRENT_SLOT)
                 .build(),
@@ -201,7 +200,7 @@ async fn completion_update_must_follow_delegation() {
             AccountBuilder::default()
                 .lamports(1_000_000)
                 .data(700_i64.to_le_bytes().to_vec())
-                .owner(delegation_program_api::id())
+                .owner(dpi::id())
                 .mode(AccountMode::Undelegating)
                 .slot(local_slot)
                 .build(),
@@ -239,12 +238,7 @@ async fn completion_update_must_follow_delegation() {
     };
     assert_eq!(
         local(),
-        (
-            AccountMode::Undelegating,
-            local_slot,
-            delegation_program_api::id(),
-            700
-        ),
+        (AccountMode::Undelegating, local_slot, dpi::id(), 700),
         "an older original-owner image cannot complete this delegation"
     );
 

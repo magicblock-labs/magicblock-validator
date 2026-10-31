@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use delegation_program_interface as dpi;
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_undelegated,
     testing::{
@@ -68,8 +69,7 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         lamports: 1_000_000,
         ..Default::default()
     };
-    let delegated_acc =
-        account_shared_with_owner_and_slot(&acc, delegation_program_api::id(), slot);
+    let delegated_acc = account_shared_with_owner_and_slot(&acc, dpi::id(), slot);
     rpc_client.add_account(pubkey, delegated_acc.into());
     add_delegation_record_for(&rpc_client, pubkey, ctx.validator_pubkey, owner);
 

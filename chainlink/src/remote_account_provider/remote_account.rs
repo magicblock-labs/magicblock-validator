@@ -1,3 +1,4 @@
+use delegation_program_interface as dpi;
 use solana_account::{Account, AccountBuilder, AccountSharedData, ReadableAccount};
 use solana_clock::Slot;
 use solana_pubkey::Pubkey;
@@ -86,6 +87,6 @@ impl RemoteAccount {
     }
 
     pub fn is_owned_by_delegation_program(&self) -> bool {
-        self.owner().is_some_and(|owner| owner.eq(&delegation_program_api::id()))
+        self.owner().is_some_and(|owner| owner.eq(&dpi::id()))
     }
 }

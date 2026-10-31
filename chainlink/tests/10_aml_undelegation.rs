@@ -10,13 +10,16 @@ use std::{
 
 use aml::RiskService;
 use config::config::{AmlCheckStrategy, RiskConfig};
-use delegation_program_api::{
-    args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
     },
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
 };
 use magicblock_chainlink::testing::{context::TestContext, init_logger};
 use solana_account::{Account, AccountMode};
@@ -121,12 +124,10 @@ fn add_delegation_record_with_signer_action(
         instructions: vec![MaybeEncryptedInstruction {
             program_id: 1,
             accounts: vec![
-                MaybeEncryptedAccountMeta::ClearText(
-                    delegation_program_api::compact::AccountMeta::new(0, true),
-                ),
-                MaybeEncryptedAccountMeta::ClearText(
-                    delegation_program_api::compact::AccountMeta::new_readonly(1, false),
-                ),
+                MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new(0, true)),
+                MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new_readonly(
+                    1, false,
+                )),
             ],
             data: MaybeEncryptedIxData {
                 prefix: action.data,
@@ -139,7 +140,7 @@ fn add_delegation_record_with_signer_action(
     ctx.rpc_client.add_account(
         delegation_record_pda_from_delegated_account(&delegated_pubkey),
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -166,7 +167,7 @@ async fn setup(risk_score: u64) -> (TestContext, MockRiskServer, Pubkey) {
         Account {
             lamports: 1_000_000,
             data: 0_i64.to_le_bytes().to_vec(),
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             executable: false,
             rent_epoch: 0,
         },

@@ -1,11 +1,14 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use delegation_program_api::{
-    args::{
-        EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
     },
-    pda::delegation_record_pda_from_delegated_account,
-    state::DelegationRecord,
 };
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_not_subscribed, assert_remain_undelegating,
@@ -40,7 +43,7 @@ fn add_record(
     ctx.rpc_client.add_account(
         record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -72,7 +75,7 @@ async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
     let owner = Pubkey::new_unique();
     let remote = Account {
         lamports: 1_000_000,
-        owner: delegation_program_api::id(),
+        owner: dpi::id(),
         data: vec![1],
         ..Default::default()
     };

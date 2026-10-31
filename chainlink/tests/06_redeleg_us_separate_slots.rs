@@ -5,6 +5,7 @@
 // ## Redelegate an Account that was delegated to us to us - Separate Slots
 // Materialization rules: ../README.md#materialization-and-ordering
 
+use delegation_program_interface as dpi;
 use magicblock_chainlink::{
     assert_cloned_as_delegated, assert_cloned_as_undelegated, assert_not_subscribed,
     assert_remain_undelegating, assert_subscribed_without_delegation_record,
@@ -37,8 +38,7 @@ async fn test_undelegate_redelegate_to_us_in_separate_slots() {
         info!("1. Account delegated to us");
 
         slot = rpc_client.set_slot(slot + 11);
-        let delegated_acc =
-            account_shared_with_owner_and_slot(&acc, delegation_program_api::id(), slot);
+        let delegated_acc = account_shared_with_owner_and_slot(&acc, dpi::id(), slot);
 
         rpc_client.add_account(pubkey, delegated_acc.into());
         let delegation_record =

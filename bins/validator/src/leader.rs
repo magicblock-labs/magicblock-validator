@@ -11,6 +11,7 @@ use chainlink::{
 };
 use committor::{CommittorConfig, CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT};
 use config::LeaderParams;
+use delegation_program_interface as dpi;
 use engine::Engine;
 use metrics::MetricsService;
 use nucleus::{
@@ -261,12 +262,9 @@ impl Leader {
     async fn ensure_magic_fee_vault_on_chain(engine: &Engine, rpc_url: String) -> ApiResult<()> {
         let validator_keypair = engine.signer().insecure_clone();
         let validator_pubkey = validator_keypair.pubkey();
-        let vault_pubkey =
-            delegation_program_api::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
+        let vault_pubkey = dpi::legacy::pda::magic_fee_vault_pda_from_validator(&validator_pubkey);
         let delegation_record_pubkey =
-            delegation_program_api::pda::delegation_record_pda_from_delegated_account(
-                &vault_pubkey,
-            );
+            dpi::legacy::pda::delegation_record_pda_from_delegated_account(&vault_pubkey);
 
         let rpc = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
 
@@ -282,7 +280,7 @@ impl Leader {
 
         if !vault_exists {
             info!(%validator_pubkey, "Magic fee vault absent, initializing");
-            let ix = delegation_program_api::instruction_builder::init_magic_fee_vault(
+            let ix = dpi::legacy::instruction_builder::init_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );
@@ -310,7 +308,7 @@ impl Leader {
 
         if !delegation_record_exists {
             info!(%validator_pubkey, "Magic fee vault not delegated, delegating");
-            let ix = delegation_program_api::instruction_builder::delegate_magic_fee_vault(
+            let ix = dpi::legacy::instruction_builder::delegate_magic_fee_vault(
                 validator_pubkey,
                 validator_pubkey,
             );

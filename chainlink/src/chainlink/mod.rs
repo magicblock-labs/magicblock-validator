@@ -6,6 +6,7 @@ use std::{
 use ::metrics::metrics::{AccountFetchContext, AccountFetchEntrypoint};
 use aml::RiskService;
 use config::config::ChainLinkConfig;
+use delegation_program_interface as dpi;
 use engine::Engine;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::FetchCloner;
@@ -540,8 +541,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
                 let delegated_on_base = remote_account.is_owned_by_delegation_program();
                 let account_on_er = match loader
                     .read(pubkey, |account| {
-                        account.is(AccountMode::Delegated)
-                            || account.owner().eq(&delegation_program_api::id())
+                        account.is(AccountMode::Delegated) || account.owner().eq(&dpi::id())
                     })
                     .ok()
                     .flatten()

@@ -1,10 +1,10 @@
 use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use delegation_program_api::{
-    delegation_metadata_seeds_from_delegated_account,
+use delegation_program_interface::{
+    self as dpi, delegation_metadata_seeds_from_delegated_account,
     delegation_record_seeds_from_delegated_account,
-    state::{DelegationMetadata, DelegationRecord},
+    legacy::state::{DelegationMetadata, DelegationRecord},
 };
 use lru::LruCache;
 use metrics::metrics;
@@ -97,12 +97,12 @@ impl RpcTaskInfoProvider {
                 [
                     Pubkey::find_program_address(
                         delegation_record_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &dpi::id(),
                     )
                     .0,
                     Pubkey::find_program_address(
                         delegation_metadata_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &dpi::id(),
                     )
                     .0,
                 ]
@@ -1001,8 +1001,7 @@ mod tests {
                         *pubkey,
                         DelegationMetadata {
                             last_commit_id: 0,
-                            undelegation_requester:
-                                delegation_program_api::state::UndelegationRequester::None,
+                            undelegation_requester: dpi::legacy::state::UndelegationRequester::None,
                             seeds: vec![],
                             rent_payer: *pubkey,
                         },

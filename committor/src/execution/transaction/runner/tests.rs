@@ -1,5 +1,6 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use delegation_program_interface as dpi;
 use mbv_core::intent::types::CommittedAccount;
 use program::outbox::{ExecutionStage, TwoStageProgress};
 use rpc_client::MagicblockRpcClient;
@@ -195,7 +196,7 @@ async fn recovery_preserves_progress_and_resources() {
     let nonce_error = format!(
         r#"{{"InstructionError":[{},{{"Custom":{}}}]}}"#,
         TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT,
-        delegation_program_api::error::DlpError::NonceOutOfOrder as u32
+        dpi::error::DlpError::NonceOutOfOrder as u32
     );
     // The RPC mock has no delegation record, so nonce recovery fails after
     // preparing the first transaction and receiving its on-chain nonce error.
