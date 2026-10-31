@@ -10,8 +10,8 @@ use tracing::warn;
 use crate::{
     ComputeBudgetConfig,
     intent_executor::{
-        IntentExecutor, IntentExecutorCtx, build_stage_intent_executor, error::IntentExecutorError,
-        intent_execution_client::IntentExecutionClient,
+        IntentExecutor, IntentExecutorCtx, error::IntentExecutorError,
+        executor::IntentExecutorImpl, intent_execution_client::IntentExecutionClient,
     },
     outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
     tasks::task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
@@ -75,7 +75,11 @@ where
             outbox_client: self.outbox_client.clone(),
             actions_callback_executor: self.actions_callback_executor.clone(),
         };
-        build_stage_intent_executor(ctx, status, self.executor_config.actions_timeout)
+        Box::new(IntentExecutorImpl::new(
+            ctx,
+            status,
+            self.executor_config.actions_timeout,
+        ))
     }
 
     fn reconcile_intent<'a>(&'a self, intent: &'a OutboxIntentBundle) -> ReconcileIntentFuture<'a> {
