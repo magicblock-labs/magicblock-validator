@@ -77,106 +77,34 @@ pub enum IntentExecutorError {
     PendingSignatureResolutionError(Signature),
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
-    #[error("FailedToCommitError: {err}")]
-    FailedToCommitError {
-        #[source]
-        err: TransactionStrategyExecutionError,
-        signature: Option<Signature>,
-    },
-    #[error("FailedToFinalizeError: {err}")]
-    FailedToFinalizeError {
-        #[source]
-        err: TransactionStrategyExecutionError,
-        commit_signature: Option<Signature>,
-        finalize_signature: Option<Signature>,
-    },
-    #[error("FailedCommitPreparationError: {0}")]
-    FailedCommitPreparationError(#[source] TransactionPreparatorError),
-    #[error("FailedFinalizePreparationError: {0}")]
-    FailedFinalizePreparationError(#[source] TransactionPreparatorError),
+    #[error("Transaction execution failed: {0}")]
+    FailedExecution(#[from] TransactionStrategyExecutionError),
+    #[error("Transaction preparation failed: {0}")]
+    FailedPreparation(#[from] TransactionPreparatorError),
 }
 
 impl IntentExecutorError {
-    pub fn from_commit_execution_error(
-        error: TransactionStrategyExecutionError,
-    ) -> IntentExecutorError {
-        let signature = error.signature();
-        IntentExecutorError::FailedToCommitError { err: error, signature }
-    }
-
-    pub fn from_finalize_execution_error(
-        error: TransactionStrategyExecutionError,
-        commit_signature: Option<Signature>,
-    ) -> IntentExecutorError {
-        let finalize_signature = error.signature();
-        IntentExecutorError::FailedToFinalizeError {
-            err: error,
-            commit_signature,
-            finalize_signature,
-        }
-    }
-
-    /// True when re-executing the whole intent from scratch may succeed:
-    /// the failure was transport/RPC-side rather than deterministic.
-    /// Once either stage exposes a submitted signature, re-execution could
-    /// duplicate work whose base-layer outcome is still ambiguous.
+    /// Whether the cause is transient. Execution progress separately determines
+    /// whether a fresh attempt is safe.
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::EmptyIntentError
-            | Self::SchedulerError(_)
-            | Self::FailedToFitError
-            | Self::CompileError(_)
-            | Self::PoisonedIntentError
-            | Self::SignerError(_)
-            | Self::OutboxClientError(_)
-            // The underlying tx may have already landed; blindly
-            // re-executing from scratch risks double-execution.
-            | Self::PendingSignatureResolutionError(_) => false,
             Self::GetPendingSignatureStatusError(err) => err.is_transient(),
             Self::TaskBuilderError(err) => err.is_transient(),
-            Self::FailedToCommitError { err, .. } => err.is_transient(),
-            Self::FailedToFinalizeError {
-                err,
-                commit_signature: None,
-                finalize_signature: None,
-            } => err.is_transient(),
-            Self::FailedToFinalizeError { .. }
-            | Self::FailedFinalizePreparationError(_) => false,
-            Self::FailedCommitPreparationError(err) => err.is_transient(),
+            Self::FailedExecution(err) => err.is_transient(),
+            Self::FailedPreparation(err) => err.is_transient(),
+            _ => false,
         }
     }
 
-    /// Returns signatures of transaction sent to Base layer
-    pub fn base_signatures(&self) -> Option<(Signature, Option<Signature>)> {
+    /// A transaction signature reported by the underlying failure. Confirmed
+    /// commits and locally prepared/submitted signatures live in ExecutionProgress.
+    pub fn signature(&self) -> Option<Signature> {
         match self {
-            IntentExecutorError::FailedToCommitError { signature, err: _ } => {
-                signature.map(|el| (el, None))
-            }
-            IntentExecutorError::FailedCommitPreparationError(err)
-            | IntentExecutorError::FailedFinalizePreparationError(err) => {
-                err.signature().map(|el| (el, None))
-            }
-            IntentExecutorError::TaskBuilderError(err) => err.signature().map(|el| (el, None)),
-            IntentExecutorError::FailedToFinalizeError {
-                err: _,
-                commit_signature,
-                finalize_signature,
-            } => match (*commit_signature, *finalize_signature) {
-                (Some(commit), finalize) => Some((commit, finalize)),
-                (None, Some(finalize)) => Some((finalize, Some(finalize))),
-                _ => None,
-            },
-            IntentExecutorError::PendingSignatureResolutionError(signature) => {
-                Some((*signature, None))
-            }
-            IntentExecutorError::EmptyIntentError
-            | IntentExecutorError::SchedulerError(_)
-            | IntentExecutorError::FailedToFitError
-            | IntentExecutorError::CompileError(_)
-            | IntentExecutorError::PoisonedIntentError
-            | IntentExecutorError::SignerError(_)
-            | IntentExecutorError::OutboxClientError(_)
-            | IntentExecutorError::GetPendingSignatureStatusError(_) => None,
+            Self::FailedExecution(err) => err.signature(),
+            Self::FailedPreparation(err) => err.signature(),
+            Self::TaskBuilderError(err) => err.signature(),
+            Self::PendingSignatureResolutionError(signature) => Some(*signature),
+            _ => None,
         }
     }
 }
@@ -184,12 +112,7 @@ impl IntentExecutorError {
 impl metrics::LabelValue for IntentExecutorError {
     fn value(&self) -> &str {
         match self {
-            IntentExecutorError::FailedToCommitError { err, signature: _ } => err.value(),
-            IntentExecutorError::FailedToFinalizeError {
-                err,
-                commit_signature: _,
-                finalize_signature: _,
-            } => err.value(),
+            Self::FailedExecution(err) => err.value(),
             _ => "failed",
         }
     }
@@ -198,8 +121,7 @@ impl metrics::LabelValue for IntentExecutorError {
 impl From<&IntentExecutorError> for ActionError {
     fn from(value: &IntentExecutorError) -> Self {
         match value {
-            IntentExecutorError::FailedToCommitError { err, .. }
-            | IntentExecutorError::FailedToFinalizeError { err, .. } => err.into(),
+            IntentExecutorError::FailedExecution(err) => err.into(),
             err => ActionError::IntentFailedError(err.to_string()),
         }
     }
@@ -257,10 +179,10 @@ mod tests {
     }
 
     #[test]
-    fn transaction_too_large_error_is_recoverable_by_two_stage() {
+    fn transaction_too_large_error_is_recoverable_by_splitting() {
         let inner = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
         let err = TransactionStrategyExecutionError::TransactionTooLargeError(inner);
-        assert!(err.is_recoverable_by_two_stage());
+        assert!(err.is_recoverable_by_splitting());
     }
 
     #[test]
@@ -343,7 +265,7 @@ mod tests {
 
         // Not-found on fetch is transient (may be a stale RPC read)
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::FinalizedTasksBuildError(TaskInfoFetcherError::AccountNotFoundError(
+            TaskBuilderError::FollowUpTasksBuildError(TaskInfoFetcherError::AccountNotFoundError(
                 solana_pubkey::Pubkey::new_unique(),
             )),
         );
@@ -351,7 +273,7 @@ mod tests {
 
         // A delegation created after the committed snapshot is terminal
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::FinalizedTasksBuildError(
+            TaskBuilderError::FollowUpTasksBuildError(
                 TaskInfoFetcherError::DelegationSessionChangedError {
                     delegated_account: solana_pubkey::Pubkey::new_unique(),
                     delegation_slot: 2,
@@ -367,50 +289,56 @@ mod tests {
         );
         assert!(!err.is_transient());
 
-        // Commit-stage delivery preparation RPC failures are transient
-        let err =
-            super::IntentExecutorError::FailedCommitPreparationError(transient_delivery_error());
+        // Delivery preparation RPC failures have a transient cause.
+        let err = super::IntentExecutorError::FailedPreparation(transient_delivery_error());
         assert!(err.is_transient());
 
         // Oversized strategies are deterministic
-        let err = super::IntentExecutorError::FailedCommitPreparationError(
+        let err = super::IntentExecutorError::FailedPreparation(
             TransactionPreparatorError::FailedToFitError,
         );
-        assert!(!err.is_transient());
-
-        // Finalize preparation runs after a landed commit - always terminal
-        let err =
-            super::IntentExecutorError::FailedFinalizePreparationError(transient_delivery_error());
         assert!(!err.is_transient());
     }
 
     #[test]
-    fn finalize_failure_after_landed_commit_is_not_transient() {
+    fn execution_progress_prevents_replaying_confirmed_or_pending_transactions() {
+        use crate::intent_executor::{
+            IntentExecutionResult,
+            progress::{ExecutionProgress, TransactionProgress},
+        };
+        use solana_signature::Signature;
+
         let transient_err = || {
             TransactionStrategyExecutionError::InternalError(make_send_transaction_error(
                 "connection reset",
             ))
         };
 
-        // Single-stage: nothing landed, safe to re-execute
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: None,
-            finalize_signature: None,
-        };
-        assert!(err.is_transient());
-
-        // Two-stage: commit landed, re-execution would commit again
-        let err = super::IntentExecutorError::FailedToFinalizeError {
-            err: transient_err(),
-            commit_signature: Some(solana_signature::Signature::default()),
-            finalize_signature: None,
-        };
-        assert!(!err.is_transient());
+        let signature = Signature::new_unique();
+        for (transaction, confirmed_commit, retry) in [
+            (TransactionProgress::Preparing, None, true),
+            (TransactionProgress::Prepared(signature), None, true),
+            (TransactionProgress::Rejected(signature), None, true),
+            (TransactionProgress::Submitted(signature), None, false),
+            (TransactionProgress::Confirmed(signature), None, false),
+            (TransactionProgress::Preparing, Some(signature), false),
+        ] {
+            let result = IntentExecutionResult {
+                inner: Err(super::IntentExecutorError::FailedExecution(transient_err())),
+                progress: ExecutionProgress { transaction, confirmed_commit },
+                patched_errors: vec![],
+                callbacks_report: vec![],
+            };
+            assert_eq!(result.is_retriable(true), retry);
+            assert!(
+                !result.is_retriable(false),
+                "action-only execution failures must not get fresh retries"
+            );
+        }
     }
 
     #[test]
-    fn unrelated_internal_errors_do_not_trigger_single_stage_split() {
+    fn unrelated_internal_errors_do_not_trigger_splitting() {
         let err = TransactionStrategyExecutionError::InternalError(
             InternalError::MagicBlockRpcClientError(Box::new(
                 MagicBlockRpcClientError::LookupTableDeserialize(
@@ -418,6 +346,6 @@ mod tests {
                 ),
             )),
         );
-        assert!(!err.is_recoverable_by_two_stage());
+        assert!(!err.is_recoverable_by_splitting());
     }
 }

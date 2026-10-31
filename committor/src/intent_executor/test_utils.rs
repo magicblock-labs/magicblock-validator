@@ -9,6 +9,7 @@ use mbv_core::{
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use program::{
+    SentCommit,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox::{ExecutionStage, TwoStageProgress},
     outbox_intent_bundles::OutboxIntentBundle,
@@ -29,7 +30,7 @@ use crate::{
     },
     outbox::{
         OutboxClient, ScheduledBaseIntentMeta,
-        outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        outbox_intent_bundles_reader::OutboxIntentBundlesReader, utils::build_sent_commit,
     },
     tasks::{
         BaseTaskImpl,
@@ -71,7 +72,7 @@ pub(super) fn base_action() -> BaseAction {
 pub(super) struct RecordingOutbox {
     pub stages: Arc<Mutex<Vec<ExecutionStage>>>,
     pub expected_commit_nonces: Vec<(Pubkey, u64)>,
-    pub reports: Arc<Mutex<Vec<bool>>>,
+    pub reports: Arc<Mutex<Vec<SentCommit>>>,
     pub fail_reporting: bool,
 }
 
@@ -109,11 +110,11 @@ impl OutboxClient for RecordingOutbox {
     }
     async fn notify_commit_sent(
         &self,
-        _: ScheduledBaseIntentMeta,
+        meta: ScheduledBaseIntentMeta,
         result: &IntentExecutorResult<ExecutionOutput>,
-        _: &IntentExecutionReport,
+        report: &IntentExecutionReport,
     ) -> Result<(), Self::Error> {
-        self.reports.lock().unwrap().push(result.is_ok());
+        self.reports.lock().unwrap().push(build_sent_commit(meta, result, report));
         if self.fail_reporting {
             return Err(
                 crate::outbox::outbox_client::InternalOutboxClientError::TransactionError(

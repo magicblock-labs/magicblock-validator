@@ -94,34 +94,21 @@ impl TransactionStrategy {
     }
 }
 
-pub enum StrategyExecutionMode {
-    SingleStage(TransactionStrategy),
-    TwoStage(TwoStageExecutionMode),
+pub struct TransactionPlan {
+    pub current: TransactionStrategy,
+    pub follow_up: Option<TransactionStrategy>,
 }
 
-impl StrategyExecutionMode {
+impl TransactionPlan {
     pub fn uses_alts(&self) -> bool {
-        match self {
-            Self::SingleStage(value) => value.uses_alts(),
-            Self::TwoStage(value) => value.uses_alts(),
-        }
+        self.current.uses_alts()
+            || self.follow_up.as_ref().is_some_and(TransactionStrategy::uses_alts)
     }
 }
 
-pub struct TwoStageExecutionMode {
-    pub commit_stage: TransactionStrategy,
-    pub finalize_stage: TransactionStrategy,
-}
-
-impl TwoStageExecutionMode {
-    pub fn uses_alts(&self) -> bool {
-        self.commit_stage.uses_alts() || self.finalize_stage.uses_alts()
-    }
-}
-
-impl From<TwoStageExecutionMode> for StrategyExecutionMode {
-    fn from(value: TwoStageExecutionMode) -> Self {
-        Self::TwoStage(value)
+impl From<TransactionStrategy> for TransactionPlan {
+    fn from(current: TransactionStrategy) -> Self {
+        Self { current, follow_up: None }
     }
 }
 
@@ -129,55 +116,49 @@ impl From<TwoStageExecutionMode> for StrategyExecutionMode {
 /// It may change Task execution strategy so all task would fit in tx
 pub struct TaskStrategist;
 impl TaskStrategist {
-    /// Builds execution strategy from [`BaseTask`]s
-    /// 1. Optimizes tasks to fit in TX
-    /// 2. Chooses the fastest execution mode for Tasks
-    pub fn build_execution_strategy(
+    /// Fits tasks into transactions and chooses a combined or split plan.
+    pub fn build_plan(
         commit_tasks: Vec<BaseTaskImpl>,
-        finalize_tasks: Vec<BaseTaskImpl>,
+        follow_up_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
-    ) -> TaskStrategistResult<StrategyExecutionMode> {
+    ) -> TaskStrategistResult<TransactionPlan> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
-        // Combined commits need no empty finalize transaction.
-        if finalize_tasks.is_empty()
+        // Combined commits need no empty follow-up transaction.
+        if follow_up_tasks.is_empty()
             && commit_tasks.iter().any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)))
         {
-            return Self::build_strategy(commit_tasks, authority, uniqueness_nonce)
-                .map(StrategyExecutionMode::SingleStage);
+            return Self::build_strategy(commit_tasks, authority, uniqueness_nonce).map(Into::into);
         }
 
         // We can unite in 1 tx a lot of commits
         // but then there's a possibility of hitting CPI limit, aka
         // MaxInstructionTraceLengthExceeded error.
         // So we limit tasks len with 22 total tasks
-        // In case this fails as well, it will be retried with TwoStage approach
-        // on retry, once retries are introduced
-        if commit_tasks.len() + finalize_tasks.len() > MAX_UNITED_TASKS_LEN {
-            return Self::build_two_stage(
+        // The runner can also split a combined transaction after a recoverable limit error.
+        if commit_tasks.len() + follow_up_tasks.len() > MAX_UNITED_TASKS_LEN {
+            return Self::build_split_plan(
                 commit_tasks,
-                finalize_tasks,
+                follow_up_tasks,
                 authority,
                 uniqueness_nonce,
-            )
-            .map(Into::into);
+            );
         }
 
         // Clone tasks since strategies applied to united case maybe suboptimal for regular one
         // Unite tasks to attempt running as single tx
-        let single_stage_tasks = [commit_tasks.clone(), finalize_tasks.clone()].concat();
-        let single_stage_strategy =
-            match TaskStrategist::build_strategy(single_stage_tasks, authority, uniqueness_nonce) {
-                Ok(strategy) => StrategyExecutionMode::SingleStage(strategy),
+        let combined_tasks = [commit_tasks.clone(), follow_up_tasks.clone()].concat();
+        let combined_plan =
+            match TaskStrategist::build_strategy(combined_tasks, authority, uniqueness_nonce) {
+                Ok(strategy) => TransactionPlan::from(strategy),
                 Err(TaskStrategistError::FailedToFitError) => {
-                    // If Tasks can't fit in SingleStage - use TwpStage execution
-                    return Self::build_two_stage(
+                    // Split the tasks when they do not fit together.
+                    return Self::build_split_plan(
                         commit_tasks,
-                        finalize_tasks,
+                        follow_up_tasks,
                         authority,
                         uniqueness_nonce,
-                    )
-                    .map(Into::into);
+                    );
                 }
                 Err(TaskStrategistError::SignerError(err)) => {
                     return Err(err.into());
@@ -186,39 +167,33 @@ impl TaskStrategist {
             };
 
         // If ALTs aren't used then we sure this will be optimal - return
-        if !single_stage_strategy.uses_alts() {
-            return Ok(single_stage_strategy);
+        if !combined_plan.uses_alts() {
+            return Ok(combined_plan);
         }
 
-        // As ALTs take a very long time to activate
-        // it is actually faster to execute in TwoStage mode
-        // unless TwoStage also uses ALTs
-        let two_stage =
-            Self::build_two_stage(commit_tasks, finalize_tasks, authority, uniqueness_nonce)?;
-        if two_stage.uses_alts() {
-            Ok(single_stage_strategy)
-        } else {
-            Ok(two_stage.into())
-        }
+        // Prefer splitting when it avoids waiting for ALT activation.
+        let split_plan =
+            Self::build_split_plan(commit_tasks, follow_up_tasks, authority, uniqueness_nonce)?;
+        if split_plan.uses_alts() { Ok(combined_plan) } else { Ok(split_plan) }
     }
 
-    pub fn build_two_stage(
+    pub fn build_split_plan(
         commit_tasks: Vec<BaseTaskImpl>,
-        finalize_tasks: Vec<BaseTaskImpl>,
+        follow_up_tasks: Vec<BaseTaskImpl>,
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
-    ) -> TaskStrategistResult<TwoStageExecutionMode> {
-        // Build strategy for Commit stage
+    ) -> TaskStrategistResult<TransactionPlan> {
+        // Build the commit transaction.
         let commit_strategy =
             TaskStrategist::build_strategy(commit_tasks, authority, uniqueness_nonce)?;
 
-        // Build strategy for Finalize stage
-        let finalize_strategy =
-            TaskStrategist::build_strategy(finalize_tasks, authority, uniqueness_nonce)?;
+        // Build its follow-up transaction.
+        let follow_up_strategy =
+            TaskStrategist::build_strategy(follow_up_tasks, authority, uniqueness_nonce)?;
 
-        Ok(TwoStageExecutionMode {
-            commit_stage: commit_strategy,
-            finalize_stage: finalize_strategy,
+        Ok(TransactionPlan {
+            current: commit_strategy,
+            follow_up: Some(follow_up_strategy),
         })
     }
 
@@ -873,7 +848,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_finalize_tasks_include_request_for_owner_program_undelegate() {
+    async fn test_follow_up_tasks_include_request_for_owner_program_undelegate() {
         let delegated_account = Pubkey::new_unique();
         let intent = create_test_intent_bundle(0, &[], &[delegated_account]).inner;
         let info_fetcher = Arc::new(MockInfoFetcher {
@@ -884,7 +859,7 @@ mod tests {
             ..Default::default()
         });
 
-        let tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent).await.unwrap();
+        let tasks = TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
 
         let BaseTaskImpl::Undelegate(task) = &tasks[0] else {
             panic!("expected undelegate task");
@@ -950,8 +925,8 @@ mod tests {
                     intent.intent_bundle = base_intent.into();
                     let mut commits =
                         TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
-                    let finalizes =
-                        TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent).await.unwrap();
+                    let follow_ups =
+                        TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
                     assert_eq!(commits.len(), 1 + usize::from(combined));
                     let BaseTaskImpl::CommitFinalize(task) = &mut commits[0] else {
                         panic!("all commit intents must use CommitFinalize");
@@ -974,10 +949,10 @@ mod tests {
                     assert_eq!(inline_ix.program_id, delegation_program_api::id());
                     assert_eq!(buffer_ix.program_id, delegation_program_api::id());
                     assert_eq!(
-                        finalizes.len(),
+                        follow_ups.len(),
                         usize::from(!combined) + 2 * usize::from(undelegate)
                     );
-                    let mut tail = finalizes.iter();
+                    let mut tail = follow_ups.iter();
                     if !combined {
                         assert!(matches!(tail.next(), Some(BaseTaskImpl::BaseAction(_))));
                     }
@@ -992,7 +967,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_combined_commit_delivery_formats_without_finalize_stage() {
+    async fn test_combined_commit_delivery_formats_without_follow_up() {
         for data_len in [40, 10_240] {
             for use_alts in [false, true] {
                 let mut intent = create_test_intent_bundle(0, &[Pubkey::new_unique()], &[]).inner;
@@ -1013,18 +988,13 @@ mod tests {
                 intent.intent_bundle.standalone_actions.push(action.action);
                 let fetcher = Arc::new(MockInfoFetcher::default());
                 let commits = TaskBuilderImpl::commit_tasks(&fetcher, &intent).await.unwrap();
-                let finalizes = TaskBuilderImpl::finalize_tasks(&fetcher, &intent).await.unwrap();
-                assert!(finalizes.is_empty());
-                let mode = TaskStrategist::build_execution_strategy(
-                    commits,
-                    finalizes,
-                    &Pubkey::new_unique(),
-                    Some(1),
-                )
-                .unwrap();
-                let StrategyExecutionMode::SingleStage(strategy) = mode else {
-                    panic!("no separate finalization transaction is needed");
-                };
+                let follow_ups = TaskBuilderImpl::follow_up_tasks(&fetcher, &intent).await.unwrap();
+                assert!(follow_ups.is_empty());
+                let plan =
+                    TaskStrategist::build_plan(commits, follow_ups, &Pubkey::new_unique(), Some(1))
+                        .unwrap();
+                assert!(plan.follow_up.is_none());
+                let strategy = plan.current;
                 assert_eq!(strategy.uses_alts(), use_alts);
                 let BaseTaskImpl::CommitFinalize(task) = &strategy.optimized_tasks[1] else {
                     panic!("format fallback must retain CommitFinalize");
@@ -1038,52 +1008,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_single_stage_mode() {
-        let pubkey = [Pubkey::new_unique()];
-        let intent = create_test_intent_bundle(0, &pubkey, &[]).inner;
-
-        let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_task = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
-        let finalize_task = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent).await.unwrap();
-
-        let execution_mode = TaskStrategist::build_execution_strategy(
-            commit_task,
-            finalize_task,
-            &Pubkey::new_unique(),
-            None,
-        )
-        .expect("Execution mode created");
-
-        let StrategyExecutionMode::SingleStage(value) = execution_mode else {
-            panic!("Unexpected execution mode");
-        };
-        assert!(!value.uses_alts());
-    }
-
-    #[tokio::test]
-    async fn test_build_two_stage_mode_when_combined_compute_budget_exceeded() {
+    async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
         let info_fetcher = Arc::new(MockInfoFetcher::default());
         let commit_tasks = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
-        let finalize_tasks = TaskBuilderImpl::finalize_tasks(&info_fetcher, &intent).await.unwrap();
+        let follow_up_tasks =
+            TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
 
         // Six commits and six undelegations need 1.44M CU together;
         // each group fits separately with 720K CU.
-        let execution_mode = TaskStrategist::build_execution_strategy(
-            commit_tasks,
-            finalize_tasks,
-            &Pubkey::new_unique(),
-            None,
-        )
-        .expect("Both transactions fit separately");
+        let plan =
+            TaskStrategist::build_plan(commit_tasks, follow_up_tasks, &Pubkey::new_unique(), None)
+                .expect("Both transactions fit separately");
 
-        let StrategyExecutionMode::TwoStage(TwoStageExecutionMode { commit_stage, finalize_stage }) =
-            execution_mode
-        else {
-            panic!("expected two transactions");
-        };
-        assert_eq!(commit_stage.optimized_tasks.len(), 6);
-        assert_eq!(finalize_stage.optimized_tasks.len(), 6);
+        assert_eq!(plan.current.optimized_tasks.len(), 6);
+        assert_eq!(plan.follow_up.unwrap().optimized_tasks.len(), 6);
     }
 }

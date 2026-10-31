@@ -24,6 +24,7 @@ use crate::{
         intent_scheduler::create_test_intent_bundle,
     },
     intent_executor::error::InternalError,
+    intent_executor::progress::TransactionProgress,
     intent_executor::{IntentExecutor, cleanup_handle::CleanupHandle},
 };
 
@@ -76,22 +77,30 @@ impl IntentExecutor<MockTransactionPreparator> for ControlledExecutor {
         let (finish, finished) = oneshot::channel();
         self.0.send(Attempt { id: intent.intent_id, finish }).unwrap();
         let success = finished.await.unwrap();
+        let output = ExecutionOutput {
+            confirmed_commit: Some(Signature::default()),
+            signature: Signature::default(),
+        };
         let result = IntentExecutionResult {
             inner: if success {
-                Ok(ExecutionOutput::TwoStage {
-                    commit_signature: Signature::default(),
-                    finalize_signature: Signature::default(),
-                })
+                Ok(output)
             } else {
-                Err(IntentExecutorError::FailedToCommitError {
-                    err: TransactionStrategyExecutionError::InternalError(InternalError::from(
+                Err(IntentExecutorError::FailedExecution(
+                    TransactionStrategyExecutionError::InternalError(InternalError::from(
                         MagicBlockRpcClientError::SentTransactionError(
                             TransactionError::BlockhashNotFound,
                             Signature::default(),
                         ),
                     )),
-                    signature: None,
-                })
+                ))
+            },
+            progress: if success {
+                output.progress()
+            } else {
+                ExecutionProgress {
+                    transaction: TransactionProgress::Rejected(Signature::default()),
+                    ..Default::default()
+                }
             },
             patched_errors: vec![],
             callbacks_report: vec![],

@@ -76,7 +76,6 @@ impl IntentExecutionClient {
         &self,
         authority: &Keypair,
         accounts: &[Pubkey],
-        commit_signature: Signature,
     ) -> IntentExecutorResult<()> {
         if accounts.is_empty() {
             return Ok(());
@@ -89,10 +88,7 @@ impl IntentExecutionClient {
                 .get_multiple_accounts(&records)
                 .await
                 .map_err(|err| {
-                    IntentExecutorError::from_finalize_execution_error(
-                        MagicBlockRpcClientError::from(err).into(),
-                        Some(commit_signature),
-                    )
+                    IntentExecutorError::FailedExecution(MagicBlockRpcClientError::from(err).into())
                 })?;
         for (&pubkey, record) in accounts.iter().zip(records) {
             if record.is_none_or(|record| record.owner != delegation_program_api::id()) {
@@ -100,10 +96,8 @@ impl IntentExecutionClient {
             }
             self.finalize_account(authority, pubkey)
                 .await
-                .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-                .map_err(|err| {
-                    IntentExecutorError::from_finalize_execution_error(err, Some(commit_signature))
-                })?;
+                .map_err(IntentExecutorError::FailedPreparation)?
+                .map_err(IntentExecutorError::FailedExecution)?;
         }
         Ok(())
     }
@@ -289,27 +283,13 @@ impl IntentExecutionClient {
             ..Default::default()
         };
         let cu_metrics = || async {
-            match execution_outcome {
-                ExecutionOutput::SingleStage(signature) => {
-                    let tx = self.rpc_client.get_transaction(&signature, Some(config)).await?;
-                    Ok::<_, MagicBlockRpcClientError>(extract_cu(tx.transaction))
-                }
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => {
-                    let commit_tx =
-                        self.rpc_client.get_transaction(&commit_signature, Some(config)).await?;
-                    let finalize_tx =
-                        self.rpc_client.get_transaction(&finalize_signature, Some(config)).await?;
-                    let commit_cu = extract_cu(commit_tx.transaction);
-                    let finalize_cu = extract_cu(finalize_tx.transaction);
-                    let (Some(commit_cu), Some(finalize_cu)) = (commit_cu, finalize_cu) else {
-                        return Ok(None);
-                    };
-                    Ok(Some(commit_cu + finalize_cu))
-                }
+            let mut total = 0;
+            for signature in execution_outcome.progress().signatures(None) {
+                let tx = self.rpc_client.get_transaction(&signature, Some(config)).await?;
+                let Some(cu) = extract_cu(tx.transaction) else { return Ok(None) };
+                total += cu;
             }
+            Ok::<_, MagicBlockRpcClientError>(Some(total))
         };
 
         match cu_metrics().await {

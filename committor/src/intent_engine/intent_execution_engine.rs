@@ -28,6 +28,7 @@ use crate::{
         ExecutionOutput, IntentExecutionResult,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_executor_factory::IntentExecutorBuilder,
+        progress::ExecutionProgress,
         strategy_executor::error::TransactionStrategyExecutionError,
     },
     transaction_preparator::TransactionPreparator,
@@ -63,6 +64,7 @@ pub(super) type PatchedErrors = Vec<TransactionStrategyExecutionError>;
 #[derive(Clone, Debug)]
 pub struct BroadcastedIntentExecutionResult {
     pub inner: Result<ExecutionOutput, Arc<IntentExecutorError>>,
+    pub progress: ExecutionProgress,
     pub id: u64,
     pub patched_errors: Arc<PatchedErrors>,
     pub callbacks_report: Vec<Result<Signature, Arc<CallbackScheduleError>>>,
@@ -80,6 +82,7 @@ impl BroadcastedIntentExecutionResult {
 
         Self {
             id,
+            progress: execution_result.progress,
             patched_errors,
             inner,
             callbacks_report,
@@ -89,6 +92,7 @@ impl BroadcastedIntentExecutionResult {
     fn poisoned(id: u64) -> Self {
         Self {
             inner: Err(IntentExecutorError::PoisonedIntentError.into()),
+            progress: ExecutionProgress::default(),
             id,
             patched_errors: Arc::default(),
             callbacks_report: Vec::new(),
@@ -656,7 +660,7 @@ mod tests {
         );
         assert_eq!(
             result.inner.unwrap_err().to_string(),
-            "FailedToCommitError: InternalError: SignerError: custom error: oops"
+            "Transaction execution failed: InternalError: SignerError: custom error: oops"
         );
     }
 
@@ -762,7 +766,7 @@ mod tests {
         assert!(
             matches!(
                 head.inner.as_ref().unwrap_err().as_ref(),
-                ExecutorError::FailedToCommitError { .. }
+                ExecutorError::FailedExecution(_)
             ),
             "head should report the real executor error, got {:?}",
             head.inner
@@ -832,7 +836,7 @@ mod tests {
         assert!(
             matches!(
                 result.inner.as_ref().unwrap_err().as_ref(),
-                ExecutorError::FailedToCommitError { .. }
+                ExecutorError::FailedExecution(_)
             ),
             "unrelated pubkey should fail for real, not as poisoned: {:?}",
             result.inner
@@ -1146,23 +1150,25 @@ mod tests {
             // Simulate some work
             sleep(Duration::from_millis(50)).await;
 
+            let output = ExecutionOutput {
+                confirmed_commit: Some(Signature::default()),
+                signature: Signature::default(),
+            };
             let success = IntentExecutionResult {
-                inner: Ok(ExecutionOutput::TwoStage {
-                    commit_signature: Signature::default(),
-                    finalize_signature: Signature::default(),
-                }),
+                inner: Ok(output),
+                progress: output.progress(),
                 patched_errors: vec![],
                 callbacks_report: vec![],
             };
             let result = match &self.failure_mode {
                 MockFailureMode::None => success,
                 MockFailureMode::Persistent => IntentExecutionResult {
-                    inner: Err(ExecutorError::FailedToCommitError {
-                        err: TransactionStrategyExecutionError::InternalError(
+                    inner: Err(ExecutorError::FailedExecution(
+                        TransactionStrategyExecutionError::InternalError(
                             InternalError::SignerError(SignerError::Custom("oops".to_string())),
                         ),
-                        signature: None,
-                    }),
+                    )),
+                    progress: ExecutionProgress::default(),
                     patched_errors: vec![TransactionStrategyExecutionError::ActionsError(
                         TransactionError::AccountNotFound,
                         None,
@@ -1182,8 +1188,8 @@ mod tests {
                             vec![]
                         };
                         IntentExecutionResult {
-                            inner: Err(ExecutorError::FailedToCommitError {
-                                err: TransactionStrategyExecutionError::InternalError(
+                            inner: Err(ExecutorError::FailedExecution(
+                                TransactionStrategyExecutionError::InternalError(
                                     InternalError::from(
                                         MagicBlockRpcClientError::SentTransactionError(
                                             TransactionError::BlockhashNotFound,
@@ -1191,8 +1197,14 @@ mod tests {
                                         ),
                                     ),
                                 ),
-                                signature: None,
-                            }),
+                            )),
+                            progress: ExecutionProgress {
+                                transaction:
+                                    crate::intent_executor::progress::TransactionProgress::Rejected(
+                                        Signature::default(),
+                                    ),
+                                ..Default::default()
+                            },
                             patched_errors: vec![],
                             callbacks_report,
                         }

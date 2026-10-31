@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use mbv_core::intent::types::CommittedAccount;
+use program::outbox::{ExecutionStage, TwoStageProgress};
 use rpc_client::MagicblockRpcClient;
 use solana_account::Account;
 use solana_rpc_client::{mock_sender::MocksMap, nonblocking::rpc_client::RpcClient};
@@ -49,11 +50,11 @@ fn strategy(tasks: Vec<BaseTaskImpl>) -> TransactionStrategy {
     }
 }
 
-fn split(follow_up: Vec<BaseTaskImpl>) -> StrategyExecutionMode {
-    StrategyExecutionMode::TwoStage(TwoStageExecutionMode {
-        commit_stage: strategy(vec![commit()]),
-        finalize_stage: strategy(follow_up),
-    })
+fn split(follow_up: Vec<BaseTaskImpl>) -> TransactionPlan {
+    TransactionPlan {
+        current: strategy(vec![commit()]),
+        follow_up: Some(strategy(follow_up)),
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -90,7 +91,7 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
                     &mut report,
                     42,
                     &[ACCOUNT],
-                    StrategyExecutionMode::SingleStage(strategy(vec![commit(), action()])),
+                    strategy(vec![commit(), action()]).into(),
                 ),
                 "commit" => TransactionExecutor::new(
                     &ctx,
@@ -137,22 +138,19 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
                     .any(|t| matches!(t, BaseTaskImpl::BaseAction(_))),
                 "timeout must retain actions"
             );
-            match result {
-                ExecutionOutput::SingleStage(signature) => {
+            match result.confirmed_commit {
+                None => {
                     assert_eq!(phase, "combined");
                     if has_pending_transaction {
-                        assert_eq!(signature, pending.signature);
+                        assert_eq!(result.signature, pending.signature);
                     }
                 }
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => {
+                Some(commit_signature) => {
                     assert_ne!(phase, "combined");
                     if phase == "follow_up" {
                         assert_eq!(commit_signature, earlier_commit);
                         if has_pending_transaction {
-                            assert_eq!(finalize_signature, pending.signature);
+                            assert_eq!(result.signature, pending.signature);
                         }
                     } else if has_pending_transaction {
                         assert_eq!(commit_signature, pending.signature);
@@ -179,7 +177,7 @@ async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
         &mut report,
         42,
         &[ACCOUNT],
-        StrategyExecutionMode::SingleStage(strategy(vec![commit(), action()])),
+        strategy(vec![commit(), action()]).into(),
     );
     runner.current_attempt = 8;
     runner
@@ -221,20 +219,9 @@ async fn execution_failure_surrenders_current_and_pending_resources() {
                 matches!(result, Err(IntentExecutorError::TaskBuilderError(_))),
                 "{result:?}"
             );
-        } else if expected_preparations == 1 {
-            assert!(
-                matches!(
-                    result,
-                    Err(IntentExecutorError::FailedCommitPreparationError(_))
-                ),
-                "{result:?}"
-            );
         } else {
             assert!(
-                matches!(
-                    result,
-                    Err(IntentExecutorError::FailedFinalizePreparationError(_))
-                ),
+                matches!(result, Err(IntentExecutorError::FailedPreparation(_))),
                 "{result:?}"
             );
         }

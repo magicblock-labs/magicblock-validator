@@ -4,11 +4,9 @@ use async_trait::async_trait;
 use mbv_core::traits::ActionsCallbackScheduler;
 use program::{
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    outbox::{ExecutionStage, TwoStageProgress},
     outbox_intent_bundles::OutboxIntentBundleStatus,
 };
 use solana_pubkey::Pubkey;
-use solana_signature::Signature;
 use solana_signer::Signer;
 
 use crate::{
@@ -17,17 +15,18 @@ use crate::{
         IntentExecutorCtx,
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
+        progress::{ExecutionProgress, TransactionProgress},
         strategy_executor::{
             transaction::TransactionExecutor,
             utils::{requires_uniqueness_nonce, resolve_pending_signature},
         },
-        utils::{build_commit_finalize_tasks, report_and_close_intent},
+        utils::{build_intent_tasks, report_and_close_intent},
     },
-    outbox::{OutboxClient, ScheduledBaseIntentMeta},
+    outbox::{OutboxClient, ScheduledBaseIntentMeta, progress::PendingExecution},
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::{AccountSnapshot, ResetType, TaskInfoFetcher},
-        task_strategist::{StrategyExecutionMode, TaskStrategist, TransactionStrategy},
+        task_strategist::{TaskStrategist, TransactionPlan, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -64,46 +63,38 @@ where
         report: &mut IntentExecutionReport,
         started_at: Instant,
     ) -> IntentExecutorResult<ExecutionOutput> {
-        let confirmed_commit = match &self.status {
-            OutboxIntentBundleStatus::Accepted => {
-                if intent.is_empty() {
-                    return Err(IntentExecutorError::EmptyIntentError);
+        if let Some(pending) = PendingExecution::from_status(&self.status) {
+            report.progress = ExecutionProgress {
+                confirmed_commit: pending.confirmed_commit,
+                transaction: TransactionProgress::Submitted(pending.transaction.signature),
+            };
+            // Resolve the old transaction before building replacement work: it may still land.
+            let succeeded =
+                resolve_pending_signature(&self.ctx.intent_client, &pending.transaction).await?;
+            if succeeded {
+                report.progress.transaction =
+                    TransactionProgress::Confirmed(pending.transaction.signature);
+                if !pending.has_follow_up {
+                    return Ok(ExecutionOutput {
+                        confirmed_commit: pending.confirmed_commit,
+                        signature: pending.transaction.signature,
+                    });
                 }
-                None
+                report.progress = ExecutionProgress {
+                    confirmed_commit: Some(pending.transaction.signature),
+                    ..Default::default()
+                };
+            } else {
+                report.progress.transaction =
+                    TransactionProgress::Rejected(pending.transaction.signature);
             }
-            OutboxIntentBundleStatus::Executing(stage) => {
-                // Resolve the old transaction before building replacement work: it may still land.
-                let succeeded =
-                    resolve_pending_signature(&self.ctx.intent_client, stage.pending_transaction())
-                        .await?;
-                match (stage, succeeded) {
-                    (ExecutionStage::SingleStage(pending), true) => {
-                        return Ok(ExecutionOutput::SingleStage(pending.signature));
-                    }
-                    (
-                        ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, finalize }),
-                        true,
-                    ) => {
-                        return Ok(ExecutionOutput::TwoStage {
-                            commit_signature: *commit,
-                            finalize_signature: finalize.signature,
-                        });
-                    }
-                    (ExecutionStage::TwoStage(TwoStageProgress::Committing(pending)), true) => {
-                        Some(pending.signature)
-                    }
-                    (
-                        ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, .. }),
-                        false,
-                    ) => Some(*commit),
-                    _ => None,
-                }
-            }
-        };
+        } else if intent.is_empty() {
+            return Err(IntentExecutorError::EmptyIntentError);
+        }
 
         let committed_pubkeys = intent.get_all_committed_pubkeys();
-        let executor = if let Some(commit_signature) = confirmed_commit {
-            let strategy = self.build_follow_up(intent, commit_signature).await?;
+        let executor = if let Some(commit_signature) = report.progress.confirmed_commit {
+            let strategy = self.build_follow_up(intent).await?;
             TransactionExecutor::resume_follow_up(
                 &self.ctx,
                 report,
@@ -130,52 +121,37 @@ where
         &self,
         intent: &ScheduledIntentBundle,
         committed_pubkeys: &[Pubkey],
-    ) -> IntentExecutorResult<StrategyExecutionMode> {
+    ) -> IntentExecutorResult<TransactionPlan> {
         let authority = self.ctx.authority.pubkey();
-        if matches!(self.status, OutboxIntentBundleStatus::Accepted) && committed_pubkeys.is_empty()
-        {
+        let pending = PendingExecution::from_status(&self.status);
+        if pending.is_none() && committed_pubkeys.is_empty() {
             // Standalone actions use one transaction with a per-intent uniqueness nonce.
             let tasks = TaskBuilderImpl::commit_tasks(&self.ctx.task_info_fetcher, intent).await?;
-            return Ok(StrategyExecutionMode::SingleStage(
-                TaskStrategist::build_strategy(tasks, &authority, Some(intent.intent_id))?,
-            ));
+            return Ok(
+                TaskStrategist::build_strategy(tasks, &authority, Some(intent.intent_id))?.into(),
+            );
         }
 
         let (mut commit_tasks, follow_up_tasks) =
-            build_commit_finalize_tasks(intent, &self.ctx.task_info_fetcher).await?;
+            build_intent_tasks(intent, &self.ctx.task_info_fetcher).await?;
         // Resumed standalone actions still need their per-intent uniqueness nonce.
         let nonce = (committed_pubkeys.is_empty() || requires_uniqueness_nonce(&commit_tasks))
             .then_some(intent.intent_id);
-        // Resumed work must respect the mode already recorded in the outbox.
-        match &self.status {
-            OutboxIntentBundleStatus::Executing(ExecutionStage::SingleStage(_)) => {
-                commit_tasks.extend(follow_up_tasks);
-                Ok(StrategyExecutionMode::SingleStage(
-                    TaskStrategist::build_strategy(commit_tasks, &authority, nonce)?,
-                ))
-            }
-            status => Ok(match status {
-                OutboxIntentBundleStatus::Accepted => TaskStrategist::build_execution_strategy(
-                    commit_tasks,
-                    follow_up_tasks,
-                    &authority,
-                    nonce,
-                )?,
-                _ => TaskStrategist::build_two_stage(
-                    commit_tasks,
-                    follow_up_tasks,
-                    &authority,
-                    nonce,
-                )?
-                .into(),
-            }),
+        // Resumed work must respect the plan already recorded in the outbox.
+        if pending.is_some_and(|progress| !progress.has_follow_up) {
+            commit_tasks.extend(follow_up_tasks);
+            return Ok(TaskStrategist::build_strategy(commit_tasks, &authority, nonce)?.into());
         }
+        Ok(if pending.is_some() {
+            TaskStrategist::build_split_plan(commit_tasks, follow_up_tasks, &authority, nonce)?
+        } else {
+            TaskStrategist::build_plan(commit_tasks, follow_up_tasks, &authority, nonce)?
+        })
     }
 
     async fn build_follow_up(
         &self,
         intent: &ScheduledIntentBundle,
-        commit_signature: Signature,
     ) -> IntentExecutorResult<TransactionStrategy> {
         let accounts: Vec<AccountSnapshot> = intent
             .get_commit_intent_accounts()
@@ -190,16 +166,16 @@ where
                 .task_info_fetcher
                 .fetch_delegation_metadata(&accounts, min_context_slot)
                 .await
-                .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+                .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
             let pubkeys: Vec<_> = accounts.iter().map(|(pubkey, _)| *pubkey).collect();
             self.ctx
                 .intent_client
-                .finalize_legacy_commits(&self.ctx.authority, &pubkeys, commit_signature)
+                .finalize_legacy_commits(&self.ctx.authority, &pubkeys)
                 .await?;
         }
 
         // The commit is confirmed; only actions and undelegation remain.
-        let tasks = TaskBuilderImpl::finalize_tasks(&self.ctx.task_info_fetcher, intent).await?;
+        let tasks = TaskBuilderImpl::follow_up_tasks(&self.ctx.task_info_fetcher, intent).await?;
         let uniqueness_nonce = self.follow_up_uniqueness_nonce(intent).await?;
         Ok(TaskStrategist::build_strategy(
             tasks,
@@ -276,6 +252,7 @@ where
         );
         let result = IntentExecutionResult {
             inner: result,
+            progress: report.progress,
             patched_errors: report.patched_errors,
             callbacks_report: report.callbacks_report,
         };

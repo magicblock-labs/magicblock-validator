@@ -17,15 +17,15 @@ use crate::{
     },
 };
 
-pub(in crate::intent_executor) async fn build_commit_finalize_tasks<F: TaskInfoFetcher>(
+pub(in crate::intent_executor) async fn build_intent_tasks<F: TaskInfoFetcher>(
     intent_bundle: &ScheduledIntentBundle,
     task_info_fetcher: &Arc<F>,
 ) -> IntentExecutorResult<(Vec<BaseTaskImpl>, Vec<BaseTaskImpl>)> {
     let commit_tasks_fut = TaskBuilderImpl::commit_tasks(task_info_fetcher, intent_bundle);
-    let finalize_tasks_fut = TaskBuilderImpl::finalize_tasks(task_info_fetcher, intent_bundle);
-    let (commit_tasks, finalize_tasks) = join(commit_tasks_fut, finalize_tasks_fut).await;
+    let follow_up_tasks_fut = TaskBuilderImpl::follow_up_tasks(task_info_fetcher, intent_bundle);
+    let (commit_tasks, follow_up_tasks) = join(commit_tasks_fut, follow_up_tasks_fut).await;
 
-    Ok((commit_tasks?, finalize_tasks?))
+    Ok((commit_tasks?, follow_up_tasks?))
 }
 
 /// Reports terminal intent execution outcomes. The `ScheduledCommitSent`
@@ -67,12 +67,10 @@ fn is_terminal_execution_error(err: &IntentExecutorError) -> bool {
         IntentExecutorError::OutboxClientError(_)
         | IntentExecutorError::GetPendingSignatureStatusError(_)
         | IntentExecutorError::PendingSignatureResolutionError(_)
-        | IntentExecutorError::FailedCommitPreparationError(_)
-        | IntentExecutorError::FailedFinalizePreparationError(_)
+        | IntentExecutorError::FailedPreparation(_)
         | IntentExecutorError::SchedulerError(_)
         | IntentExecutorError::PoisonedIntentError => false,
-        IntentExecutorError::FailedToCommitError { err, .. }
-        | IntentExecutorError::FailedToFinalizeError { err, .. } => is_terminal_strategy_error(err),
+        IntentExecutorError::FailedExecution(err) => is_terminal_strategy_error(err),
         IntentExecutorError::TaskBuilderError(err) => !err.is_transient(),
         IntentExecutorError::EmptyIntentError
         | IntentExecutorError::FailedToFitError
