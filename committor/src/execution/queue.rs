@@ -4,7 +4,6 @@ use chainlink::{AccountFetchEntrypoint, ProdChainlink};
 use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use std::{collections::HashSet, num::NonZeroUsize, sync::Arc};
 use tokio::{
     sync::mpsc::{Sender, error::TrySendError},
@@ -70,17 +69,11 @@ impl IntentQueue {
         let mut outbox_bundles_reader = self.outbox_client.outbox_reader();
         loop {
             // Read by chunks in order not to overload the execution worker
-            let mut intent_bundles_chunk =
+            let intent_bundles_chunk =
                 outbox_bundles_reader.read(RESCHEDULE_CHUNK_SIZE.get()).await?;
             if intent_bundles_chunk.is_empty() {
                 return Ok(());
             }
-
-            // Original blockhash is stale after restart; signal recovery so
-            // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
-            intent_bundles_chunk
-                .iter_mut()
-                .for_each(|b| b.inner.sent_transaction = Transaction::default());
 
             let read_len = intent_bundles_chunk.len();
             let intent_bundles_chunk =
@@ -237,7 +230,6 @@ mod tests {
             intent_id,
             slot: 0,
             blockhash: Hash::default(),
-            sent_transaction: Default::default(),
             payer: Pubkey::default(),
             intent_bundle,
         };

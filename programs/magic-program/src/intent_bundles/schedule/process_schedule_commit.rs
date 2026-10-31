@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use mbv_core::intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee,
-    types::CommittedAccount,
+    outbox::outbox_intent_pda, types::CommittedAccount,
 };
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
@@ -22,7 +22,6 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
         },
-        instruction_utils::InstructionUtils,
     },
 };
 
@@ -224,8 +223,6 @@ pub(crate) fn process_schedule_commit(
         InstructionError::UnsupportedSysvar
     })?;
     let blockhash = invoke_context.environment_config.blockhash;
-    let sent_transaction = InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
-    let sent_signature = sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -247,7 +244,6 @@ pub(crate) fn process_schedule_commit(
         intent_id,
         slot: clock.slot,
         blockhash,
-        sent_transaction,
         payer: *payer_pubkey,
         intent_bundle: base_intent,
     };
@@ -258,8 +254,8 @@ pub(crate) fn process_schedule_commit(
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent signature: {}",
-        sent_signature,
+        "ScheduledCommitSent outbox: {}",
+        outbox_intent_pda(intent_id),
     );
 
     Ok(())

@@ -24,11 +24,9 @@ use solana_program_runtime::{
     invoke_context::InvokeContext,
 };
 use solana_pubkey::Pubkey;
-use solana_transaction::Transaction;
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
-    instruction_utils::InstructionUtils,
     schedule_transactions::{reserve_commit_id, validate_intent_size},
     utils::accounts::{
         InstructionAccount, get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
@@ -89,7 +87,6 @@ pub struct ScheduledIntentBundle {
     pub intent_id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
-    pub sent_transaction: Transaction,
     pub payer: Pubkey,
     /// Scheduled intent bundle
     pub intent_bundle: MagicIntentBundle,
@@ -105,13 +102,11 @@ impl ScheduledIntentBundle {
     ) -> Result<ScheduledIntentBundle, InstructionError> {
         let intent_bundle = MagicIntentBundle::try_from_args(args, context)?;
         let blockhash = context.invoke_context.environment_config.blockhash;
-        let sent_transaction = InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
 
         Ok(ScheduledIntentBundle {
             intent_id,
             slot,
             blockhash,
-            sent_transaction,
             payer: *payer_pubkey,
             intent_bundle,
         })
@@ -713,7 +708,6 @@ mod tests {
             intent_id: 0,
             slot: 0,
             blockhash: Hash::default(),
-            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle: MagicIntentBundle {
                 commit: Some(CommitType::WithBaseActions {

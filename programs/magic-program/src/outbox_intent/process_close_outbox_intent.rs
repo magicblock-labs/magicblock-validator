@@ -139,7 +139,6 @@ mod tests {
     use solana_sdk_ids::system_program;
     use solana_signature::Signature;
     use solana_signer::Signer;
-    use solana_transaction::Transaction;
 
     use super::*;
     use crate::{
@@ -165,7 +164,6 @@ mod tests {
             intent_id,
             slot: 0,
             blockhash: Hash::default(),
-            sent_transaction: Transaction::default(),
             payer: Pubkey::new_unique(),
             intent_bundle: MagicIntentBundle::default(),
         };

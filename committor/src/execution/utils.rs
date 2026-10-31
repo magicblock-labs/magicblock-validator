@@ -13,7 +13,7 @@ use crate::{
 /// as it is part of intent execution lifecycle.
 pub(in crate::execution) async fn report_and_close_intent(
     result: IntentExecutorResult<ExecutionOutput>,
-    mut meta: ScheduledBaseIntentMeta,
+    meta: ScheduledBaseIntentMeta,
     execution_report: &mut IntentExecutionReport,
     outbox_client: &dyn OutboxClient,
 ) -> IntentExecutorResult<ExecutionOutput> {
@@ -27,9 +27,8 @@ pub(in crate::execution) async fn report_and_close_intent(
         return result;
     }
 
-    let transaction = std::mem::take(&mut meta.intent_sent_transaction);
     let payload = crate::execution::report::build_sent_commit(meta, &result, execution_report);
-    outbox_client.notify_commit_sent(payload, transaction).await?;
+    outbox_client.notify_commit_sent(payload).await?;
 
     result
 }

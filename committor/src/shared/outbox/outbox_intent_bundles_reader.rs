@@ -182,7 +182,6 @@ mod tests {
     use solana_account::{AccountBuilder, AccountMode};
     use solana_hash::Hash;
     use solana_pubkey::Pubkey;
-    use solana_transaction::Transaction;
 
     use super::InternalOutboxIntentBundlesReader;
 
@@ -191,7 +190,6 @@ mod tests {
             intent_id: id,
             slot: 0,
             blockhash: Hash::default(),
-            sent_transaction: Transaction::default(),
             payer: Pubkey::default(),
             intent_bundle: MagicIntentBundle::default(),
         };

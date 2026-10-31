@@ -37,6 +37,31 @@ intent. Fees use those IDs, and retries never allocate replacements. A failed
 unsettled commit keeps its outbox; dependent work stays blocked for the rest of
 the process and can be recovered after restart.
 
+## Settlement receipts
+
+Each successful scheduling transaction logs `ScheduledCommitSent outbox: <address>`
+for every intent it creates. The address is known before the acceptance transaction
+creates its account; an absent outbox at that point means the intent is still queued.
+
+After settlement, the committor asks Engine to sign and execute
+`OutboxIntentInstruction::ScheduledCommitSent(SentCommit)`. Its payload contains
+the result, actual base-chain signatures, and callback scheduling results.
+Execution emits the same receipt logs on leaders and followers and closes the
+outbox in that transaction. Failed submission leaves the outbox pending.
+
+Clients discover completion through `getSignaturesForAddress(outbox)` and
+`getTransaction(signature)`, including after the account closes. Select a successful
+completion transaction from the outbox program with the matching intent ID;
+acceptance and progress transactions are not receipts. Check scheduling success
+as well: failed transactions can contain logs without creating an intent. The
+serialized completion payload remains the full result if diagnostic logs are
+truncated. Missing or pruned history is not proof of successful settlement.
+
+This replaces the predicted-signature receipt contract and changes the WIP
+intent/outbox format without a migration. SDK receipt support is tracked in
+[SDK #304](https://github.com/magicblock-labs/ephemeral-rollups-sdk/issues/304);
+RedSuite's signature-based receipt reader also needs updating before qualification.
+
 ## Completion and shutdown
 
 Local queue acceptance does not mean settlement has completed. Base-chain

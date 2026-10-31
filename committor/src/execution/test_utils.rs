@@ -114,7 +114,6 @@ impl OutboxClient for RecordingOutbox {
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        _: crate::shared::outbox::IntentSentTransaction,
     ) -> Result<(), crate::shared::outbox::outbox_client::InternalOutboxClientError> {
         self.reports.lock().unwrap().push(sent_commit);
         if self.fail_reporting {

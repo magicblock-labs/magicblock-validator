@@ -5,6 +5,27 @@ use solana_hash::Hash;
 use solana_signature::Signature;
 use wincode::{SchemaRead, SchemaWrite};
 
+use crate::Pubkey;
+
+/// Settlement result carried by the authority-signed completion transaction.
+/// It remains available in the outbox address's transaction history after closure.
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+pub struct SentCommit {
+    pub message_id: u64,
+    pub slot: u64,
+    pub blockhash: Hash,
+    pub payer: Pubkey,
+    pub chain_signatures: Vec<Signature>,
+    pub included_pubkeys: Vec<Pubkey>,
+    pub excluded_pubkeys: Vec<Pubkey>,
+    pub requested_undelegation: bool,
+    pub error_message: Option<String>,
+    pub patched_errors: Vec<String>,
+    /// Callback transaction signatures or compilation/scheduling errors.
+    pub callbacks_scheduling_results: Vec<String>,
+}
+
 /// A transaction that was sent but not yet confirmed, along with the
 /// blockhash it was built with. The blockhash is needed on recovery to
 /// tell apart "may still land" (blockhash still valid) from "guaranteed

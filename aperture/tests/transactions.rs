@@ -522,6 +522,132 @@ async fn test_get_signatures_for_address() {
     assert!(sig_strings.contains(&signature2.to_string()));
 }
 
+/// Completion stays discoverable after closure, and rejected receipts keep the outbox.
+#[tokio::test]
+async fn settlement_receipt_history_survives_outbox_closure() {
+    use engine::testkit::{Pacing, TestEngine};
+    use keeper::testkit::{Dirs, keeper_builder};
+    use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
+    use program::{
+        OUTBOX_INTENT_PROGRAM_ID, SentCommit, instruction::OutboxIntentInstruction,
+        instruction_utils::InstructionUtils, magic_scheduled_base_intent::ScheduledIntentBundle,
+        magicblock_processor::OutboxIntentEntrypoint, outbox_intent_bundles::OutboxIntentBundle,
+    };
+    use solana_account::{AccountBuilder, AccountMode};
+    use solana_instruction::Instruction;
+    use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
+
+    let receipt = SentCommit {
+        message_id: 42,
+        payer: Pubkey::new_unique(),
+        chain_signatures: vec![Signature::new_unique()],
+        // Larger than the old, fixed-size notification.
+        patched_errors: vec!["diagnostic ".repeat(200)],
+        ..Default::default()
+    };
+    let (outbox, bump) = outbox_intent_pda_with_bump(receipt.message_id);
+    let bundle = OutboxIntentBundle::accepted(
+        ScheduledIntentBundle {
+            intent_id: receipt.message_id,
+            slot: receipt.slot,
+            blockhash: receipt.blockhash,
+            payer: receipt.payer,
+            intent_bundle: MagicIntentBundle::default(),
+        },
+        bump,
+    );
+    let dirs = Dirs::default();
+    let mut builder = keeper_builder(&dirs);
+    builder.builtins.insert(
+        OUTBOX_INTENT_PROGRAM_ID,
+        (OutboxIntentEntrypoint::vm, OutboxIntentEntrypoint::codegen),
+    );
+    builder.accounts.insert(
+        outbox,
+        AccountBuilder::default()
+            .data(bundle.try_to_bytes().unwrap())
+            .owner(OUTBOX_INTENT_PROGRAM_ID)
+            .mode(AccountMode::Magic)
+            .build(),
+    );
+    let env =
+        RpcTestEnv::with_engine(TestEngine::from_builder(dirs, builder, Pacing::External).await)
+            .await;
+    let original = env.engine.get_account(outbox).unwrap();
+
+    let mut oversized = receipt.clone();
+    oversized.patched_errors = vec![String::new()];
+    let overhead = wincode::serialized_size(&OutboxIntentInstruction::ScheduledCommitSent(
+        oversized.clone(),
+    ))
+    .unwrap() as usize;
+    oversized.patched_errors[0] = "x".repeat(u16::MAX as usize - overhead);
+    // The instruction fits, but the signed transaction exceeds Engine's wire limit.
+    let ix = InstructionUtils::scheduled_commit_sent_instruction(
+        env.engine.authority(),
+        oversized.clone(),
+    )
+    .unwrap();
+    assert!(env.engine.transaction(&[ix]).is_err());
+    // Exceeding the instruction's own length limit must also return an error,
+    // before reaching Solana's signing path (which would panic).
+    oversized.patched_errors[0].push('x');
+    assert!(
+        InstructionUtils::scheduled_commit_sent_instruction(env.engine.authority(), oversized)
+            .is_err()
+    );
+    assert_eq!(env.engine.get_account(outbox), Some(original.clone()));
+
+    let ix = InstructionUtils::scheduled_commit_sent_instruction(
+        env.engine.authority(),
+        receipt.clone(),
+    )
+    .unwrap();
+    let failed = env.rpc_transaction(&[
+        ix.clone(),
+        Instruction {
+            program_id: OUTBOX_INTENT_PROGRAM_ID,
+            accounts: vec![],
+            data: vec![255],
+        },
+    ]);
+    assert!(env.engine.execute(failed).await.is_err());
+    assert_eq!(env.engine.get_account(outbox), Some(original));
+
+    let tx = env.rpc_transaction(&[ix]);
+    let signature = tx.signatures[0];
+    env.engine.execute(tx).await.unwrap();
+    env.engine.sync().await;
+    assert!(env.engine.get_account(outbox).is_none());
+
+    let history = env.rpc.get_signatures_for_address(&outbox).await.unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|entry| entry.signature == signature.to_string() && entry.err.is_none())
+    );
+    assert!(history.iter().any(|entry| entry.err.is_some()));
+    let completed = env
+        .rpc
+        .get_transaction(&signature, UiTransactionEncoding::Base64)
+        .await
+        .unwrap();
+    let meta = completed.transaction.meta.unwrap();
+    assert!(meta.err.is_none());
+    let logs = meta.log_messages.unwrap();
+    assert!(logs.contains(&format!(
+        "ScheduledCommitSent signature[0]: {}",
+        receipt.chain_signatures[0]
+    )));
+    let recorded = completed.transaction.transaction.decode().unwrap();
+    let payload: OutboxIntentInstruction =
+        wincode::deserialize(&recorded.message.instructions()[0].data).unwrap();
+    assert_eq!(
+        payload,
+        OutboxIntentInstruction::ScheduledCommitSent(receipt)
+    );
+}
+
 /// Verifies pagination (`before` and `until`) for `get_signatures_for_address`.
 #[tokio::test]
 async fn test_get_signatures_for_address_pagination() {

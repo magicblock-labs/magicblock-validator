@@ -7,7 +7,6 @@ use engine::{Engine, EngineError, IntoTransactionView};
 use program::{
     MAGIC_CONTEXT_PUBKEY, MagicContext, SentCommit, instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent,
 };
 use solana_account::ReadableAccount;
 use solana_keypair::Address as Pubkey;
@@ -18,11 +17,10 @@ use solana_rpc_client_api::{
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{Instant, sleep};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::shared::outbox::{
-    IntentSentTransaction, OutboxClient,
-    outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
+    OutboxClient, outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
 };
 
 const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
@@ -180,15 +178,6 @@ impl InternalOutboxClient {
 
         Ok(accepted)
     }
-
-    /// Builds and executes a notification using the engine's current blockhash.
-    async fn send_fresh_commit_sent_tx(
-        &self,
-        intent_id: u64,
-    ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::scheduled_commit_sent(intent_id, self.engine.blockhash());
-        self.execute_via_engine(tx).await
-    }
 }
 
 fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
@@ -304,38 +293,15 @@ impl OutboxClient for InternalOutboxClient {
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        transaction: IntentSentTransaction,
     ) -> Result<(), InternalOutboxClientError> {
-        let intent_id = sent_commit.message_id;
-        // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
-        // Register once before submission. Only BlockhashNotFound permits a
-        // fallback because it occurs before the processor can consume this payload.
-        register_scheduled_commit_sent(sent_commit);
-        match transaction {
-            IntentSentTransaction::Known(tx) => {
-                let signature = tx.signatures[0];
-                match self.execute_via_engine(tx).await {
-                    Err(InternalOutboxClientError::TransactionError(
-                        TransactionError::BlockhashNotFound,
-                    )) => {
-                        warn!(
-                            %signature,
-                            intent_id,
-                            "Pre-signed commit notification expired; its logged signature is best-effort"
-                        );
-                        self.send_fresh_commit_sent_tx(intent_id).await
-                    }
-                    result => result,
-                }
-            }
-            IntentSentTransaction::Recovered => {
-                self.send_fresh_commit_sent_tx(intent_id).await
-            }
-        }
-        .inspect(|_| debug!("Sent commit signaled"))
-        .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))?;
-
-        Ok(())
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            self.engine.authority(),
+            sent_commit,
+        )?;
+        self.execute_via_engine(&[ix])
+            .await
+            .inspect(|_| debug!("Sent commit signaled"))
+            .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))
     }
 
     async fn fetch_outbox_intent(
@@ -359,6 +325,8 @@ pub enum InternalOutboxClientError {
     EngineError(#[from] EngineError),
     #[error("WincodeError: {0}")]
     WincodeError(#[from] wincode::ReadError),
+    #[error("Receipt encoding error: {0}")]
+    ReceiptEncoding(#[from] wincode::WriteError),
     #[error("AccountsDbError: {0}")]
     AccountsDbError(#[from] AccountsDBError),
     #[error(transparent)]
