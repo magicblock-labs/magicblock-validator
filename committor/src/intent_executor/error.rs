@@ -43,13 +43,6 @@ impl InternalError {
             Self::MagicBlockRpcClientError(err) => err.is_transient(),
         }
     }
-
-    pub fn is_transaction_too_large(&self) -> bool {
-        match self {
-            Self::MagicBlockRpcClientError(err) => err.is_transaction_too_large(),
-            Self::SignerError(_) => false,
-        }
-    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -143,53 +136,20 @@ mod tests {
     use rpc_client::MagicBlockRpcClientError;
     use solana_rpc_client_api::{
         client_error::{Error as RpcClientError, ErrorKind as RpcClientErrorKind},
-        request::{RpcError, RpcRequest, RpcResponseErrorData},
+        request::RpcRequest,
     };
 
     use super::InternalError;
-    use crate::intent_executor::strategy_executor::error::TransactionStrategyExecutionError;
-
-    const TX_TOO_LARGE_SOLANA: &str = "base64 encoded too large";
-    const TX_TOO_LARGE_MAGICBLOCK: &str = "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)";
-
-    fn make_send_transaction_error(message: &str) -> InternalError {
-        let rpc_error = RpcClientError {
-            request: Some(RpcRequest::SendTransaction),
-            kind: Box::new(RpcClientErrorKind::RpcError(RpcError::RpcResponseError {
-                code: -32602,
-                message: message.to_string(),
-                data: RpcResponseErrorData::Empty,
-            })),
-        };
-        InternalError::MagicBlockRpcClientError(Box::new(
-            MagicBlockRpcClientError::SendTransaction(Box::new(rpc_error)),
-        ))
-    }
-
-    #[test]
-    fn is_transaction_too_large_matches_solana_format() {
-        let err = make_send_transaction_error(TX_TOO_LARGE_SOLANA);
-        assert!(err.is_transaction_too_large());
-    }
-
-    #[test]
-    fn is_transaction_too_large_matches_magicblock_format() {
-        let err = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
-        assert!(err.is_transaction_too_large());
-    }
-
-    #[test]
-    fn transaction_too_large_error_is_recoverable_by_splitting() {
-        let inner = make_send_transaction_error(TX_TOO_LARGE_MAGICBLOCK);
-        let err = TransactionStrategyExecutionError::TransactionTooLargeError(inner);
-        assert!(err.is_recoverable_by_splitting());
-    }
+    use crate::intent_executor::{
+        strategy_executor::error::TransactionStrategyExecutionError,
+        test_utils::send_transaction_error,
+    };
 
     #[test]
     fn transport_errors_are_transient() {
-        let err = TransactionStrategyExecutionError::InternalError(make_send_transaction_error(
-            "connection reset",
-        ));
+        let err = TransactionStrategyExecutionError::InternalError(
+            send_transaction_error("connection reset").into(),
+        );
         assert!(err.is_transient());
 
         let err = TransactionStrategyExecutionError::InternalError(
@@ -309,9 +269,9 @@ mod tests {
         use solana_signature::Signature;
 
         let transient_err = || {
-            TransactionStrategyExecutionError::InternalError(make_send_transaction_error(
-                "connection reset",
-            ))
+            TransactionStrategyExecutionError::InternalError(
+                send_transaction_error("connection reset").into(),
+            )
         };
 
         let signature = Signature::new_unique();
@@ -335,17 +295,5 @@ mod tests {
                 "action-only execution failures must not get fresh retries"
             );
         }
-    }
-
-    #[test]
-    fn unrelated_internal_errors_do_not_trigger_splitting() {
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::LookupTableDeserialize(
-                    solana_instruction::error::InstructionError::GenericError,
-                ),
-            )),
-        );
-        assert!(!err.is_recoverable_by_splitting());
     }
 }

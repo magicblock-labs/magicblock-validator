@@ -4,7 +4,7 @@ use delegation_program_api::pda::commit_record_pda_from_delegated_account;
 use metrics::metrics;
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,
-    MagicBlockSendTransactionOutcome, MagicblockRpcClient,
+    MagicblockRpcClient,
     utils::{
         SendErrorMapper, TransactionErrorMapper, decide_rpc_error_flow, get_with_retries,
         map_magicblock_client_error, send_transaction_with_retries,
@@ -106,35 +106,6 @@ impl IntentExecutionClient {
         self.rpc_client.invalidate_cached_blockhash().await;
     }
 
-    pub(in crate::intent_executor) async fn execute_message_with_retries(
-        &self,
-        authority: &Keypair,
-        prepared_message: VersionedMessage,
-        tasks: &[BaseTaskImpl],
-    ) -> IntentExecutorResult<Signature, TransactionStrategyExecutionError> {
-        const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
-        const MIN_ATTEMPTS: usize = 3;
-
-        // Send with retries
-        let send_error_mapper = IntentErrorMapper {
-            transaction_error_mapper: IntentTransactionErrorMapper {
-                tasks,
-                task_instruction_offset: if matches!(prepared_message, VersionedMessage::V1(_)) {
-                    0
-                } else {
-                    TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
-                },
-            },
-            has_dedup_guard: tasks.iter().any(|task| !matches!(task, BaseTaskImpl::BaseAction(_))),
-        };
-        let attempt =
-            || async { self.send_prepared_message(authority, prepared_message.clone()).await };
-        send_transaction_with_retries(attempt, send_error_mapper, |i, elapsed| {
-            !(elapsed < RETRY_FOR || i < MIN_ATTEMPTS)
-        })
-        .await
-    }
-
     // Sends signed tx
     // Returns success on successfully sent tx, signature can be extracted from tx itself
     pub(in crate::intent_executor) async fn send_signed_tx_with_retries(
@@ -155,10 +126,8 @@ impl IntentExecutionClient {
                     TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT
                 },
             },
-            // Resending the identical already-signed transaction can't
-            // double-apply actions - it either lands once or is rejected.
-            has_dedup_guard: true,
         };
+        // Retries send identical signed bytes, so actions cannot execute twice.
         let attempt = || async {
             self.rpc_client
                 .send_transaction(
@@ -236,40 +205,6 @@ impl IntentExecutionClient {
         .await
     }
 
-    /// Shared helper for sending transactions
-    async fn send_prepared_message(
-        &self,
-        authority: &Keypair,
-        mut prepared_message: VersionedMessage,
-    ) -> IntentExecutorResult<MagicBlockSendTransactionOutcome, InternalError> {
-        let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
-        match &mut prepared_message {
-            VersionedMessage::V0(value) => {
-                value.recent_blockhash = latest_blockhash;
-            }
-            VersionedMessage::Legacy(value) => {
-                warn!("Legacy message not expected");
-                value.recent_blockhash = latest_blockhash;
-            }
-            VersionedMessage::V1(value) => {
-                warn!("V1 message not expected");
-                // V1 renames the blockhash to the lifetime specifier.
-                value.lifetime_specifier = latest_blockhash;
-            }
-        };
-
-        let transaction = VersionedTransaction::try_new(prepared_message, &[&authority])?;
-        let result = self
-            .rpc_client
-            .send_transaction(
-                &transaction,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
-            )
-            .await?;
-
-        Ok(result)
-    }
-
     pub async fn intent_metrics(&self, execution_outcome: ExecutionOutput) {
         use solana_transaction_status_client_types::EncodedTransactionWithStatusMeta;
         fn extract_cu(tx: EncodedTransactionWithStatusMeta) -> Option<u64> {
@@ -304,47 +239,6 @@ impl IntentExecutionClient {
 
 struct IntentErrorMapper<TxMap> {
     transaction_error_mapper: TxMap,
-    /// Commit/finalize/undelegate tasks make a duplicate landing fail
-    /// the whole retried transaction, so re-sends cannot double-apply
-    has_dedup_guard: bool,
-}
-
-impl<TxMap> SendErrorMapper<InternalError> for IntentErrorMapper<TxMap>
-where
-    TxMap: TransactionErrorMapper<ExecutionError = TransactionStrategyExecutionError>,
-{
-    type ExecutionError = TransactionStrategyExecutionError;
-    fn map(&self, error: InternalError) -> Self::ExecutionError {
-        if error.is_transaction_too_large() {
-            TransactionStrategyExecutionError::TransactionTooLargeError(error)
-        } else {
-            match error {
-                InternalError::MagicBlockRpcClientError(err) => {
-                    map_magicblock_client_error(&self.transaction_error_mapper, *err)
-                }
-                err => TransactionStrategyExecutionError::InternalError(err),
-            }
-        }
-    }
-
-    fn decide_flow(&self, err: &Self::ExecutionError) -> ControlFlow<(), Duration> {
-        let TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(err),
-        ) = err
-        else {
-            return ControlFlow::Break(());
-        };
-        if self.has_dedup_guard {
-            return decide_rpc_error_flow(err);
-        }
-        // Action-only transactions have no on-chain dedup: a re-send
-        // with a fresh blockhash could execute the actions twice.
-        // Only failures from before signing & sending are retriable.
-        match err.as_ref() {
-            MagicBlockRpcClientError::GetLatestBlockhash(_) => decide_rpc_error_flow(err),
-            _ => ControlFlow::Break(()),
-        }
-    }
 }
 
 impl<TxMap> SendErrorMapper<MagicBlockRpcClientError> for IntentErrorMapper<TxMap>
@@ -380,5 +274,39 @@ impl SendErrorMapper<MagicBlockRpcClientError> for DefaultGetErrorMapper {
 
     fn decide_flow(&self, mapped_error: &Self::ExecutionError) -> ControlFlow<(), Duration> {
         decide_rpc_error_flow(mapped_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::intent_executor::test_utils::send_transaction_error;
+
+    #[test]
+    fn send_errors_preserve_split_recovery() {
+        let mapper = IntentErrorMapper {
+            transaction_error_mapper: IntentTransactionErrorMapper {
+                tasks: &[],
+                task_instruction_offset: 0,
+            },
+        };
+        for (error, splits) in [
+            (send_transaction_error("base64 encoded too large"), true),
+            (
+                send_transaction_error(
+                    "base64 encoded solana_transaction::versioned::VersionedTransaction too large: 1684 bytes (max: encoded/raw 1644/1232)",
+                ),
+                true,
+            ),
+            (send_transaction_error("connection reset"), false),
+            (
+                MagicBlockRpcClientError::LookupTableDeserialize(
+                    solana_instruction::error::InstructionError::GenericError,
+                ),
+                false,
+            ),
+        ] {
+            assert_eq!(mapper.map(error).is_recoverable_by_splitting(), splits);
+        }
     }
 }
