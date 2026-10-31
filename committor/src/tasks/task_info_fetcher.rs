@@ -422,20 +422,12 @@ impl<T: TaskInfoFetcher> CacheTaskInfoFetcher<T> {
         (value != u64::MAX).then_some(value)
     }
 
-    /// Resets cache for some or all accounts
-    pub fn reset(&self, reset_type: ResetType<'_>) {
+    /// Invalidates cached nonces for the given accounts.
+    pub fn invalidate_nonces(&self, pubkeys: &[Pubkey]) {
         let mut cache = self.cache.lock();
-        match reset_type {
-            ResetType::All => {
-                cache.active.clear();
-                cache.retiring.clear();
-            }
-            ResetType::Specific(pubkeys) => {
-                for pubkey in pubkeys {
-                    cache.active.pop(pubkey);
-                    cache.retiring.remove(pubkey);
-                }
-            }
+        for pubkey in pubkeys {
+            cache.active.pop(pubkey);
+            cache.retiring.remove(pubkey);
         }
     }
 
@@ -639,11 +631,6 @@ impl<T: TaskInfoFetcher> TaskInfoFetcher for CacheTaskInfoFetcher<T> {
     ) -> TaskInfoFetcherResult<HashMap<Pubkey, Account>> {
         self.inner.get_base_accounts(pubkeys, min_context_slot).await
     }
-}
-
-pub enum ResetType<'a> {
-    All,
-    Specific(&'a [Pubkey]),
 }
 
 /// Deduplicates snapshots by pubkey, keeping the newest snapshot slot.
@@ -945,7 +932,7 @@ mod tests {
 
         fetcher.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 cached = 2
         fetcher.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap(); // pk2 cached = 3
-        fetcher.reset(ResetType::Specific(&[pk1]));
+        fetcher.invalidate_nonces(&[pk1]);
 
         assert!(fetcher.peek_commit_nonce(&pk1).await.is_none()); // cleared
         assert_eq!(fetcher.peek_commit_nonce(&pk2).await, Some(3)); // still cached

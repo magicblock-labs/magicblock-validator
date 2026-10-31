@@ -36,8 +36,8 @@ use crate::{
         outbox_intent_bundles_reader::OutboxIntentBundlesReader, utils::build_sent_commit,
     },
     tasks::{
-        BaseTaskImpl,
-        buffer_task::CleanupTask,
+        Task,
+        buffer_task::BufferCleanup,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
@@ -141,9 +141,6 @@ impl OutboxClient for RecordingOutbox {
         }
         Ok(())
     }
-    async fn close_intent(&self, _: u64) -> Result<(), Self::Error> {
-        unreachable!()
-    }
     fn outbox_reader(&self) -> Self {
         self.clone()
     }
@@ -169,7 +166,7 @@ pub(super) enum Preparation {
 #[derive(Clone, Default)]
 pub(super) struct RecordingPreparator {
     pub steps: Arc<Mutex<VecDeque<Preparation>>>,
-    pub prepared: Arc<Mutex<Vec<Vec<BaseTaskImpl>>>>,
+    pub prepared: Arc<Mutex<Vec<Vec<Task>>>>,
     pub uniqueness_nonces: Arc<Mutex<Vec<Option<u64>>>>,
     pub cleaned: Arc<Mutex<Vec<(CleanupResources, bool)>>>,
 }
@@ -182,16 +179,16 @@ impl TransactionPreparator for RecordingPreparator {
         strategy: &TransactionStrategy,
         cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage> {
-        self.prepared.lock().unwrap().push(strategy.optimized_tasks.clone());
+        self.prepared.lock().unwrap().push(strategy.tasks.clone());
         self.uniqueness_nonces.lock().unwrap().push(strategy.uniqueness_nonce);
         // Represent a reservation made before preparation succeeds or fails.
         cleanup.alt_reservation.insert(RESERVED_ALT_KEY);
         cleanup.uniqueness_nonce = strategy.uniqueness_nonce;
         cleanup.buffers = strategy
-            .optimized_tasks
+            .tasks
             .iter()
             .filter_map(|task| match task {
-                BaseTaskImpl::CommitFinalize(task) => CleanupTask::from_commit_finalize(task),
+                Task::CommitFinalize(task) => BufferCleanup::from_commit_finalize(task),
                 _ => None,
             })
             .collect();
@@ -202,16 +199,16 @@ impl TransactionPreparator for RecordingPreparator {
             Preparation::Ready => {
                 let mut instructions = TransactionUtils::budget_instructions(
                     TransactionUtils::tasks_compute_units(
-                        &strategy.optimized_tasks,
+                        &strategy.tasks,
                         strategy.uniqueness_nonce,
                     ),
                     0,
-                    TransactionUtils::tasks_accounts_size_budget(&strategy.optimized_tasks),
+                    TransactionUtils::tasks_accounts_size_budget(&strategy.tasks),
                 )
                 .to_vec();
                 instructions.extend(TransactionUtils::tasks_instructions(
                     &authority.pubkey(),
-                    &strategy.optimized_tasks,
+                    &strategy.tasks,
                 ));
                 // The RPC mock decodes legacy messages. Keep the same budget
                 // instruction offset used by production versioned messages.

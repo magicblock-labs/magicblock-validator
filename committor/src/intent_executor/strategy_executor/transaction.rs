@@ -10,11 +10,11 @@ use tokio::time::timeout;
 use tracing::{error, info, warn};
 
 use super::{
-    error::TransactionStrategyExecutionError,
+    error::TransactionExecutionError,
     recovery::TransactionRecovery,
     utils::{
-        handle_actions_result, handle_cpi_limit_error, prepare_transaction, recovery_commit_nonces,
-        resolve_pending_signature,
+        handle_actions_result, prepare_transaction, recovery_commit_nonces,
+        resolve_pending_signature, split_for_follow_up,
     },
 };
 use crate::{
@@ -28,7 +28,7 @@ use crate::{
         progress::PendingExecution,
     },
     tasks::{
-        BaseTaskImpl,
+        Task,
         task_info_fetcher::TaskInfoFetcher,
         task_strategist::{TransactionPlan, TransactionStrategy},
     },
@@ -106,7 +106,7 @@ where
                         && self.has_tasks_after_commit()
                         && err.is_recoverable_by_splitting() =>
                 {
-                    let (current, follow_up) = handle_cpi_limit_error(
+                    let (current, follow_up) = split_for_follow_up(
                         &self.ctx.authority.pubkey(),
                         mem::take(&mut self.current),
                     );
@@ -164,7 +164,7 @@ where
     async fn execute_with_timeout(
         &mut self,
         time_left: Option<Duration>,
-    ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>> {
+    ) -> IntentExecutorResult<Result<Signature, TransactionExecutionError>> {
         if self.current.has_actions_callbacks()
             || self.follow_up.as_ref().is_some_and(TransactionStrategy::has_actions_callbacks)
         {
@@ -188,7 +188,7 @@ where
     ))]
     async fn execute_current(
         &mut self,
-    ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>> {
+    ) -> IntentExecutorResult<Result<Signature, TransactionExecutionError>> {
         let ctx = self.ctx;
         let confirmed_commit = self.report.progress.confirmed_commit;
         let has_follow_up = self.follow_up.is_some();
@@ -221,7 +221,7 @@ where
 
             // Resolve a previously sent transaction before skipping an empty follow-up.
             if let Some(commit_signature) = confirmed_commit
-                && self.current.optimized_tasks.is_empty()
+                && self.current.tasks.is_empty()
             {
                 return Ok(Ok(commit_signature));
             }
@@ -246,7 +246,7 @@ where
                 blockhash: *prepared_transaction.get_recent_blockhash(),
             };
             self.report.progress.transaction = TransactionProgress::Prepared(pending.signature);
-            let recovery_commit_nonces = recovery_commit_nonces(&self.current.optimized_tasks);
+            let recovery_commit_nonces = recovery_commit_nonces(&self.current.tasks);
             ctx.outbox_client
                 .set_intent_execution_stage(
                     self.intent_id,
@@ -270,7 +270,7 @@ where
             // Send signed tx
             let execution_result = ctx
                 .intent_client
-                .send_signed_tx_with_retries(&prepared_transaction, &self.current.optimized_tasks)
+                .send_signed_tx_with_retries(&prepared_transaction, &self.current.tasks)
                 .await;
 
             // Result returned, cleanup pending signature
@@ -293,14 +293,11 @@ where
             ctx.intent_client.invalidate_cached_blockhash().await;
 
             if let Some(commit_signature) = confirmed_commit
-                && self.current.optimized_tasks.is_empty()
+                && self.current.tasks.is_empty()
             {
                 // Failed actions can leave no work after a confirmed commit.
                 // Keep undelegation failures visible even when patching removes all tasks.
-                if matches!(
-                    execution_err,
-                    TransactionStrategyExecutionError::ActionsError(..)
-                ) {
+                if matches!(execution_err, TransactionExecutionError::ActionsError(..)) {
                     self.report.add_patched_error(execution_err);
                     return Ok(Ok(commit_signature));
                 }
@@ -364,9 +361,9 @@ where
 
     fn has_tasks_after_commit(&self) -> bool {
         self.current
-            .optimized_tasks
+            .tasks
             .iter()
-            .rposition(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)))
-            .is_some_and(|index| index + 1 < self.current.optimized_tasks.len())
+            .rposition(|task| matches!(task, Task::CommitFinalize(_)))
+            .is_some_and(|index| index + 1 < self.current.tasks.len())
     }
 }

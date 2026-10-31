@@ -19,7 +19,7 @@ use program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use progress::{ExecutionProgress, TransactionProgress};
 use solana_keypair::Keypair;
 use solana_signature::Signature;
-use strategy_executor::error::TransactionStrategyExecutionError;
+use strategy_executor::error::TransactionExecutionError;
 
 use crate::{
     intent_executor::{
@@ -83,7 +83,7 @@ pub struct IntentExecutionResult {
     pub inner: IntentExecutorResult<ExecutionOutput>,
     pub progress: ExecutionProgress,
     /// Errors patched along the way
-    pub patched_errors: Vec<TransactionStrategyExecutionError>,
+    pub patched_errors: Vec<TransactionExecutionError>,
     /// Callbacks result
     pub callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
@@ -120,17 +120,17 @@ pub struct IntentExecutionReport {
     /// Resource ownership from each preparation attempt, including failed attempts.
     cleanup: Vec<CleanupResources>,
     /// Errors we patched trying to recover intent
-    patched_errors: Vec<TransactionStrategyExecutionError>,
+    patched_errors: Vec<TransactionExecutionError>,
     /// Report of scheduled callbacks
     callbacks_report: Vec<Result<Signature, CallbackScheduleError>>,
 }
 
 impl IntentExecutionReport {
-    pub fn add_patched_error(&mut self, value: TransactionStrategyExecutionError) {
+    pub fn add_patched_error(&mut self, value: TransactionExecutionError) {
         self.patched_errors.push(value);
     }
 
-    pub fn patched_errors(&self) -> &[TransactionStrategyExecutionError] {
+    pub fn patched_errors(&self) -> &[TransactionExecutionError] {
         &self.patched_errors
     }
 

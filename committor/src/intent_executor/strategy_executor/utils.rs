@@ -20,9 +20,9 @@ use crate::{
         intent_execution_client::IntentExecutionClient,
     },
     tasks::{
-        BaseTaskImpl,
+        Task,
         task_builder::TaskBuilderError,
-        task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
+        task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
     transaction_preparator::{
@@ -35,15 +35,11 @@ use crate::{
 /// within its blockhash's valid window (i.e. it might still land).
 const PENDING_SIGNATURE_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
-pub(in crate::intent_executor) fn recovery_commit_nonces(
-    tasks: &[BaseTaskImpl],
-) -> Vec<(Pubkey, u64)> {
+pub(in crate::intent_executor) fn recovery_commit_nonces(tasks: &[Task]) -> Vec<(Pubkey, u64)> {
     tasks
         .iter()
         .filter_map(|task| match task {
-            BaseTaskImpl::CommitFinalize(task) => {
-                Some((task.committed_account.pubkey, task.commit_id))
-            }
+            Task::CommitFinalize(task) => Some((task.committed_account.pubkey, task.commit_id)),
             _ => None,
         })
         .collect()
@@ -198,10 +194,10 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
     intent_id: u64,
 ) -> Result<(), TaskBuilderError> {
     let snapshot_slots: HashMap<Pubkey, u64> = strategy
-        .optimized_tasks
+        .tasks
         .iter()
         .filter_map(|task| match task {
-            BaseTaskImpl::CommitFinalize(task) => Some((
+            Task::CommitFinalize(task) => Some((
                 task.committed_account.pubkey,
                 task.committed_account.remote_slot,
             )),
@@ -219,15 +215,15 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
 
     // We reset TaskInfoFetcher for all committed accounts
     // We re-fetch them to fix out of sync tasks
-    task_info_fetcher.reset(ResetType::Specific(committed_pubkeys));
+    task_info_fetcher.invalidate_nonces(committed_pubkeys);
     let commit_ids = task_info_fetcher
         .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
         .await
         .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
     // Old buffer identities remain in the preparation attempt's cleanup record.
-    for task in &mut strategy.optimized_tasks {
-        if let BaseTaskImpl::CommitFinalize(task) = task {
+    for task in &mut strategy.tasks {
+        if let Task::CommitFinalize(task) = task {
             let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
                 continue;
             };
@@ -237,7 +233,7 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
 
     // Re-fetched nonces land back on 1 after a re-delegation; such a retry is
     // a first-commit transaction and must carry the uniqueness noop.
-    if requires_uniqueness_nonce(&strategy.optimized_tasks) {
+    if requires_uniqueness_nonce(&strategy.tasks) {
         strategy.uniqueness_nonce = Some(intent_id);
     }
 
@@ -248,26 +244,23 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
 /// On the first commit of a delegation instance the nonce restarts at 1, so the
 /// transaction can be byte-identical to a prior instance's landed commit and
 /// alias its signature. Such intents must carry a per-intent uniqueness noop.
-pub(in crate::intent_executor) fn requires_uniqueness_nonce(commit_tasks: &[BaseTaskImpl]) -> bool {
+pub(in crate::intent_executor) fn requires_uniqueness_nonce(commit_tasks: &[Task]) -> bool {
     commit_tasks.iter().any(|task| match task {
-        BaseTaskImpl::CommitFinalize(task) => task.commit_id <= 1,
+        Task::CommitFinalize(task) => task.commit_id <= 1,
         _ => false,
     })
 }
 
-/// Handle CPI limit error, splits single strategy flow into 2
-/// Returns a commit transaction and its follow-up.
-pub(in crate::intent_executor) fn handle_cpi_limit_error(
+/// Splits a transaction at its last commit, retaining later tasks in the follow-up.
+pub(in crate::intent_executor) fn split_for_follow_up(
     authority: &Pubkey,
     strategy: TransactionStrategy,
 ) -> (TransactionStrategy, TransactionStrategy) {
     // Keep tasks through the last commit together; the remaining tasks form the follow-up.
-    let last_commit_ind = strategy
-        .optimized_tasks
-        .iter()
-        .rposition(|el| matches!(el, BaseTaskImpl::CommitFinalize(_)));
+    let last_commit_ind =
+        strategy.tasks.iter().rposition(|el| matches!(el, Task::CommitFinalize(_)));
     let (mut commit_tasks, mut follow_up_tasks) = (vec![], vec![]);
-    for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
+    for (i, el) in strategy.tasks.into_iter().enumerate() {
         if Some(i) <= last_commit_ind {
             commit_tasks.push(el);
         } else {
@@ -285,7 +278,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         )
     };
     let commit_strategy = TransactionStrategy {
-        optimized_tasks: commit_tasks,
+        tasks: commit_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
@@ -300,7 +293,7 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         )
     };
     let follow_up_strategy = TransactionStrategy {
-        optimized_tasks: follow_up_tasks,
+        tasks: follow_up_tasks,
         lookup_tables_keys: follow_up_alt_pubkeys,
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
@@ -313,18 +306,15 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
     authority: &Pubkey,
     strategy: &mut TransactionStrategy,
 ) -> Vec<BaseActionCallback> {
-    let position = strategy
-        .optimized_tasks
-        .iter()
-        .position(|el| matches!(el, BaseTaskImpl::Undelegate(_)));
+    let position = strategy.tasks.iter().position(|el| matches!(el, Task::Undelegate(_)));
 
     if let Some(position) = position {
         // Remove everything after undelegation including post undelegation actions
         let callbacks = strategy
-            .optimized_tasks
+            .tasks
             .drain(position..)
             .filter_map(|task| match task {
-                BaseTaskImpl::BaseAction(mut action) => action.extract_callback(),
+                Task::BaseAction(mut action) => action.extract_callback(),
                 _ => None,
             })
             .collect();
@@ -448,7 +438,7 @@ mod tests {
             None,
         );
         let mut strategy = TransactionStrategy {
-            optimized_tasks: vec![
+            tasks: vec![
                 stale_task.into(),
                 create_commit_finalize_task(
                     5,
@@ -478,7 +468,7 @@ mod tests {
         .expect("commit id recovery succeeds");
 
         assert_eq!(strategy.uniqueness_nonce, Some(42));
-        let ids: Vec<_> = recovery_commit_nonces(&strategy.optimized_tasks);
+        let ids: Vec<_> = recovery_commit_nonces(&strategy.tasks);
         assert_eq!(ids, vec![(pubkey, 1), (unchanged_pubkey, 5)]);
     }
 }

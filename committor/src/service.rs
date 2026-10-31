@@ -23,11 +23,9 @@ use crate::{
     tasks::task_info_fetcher::AccountSnapshot,
 };
 
-pub type ChainlinkImpl = ProdChainlink;
-
 pub struct IntentExecutionService<O, D> {
     /// Chainlink for notifying of undelegations
-    chainlink: Arc<ChainlinkImpl>,
+    chainlink: Arc<ProdChainlink>,
     /// ER client specific for Intent needs. Could be switched to RpcClient
     outbox_client: Arc<O>,
     /// Processor of accepted intents
@@ -56,7 +54,7 @@ where
     <O::OutboxReader as OutboxIntentBundlesReader>::Error: Into<IntentExecutionServiceError>,
 {
     pub fn new(
-        chainlink: Arc<ChainlinkImpl>,
+        chainlink: Arc<ProdChainlink>,
         outbox_client: Arc<O>,
         processor: Arc<CommittorProcessor<D>>,
         slot_interval: Duration,
