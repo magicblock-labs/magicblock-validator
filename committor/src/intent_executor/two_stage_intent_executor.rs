@@ -14,19 +14,16 @@ use crate::{
         cleanup_handle::CleanupHandle,
         error::{IntentExecutorError, IntentExecutorResult},
         strategy_executor::{
-            two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
-            utils::{
-                FinalizeStage, execute_with_timeout, requires_uniqueness_nonce,
-                resolve_pending_signature,
-            },
+            transaction::TransactionExecutor,
+            utils::{requires_uniqueness_nonce, resolve_pending_signature},
         },
-        utils::{build_commit_finalize_tasks, execute_two_stage_flow, report_and_close_intent},
+        utils::{build_commit_finalize_tasks, report_and_close_intent},
     },
     outbox::{OutboxClient, ScheduledBaseIntentMeta},
     tasks::{
         task_builder::{TaskBuilderError, TaskBuilderImpl, TasksBuilder},
         task_info_fetcher::{AccountSnapshot, ResetType, TaskInfoFetcher},
-        task_strategist::{TaskStrategist, TwoStageExecutionMode},
+        task_strategist::{StrategyExecutionMode, TaskStrategist},
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -87,23 +84,21 @@ where
             requires_uniqueness_nonce(&commit_tasks).then_some(intent_bundle.intent_id);
 
         // As strategy was chosen build two stage
-        let TwoStageExecutionMode { commit_stage, finalize_stage } =
-            TaskStrategist::build_two_stage(
-                commit_tasks,
-                finalize_tasks,
-                &self.authority.pubkey(),
-                uniqueness_nonce,
-            )?;
+        let strategy = TaskStrategist::build_two_stage(
+            commit_tasks,
+            finalize_tasks,
+            &self.authority.pubkey(),
+            uniqueness_nonce,
+        )?;
 
-        let state = Initialized::new(commit_stage, finalize_stage);
-        execute_two_stage_flow(
+        TransactionExecutor::new(
             &self.ctx,
-            state,
-            &self.authority,
-            intent_bundle,
             execution_report,
-            || self.time_left(),
+            intent_bundle.intent_id,
+            &intent_bundle.get_all_committed_pubkeys(),
+            StrategyExecutionMode::TwoStage(strategy),
         )
+        .execute(|| self.time_left())
         .await
     }
 
@@ -147,31 +142,15 @@ where
             uniqueness_nonce,
         )?;
 
-        let committed_state = Committed::new(commit_signature, finalize_strategy);
-        let mut finalize_strategy_executor = TwoStageStrategyExecutor::committed(
-            committed_state,
-            self.authority.insecure_clone(),
-            intent.intent_id,
-            self.ctx.intent_client.clone(),
-            self.ctx.outbox_client.clone(),
-            self.ctx.actions_callback_executor.clone(),
+        TransactionExecutor::resume_follow_up(
+            &self.ctx,
             execution_report,
-        );
-
-        let finalize_signature = execute_with_timeout(
-            self.time_left(),
-            FinalizeStage {
-                inner: &mut finalize_strategy_executor,
-                transaction_preparator: &self.ctx.transaction_preparator,
-            },
+            intent.intent_id,
+            commit_signature,
+            finalize_strategy,
         )
-        .await?;
-
-        let finalized_stage = finalize_strategy_executor.done(finalize_signature);
-        Ok(ExecutionOutput::TwoStage {
-            commit_signature: finalized_stage.commit_signature,
-            finalize_signature: finalized_stage.finalize_signature,
-        })
+        .execute(|| self.time_left())
+        .await
     }
 
     async fn finalizing_uniqueness_nonce(
