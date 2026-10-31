@@ -126,6 +126,9 @@ impl From<&IntentExecutorError> for ActionError {
 impl From<TaskStrategistError> for IntentExecutorError {
     fn from(value: TaskStrategistError) -> Self {
         match value {
+            TaskStrategistError::InstructionEncoding(err) => {
+                Self::FailedPreparation(TransactionPreparatorError::InstructionEncoding(err))
+            }
             TaskStrategistError::FailedToFit => Self::FailedToFitError,
             TaskStrategistError::Compile(err) => Self::CompileError(err),
             TaskStrategistError::Signer(err) => Self::SignerError(err),
@@ -244,9 +247,9 @@ mod tests {
         );
         assert!(!err.is_transient());
 
-        // Missing delegation metadata is deterministic
+        // Missing delegation info is deterministic
         let err = super::IntentExecutorError::TaskBuilderError(
-            TaskBuilderError::MissingDelegationMetadata(solana_pubkey::Pubkey::new_unique()),
+            TaskBuilderError::MissingDelegationInfo(solana_pubkey::Pubkey::new_unique()),
         );
         assert!(!err.is_transient());
 

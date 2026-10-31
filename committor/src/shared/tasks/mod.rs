@@ -6,6 +6,7 @@ use delegation_program_interface::{
 use mbv_core::intent::{BaseAction, BaseActionCallback};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
+use wheels::DataLayoutError;
 
 pub(crate) mod buffer_task;
 pub(crate) mod commit_delivery;
@@ -13,7 +14,9 @@ pub(crate) mod commit_finalize_task;
 pub(crate) mod task_strategist;
 pub(crate) mod utils;
 
-use crate::shared::tasks::commit_finalize_task::CommitFinalizeTask;
+use crate::shared::{
+    account_state::DelegationVersion, tasks::commit_finalize_task::CommitFinalizeTask,
+};
 
 #[derive(Clone, Debug)]
 pub enum Task {
@@ -23,15 +26,15 @@ pub enum Task {
 }
 
 impl Task {
-    pub fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
-        self.instruction(validator).accounts.iter().map(|meta| meta.pubkey).collect()
+    pub fn involved_accounts(&self, validator: &Pubkey) -> Result<Vec<Pubkey>, DataLayoutError> {
+        Ok(self.instruction(validator)?.accounts.iter().map(|meta| meta.pubkey).collect())
     }
 
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+    pub fn instruction(&self, validator: &Pubkey) -> Result<Instruction, DataLayoutError> {
         match self {
             Self::CommitFinalize(value) => value.instruction(validator),
             Self::Undelegate(value) => value.instruction(validator),
-            Self::BaseAction(value) => value.instruction(validator),
+            Self::BaseAction(value) => Ok(value.instruction(validator)),
         }
     }
 
@@ -87,6 +90,7 @@ impl LabelValue for Task {
 
 #[derive(Clone, Debug)]
 pub struct UndelegateTask {
+    pub(crate) version: DelegationVersion,
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
@@ -94,8 +98,17 @@ pub struct UndelegateTask {
 }
 
 impl UndelegateTask {
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
-        if self.include_undelegation_request {
+    pub fn instruction(&self, validator: &Pubkey) -> Result<Instruction, DataLayoutError> {
+        if let DelegationVersion::V2 { cluster } = self.version {
+            return dpi::instruction_builder::undelegate(
+                *validator,
+                self.delegated_account,
+                self.owner_program,
+                cluster,
+                self.rent_reimbursement,
+            );
+        }
+        Ok(if self.include_undelegation_request {
             dpi::legacy::instruction_builder::undelegate_with_request(
                 *validator,
                 self.delegated_account,
@@ -109,7 +122,7 @@ impl UndelegateTask {
                 self.owner_program,
                 self.rent_reimbursement,
             )
-        }
+        })
     }
 }
 
@@ -353,12 +366,14 @@ mod tests {
         let delegated_account = Pubkey::new_unique();
 
         let ix = UndelegateTask {
+            version: Default::default(),
             delegated_account,
             owner_program: Pubkey::new_unique(),
             rent_reimbursement: Pubkey::new_unique(),
             include_undelegation_request: true,
         }
-        .instruction(&Pubkey::new_unique());
+        .instruction(&Pubkey::new_unique())
+        .unwrap();
 
         assert_eq!(ix.program_id, dpi::id());
         assert_eq!(ix.data, DlpDiscriminator::Undelegate.to_vec());
@@ -381,35 +396,45 @@ mod tests {
         let compute_budget_ix = ComputeBudgetInstruction::set_compute_unit_limit(30_000);
         let compute_unit_price_ix = ComputeBudgetInstruction::set_compute_unit_price(101);
 
-        // Each task unique: commit_id increments; pubkey is new_unique each time
-        let base_commit_id = 101u64;
-        let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
-            let task = BufferCleanup {
-                commit_id: base_commit_id + i as u64,
+        for v2_count in 0..=BufferCleanup::MAX_PER_TRANSACTION {
+            // Each task unique: commit_id increments; pubkey is new_unique each time
+            let base_commit_id = 101u64;
+            let ixs_iter = (0..BufferCleanup::MAX_PER_TRANSACTION).map(|i| {
+                let task = BufferCleanup {
+                    version: if i < v2_count {
+                        DelegationVersion::V2 { cluster: Pubkey::new_unique() }
+                    } else {
+                        DelegationVersion::Legacy
+                    },
+                    commit_id: base_commit_id + i as u64,
+                    pubkey: Pubkey::new_unique(),
+                };
+                task.instruction(&authority.pubkey()).unwrap()
+            });
+
+            let mut ixs: Vec<_> = [compute_budget_ix.clone(), compute_unit_price_ix.clone()]
+                .into_iter()
+                .chain(ixs_iter)
+                .collect();
+            ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
+
+            let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+            let tx_size = serialized_transaction_size(&tx);
+            info!(transaction_size = tx_size, "Cleanup task transaction size");
+            assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
+
+            // One more unique task should overflow
+            let overflow_task = BufferCleanup {
+                version: DelegationVersion::Legacy,
+                commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
                 pubkey: Pubkey::new_unique(),
             };
-            task.instruction(&authority.pubkey())
-        });
+            let uniqueness_noop = ixs.pop().expect("uniqueness noop");
+            ixs.push(overflow_task.instruction(&authority.pubkey()).unwrap());
+            ixs.push(uniqueness_noop);
 
-        let mut ixs: Vec<_> =
-            [compute_budget_ix, compute_unit_price_ix].into_iter().chain(ixs_iter).collect();
-        ixs.push(TransactionUtils::uniqueness_noop_instruction(42));
-
-        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-        let tx_size = serialized_transaction_size(&tx);
-        info!(transaction_size = tx_size, "Cleanup task transaction size");
-        assert!(tx_size <= MAX_TRANSACTION_WIRE_SIZE);
-
-        // One more unique task should overflow
-        let overflow_task = BufferCleanup {
-            commit_id: base_commit_id + BufferCleanup::MAX_PER_TRANSACTION as u64,
-            pubkey: Pubkey::new_unique(),
-        };
-        let uniqueness_noop = ixs.pop().expect("uniqueness noop");
-        ixs.push(overflow_task.instruction(&authority.pubkey()));
-        ixs.push(uniqueness_noop);
-
-        let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
-        assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+            let tx = Transaction::new_with_payer(&ixs, Some(&authority.pubkey()));
+            assert!(serialized_transaction_size(&tx) > MAX_TRANSACTION_WIRE_SIZE);
+        }
     }
 }

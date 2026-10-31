@@ -2,18 +2,20 @@
 
 use std::collections::HashMap;
 
-use delegation_program_interface::legacy::state::{DelegationMetadata, UndelegationRequester};
+use delegation_program_interface::UndelegationRequester;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 
-use crate::shared::account_state::{AccountSnapshot, TaskInfoProvider, TaskInfoProviderResult};
+use crate::shared::account_state::{
+    AccountSnapshot, DelegationInfo, DelegationVersion, TaskInfoProvider, TaskInfoProviderResult,
+};
 
 #[derive(Default)]
 pub(crate) struct MockInfoProvider {
     pub default_commit_id: u64,
     pub commit_ids: HashMap<Pubkey, u64>,
     pub next_commit_id: Option<u64>,
-    pub delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
+    pub delegation_info: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
     /// `None` allows a lookup that intentionally returns no account.
     pub base_accounts: HashMap<Pubkey, Option<Account>>,
 }
@@ -47,25 +49,25 @@ impl TaskInfoProvider for MockInfoProvider {
             .collect())
     }
 
-    async fn fetch_delegation_metadata(
+    async fn fetch_delegation_info(
         &self,
         accounts: &[AccountSnapshot],
         _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationInfo>> {
         Ok(accounts
             .iter()
             .map(|(pubkey, _)| {
                 let (undelegation_requester, rent_payer) = self
-                    .delegation_metadata
+                    .delegation_info
                     .get(pubkey)
                     .copied()
                     .unwrap_or((UndelegationRequester::None, *pubkey));
                 (
                     *pubkey,
-                    DelegationMetadata {
+                    DelegationInfo {
                         last_commit_id: self.default_commit_id,
                         undelegation_requester,
-                        seeds: vec![],
+                        version: DelegationVersion::Legacy,
                         rent_payer,
                     },
                 )

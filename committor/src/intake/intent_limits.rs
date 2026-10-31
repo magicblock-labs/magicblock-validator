@@ -64,6 +64,7 @@ fn commit_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
 fn follow_up_tasks(intent: &MagicIntentBundle) -> Vec<Task> {
     fn undelegate_task(account: &CommittedAccount) -> Task {
         UndelegateTask {
+            version: Default::default(),
             delegated_account: account.pubkey,
             owner_program: account.account.owner,
             // Assigned a distinct placeholder before the fit checks.
@@ -154,26 +155,28 @@ fn tasks_fit(mut tasks: Vec<Task>, uniqueness_nonce: Option<u64>) -> bool {
     }
 
     let placeholder = Keypair::new();
-    assign_unknown_rent_payers(&mut tasks, &placeholder.pubkey(), uniqueness_nonce);
+    if assign_unknown_rent_payers(&mut tasks, &placeholder.pubkey(), uniqueness_nonce).is_err() {
+        return false;
+    }
     tasks_fit_v1(&placeholder, &tasks, uniqueness_nonce)
         || tasks_fit_v0_with_alts(&placeholder, &tasks, uniqueness_nonce)
 }
 
 /// Give unknown payers separate keys so account-key deduplication cannot
 /// make the estimate smaller. Only admission tasks use these placeholders;
-/// execution gets the actual payers from delegation metadata.
+/// execution gets the actual payers from delegation info.
 fn assign_unknown_rent_payers(
     tasks: &mut [Task],
     authority: &Pubkey,
     uniqueness_nonce: Option<u64>,
-) {
+) -> Result<(), wheels::DataLayoutError> {
     if !tasks.iter().any(|task| matches!(task, Task::Undelegate(_))) {
-        return;
+        return Ok(());
     }
 
     let mut used_keys = HashSet::from([*authority]);
     for task in tasks.iter() {
-        let instruction = task.instruction(authority);
+        let instruction = task.instruction(authority)?;
         used_keys.insert(instruction.program_id);
         used_keys.extend(instruction.accounts.iter().map(|meta| meta.pubkey));
     }
@@ -201,6 +204,7 @@ fn assign_unknown_rent_payers(
             }
         }
     }
+    Ok(())
 }
 
 fn tasks_fit_v1(placeholder: &Keypair, tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
@@ -219,8 +223,11 @@ fn tasks_fit_v0_with_alts(
     tasks: &[Task],
     uniqueness_nonce: Option<u64>,
 ) -> bool {
-    let lookup_table_keys =
-        TaskStrategist::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce);
+    let Ok(lookup_table_keys) =
+        TaskStrategist::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce)
+    else {
+        return false;
+    };
     let lookup_tables = TransactionUtils::dummy_lookup_table(&lookup_table_keys);
 
     TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
@@ -404,12 +411,13 @@ mod tests {
             let original = follow_up_tasks(&above_boundary);
             assert!(tasks_fit_v1(&authority, &original, Some(0)));
             let mut estimated = original.clone();
-            assign_unknown_rent_payers(&mut estimated, &authority.pubkey(), Some(0));
+            assign_unknown_rent_payers(&mut estimated, &authority.pubkey(), Some(0)).unwrap();
             let payers = payer_keys(&estimated);
             assert_eq!(payers.len(), 2);
             assert_ne!(payers[0], payers[1]);
             let mut known_keys =
-                TaskStrategist::collect_lookup_table_keys(&authority.pubkey(), &original, Some(0));
+                TaskStrategist::collect_lookup_table_keys(&authority.pubkey(), &original, Some(0))
+                    .unwrap();
             known_keys.push(authority.pubkey());
             known_keys.push(dpi::id());
             assert!(payers.iter().all(|payer| !known_keys.contains(payer)));

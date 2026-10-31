@@ -13,8 +13,12 @@ use mbv_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
+use wheels::DataLayoutError;
 
-use crate::shared::tasks::{Task, commit_delivery::CommitDelivery};
+use crate::shared::{
+    account_state::DelegationVersion,
+    tasks::{Task, commit_delivery::CommitDelivery},
+};
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
 /// instruction.
@@ -23,6 +27,7 @@ use crate::shared::tasks::{Task, commit_delivery::CommitDelivery};
 /// the chain (inline args vs buffer, full state vs diff).
 #[derive(Clone, Debug)]
 pub struct CommitFinalizeTask {
+    pub(crate) version: DelegationVersion,
     pub commit_id: u64,
     pub allow_undelegation: bool,
     pub committed_account: CommittedAccount,
@@ -35,7 +40,7 @@ impl CommitFinalizeTask {
         &self,
         validator: &Pubkey,
         base_account: Option<&Account>,
-    ) -> Instruction {
+    ) -> Result<Instruction, DataLayoutError> {
         let (data, data_is_diff) = if let Some(base_account) = base_account {
             (
                 compute_diff(base_account.data(), self.committed_account.account.data()).to_vec(),
@@ -45,6 +50,27 @@ impl CommitFinalizeTask {
             (self.committed_account.account.data.clone(), false)
         };
 
+        if let DelegationVersion::V2 { cluster } = self.version {
+            return dpi::instruction_builder::commit_finalize(
+                *validator,
+                cluster,
+                self.committed_account.pubkey,
+                dpi::CommitFinalizeArgs {
+                    commit_id: self.commit_id,
+                    lamports: self.committed_account.account.lamports,
+                    owner: self.committed_account.account.owner,
+                    allow_undelegation: self.allow_undelegation,
+                    payload_kind: if data_is_diff {
+                        dpi::CommitPayloadKind::Diff
+                    } else {
+                        dpi::CommitPayloadKind::FullData
+                    }
+                    .value(),
+                    payload_alignment_padding: 0,
+                    payload: data,
+                },
+            );
+        }
         let mut args = CommitFinalizeArgs {
             commit_id: self.commit_id,
             lamports: self.committed_account.account.lamports,
@@ -54,13 +80,13 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        dpi::legacy::instruction_builder::commit_finalize(
+        Ok(dpi::legacy::instruction_builder::commit_finalize(
             *validator,
             self.committed_account.pubkey,
             &mut args,
             &data,
         )
-        .0
+        .0)
     }
 
     #[inline(always)]
@@ -68,7 +94,26 @@ impl CommitFinalizeTask {
         &self,
         validator: &Pubkey,
         base_account: Option<&Account>,
-    ) -> Instruction {
+    ) -> Result<Instruction, DataLayoutError> {
+        if let DelegationVersion::V2 { cluster } = self.version {
+            return dpi::instruction_builder::commit_finalize_from_buffer(
+                *validator,
+                cluster,
+                self.committed_account.pubkey,
+                dpi::CommitFinalizeFromBufferArgs {
+                    commit_id: self.commit_id,
+                    lamports: self.committed_account.account.lamports,
+                    owner: self.committed_account.account.owner,
+                    allow_undelegation: self.allow_undelegation,
+                    payload_kind: if base_account.is_some() {
+                        dpi::CommitPayloadKind::Diff
+                    } else {
+                        dpi::CommitPayloadKind::FullData
+                    }
+                    .value(),
+                },
+            );
+        }
         let (data_buffer_pubkey, _) = committor_interface::pdas::buffer_pda(
             validator,
             &self.committed_account.pubkey,
@@ -84,13 +129,15 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        dpi::legacy::instruction_builder::commit_finalize_from_buffer(
-            *validator,
-            self.committed_account.pubkey,
-            data_buffer_pubkey,
-            &mut args,
+        Ok(
+            dpi::legacy::instruction_builder::commit_finalize_from_buffer(
+                *validator,
+                self.committed_account.pubkey,
+                data_buffer_pubkey,
+                &mut args,
+            )
+            .0,
         )
-        .0
     }
 
     pub fn is_buffer(&self) -> bool {
@@ -100,7 +147,7 @@ impl CommitFinalizeTask {
         )
     }
 
-    pub fn instruction(&self, validator: &Pubkey) -> Instruction {
+    pub fn instruction(&self, validator: &Pubkey) -> Result<Instruction, DataLayoutError> {
         match &self.delivery {
             CommitDelivery::StateInArgs => self.commit_finalize_ix(validator, None),
             CommitDelivery::StateInBuffer => self.commit_finalize_from_buffer_ix(validator, None),
@@ -114,6 +161,13 @@ impl CommitFinalizeTask {
     }
 
     pub fn try_use_buffer(&mut self) -> bool {
+        // An empty payload is already smaller inline than a buffer reference.
+        if matches!(self.version, DelegationVersion::V2 { .. })
+            && self.committed_account.account.data.is_empty()
+            && matches!(self.delivery, CommitDelivery::StateInArgs)
+        {
+            return false;
+        }
         let delivery = std::mem::replace(&mut self.delivery, CommitDelivery::StateInArgs);
         match delivery {
             CommitDelivery::StateInArgs => {

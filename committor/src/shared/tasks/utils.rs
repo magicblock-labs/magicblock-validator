@@ -12,6 +12,7 @@ use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, 
 use solana_pubkey::{Pubkey, pubkey};
 use solana_signer::Signer;
 use solana_transaction::versioned::VersionedTransaction;
+use wheels::DataLayoutError;
 
 use crate::shared::tasks::{
     BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, Task,
@@ -70,6 +71,7 @@ pub(crate) fn create_commit_finalize_task(
     let delivery_details = commit_delivery(&account, base_account);
 
     CommitFinalizeTask {
+        version: Default::default(),
         commit_id,
         allow_undelegation,
         committed_account: account,
@@ -99,10 +101,12 @@ impl TransactionUtils {
         tasks: &[Task],
         validator: &Pubkey,
         budget_instructions: &[Instruction],
-    ) -> Vec<Pubkey> {
+    ) -> Result<Vec<Pubkey>, DataLayoutError> {
         // Collect all unique pubkeys from tasks and budget instructions
-        let mut all_pubkeys: HashSet<Pubkey> =
-            tasks.iter().flat_map(|task| task.involved_accounts(validator)).collect();
+        let mut all_pubkeys = HashSet::new();
+        for task in tasks {
+            all_pubkeys.extend(task.involved_accounts(validator)?);
+        }
 
         all_pubkeys.extend(
             budget_instructions
@@ -110,10 +114,13 @@ impl TransactionUtils {
                 .flat_map(|ix| ix.accounts.iter().map(|meta| meta.pubkey)),
         );
 
-        all_pubkeys.into_iter().collect::<Vec<_>>()
+        Ok(all_pubkeys.into_iter().collect::<Vec<_>>())
     }
 
-    pub(crate) fn tasks_instructions(validator: &Pubkey, tasks: &[Task]) -> Vec<Instruction> {
+    pub(crate) fn tasks_instructions(
+        validator: &Pubkey,
+        tasks: &[Task],
+    ) -> Result<Vec<Instruction>, DataLayoutError> {
         tasks.iter().map(|task| task.instruction(validator)).collect()
     }
 
@@ -129,7 +136,7 @@ impl TransactionUtils {
             compute_unit_price,
             Self::tasks_accounts_size_budget_with_uniqueness_nonce(tasks, uniqueness_nonce),
         );
-        let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks);
+        let mut ixs = Self::tasks_instructions(&authority.pubkey(), tasks)?;
         if let Some(nonce) = uniqueness_nonce {
             ixs.push(Self::uniqueness_noop_instruction(nonce));
         }
@@ -147,7 +154,7 @@ impl TransactionUtils {
             Self::tasks_compute_units(tasks, uniqueness_nonce),
             compute_unit_price,
         );
-        let mut instructions = Self::tasks_instructions(&authority.pubkey(), tasks);
+        let mut instructions = Self::tasks_instructions(&authority.pubkey(), tasks)?;
         if let Some(nonce) = uniqueness_nonce {
             instructions.push(Self::uniqueness_noop_instruction(nonce));
         }

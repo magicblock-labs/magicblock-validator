@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use delegation_program_interface::legacy::state::{DelegationMetadata, UndelegationRequester};
+use delegation_program_interface::UndelegationRequester;
 use mbv_core::intent::{CommitAndUndelegate, CommitType, UndelegateType, types::CommittedAccount};
 use program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;
@@ -9,7 +9,7 @@ use solana_signature::Signature;
 use tracing::error;
 
 use crate::shared::{
-    account_state::{TaskInfoProvider, TaskInfoProviderError},
+    account_state::{DelegationInfo, TaskInfoProvider, TaskInfoProviderError},
     tasks::{
         Task, UndelegateTask,
         utils::{COMMIT_STATE_SIZE_THRESHOLD, create_action_tasks, create_commit_finalize_task},
@@ -22,15 +22,14 @@ struct CommitInputs {
     commit_nonces: HashMap<Pubkey, u64>,
     /// Base account state for diff calculation
     base_accounts: HashMap<Pubkey, Account>,
+    delegation_info: HashMap<Pubkey, DelegationInfo>,
 }
 
 /// Task builder
 pub(crate) struct TaskBuilder;
 
 impl TaskBuilder {
-    fn get_follow_up_metadata_accounts(
-        intent_bundle: &ScheduledIntentBundle,
-    ) -> Vec<(Pubkey, u64)> {
+    fn get_follow_up_info_accounts(intent_bundle: &ScheduledIntentBundle) -> Vec<(Pubkey, u64)> {
         [
             intent_bundle.get_undelegate_intent_accounts(),
             intent_bundle.intent_bundle.get_commit_finalize_and_undelegate_intent_accounts(),
@@ -63,9 +62,10 @@ impl TaskBuilder {
             .filter(|account| account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD)
             .map(|account| account.pubkey)
             .collect::<Vec<_>>();
-        let (commit_ids, base_accounts) = tokio::join!(
+        let (commit_ids, base_accounts, delegation_info) = tokio::join!(
             task_info_provider.fetch_next_commit_nonces(&committed_accounts, min_context_slot),
-            task_info_provider.get_base_accounts(&diffable_pubkeys, min_context_slot)
+            task_info_provider.get_base_accounts(&diffable_pubkeys, min_context_slot),
+            task_info_provider.fetch_delegation_info(&committed_accounts, min_context_slot)
         );
         let commit_nonces = commit_ids.map_err(TaskBuilderError::CommitTasksBuildError)?;
         let base_accounts = base_accounts.unwrap_or_else(|err| {
@@ -73,7 +73,11 @@ impl TaskBuilder {
             Default::default()
         });
 
-        Ok(CommitInputs { commit_nonces, base_accounts })
+        Ok(CommitInputs {
+            commit_nonces,
+            base_accounts,
+            delegation_info: delegation_info.map_err(TaskBuilderError::CommitTasksBuildError)?,
+        })
     }
 
     /// Builds commits and actions that can run before the follow-up transaction.
@@ -91,6 +95,7 @@ impl TaskBuilder {
         let CommitInputs {
             mut commit_nonces,
             mut base_accounts,
+            delegation_info,
         } = Self::fetch_commit_inputs(intent_bundle, task_info_provider).await?;
 
         // Create tasks per intent type
@@ -100,7 +105,8 @@ impl TaskBuilder {
                 false,
                 &mut commit_nonces,
                 &mut base_accounts,
-            ));
+                &delegation_info,
+            )?);
         }
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize {
             tasks.extend(build_commit_tasks(
@@ -108,7 +114,8 @@ impl TaskBuilder {
                 false,
                 &mut commit_nonces,
                 &mut base_accounts,
-            ));
+                &delegation_info,
+            )?);
             if let CommitType::WithBaseActions { base_actions, .. } = value {
                 tasks.extend(create_action_tasks(base_actions));
             }
@@ -119,7 +126,8 @@ impl TaskBuilder {
                 true,
                 &mut commit_nonces,
                 &mut base_accounts,
-            ));
+                &delegation_info,
+            )?);
         }
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize_and_undelegate {
             tasks.extend(build_commit_tasks(
@@ -127,7 +135,8 @@ impl TaskBuilder {
                 true,
                 &mut commit_nonces,
                 &mut base_accounts,
-            ));
+                &delegation_info,
+            )?);
             if let CommitType::WithBaseActions { base_actions, .. } = &value.commit_action {
                 tasks.extend(create_action_tasks(base_actions));
             }
@@ -142,16 +151,14 @@ impl TaskBuilder {
         intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<Task>> {
         // Helper to create an undelegate task
-        fn undelegate_task(
-            account: &CommittedAccount,
-            rent_reimbursement: &Pubkey,
-            include_undelegation_request: bool,
-        ) -> Task {
+        fn undelegate_task(account: &CommittedAccount, info: &DelegationInfo) -> Task {
             UndelegateTask {
+                version: info.version,
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
-                rent_reimbursement: *rent_reimbursement,
-                include_undelegation_request,
+                rent_reimbursement: info.rent_payer,
+                include_undelegation_request: info.undelegation_requester
+                    == UndelegationRequester::OwnerProgram,
             }
             .into()
         }
@@ -170,20 +177,15 @@ impl TaskBuilder {
 
         fn create_undelegate_tasks(
             commit_and_undelegate: &CommitAndUndelegate,
-            delegation_metadata: &HashMap<Pubkey, DelegationMetadata>,
+            delegation_info: &HashMap<Pubkey, DelegationInfo>,
         ) -> TaskBuilderResult<Vec<Task>> {
             let accounts = commit_and_undelegate.get_committed_accounts();
 
             let mut tasks = accounts
                 .iter()
                 .map(|account| {
-                    let metadata =
-                        delegation_metadata_for_pubkey(account.pubkey, delegation_metadata)?;
-                    Ok(undelegate_task(
-                        account,
-                        &metadata.rent_payer,
-                        metadata.undelegation_requester == UndelegationRequester::OwnerProgram,
-                    ))
+                    let info = delegation_info_for_pubkey(account.pubkey, delegation_info)?;
+                    Ok(undelegate_task(account, info))
                 })
                 .collect::<TaskBuilderResult<Vec<_>>>()?;
 
@@ -196,15 +198,15 @@ impl TaskBuilder {
         }
 
         let mut tasks = Vec::new();
-        let follow_up_metadata_accounts = Self::get_follow_up_metadata_accounts(intent_bundle);
+        let follow_up_info_accounts = Self::get_follow_up_info_accounts(intent_bundle);
         let min_context_slot = intent_bundle
             .get_all_committed_accounts()
             .iter()
             .map(|account| account.remote_slot)
             .max()
             .unwrap_or(0);
-        let delegation_metadata = info_provider
-            .fetch_delegation_metadata(&follow_up_metadata_accounts, min_context_slot)
+        let delegation_info = info_provider
+            .fetch_delegation_info(&follow_up_info_accounts, min_context_slot)
             .await
             .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
 
@@ -214,11 +216,11 @@ impl TaskBuilder {
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit_and_undelegate {
             tasks.extend(create_follow_up_tasks(&value.commit_action));
-            tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
+            tasks.extend(create_undelegate_tasks(value, &delegation_info)?);
         }
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit_finalize_and_undelegate {
-            tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
+            tasks.extend(create_undelegate_tasks(value, &delegation_info)?);
         }
 
         Ok(tasks)
@@ -230,14 +232,19 @@ fn build_commit_tasks(
     allow_undelegation: bool,
     commit_nonces: &mut HashMap<Pubkey, u64>,
     base_accounts: &mut HashMap<Pubkey, Account>,
-) -> Vec<Task> {
+    delegation_info: &HashMap<Pubkey, DelegationInfo>,
+) -> TaskBuilderResult<Vec<Task>> {
     commit_type
         .get_committed_accounts()
         .iter()
         .map(|account| {
             let nonce = take_commit_nonce(commit_nonces, account.pubkey);
             let base = base_accounts.remove(&account.pubkey);
-            create_commit_finalize_task(nonce, allow_undelegation, account.clone(), base).into()
+            let info = delegation_info_for_pubkey(account.pubkey, delegation_info)?;
+            let mut task =
+                create_commit_finalize_task(nonce, allow_undelegation, account.clone(), base);
+            task.version = info.version;
+            Ok(task.into())
         })
         .collect()
 }
@@ -252,13 +259,13 @@ fn take_commit_nonce(commit_nonces: &mut HashMap<Pubkey, u64>, pubkey: Pubkey) -
     })
 }
 
-fn delegation_metadata_for_pubkey(
+fn delegation_info_for_pubkey(
     pubkey: Pubkey,
-    delegation_metadata: &HashMap<Pubkey, DelegationMetadata>,
-) -> TaskBuilderResult<&DelegationMetadata> {
-    delegation_metadata
+    delegation_info: &HashMap<Pubkey, DelegationInfo>,
+) -> TaskBuilderResult<&DelegationInfo> {
+    delegation_info
         .get(&pubkey)
-        .ok_or(TaskBuilderError::MissingDelegationMetadata(pubkey))
+        .ok_or(TaskBuilderError::MissingDelegationInfo(pubkey))
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -267,8 +274,8 @@ pub enum TaskBuilderError {
     CommitTasksBuildError(#[source] TaskInfoProviderError),
     #[error("FollowUpTasksBuildError: {0}")]
     FollowUpTasksBuildError(#[source] TaskInfoProviderError),
-    #[error("Missing delegation metadata for {0}")]
-    MissingDelegationMetadata(Pubkey),
+    #[error("Missing delegation info for {0}")]
+    MissingDelegationInfo(Pubkey),
 }
 
 impl TaskBuilderError {
@@ -276,7 +283,7 @@ impl TaskBuilderError {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
             Self::FollowUpTasksBuildError(err) => err.signature(),
-            Self::MissingDelegationMetadata(_) => None,
+            Self::MissingDelegationInfo(_) => None,
         }
     }
 
@@ -285,7 +292,7 @@ impl TaskBuilderError {
             Self::CommitTasksBuildError(err) | Self::FollowUpTasksBuildError(err) => {
                 err.is_transient()
             }
-            Self::MissingDelegationMetadata(_) => false,
+            Self::MissingDelegationInfo(_) => false,
         }
     }
 }

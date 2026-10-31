@@ -138,7 +138,7 @@ impl ExecutionContext {
         if !accounts.is_empty() {
             let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
             self.task_info_provider
-                .fetch_delegation_metadata(&accounts, min_context_slot)
+                .fetch_delegation_info(&accounts, min_context_slot)
                 .await
                 .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
             let pubkeys: Vec<_> = accounts.iter().map(|(pubkey, _)| *pubkey).collect();

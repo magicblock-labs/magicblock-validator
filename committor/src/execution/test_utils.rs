@@ -189,7 +189,7 @@ impl TransactionPreparator for RecordingPreparator {
                 instructions.extend(TransactionUtils::tasks_instructions(
                     &authority.pubkey(),
                     &strategy.tasks,
-                ));
+                )?);
                 // The RPC mock decodes legacy messages. Keep the same budget
                 // instruction offset used by production versioned messages.
                 Ok(VersionedMessage::Legacy(Message::new(
