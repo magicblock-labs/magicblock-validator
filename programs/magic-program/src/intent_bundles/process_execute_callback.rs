@@ -98,20 +98,14 @@ mod tests {
     use solana_pubkey::Pubkey;
 
     use crate::{
-        instruction_utils::InstructionUtils,
-        magicblock_processor::CallbackEntrypoint,
-        validator::{generate_validator_authority_if_needed, validator_authority_id},
+        instruction_utils::InstructionUtils, magicblock_processor::CallbackEntrypoint,
+        test_utils::ensure_authority,
     };
 
     fn make_data(inner_accounts: Vec<AccountMeta>) -> Vec<u8> {
         let mut instruction = InstructionUtils::noop_instruction(0);
         instruction.accounts = inner_accounts;
         wincode::serialize(&CallbackInstruction::ExecuteCallback { instruction }).unwrap()
-    }
-
-    fn setup_validator() -> Pubkey {
-        generate_validator_authority_if_needed();
-        validator_authority_id()
     }
 
     fn outer_accounts(
@@ -152,7 +146,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_validate_rejects_validator_not_signer() {
-        let validator = setup_validator();
+        let validator = ensure_authority();
         let data = make_data(vec![]);
         let (tx, _) = outer_accounts(validator, CALLBACK_SIGNER);
         run(
@@ -169,7 +163,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_validate_rejects_wrong_callback_signer() {
-        let validator = setup_validator();
+        let validator = ensure_authority();
         let wrong = Pubkey::new_unique();
         let data = make_data(vec![]);
         let (tx, _) = outer_accounts(validator, wrong);
@@ -189,7 +183,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_callback_accounts_rejects_unauthorized_signer() {
-        let validator = setup_validator();
+        let validator = ensure_authority();
         let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
         let rogue = Pubkey::new_unique();
         let data = make_data(vec![AccountMeta::new_readonly(rogue, true)]);
@@ -199,7 +193,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_callback_accounts_rejects_writable_callback_signer() {
-        let validator = setup_validator();
+        let validator = ensure_authority();
         let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
         let data = make_data(vec![AccountMeta::new(CALLBACK_SIGNER, false)]);
         run(&data, tx, ix, Err(InstructionError::Immutable));
@@ -208,7 +202,7 @@ mod tests {
     #[test]
     #[serial]
     fn test_callback_accounts_rejects_validator_authority() {
-        let validator = setup_validator();
+        let validator = ensure_authority();
         let (tx, ix) = outer_accounts(validator, CALLBACK_SIGNER);
         let data = make_data(vec![AccountMeta::new_readonly(validator, false)]);
         run(&data, tx, ix, Err(InstructionError::IncorrectAuthority));

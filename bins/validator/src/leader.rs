@@ -17,7 +17,6 @@ use nucleus::{
     metrics::EventTimer,
     shutdown::{Service, ShutdownManager, ShutdownReason},
 };
-use program::validator::init_validator_authority;
 use replicator::ReplicationDispatcher;
 use runtime::keeper_builder;
 use services::{
@@ -66,7 +65,6 @@ impl Leader {
         let mut timer = EventTimer::new("init");
 
         let engine_ledger = config.engine.ledger.directory.clone();
-        init_validator_authority(config.engine.authority.local.clone());
 
         let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
         let ledger = Arc::new(ledger);

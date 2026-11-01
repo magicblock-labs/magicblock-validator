@@ -214,7 +214,7 @@ mod tests {
         let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let mut ix = InstructionUtils::close_outbox_intent_instruction(authority(), intent_id);
         ix.accounts[0].is_signer = false;
 
         let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
@@ -237,8 +237,8 @@ mod tests {
         );
         ensure_started_validator(&mut account_data, None);
 
-        let mut ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
-        ix.accounts[0].pubkey = fake_validator.pubkey();
+        let ix =
+            InstructionUtils::close_outbox_intent_instruction(fake_validator.pubkey(), intent_id);
         let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
@@ -250,11 +250,13 @@ mod tests {
 
     #[test]
     fn test_closes_outbox_pda() {
+        let validator = Pubkey::new_unique();
+        nucleus::tls::AUTHORITY.set(validator);
         let intent_id: u64 = rand::random();
         let mut account_data = setup_outbox_pda(intent_id, Some(final_stage()));
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let ix = InstructionUtils::close_outbox_intent_instruction(validator, intent_id);
         let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
@@ -271,7 +273,7 @@ mod tests {
         let mut account_data = setup_outbox_pda(intent_id, None);
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let ix = InstructionUtils::close_outbox_intent_instruction(authority(), intent_id);
         let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),
@@ -292,7 +294,7 @@ mod tests {
         let mut account_data = setup_outbox_pda(intent_id, Some(committing));
         ensure_started_validator(&mut account_data, None);
 
-        let ix = InstructionUtils::close_outbox_intent_instruction(intent_id);
+        let ix = InstructionUtils::close_outbox_intent_instruction(authority(), intent_id);
         let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
         process_outbox_intent_instruction(
             ix.data.as_slice(),

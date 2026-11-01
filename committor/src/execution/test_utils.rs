@@ -278,7 +278,6 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
         );
     }
     let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map("succeeds", mocks));
-    program::validator::generate_validator_authority_if_needed();
     let transaction_preparator = RecordingPreparator {
         steps: Arc::new(Mutex::new(steps.into())),
         ..Default::default()
