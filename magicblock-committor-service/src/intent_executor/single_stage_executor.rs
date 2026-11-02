@@ -83,7 +83,8 @@ where
         let result = loop {
             self.current_attempt += 1;
 
-            // Prepare & execute message
+            // Preparation happens before settlement, so transient failures
+            // can retry just like commit-stage preparation.
             let execution_result = prepare_and_execute_strategy(
                 &self.intent_client,
                 &self.authority,
@@ -92,7 +93,7 @@ where
                 persister,
             )
             .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?;
+            .map_err(IntentExecutorError::FailedCommitPreparationError)?;
 
             // Process error: Ok - return, Err - handle further
             let execution_err = match execution_result {

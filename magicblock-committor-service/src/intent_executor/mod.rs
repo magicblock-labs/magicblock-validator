@@ -673,8 +673,11 @@ mod tests {
         },
         traits::ActionResult,
     };
+    use magicblock_rpc_client::MagicBlockRpcClientError;
     use solana_account::Account;
     use solana_instruction::error::InstructionError;
+    use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+    use solana_rpc_client_api::client_error::Error as RpcClientError;
     use solana_transaction_error::TransactionError;
     use tempfile::NamedTempFile;
 
@@ -683,8 +686,29 @@ mod tests {
         intent_executor::task_info_fetcher::RpcTaskInfoFetcher,
         persist::IntentPersisterImpl,
         tasks::{utils::create_commit_finalize_task, UndelegateTask},
-        transaction_preparator::TransactionPreparatorImpl,
+        transaction_preparator::{
+            delivery_preparator::{
+                DeliveryPreparatorError, DeliveryPreparatorResult,
+            },
+            error::PreparatorResult,
+            TransactionPreparatorImpl,
+        },
+        transactions::PreparedMessage,
     };
+
+    #[derive(Clone)]
+    struct NoCallbacks;
+
+    impl ActionsCallbackScheduler for NoCallbacks {
+        fn schedule(
+            &self,
+            _: Vec<BaseActionCallback>,
+            _: Option<Signature>,
+            _: ActionResult,
+        ) -> Vec<Result<Signature, CallbackScheduleError>> {
+            unreachable!("no callbacks expected")
+        }
+    }
 
     fn commit_task(commit_id: u64) -> BaseTaskImpl {
         create_commit_finalize_task(
@@ -718,20 +742,6 @@ mod tests {
 
     #[test]
     fn failed_execution_persists_available_signatures() {
-        #[derive(Clone)]
-        struct NoCallbacks;
-
-        impl ActionsCallbackScheduler for NoCallbacks {
-            fn schedule(
-                &self,
-                _: Vec<BaseActionCallback>,
-                _: Option<Signature>,
-                _: ActionResult,
-            ) -> Vec<Result<Signature, CallbackScheduleError>> {
-                unreachable!("persisting a result must not schedule callbacks")
-            }
-        }
-
         let db_file = NamedTempFile::new().unwrap();
         let persister = IntentPersisterImpl::try_new(db_file.path()).unwrap();
         let pubkey = Pubkey::new_unique();
@@ -807,6 +817,89 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(row.commit_status, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn preparation_failure_retries_only_before_commit() {
+        struct FailingPreparator;
+
+        #[async_trait]
+        impl TransactionPreparator for FailingPreparator {
+            async fn prepare_for_strategy<P: IntentPersister>(
+                &self,
+                _: &Keypair,
+                _: &mut TransactionStrategy,
+                _: &Option<P>,
+            ) -> PreparatorResult<PreparedMessage> {
+                let rpc_error = RpcClientError::from(std::io::Error::from(
+                    std::io::ErrorKind::TimedOut,
+                ));
+                Err(DeliveryPreparatorError::FailedToPrepareBufferAccounts(
+                    MagicBlockRpcClientError::from(rpc_error).into(),
+                )
+                .into())
+            }
+
+            async fn cleanup_for_strategy(
+                &self,
+                _: &Keypair,
+                _: &TransactionStrategy,
+                _: bool,
+            ) -> DeliveryPreparatorResult<(), BufferExecutionError>
+            {
+                unreachable!("no resources were prepared")
+            }
+        }
+
+        let rpc = MagicblockRpcClient::new(Arc::new(RpcClient::new_mock(
+            "succeeds".into(),
+        )));
+        let client = IntentExecutionClient::new(rpc.clone());
+        let fetcher =
+            Arc::new(CacheTaskInfoFetcher::new(RpcTaskInfoFetcher::new(rpc)));
+        let mut report = IntentExecutionReport::default();
+        let persister = None::<IntentPersisterImpl>;
+        let strategy = || TransactionStrategy {
+            optimized_tasks: vec![commit_task(1)],
+            ..Default::default()
+        };
+
+        let before_commit = SingleStageExecutor::new(
+            Keypair::new(),
+            client.clone(),
+            fetcher,
+            strategy(),
+            NoCallbacks,
+            &mut report,
+            1,
+        )
+        .execute(&[], &FailingPreparator, &persister)
+        .await;
+
+        let after_commit = TwoStageExecutor::new(
+            Keypair::new(),
+            strategy(),
+            TransactionStrategy::default(),
+            client,
+            NoCallbacks,
+            &mut report,
+            1,
+        )
+        .done(Signature::new_unique())
+        .finalize(&FailingPreparator, &persister)
+        .await;
+
+        for (result, should_retry) in
+            [(before_commit, true), (after_commit, false)]
+        {
+            assert!(result.is_err());
+            let result = IntentExecutionResult {
+                inner: result.map(ExecutionOutput::SingleStage),
+                patched_errors: vec![],
+                callbacks_report: vec![],
+            };
+            assert_eq!(result.is_retriable(true), should_retry);
         }
     }
 }
