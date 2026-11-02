@@ -1765,7 +1765,7 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
         committee,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
-            .nonce(3)
+            .commit_seq(3)
             .build(),
     );
     let overflow = Pubkey::new_unique();
@@ -1773,7 +1773,7 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
         overflow,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
-            .nonce(u64::MAX)
+            .commit_seq(u32::MAX)
             .build(),
     );
     let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
@@ -1799,7 +1799,7 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     };
     let initial_context = engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data().to_vec();
     assert!(engine.execute(&[schedule.clone(), bundle.clone(), fail]).await.is_err());
-    assert_eq!(engine.get_account(committee).unwrap().nonce(), 3);
+    assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 3);
     assert_eq!(
         engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data(),
         initial_context
@@ -1823,14 +1823,14 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
             InstructionError::ArithmeticOverflow
         ))
     ));
-    assert_eq!(engine.get_account(overflow).unwrap().nonce(), u64::MAX);
+    assert_eq!(engine.get_account(overflow).unwrap().commit_seq(), u32::MAX);
     assert_eq!(
         engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data(),
         initial_context
     );
 
     engine.execute(&[schedule, bundle]).await.unwrap();
-    assert_eq!(engine.get_account(committee).unwrap().nonce(), 5);
+    assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 5);
     let context =
         MagicContext::deserialize(engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data())
             .unwrap();

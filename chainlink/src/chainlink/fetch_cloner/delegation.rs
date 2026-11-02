@@ -255,7 +255,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     this: &FetchCloner<T, U>,
     request: &crate::cloner::AccountCloneRequest,
     fetch_context: metrics::AccountFetchContext,
-) -> ChainlinkResult<u64> {
+) -> ChainlinkResult<u32> {
     use delegation_program_api::{
         pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
     };
@@ -322,7 +322,9 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     }
     let metadata = DelegationMetadata::try_from_bytes_with_discriminator(metadata.data())
         .map_err(|_| invalid())?;
-    Ok(metadata.last_commit_id)
+    u32::try_from(metadata.last_commit_id).map_err(|_| {
+        ChainlinkError::InvalidDelegationCommitSequence(metadata_pubkey, metadata.last_commit_id)
+    })
 }
 
 #[cfg(test)]

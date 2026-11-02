@@ -70,7 +70,9 @@ pub fn ensure_started_validator(
                 StubNonces::Global(nonce) => *nonce,
                 StubNonces::PerAccount(nonces) => nonces.get(pubkey).copied().unwrap_or_default(),
             };
-            *account = AccountBuilder::from(std::mem::take(account)).nonce(nonce).build();
+            *account = AccountBuilder::from(std::mem::take(account))
+                .commit_seq(nonce.try_into().expect("stub nonce fits u32"))
+                .build();
         }
     }
 }

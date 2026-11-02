@@ -19,7 +19,7 @@ pub struct CommittedAccount {
 impl From<CommittedAccountRef> for CommittedAccount {
     fn from(value: CommittedAccountRef) -> Self {
         let remote_slot = value.1.slot();
-        let commit_id = value.1.nonce();
+        let commit_id = u64::from(value.1.commit_seq());
         Self {
             pubkey: value.0,
             account: value.1.into(),
@@ -34,7 +34,7 @@ impl CommittedAccount {
     /// ATA -> eATA if applicable.
     pub fn from_account_shared(pubkey: Pubkey, account_shared: &AccountSharedData) -> Self {
         let remote_slot = account_shared.slot();
-        let commit_id = account_shared.nonce();
+        let commit_id = u64::from(account_shared.commit_seq());
         if let Some((eata_pubkey, eata)) = try_remap_ata_to_eata(&pubkey, account_shared) {
             return CommittedAccount {
                 pubkey: eata_pubkey,

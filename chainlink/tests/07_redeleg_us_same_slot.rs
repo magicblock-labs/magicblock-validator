@@ -81,9 +81,9 @@ async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
     let record = add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
     magicblock_chainlink::testing::deleg::add_delegation_metadata_for(&ctx.rpc_client, pubkey, 3);
     ctx.ensure_account(&pubkey).await.unwrap();
-    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().nonce(), 3);
+    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 3);
     let reserve = magic_root_interface::MagicRootInstruction::Patch(
-        solana_account::AccountFieldPatch::Nonce(7),
+        solana_account::AccountFieldPatch::CommitSeq(7),
     )
     .compose(pubkey)
     .unwrap();
@@ -113,7 +113,7 @@ async fn redelegation_without_readonly_notification() {
         .read(&pubkey, |local| {
             assert_eq!(local.lamports(), remote.lamports);
             assert_eq!(local.data(), remote.data);
-            assert_eq!(local.nonce(), 0, "new delegation starts a fresh nonce");
+            assert_eq!(local.commit_seq(), 0, "new delegation starts a fresh nonce");
         })
         .unwrap()
         .expect("local account");
@@ -128,7 +128,7 @@ async fn old_delegation_keeps_recovery_subscription() {
     add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
     assert!(ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
-    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().nonce(), 7);
+    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 7);
     assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
 }
 
@@ -141,7 +141,7 @@ async fn failed_redelegation_can_recover() {
     let record = add_record(&ctx, pubkey, owner, slot, Some(failing_action()));
     assert!(ctx.send_and_receive_account_update(pubkey, remote.clone(), Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
-    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().nonce(), 7);
+    assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 7);
     assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
 
     let slot = ctx.rpc_client.set_slot(slot + 1);

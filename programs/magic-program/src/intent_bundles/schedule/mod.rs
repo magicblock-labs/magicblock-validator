@@ -221,9 +221,12 @@ pub(crate) fn reserve_commit_id(
         return Err(InstructionError::ReadonlyDataModified);
     }
     let mut account = account.borrow_mut()?;
-    let commit_id = account.nonce().checked_add(1).ok_or(InstructionError::ArithmeticOverflow)?;
-    AccountFieldPatch::Nonce(commit_id)
+    let commit_seq = account
+        .commit_seq()
+        .checked_add(1)
+        .ok_or(InstructionError::ArithmeticOverflow)?;
+    AccountFieldPatch::CommitSeq(commit_seq)
         .apply(&mut account)
         .map_err(|_| InstructionError::InvalidAccountData)?;
-    Ok(commit_id)
+    Ok(u64::from(commit_seq))
 }

@@ -88,7 +88,7 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     assert!(spl_token_account.is_native.is_none());
     assert!(delegated);
     let projected = ctx.test_engine.get_account(ata_pubkey).unwrap();
-    assert_eq!(projected.nonce(), 7);
+    assert_eq!(projected.commit_seq(), 7);
     let committed = mbv_core::intent::CommittedAccount::from_account_shared(ata_pubkey, &projected);
     assert_eq!(committed.pubkey, eata_pubkey);
     assert_eq!(committed.commit_id, 7);
