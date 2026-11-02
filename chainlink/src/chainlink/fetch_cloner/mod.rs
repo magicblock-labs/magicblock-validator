@@ -1646,6 +1646,17 @@ where
             return;
         }
 
+        // A delegated clone carries the delegation slot rather than a fetch
+        // slot, so compare against the record instead of the candidate slot.
+        let is_settled_delegation = |account: &AccountSharedData| {
+            account.is(AccountMode::Delegated) && account.slot() >= deleg_record.delegation_slot
+        };
+        let already_delegated =
+            self.read_account(&candidate.pubkey, is_settled_delegation).unwrap_or(false);
+        if already_delegated {
+            return;
+        }
+
         const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
         for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
             // The candidate may have been parked before local undelegation
@@ -1696,7 +1707,8 @@ where
             }
             let reader = |account: &AccountSharedData| {
                 let settled = account.slot() > candidate.slot
-                    || (account.slot() == candidate.slot && account.is(AccountMode::Delegated));
+                    || (account.slot() == candidate.slot && account.is(AccountMode::Delegated))
+                    || is_settled_delegation(account);
                 let stale_transient = account.is(AccountMode::Undelegating)
                     && deleg_record.delegation_slot <= account.slot();
                 (settled, stale_transient)
