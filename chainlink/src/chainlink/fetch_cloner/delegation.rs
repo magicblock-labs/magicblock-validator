@@ -245,6 +245,12 @@ where
 
 /// Seed only a newly materialized session. Existing protected images are skipped
 /// by the engine, so later observations cannot overwrite ER reservations.
+///
+/// CHECKPOINT: A fresh delegation starts at commit ID 0. Once commits advance it,
+/// the account already exists locally, and cloning preserves its counter.
+/// For this normal lifecycle, initializing to 0 may be enough and this lookup
+/// may be unnecessary. We keep it for now: a nonzero initial value would matter
+/// when rebuilding an active delegation without its existing local ER state.
 pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     this: &FetchCloner<T, U>,
     request: &crate::cloner::AccountCloneRequest,
