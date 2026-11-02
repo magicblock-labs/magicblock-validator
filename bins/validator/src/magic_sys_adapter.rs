@@ -50,21 +50,25 @@ impl MagicSys for MagicSysAdapter {
 
         let _timer = metrics::start_fetch_commit_nonces_wait_timer();
         let provider = self.commit_id_provider.clone();
-        let fetch = self
-            .handle
-            .spawn(async move { provider.current_commit_ids(&accounts, min_context_slot).await });
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        self.handle.spawn(async move {
+            let result = provider.current_commit_ids(&accounts, min_context_slot).await;
+            let _ = sender.send(result);
+        });
 
-        // Engine calls this syscall on a dedicated OS thread. Keep the fetch
-        // spawned to isolate panics and let it finish even if this wait times out.
-        self.handle
-            .block_on(async { tokio::time::timeout(Self::FETCH_TIMEOUT, fetch).await })
-            .map_err(|_| {
-                error!("Timed out waiting for commit nonces from CommittorService");
-                InstructionError::Custom(Self::TIMEOUT_ERR)
-            })?
-            .map_err(|err| {
-                error!(error = ?err, "Commit nonce fetch task failed");
-                InstructionError::Custom(Self::TASK_ERR)
+        // Simulation can call this from a Tokio runtime thread. Wait on a
+        // standard channel instead of trying to start that runtime again.
+        receiver
+            .recv_timeout(Self::FETCH_TIMEOUT)
+            .map_err(|err| match err {
+                std::sync::mpsc::RecvTimeoutError::Timeout => {
+                    error!("Timed out waiting for commit nonces from CommittorService");
+                    InstructionError::Custom(Self::TIMEOUT_ERR)
+                }
+                std::sync::mpsc::RecvTimeoutError::Disconnected => {
+                    error!("Commit nonce fetch task failed");
+                    InstructionError::Custom(Self::TASK_ERR)
+                }
             })?
             .inspect_err(|err| error!(error = ?err, "Failed to fetch current commit nonces"))
             .map_err(|_| InstructionError::Custom(Self::FETCH_ERR))
