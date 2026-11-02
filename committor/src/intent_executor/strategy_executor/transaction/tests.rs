@@ -390,6 +390,33 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
             }
         }
     }
+
+    // Resuming an empty follow-up reports only the transaction that actually ran.
+    let ctx = executor(vec![], None);
+    let mut report = IntentExecutionReport::default();
+    let commit_signature = Signature::new_unique();
+    let result = TransactionExecutor::resume_follow_up(
+        &ctx,
+        &mut report,
+        42,
+        commit_signature,
+        strategy(vec![]),
+    )
+    .execute(|| Some(Duration::from_secs(1)))
+    .await;
+    assert!(result.is_ok());
+    assert!(ctx.transaction_preparator.prepared.lock().unwrap().is_empty());
+    let meta = ScheduledBaseIntentMeta {
+        id: 42,
+        slot: 0,
+        blockhash: Default::default(),
+        payer: ACCOUNT,
+        included_pubkeys: vec![ACCOUNT],
+        intent_sent_transaction: Default::default(),
+        requested_undelegation: false,
+    };
+    let receipt = crate::outbox::utils::build_sent_commit(meta, &result, &report);
+    assert_eq!(receipt.chain_signatures, vec![commit_signature]);
 }
 
 #[tokio::test(start_paused = true)]

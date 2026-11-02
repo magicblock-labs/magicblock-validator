@@ -19,7 +19,13 @@ pub(crate) fn build_sent_commit(
             ExecutionOutput::TwoStage {
                 commit_signature,
                 finalize_signature,
-            } => vec![*commit_signature, *finalize_signature],
+            } => {
+                if commit_signature == finalize_signature {
+                    vec![*commit_signature]
+                } else {
+                    vec![*commit_signature, *finalize_signature]
+                }
+            }
         },
         Err(err) => {
             error!(
