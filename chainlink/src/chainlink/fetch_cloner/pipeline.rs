@@ -18,8 +18,7 @@ use super::{
     FetchCloner, delegation,
     subscription::{SubscriptionRelease, acquire_subs, release_subs},
     types::{
-        AccountWithCompanion, ClassifiedAccounts, PartitionedNotFound, ResolvedDelegatedAccounts,
-        ResolvedPrograms,
+        AccountWithCompanion, ClassifiedAccounts, ResolvedDelegatedAccounts, ResolvedPrograms,
     },
 };
 use crate::{
@@ -121,21 +120,6 @@ fn classify_program(
     } else {
         programs.push((pubkey, account, slot));
     }
-}
-
-pub(crate) fn partition_not_found(
-    mark_empty_if_not_found: Option<&[Pubkey]>,
-    not_found: Vec<(Pubkey, u64)>,
-) -> PartitionedNotFound {
-    let Some(mark_empty) = mark_empty_if_not_found else {
-        return PartitionedNotFound {
-            clone_as_empty: Vec::new(),
-            not_found,
-        };
-    };
-    let (clone_as_empty, not_found) =
-        not_found.into_iter().partition(|(pubkey, _)| mark_empty.contains(pubkey));
-    PartitionedNotFound { clone_as_empty, not_found }
 }
 
 /// Resolves delegated accounts by fetching their delegation records
@@ -262,8 +246,6 @@ where
                         return Err(err);
                     }
                 };
-
-                trace!(pubkey = %pubkey, "Delegation record found");
 
                 let delegated_to_other =
                     delegation::delegated_to_other(&this.validator_pubkey, &delegation_record);
@@ -594,16 +576,6 @@ where
 {
     let mut pending = JoinSet::new();
     for request in requests {
-        if tracing::enabled!(Level::TRACE) {
-            let account = request.account.read();
-            trace!(
-                pubkey = %request.pubkey,
-                slot = account.slot(),
-                owner = %account.owner(),
-                actions = request.post_delegation_mode.has_actions(),
-                "Cloning account"
-            );
-        }
         let this = this.clone();
         let fetch_context = fetch_context.clone();
         pending.spawn(async move { this.clone_account(request, fetch_context).await });
@@ -635,7 +607,7 @@ where
                 ChainlinkCloneIntent::ProgramData,
                 ChainlinkCloneOutcome::Skipped,
             );
-            debug!(program_id = %acc.program_id, "Skipping clone of program");
+
             continue;
         }
         let this_clone = this.clone();

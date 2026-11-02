@@ -1,0 +1,78 @@
+name: Build or restore RedSuite
+description: Cache the portable CLI separately from Agave-specific SBF fixtures
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve RedSuite source
+      id: source
+      shell: bash
+      working-directory: redsuite
+      run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+    # Bump artifact versions when build flags or profiles change, not cache plumbing.
+    - name: Restore RedSuite CLI
+      id: cli
+      uses: actions/cache/restore@v6
+      with:
+        path: redsuite-dist/redsuite
+        key: redsuite-cli-v4-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}
+
+    - name: Restore RedSuite fixtures
+      id: fixtures
+      uses: actions/cache/restore@v6
+      with:
+        path: redsuite-dist/deploy
+        key: >-
+          redsuite-fixtures-v4-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.sha }}-${{
+            hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
+          }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-build-env
+      id: build-env
+      if: steps.cli.outputs.cache-hit != 'true' || steps.fixtures.outputs.cache-hit != 'true'
+      with:
+        workspace: redsuite
+        cache-key: redsuite-release
+        libclang: "false"
+
+    - name: Build RedSuite CLI
+      if: steps.cli.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: redsuite
+      run: |
+        cargo build --release --locked -p redsuite
+        mkdir -p ../redsuite-dist
+        cp target/release/redsuite ../redsuite-dist/
+
+    - name: Save RedSuite CLI
+      if: steps.cli.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: redsuite-dist/redsuite
+        key: ${{ steps.cli.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      if: steps.fixtures.outputs.cache-hit != 'true'
+
+    - name: Build RedSuite fixtures
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: redsuite
+      run: |
+        env -u REDSUITE_ROOT cargo xtask programs
+        mkdir -p ../redsuite-dist/deploy
+        cp target/deploy/*.so ../redsuite-dist/deploy/
+
+    - name: Save RedSuite fixtures
+      if: steps.fixtures.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: redsuite-dist/deploy
+        key: ${{ steps.fixtures.outputs.cache-primary-key }}
+
+    - uses: ./magicblock-validator/.github/actions/save-build-cache
+      with:
+        workspace: redsuite
+        key: ${{ steps.build-env.outputs.save-key }}
+        path: ${{ steps.build-env.outputs.cache-paths }}

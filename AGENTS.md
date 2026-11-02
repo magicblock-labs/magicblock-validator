@@ -27,7 +27,7 @@ performance claims.
 
 ## Validation
 
-Use `make fmt` for formatting and `cargo check -p <package> --tests` for the
+Use `cargo fmt` for formatting and `cargo check -p <package> --tests` for the
 affected package. Before pushing a code fix, run exactly one relevant test:
 `cargo nextest run -p <package> <test_name> --no-capture`. Use `cargo test` if
 nextest is unavailable or libtest-specific flags are needed.
@@ -35,7 +35,7 @@ nextest is unavailable or libtest-specific flags are needed.
 For an explicitly requested full gate or a completed significant milestone:
 
 ```sh
-make ci-fmt
+cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo nextest run --workspace
 ```

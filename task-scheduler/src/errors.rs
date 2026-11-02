@@ -8,5 +8,8 @@ pub enum TaskSchedulerError {
     Keeper(#[from] keeper::error::KeeperError),
 
     #[error(transparent)]
+    Instruction(#[from] solana_instruction::error::InstructionError),
+
+    #[error(transparent)]
     RpcClient(#[from] solana_rpc_client::api::client_error::Error),
 }

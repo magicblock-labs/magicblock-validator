@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
-use json::JsonValueTrait;
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, remote_account_claims_header, transfer};
 use solana_account_decoder::UiAccountEncoding;
@@ -83,7 +82,10 @@ async fn test_send_transaction_emits_remote_account_claims_header_zero() {
         &response.text().await.expect("sendTransaction response body should decode"),
     )
     .expect("sendTransaction response body should be valid JSON");
-    assert!(body["result"].is_str(), "response should contain signature");
+    assert!(
+        body["result"].is_string(),
+        "response should contain signature"
+    );
 }
 
 /// Verifies the higher-level `send_and_confirm_transaction` method works correctly,

@@ -5,8 +5,9 @@ use std::{
 };
 
 use hyper::body::{Body, Bytes, Frame, SizeHint};
-use json::{Serialize, Value};
+use json::Value;
 use mbv_core::Slot;
+use serde::Serialize;
 
 use crate::{RpcResult, error::RpcError, state::subscriptions::SubscriptionID};
 

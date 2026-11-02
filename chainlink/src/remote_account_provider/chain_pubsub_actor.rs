@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    future::Future,
     sync::{
         Arc,
         atomic::{AtomicBool, AtomicU16, Ordering},
@@ -16,7 +17,7 @@ use parking_lot::Mutex;
 use solana_account_decoder_client_types::UiAccountEncoding;
 use solana_commitment_config::CommitmentConfig;
 use solana_pubkey::Pubkey;
-use solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError;
+use solana_pubsub_client::nonblocking::pubsub_client::{PubsubClientError, PubsubClientResult};
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
     response::Response as RpcResponse,
@@ -24,7 +25,7 @@ use solana_rpc_client_api::{
 use solana_sdk_ids::sysvar::clock;
 use tokio::{
     sync::{mpsc, oneshot},
-    time::Duration,
+    time::{self, Duration},
 };
 use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
@@ -58,16 +59,21 @@ fn is_connection_level_error(err: &PubsubClientError) -> bool {
 }
 #[cfg(not(test))]
 const SUBSCRIPTION_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5);
+#[cfg(test)]
+const SUBSCRIPTION_COMPLETION_TIMEOUT: Duration = Duration::from_millis(100);
 
-fn subscription_completion_timeout() -> Duration {
-    #[cfg(test)]
-    {
-        Duration::from_millis(100)
-    }
-    #[cfg(not(test))]
-    {
-        SUBSCRIPTION_COMPLETION_TIMEOUT
-    }
+// Do not race setup against cancellation: dropping a subscribe future can close
+// Solana's shared socket. The actor keeps its entry until listener cleanup ends.
+async fn finish_setup<T>(
+    pubkey: Pubkey,
+    kind: &str,
+    request: impl Future<Output = PubsubClientResult<T>>,
+) -> PubsubClientResult<T> {
+    time::timeout(SUBSCRIPTION_COMPLETION_TIMEOUT, request).await.map_err(|_| {
+        PubsubClientError::ConnectionClosed(format!(
+            "{kind} subscription setup timed out for {pubkey}"
+        ))
+    })?
 }
 
 // -----------------
@@ -191,9 +197,9 @@ impl ChainPubsubActor {
         pubkey: Pubkey,
         sub: AccountSubscription,
     ) -> RemoteAccountProviderResult<()> {
-        let timeout = subscription_completion_timeout();
+        let timeout = SUBSCRIPTION_COMPLETION_TIMEOUT;
         sub.cancellation_token.cancel();
-        match tokio::time::timeout(timeout, sub.completion_token.cancelled()).await {
+        match time::timeout(timeout, sub.completion_token.cancelled()).await {
             Ok(()) => Ok(()),
             Err(_) => {
                 warn!(
@@ -583,37 +589,20 @@ impl ChainPubsubActor {
         let mut retries = retries.unwrap_or(DEFAULT_SUBSCRIPTION_RETRIES);
         let initial_tries = retries;
         let (mut update_stream, unsubscribe) = loop {
-            // Race the subscription RPC with cancellation so that a reconnect
-            // or unsubscribe arriving while the RPC is pending doesn't have to
-            // wait for a listener task that hasn't been spawned yet. The
-            // listener completion signal is what drain_and_wait_for_listener_completion
-            // blocks on, so if cancellation hits during setup we must clean up
-            // the map entry and fire completion_token ourselves.
-            let subscribe_result = tokio::select! {
-                biased;
-                _ = cancellation_token.cancelled() => {
-                    trace!("Subscription cancelled during setup");
-                    subs.lock()
-                        .remove(&pubkey);
-                    completion_token.cancel();
-                    let _ = sub_response.send(Err(
-                        RemoteAccountProviderError::AccountSubscriptionsFailed(
-                            format!("Subscription for {pubkey} cancelled during setup"),
-                        ),
-                    ));
-                    return;
-                }
-                res = pubsub_connection.account_subscribe(&pubkey, config.clone()) => res,
-            };
-            // Perform the subscription
+            let subscribe_result = finish_setup(
+                pubkey,
+                "Account",
+                pubsub_connection.account_subscribe(&pubkey, config.clone()),
+            )
+            .await;
             match subscribe_result {
                 Ok(res) => break res,
                 Err(err) => {
-                    if retries > 0 {
+                    if retries > 0 && !cancellation_token.is_cancelled() {
                         retries -= 1;
                         // Linear backoff: sleep longer as retries decrease
                         let backoff_ms = 50u64 * (initial_tries - retries) as u64;
-                        tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+                        time::sleep(Duration::from_millis(backoff_ms)).await;
                         continue;
                     }
                     if initial_tries > 0 {
@@ -723,7 +712,7 @@ impl ChainPubsubActor {
             drop(update_stream);
 
             // Clean up subscription with timeout to prevent hanging on dead sockets
-            if tokio::time::timeout(Duration::from_secs(2), unsubscribe()).await.is_err() {
+            if time::timeout(Duration::from_secs(2), unsubscribe()).await.is_err() {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out");
                 inc_pubsub_unsubscribe_timeout_count(&client_id, "account");
             }
@@ -778,31 +767,12 @@ impl ChainPubsubActor {
             ..Default::default()
         };
 
-        // Race the subscription RPC with cancellation so that a reconnect or
-        // unsubscribe arriving while the RPC is pending doesn't have to wait
-        // for a listener task that hasn't been spawned yet. The listener
-        // completion signal is what drain_and_wait_for_listener_completion
-        // blocks on, so if cancellation hits during setup we must clean up the
-        // map entry and fire completion_token ourselves.
-        let subscribe_result = tokio::select! {
-            biased;
-            _ = cancellation_token.cancelled() => {
-                trace!("Program subscription cancelled during setup");
-                program_subs
-                    .lock()
-                    .remove(&program_pubkey);
-                completion_token.cancel();
-                let _ = sub_response.send(Err(
-                    RemoteAccountProviderError::AccountSubscriptionsFailed(
-                        format!(
-                            "Program subscription for {program_pubkey} cancelled during setup"
-                        ),
-                    ),
-                ));
-                return;
-            }
-            res = pubsub_connection.program_subscribe(&program_pubkey, config.clone()) => res,
-        };
+        let subscribe_result = finish_setup(
+            program_pubkey,
+            "Program",
+            pubsub_connection.program_subscribe(&program_pubkey, config),
+        )
+        .await;
         let (mut update_stream, unsubscribe) = match subscribe_result {
             Ok(res) => res,
             Err(err) => {
@@ -927,7 +897,7 @@ impl ChainPubsubActor {
             drop(update_stream);
 
             // Clean up subscription with timeout to prevent hanging on dead sockets
-            if tokio::time::timeout(Duration::from_secs(2), unsubscribe()).await.is_err() {
+            if time::timeout(Duration::from_secs(2), unsubscribe()).await.is_err() {
                 warn!(timeout_ms = 2000, "Unsubscribe timed out for program");
                 inc_pubsub_unsubscribe_timeout_count(&client_id, "program");
             }

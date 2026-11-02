@@ -2,7 +2,6 @@
 
 use std::collections::HashSet;
 
-use json::JsonValueTrait;
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
 use solana_account::{AccountMode, accounts_equal};
@@ -10,7 +9,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
     filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
-    request::TokenAccountsFilter,
+    request::{MAX_MULTIPLE_ACCOUNTS, TokenAccountsFilter},
 };
 
 mod setup;
@@ -97,7 +96,8 @@ async fn test_get_account_info_emits_remote_account_claims_header_zero_for_bank_
     assert!(body["result"].is_object(), "response should contain result");
 }
 
-/// Verifies `getMultipleAccounts` for both existing and non-existent accounts.
+/// Verifies account ordering and null results, and enforces the query-size limit
+/// on the raw HTTP path rather than the SDK's client-side request handling.
 #[tokio::test]
 async fn test_get_multiple_accounts() {
     let env = RpcTestEnv::new().await;
@@ -158,6 +158,29 @@ async fn test_get_multiple_accounts() {
         ),
         "last result should match the last requested account"
     );
+
+    let client = reqwest::Client::new();
+    for count in [MAX_MULTIPLE_ACCOUNTS, MAX_MULTIPLE_ACCOUNTS + 1] {
+        let response = client
+            .post(env.rpc.url())
+            .json(&json::json!({
+                "jsonrpc": "2.0",
+                "method": "getMultipleAccounts",
+                "params": [vec![acc1.to_string(); count]],
+                "id": 1,
+            }))
+            .send()
+            .await
+            .expect("account query should receive a response");
+        assert_eq!(remote_account_claims_header(&response), 0);
+        let body: json::Value = response.json().await.expect("response should decode");
+        if count == MAX_MULTIPLE_ACCOUNTS {
+            assert_eq!(body["result"]["value"].as_array().unwrap().len(), count);
+        } else {
+            assert_eq!(body["error"]["code"], -32602);
+            assert!(body.get("result").is_none());
+        }
+    }
 }
 
 #[tokio::test]

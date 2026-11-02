@@ -478,7 +478,7 @@ mod tests {
     use parking_lot::Mutex as StdMutex;
 
     use async_trait::async_trait;
-    use serde_json::Value;
+    use json::Value;
     use solana_rpc_client::{
         rpc_client::RpcClientConfig,
         rpc_sender::{RpcSender, RpcTransportStats},
@@ -619,7 +619,7 @@ mod tests {
             let signature_count = params.as_array().unwrap()[0].as_array().unwrap().len();
             self.batch_sizes.lock().push(signature_count);
             let statuses = vec![Some(self.status.clone()); signature_count];
-            Ok(serde_json::to_value(Response {
+            Ok(json::to_value(Response {
                 context: RpcResponseContext { slot: 1, api_version: None },
                 value: statuses,
             })

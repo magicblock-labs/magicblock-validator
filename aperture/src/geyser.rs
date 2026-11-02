@@ -10,7 +10,7 @@ use agave_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, SlotStatus,
 };
 use engine::Engine;
-use json::{JsonValueTrait, Value};
+use json::Value;
 use ledger::schema::Block;
 use libloading::{Library, Symbol};
 use nucleus::runtime::FullTransaction;
@@ -82,7 +82,7 @@ impl GeyserPluginManager {
             json::from_str(&config).map_err(|error| GeyserPluginError::ConfigFileReadError {
                 msg: format!("failed to parse plugin configuration: {error}"),
             })?;
-        let path = config.get("libpath").and_then(JsonValueTrait::as_str).ok_or_else(|| {
+        let path = config.get("libpath").and_then(Value::as_str).ok_or_else(|| {
             GeyserPluginError::ConfigFileReadError {
                 msg: "plugin configuration must contain a string `libpath` field".into(),
             }

@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
 use solana_signature::Signature;
 use tokio::{
-    sync::{OwnedSemaphorePermit, Semaphore, broadcast},
+    sync::{Notify, OwnedSemaphorePermit, Semaphore, broadcast},
     task::JoinHandle,
     time::sleep,
 };
@@ -36,6 +36,12 @@ use crate::{
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 /// Max number of executors that can send messages in parallel to Base layer
 const MAX_EXECUTORS: u8 = 50;
+/// Normal blocked-intent limit, with extra admission while executors are free.
+const SCHEDULER_CAPACITY: usize = 3_000;
+/// Stop admitting new intents at this limit even when executors are free.
+const SCHEDULER_HARD_CAPACITY: usize = 6_000;
+/// Yield between batches, including when the in-memory backlog is always ready.
+const SCHEDULING_BATCH_SIZE: usize = 64;
 /// Max intents concurrently sleeping in retry backoff. Retries release their
 /// executor slot while sleeping; this cap keeps the total task population
 /// bounded when many intents fail together
@@ -49,6 +55,7 @@ const INTENT_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 struct ExecutionLimits {
     executors: Arc<Semaphore>,
     retries: Arc<Semaphore>,
+    capacity_changed: Arc<Notify>,
 }
 
 pub(super) type PatchedErrors = Vec<TransactionStrategyExecutionError>;
@@ -105,6 +112,8 @@ pub(crate) struct IntentExecutionEngine<D, F, T> {
     running_executors: FuturesUnordered<JoinHandle<()>>,
     executors_semaphore: Arc<Semaphore>,
     retries_semaphore: Arc<Semaphore>,
+    execution_capacity_changed: Arc<Notify>,
+    scheduler_needs_drain: bool,
     _phantom_data: PhantomData<T>,
 }
 
@@ -122,6 +131,8 @@ where
             executors_semaphore: Arc::new(Semaphore::new(MAX_EXECUTORS as usize)),
             retries_semaphore: Arc::new(Semaphore::new(MAX_SLEEPING_RETRIERS)),
             scheduler: Arc::new(Mutex::new(IntentScheduler::new())),
+            execution_capacity_changed: Arc::new(Notify::new()),
+            scheduler_needs_drain: false,
             _phantom_data: PhantomData,
         }
     }
@@ -143,7 +154,14 @@ where
         mut self,
         result_sender: broadcast::Sender<BroadcastedIntentExecutionResult>,
     ) {
+        let mut iterations = 0;
         loop {
+            if iterations == SCHEDULING_BATCH_SIZE {
+                tokio::task::yield_now().await;
+                iterations = 0;
+            }
+            iterations += 1;
+
             let intent = match self.next_scheduled_intent().await {
                 Ok(value) => value,
                 Err(IntentScheduleError::ChannelClosed) => {
@@ -157,10 +175,9 @@ where
                 }
             };
             let Some(intent) = intent else {
-                // We couldn't pick up intent for execution due to:
-                // 1. All executors are currently busy
-                // 2. All intents are blocked and none could be executed at the moment
-                trace!("Could not schedule any intents");
+                // An intent was blocked, or an execution event requires us to
+                // reconsider scheduler readiness and admission capacity.
+                trace!("Scheduling event did not select an intent");
                 continue;
             };
 
@@ -176,6 +193,7 @@ where
             let limits = ExecutionLimits {
                 executors: self.executors_semaphore.clone(),
                 retries: self.retries_semaphore.clone(),
+                capacity_changed: self.execution_capacity_changed.clone(),
             };
 
             let handle = tokio::spawn(Self::execute(
@@ -197,52 +215,39 @@ where
     async fn next_scheduled_intent(
         &mut self,
     ) -> Result<Option<OutboxIntentBundle>, IntentScheduleError> {
-        // Limit on number of intents that can be stored in scheduler
-        const SCHEDULER_CAPACITY: usize = 1000;
-
-        let can_receive = || {
-            let num_blocked_intents = self.scheduler.lock().intents_blocked();
-            if num_blocked_intents < SCHEDULER_CAPACITY {
-                true
-            } else {
-                warn!(blocked_count = num_blocked_intents, "Capacity exceeded");
-                false
-            }
-        };
+        let blocked = self.scheduler.lock().intents_blocked();
+        let can_receive = blocked < SCHEDULER_CAPACITY
+            || (blocked < SCHEDULER_HARD_CAPACITY
+                && self.executors_semaphore.available_permits() > 0);
+        if !can_receive {
+            warn!(blocked_count = blocked, "Scheduler admission paused");
+        }
 
         let running_executors = &mut self.running_executors;
         let intent_stream = &mut self.intent_stream;
         let intent = tokio::select! {
-            // Notify polled first to prioritize unblocked intents over new one
+            // Reap completions and drain eligible work before admitting new work.
             biased;
             Some(result) = running_executors.next() => {
                 if let Err(err) = result {
                     error!(error = ?err, "Executor failed");
                 };
-                trace!("Worker executed intent bundle, fetching new available one");
-                self.scheduler.lock().pop_next_scheduled_intent()
+                self.scheduler_needs_drain = true;
+                None
             },
-            result = Self::get_new_intent(intent_stream), if can_receive() => {
+            intent = async {
+                self.scheduler.lock().pop_next_scheduled_intent()
+            }, if self.scheduler_needs_drain => {
+                if intent.is_none() {
+                    self.scheduler_needs_drain = false;
+                }
+                intent
+            },
+            _ = self.execution_capacity_changed.notified() => None,
+            result = Self::get_new_intent(intent_stream), if can_receive => {
                 let intent = result?;
                 self.scheduler.lock().schedule(intent)
             },
-            else => {
-                // Shouldn't be possible:
-                // 1. If no executors spawned -> nothing occupies any
-                //    pubkey's front -> blocked_intents is empty -> we can receive
-                // 2. If can't receive -> blocked_intents is non-empty ->
-                //    something occupies a front -> an executor is running
-                //
-                // running_executors isn't 1-1 with the executors semaphore:
-                // Self::execute drops its permit while sleeping between
-                // retries, so a retrying intent still holds a slot here
-                // without holding a permit. That's fine for (2) - it still
-                // counts as "an executor is running" for as long as it
-                // hasn't given up. And if it does give up, failed() evicts
-                // the whole poisoned cascade from blocked_intents instead
-                // of leaving it stuck, so capacity always frees up.
-                unreachable!("next_scheduled_intent")
-            }
         };
 
         Ok(intent)
@@ -400,6 +405,9 @@ where
             // many intents fail together during an outage
             let jitter = Duration::from_millis((intent.intent_id % 8) * 125);
             drop(execution_permit.take());
+            // notify_one retains a notification if the engine is not yet
+            // waiting, so a release around guard evaluation cannot be missed.
+            limits.capacity_changed.notify_one();
             sleep(INTENT_RETRY_BACKOFF * attempt + jitter).await;
             execution_permit = match limits.executors.clone().acquire_owned().await {
                 Ok(permit) => Some(permit),
@@ -446,6 +454,9 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod admission_tests;
 
 /// Worker tests
 #[cfg(test)]
@@ -494,7 +505,7 @@ mod tests {
         },
     };
 
-    struct MockTransactionPreparator;
+    pub(super) struct MockTransactionPreparator;
 
     #[async_trait]
     impl TransactionPreparator for MockTransactionPreparator {

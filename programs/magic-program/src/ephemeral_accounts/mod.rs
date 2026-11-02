@@ -2,6 +2,8 @@
 //!
 //! Ephemeral accounts are zero-balance accounts with rent paid by a sponsor.
 //! Rent is charged at 32 lamports/byte (109x cheaper than Solana base rent).
+//! Creation marks the full data length as rent-funded. Resize and close require
+//! that mark; Magic mode alone does not establish a deposit in the shared vault.
 
 mod process_close;
 mod process_close_magic_ata;

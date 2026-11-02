@@ -132,8 +132,18 @@ pub(crate) fn process_schedule_intent_bundle(
         let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
         let fee = scheduled_intent.calculate_fee(&nonces)?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
-    } else if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts() {
-        check_commit_limits(commit_accounts, invoke_context)?;
+    } else {
+        // Both commit variants use the sponsored allowance. Undelegation remains
+        // available after the allowance is exhausted.
+        for commit_accounts in [
+            scheduled_intent.get_commit_intent_accounts(),
+            scheduled_intent.get_commit_finalize_intent_accounts(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            check_commit_limits(commit_accounts, invoke_context)?;
+        }
     }
 
     let sent_signature = scheduled_intent.sent_transaction.signatures[0];

@@ -1,8 +1,8 @@
 //! Failure-only diagnostics for the operator monitor, without replay or delivery guarantees.
 
 use base64::{Engine as _, prelude::BASE64_STANDARD};
-use json::Serialize;
 use nucleus::runtime::FullTransaction;
+use serde::Serialize;
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
 use solana_transaction_error::TransactionError;
 

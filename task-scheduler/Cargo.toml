@@ -11,8 +11,10 @@ version.workspace = true
 engine = { workspace = true }
 hydra-api = { workspace = true, features = ["client", "ephemeral"] }
 keeper = { workspace = true }
+magic-root-interface = { workspace = true }
 program = { workspace = true }
 nucleus = { workspace = true }
+rand = { workspace = true }
 solana-account = { workspace = true }
 solana-instruction = { workspace = true, features = ["wincode"] }
 solana-keypair = { workspace = true }

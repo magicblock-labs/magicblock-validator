@@ -167,8 +167,10 @@ async fn waiter_applies_newer_account_image() {
     assert_eq!(state, (AccountMode::Mirrored, 12, vec![2]));
 }
 
+/// Proves streamed completion advances the delegation slot without HTTP,
+/// while older and same-slot images cannot replace protected ER state.
 #[tokio::test]
-async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
+async fn undelegation_completion_requires_newer_base_slot() {
     let ctx = TestContext::init(10).await;
     let pubkey = Pubkey::new_unique();
     let owner = system_program::id();
@@ -194,39 +196,33 @@ async fn completed_undelegation_accepts_follow_up_lower_slot_base_update() {
         .await
         .expect("watch undelegating account");
 
-    ctx.rpc_client.set_slot(10);
-    assert!(
-        ctx.send_and_receive_account_update(pubkey, remote_account(7), Some(8_000),)
-            .await,
-        "completion update should be processed"
-    );
-    assert_eq!(
-        ctx.bank
-            .accounts()
-            .loader()
-            .read(&pubkey, |account| {
-                (account.mode(), account.slot(), account.data().to_vec())
-            })
-            .expect("read completed account"),
-        Some((AccountMode::Mirrored, 100, vec![7]))
-    );
-
-    ctx.rpc_client.set_slot(11);
-    assert!(
-        ctx.send_and_receive_account_update(pubkey, remote_account(9), Some(8_000),)
-            .await,
-        "follow-up base update should be processed"
-    );
-    assert_eq!(
-        ctx.bank
-            .accounts()
-            .loader()
-            .read(&pubkey, |account| {
-                (account.mode(), account.slot(), account.data().to_vec())
-            })
-            .expect("read refreshed account"),
-        Some((AccountMode::Mirrored, 101, vec![9]))
-    );
+    ctx.rpc_client.block_fetches();
+    for (slot, byte, expected_mode, expected_slot, expected_byte) in [
+        (99, 0, AccountMode::Undelegating, 100, 7),
+        (100, 0, AccountMode::Undelegating, 100, 7),
+        (101, 8, AccountMode::Mirrored, 101, 8),
+        // A replay cannot roll back the completed image.
+        (100, 0, AccountMode::Mirrored, 101, 8),
+        (102, 9, AccountMode::Mirrored, 102, 9),
+    ] {
+        ctx.rpc_client.set_slot(slot);
+        assert!(
+            ctx.send_and_receive_account_update(pubkey, remote_account(byte), None).await,
+            "update at slot {slot} should finish while HTTP fetches are blocked"
+        );
+        assert_eq!(
+            ctx.bank
+                .accounts()
+                .loader()
+                .read(&pubkey, |account| {
+                    (account.mode(), account.slot(), account.data().to_vec())
+                })
+                .expect("read local account"),
+            Some((expected_mode, expected_slot, vec![expected_byte])),
+            "local state after update at slot {slot}"
+        );
+    }
+    ctx.rpc_client.allow_fetches();
 }
 
 mod aml_check_strategy {

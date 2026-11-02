@@ -1,0 +1,87 @@
+name: Tag release
+
+# Every workspace version is tagged once, on the release-branch push that introduces it,
+# with a draft release to publish. Release tags are never created by hand.
+
+"on":
+  push:
+    branches:
+      - master
+      - V1
+  workflow_dispatch:
+
+concurrency:
+  group: release-tag-${{ github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  tag-release:
+    name: Tag release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require release branch
+        if: github.ref_name != 'master' && github.ref_name != 'V1'
+        shell: bash
+        run: |
+          echo "::error::Releases are tagged from V1 or master only."
+          exit 1
+
+      # A GitHub App token lets a tag ruleset restrict release tags to this workflow.
+      - name: Create release app token
+        id: app-token
+        if: vars.RELEASE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+
+      - name: Checkout release branch
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || github.token }}
+
+      - name: Tag version and draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="v$(.github/scripts/workspace-version.sh)"
+
+          case "$GITHUB_REF_NAME:$tag" in
+            V1:v1.*|master:v2.*) ;;
+            master:v1.*) echo "Waiting for the separate 2.0.0 release PR"; exit 0 ;;
+            *) echo "::error::Version does not match release branch"; exit 1 ;;
+          esac
+
+          if tagged="$(git rev-parse --verify --quiet "refs/tags/${tag}^{commit}")"; then
+            if ! git merge-base --is-ancestor "$tagged" HEAD; then
+              echo "::error::${tag} points at ${tagged}, which is not on ${GITHUB_REF_NAME}. Move it to the release-branch commit that introduced ${tag}."
+              exit 1
+            fi
+            echo "${tag} is tagged at ${tagged}"
+          else
+            # Tag the commit that introduced the version, even when a later push
+            # is the first to get here.
+            introduced="$GITHUB_SHA"
+            while parent="$(git rev-parse --verify --quiet "${introduced}^")" &&
+              [[ "v$(.github/scripts/workspace-version.sh "$parent" 2> /dev/null)" == "$tag" ]]; do
+              introduced="$parent"
+            done
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag --annotate "$tag" --message "$tag" "$introduced"
+            git push origin "refs/tags/${tag}"
+            echo "Tagged ${tag} at ${introduced}" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --draft --verify-tag --generate-notes --target "$GITHUB_REF_NAME" --latest=false --title "$tag"
+            echo "Drafted release ${tag}; publish it to ship the packages" >> "$GITHUB_STEP_SUMMARY"
+          fi

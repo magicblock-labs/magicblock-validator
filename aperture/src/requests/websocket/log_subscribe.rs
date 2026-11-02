@@ -1,4 +1,4 @@
-use json::Serialize;
+use serde::Serialize;
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
 use solana_transaction_error::TransactionError;
 

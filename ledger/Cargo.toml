@@ -17,7 +17,7 @@ libc = { workspace = true }
 log = { workspace = true }
 num_cpus = { workspace = true }
 prost = { workspace = true }
-rocksdb = { workspace = true }
+rocksdb = { workspace = true, features = ["zstd"] }
 serde = { workspace = true }
 solana-clock = { workspace = true }
 solana-hash = { workspace = true }
