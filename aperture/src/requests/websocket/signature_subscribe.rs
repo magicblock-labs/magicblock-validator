@@ -27,7 +27,7 @@ impl WsDispatcher {
                         let _ = tx.send(bytes).await;
                     }
                     Err(error) => {
-                        warn!(?error, id, "signature notification serialization failed")
+                        warn!(?error, "signature notification serialization failed")
                     }
                 }
             }

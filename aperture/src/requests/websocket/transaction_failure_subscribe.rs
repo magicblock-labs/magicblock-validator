@@ -74,7 +74,7 @@ impl<'a> Failure<'a> {
 
 impl WsDispatcher {
     /// Opens Engine's bounded failure stream without taking the exclusive processed stream.
-    /// Slow receivers can close silently; unsubscribe and connection teardown stop forwarding.
+    /// Stream closure closes the connection so clients can recover.
     pub(crate) fn transaction_failure_subscribe(&mut self) -> RpcResult<SubResult> {
         let id = next_subid();
         let rx = self.engine.transactions().subscribe_failures();
