@@ -562,7 +562,7 @@ async fn settlement_receipt_history_survives_outbox_closure() {
         OUTBOX_INTENT_PROGRAM_ID,
         (OutboxIntentEntrypoint::vm, OutboxIntentEntrypoint::codegen),
     );
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         outbox,
         AccountBuilder::default()
             .data(bundle.try_to_bytes().unwrap())

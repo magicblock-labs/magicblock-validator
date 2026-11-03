@@ -1747,12 +1747,12 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     let dirs = Dirs::default();
     let mut builder = keeper_builder(&dirs);
     builder.builtins.insert(crate::id(), (Entrypoint::vm, Entrypoint::codegen));
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         MAGIC_CONTEXT_PUBKEY,
         AccountBuilder::from(magic_context_account()).mode(AccountMode::Magic).build(),
     );
     let committee = Pubkey::new_unique();
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         committee,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
@@ -1760,7 +1760,7 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
             .build(),
     );
     let overflow = Pubkey::new_unique();
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         overflow,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
