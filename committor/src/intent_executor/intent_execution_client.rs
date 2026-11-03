@@ -300,9 +300,12 @@ impl IntentExecutionClient {
                 } => {
                     let commit_tx =
                         self.rpc_client.get_transaction(&commit_signature, Some(config)).await?;
+                    let commit_cu = extract_cu(commit_tx.transaction);
+                    if commit_signature == finalize_signature {
+                        return Ok(commit_cu);
+                    }
                     let finalize_tx =
                         self.rpc_client.get_transaction(&finalize_signature, Some(config)).await?;
-                    let commit_cu = extract_cu(commit_tx.transaction);
                     let finalize_cu = extract_cu(finalize_tx.transaction);
                     let (Some(commit_cu), Some(finalize_cu)) = (commit_cu, finalize_cu) else {
                         return Ok(None);

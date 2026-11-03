@@ -1,6 +1,5 @@
 use std::{collections::HashMap, ops::ControlFlow, time::Duration};
 
-use async_trait::async_trait;
 use mbv_core::traits::{ActionError, ActionResult, ActionsCallbackScheduler};
 use program::{
     outbox::{ExecutionStage, PendingTransaction},
@@ -12,7 +11,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
-use tokio::time::{sleep, timeout};
+use tokio::time::sleep;
 use tracing::{error, info, warn};
 
 use crate::{
@@ -20,12 +19,7 @@ use crate::{
         IntentExecutionReport,
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
-        strategy_executor::{
-            error::TransactionStrategyExecutionError,
-            patcher::Patcher,
-            single_stage::SingleStageStrategyExecutor,
-            two_stage::{Committed, Initialized, TwoStageStrategyExecutor},
-        },
+        strategy_executor::{error::TransactionStrategyExecutionError, patcher::Patcher},
     },
     outbox::{OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader},
     tasks::{
@@ -48,6 +42,7 @@ pub(in crate::intent_executor) struct ExecutionState<'a> {
     pub transaction_strategy: &'a mut TransactionStrategy,
     pub pending_transaction: &'a mut Option<PendingTransaction>,
     pub execution_report: &'a mut IntentExecutionReport,
+    pub commit_signature: Option<Signature>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -82,6 +77,13 @@ where
                 break Ok(Ok(pending.signature));
             }
             *state.pending_transaction = None;
+        }
+
+        // Resolve a previously sent transaction before skipping an empty follow-up.
+        if let Some(commit_signature) = state.commit_signature
+            && state.transaction_strategy.optimized_tasks.is_empty()
+        {
+            return Ok(Ok(commit_signature));
         }
 
         *state.current_attempt += 1;
@@ -145,6 +147,21 @@ where
         };
         intent_client.invalidate_cached_blockhash().await;
         state.execution_report.dispose(cleanup);
+
+        if let Some(commit_signature) = state.commit_signature
+            && state.transaction_strategy.optimized_tasks.is_empty()
+        {
+            // Failed actions can leave no work after a confirmed commit.
+            // Keep undelegation failures visible even when patching removes all tasks.
+            if matches!(
+                execution_err,
+                TransactionStrategyExecutionError::ActionsError(..)
+            ) {
+                state.execution_report.add_patched_error(execution_err);
+                return Ok(Ok(commit_signature));
+            }
+            return Ok(Err(execution_err));
+        }
 
         if *state.current_attempt >= STAGE_LOOP_CEILING {
             error!("CRITICAL! Recursion ceiling reached");
@@ -592,133 +609,6 @@ where
     }
 
     junk
-}
-
-/// Executes a stage with an optional timeout that applies only to callbacks.
-/// If the timeout fires, callbacks are triggered with `TimeoutError` immediately
-/// (respecting the timeout contract on the user smart contract side), then
-/// execution continues without a timeout to drive the intent to completion.
-pub(in crate::intent_executor) async fn execute_with_timeout(
-    time_left: Option<Duration>,
-    mut executor: impl StageExecutor,
-) -> IntentExecutorResult<Signature> {
-    if executor.has_callbacks() {
-        if let Some(time_left) = time_left {
-            match timeout(time_left, executor.execute()).await {
-                Ok(res) => return res,
-                Err(_) => {
-                    // The race between callback and intent txn is handled
-                    // on the user smart contract side via TimeoutError.
-                    // We must respect the timeout contract.
-                    info!("Intent execution timed out, cleaning up actions");
-                    executor.execute_callbacks(None, Err(ActionError::TimeoutError));
-                }
-            }
-        } else {
-            // Already timed out; see comment above.
-            executor.execute_callbacks(None, Err(ActionError::TimeoutError));
-        }
-    }
-
-    // Timeout concerns only callbacks
-    // We still need to drive intent to completion
-    executor.execute().await
-}
-
-#[async_trait]
-pub(in crate::intent_executor) trait StageExecutor {
-    fn has_callbacks(&self) -> bool;
-    async fn execute(&mut self) -> IntentExecutorResult<Signature>;
-    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult);
-}
-
-pub(in crate::intent_executor) struct SingleStage<'a, 'e, A, T, F, O> {
-    pub(in crate::intent_executor) inner: &'a mut SingleStageStrategyExecutor<'e, F, A, O>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
-}
-
-#[async_trait]
-impl<'a, 'e, A, T, F, O> StageExecutor for SingleStage<'a, 'e, A, T, F, O>
-where
-    A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
-{
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
-
-    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
-        self.inner.execute(self.committed_pubkeys, self.transaction_preparator).await
-    }
-
-    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
-        self.inner.execute_callbacks(signature, result)
-    }
-}
-
-pub(in crate::intent_executor) struct CommitStage<'a, 'e, A, T, F, O> {
-    pub(in crate::intent_executor) inner: &'a mut TwoStageStrategyExecutor<'e, A, O, Initialized>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-    pub(in crate::intent_executor) task_info_fetcher: &'a CacheTaskInfoFetcher<F>,
-    pub(in crate::intent_executor) committed_pubkeys: &'a [Pubkey],
-}
-
-#[async_trait]
-impl<'a, 'e, A, T, F, O> StageExecutor for CommitStage<'a, 'e, A, T, F, O>
-where
-    A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
-    F: TaskInfoFetcher,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
-{
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
-
-    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
-        self.inner
-            .commit(
-                self.committed_pubkeys,
-                self.transaction_preparator,
-                self.task_info_fetcher,
-            )
-            .await
-    }
-
-    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
-        self.inner.execute_callbacks(signature, result)
-    }
-}
-
-pub(in crate::intent_executor) struct FinalizeStage<'a, 'e, A, T, O> {
-    pub(in crate::intent_executor) inner: &'a mut TwoStageStrategyExecutor<'e, A, O, Committed>,
-    pub(in crate::intent_executor) transaction_preparator: &'a T,
-}
-
-#[async_trait]
-impl<'a, 'e, A, T, O> StageExecutor for FinalizeStage<'a, 'e, A, T, O>
-where
-    A: ActionsCallbackScheduler,
-    T: TransactionPreparator,
-    O: OutboxClient,
-    O::Error: Into<IntentExecutorError>,
-{
-    fn has_callbacks(&self) -> bool {
-        self.inner.has_callbacks()
-    }
-
-    async fn execute(&mut self) -> IntentExecutorResult<Signature> {
-        self.inner.finalize(self.transaction_preparator).await
-    }
-
-    fn execute_callbacks(&mut self, signature: Option<Signature>, result: ActionResult) {
-        self.inner.execute_callbacks(signature, result)
-    }
 }
 
 #[cfg(test)]

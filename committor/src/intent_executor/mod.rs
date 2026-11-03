@@ -96,7 +96,8 @@ pub enum ExecutionOutput {
     TwoStage {
         /// Commit stage signature
         commit_signature: Signature,
-        /// Finalize stage signature
+        /// Follow-up transaction signature. Equals `commit_signature` when
+        /// no follow-up work remains and no second transaction is sent.
         finalize_signature: Signature,
     },
 }
