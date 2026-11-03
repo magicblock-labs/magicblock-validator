@@ -1,28 +1,32 @@
-use std::{mem, time::Duration};
+use std::{mem, ops::ControlFlow, time::Duration};
 
 use mbv_core::traits::{ActionError, ActionsCallbackScheduler};
 use program::outbox::PendingTransaction;
 use solana_pubkey::Pubkey;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_signature::Signature;
 use solana_signer::Signer;
 use tokio::time::timeout;
-use tracing::info;
+use tracing::{error, info, warn};
 
 use super::{
     error::TransactionStrategyExecutionError,
-    patcher::{CommitStagePatcher, FinalizeStagePatcher, SingleStagePatcher},
+    recovery::TransactionRecovery,
     utils::{
-        ExecutionState, combined_pending, committing_pending, follow_up_pending,
-        handle_actions_result, handle_cpi_limit_error, stage_execution_loop,
+        handle_actions_result, handle_cpi_limit_error, prepare_transaction, recovery_commit_nonces,
+        resolve_pending_signature,
     },
 };
 use crate::{
     intent_executor::{
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
         error::{IntentExecutorError, IntentExecutorResult},
-        progress::ExecutionProgress,
+        progress::{ExecutionProgress, TransactionProgress},
     },
-    outbox::{OutboxClient, progress::PendingExecution},
+    outbox::{
+        OutboxClient, outbox_intent_bundles_reader::OutboxIntentBundlesReader,
+        progress::PendingExecution,
+    },
     tasks::{
         BaseTaskImpl,
         task_info_fetcher::TaskInfoFetcher,
@@ -33,6 +37,8 @@ use crate::{
 
 #[cfg(test)]
 mod tests;
+
+const TRANSACTION_LOOP_CEILING: u8 = 10;
 
 /// Runs the selected transaction and any remaining actions or undelegations.
 /// A confirmed commit is never included in subsequent recovery attempts.
@@ -193,77 +199,148 @@ where
         let ctx = self.ctx;
         let confirmed_commit = self.report.progress.confirmed_commit;
         let has_follow_up = self.follow_up.is_some();
-        let make_outbox_stage = |transaction| {
-            PendingExecution {
-                transaction,
-                confirmed_commit,
-                has_follow_up,
+        let recovery = TransactionRecovery {
+            authority: &ctx.authority,
+            intent_client: &ctx.intent_client,
+            intent_id: self.intent_id,
+            callback_scheduler: &ctx.actions_callback_executor,
+            task_info_fetcher: &ctx.task_info_fetcher,
+            committed_pubkeys: self.committed_pubkeys,
+        };
+        let mut reconciled_outbox = false;
+        loop {
+            if self.pending_transaction.is_none() && !reconciled_outbox {
+                reconciled_outbox = true;
+                self.pending_transaction = self.recover_pending_from_outbox().await;
             }
-            .into_stage()
-        };
-        let state = ExecutionState {
-            current_attempt: &mut self.current_attempt,
-            transaction_strategy: &mut self.current,
-            pending_transaction: &mut self.pending_transaction,
-            execution_report: self.report,
-            commit_signature: confirmed_commit,
-        };
-        if has_follow_up {
-            stage_execution_loop(
-                &ctx.authority,
+
+            if let Some(ref pending) = self.pending_transaction {
+                self.report.progress.transaction =
+                    TransactionProgress::Submitted(pending.signature);
+                if resolve_pending_signature(&ctx.intent_client, pending).await? {
+                    self.report.progress.transaction =
+                        TransactionProgress::Confirmed(pending.signature);
+                    break Ok(Ok(pending.signature));
+                }
+                self.report.progress.transaction = TransactionProgress::Rejected(pending.signature);
+                self.pending_transaction = None;
+            }
+
+            // Resolve a previously sent transaction before skipping an empty follow-up.
+            if let Some(commit_signature) = confirmed_commit
+                && self.current.optimized_tasks.is_empty()
+            {
+                return Ok(Ok(commit_signature));
+            }
+
+            self.current_attempt += 1;
+
+            // Prepare message
+            let prepared_transaction = prepare_transaction(
                 &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
+                &ctx.authority,
                 &ctx.transaction_preparator,
-                CommitStagePatcher {
-                    authority: &ctx.authority,
-                    intent_client: &ctx.intent_client,
-                    intent_id: self.intent_id,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                    task_info_fetcher: &ctx.task_info_fetcher,
-                    committed_pubkeys: self.committed_pubkeys,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                committing_pending,
-                state,
+                &mut self.current,
             )
             .await
-        } else if confirmed_commit.is_some() {
-            stage_execution_loop(
-                &ctx.authority,
-                &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
-                &ctx.transaction_preparator,
-                FinalizeStagePatcher {
-                    authority: &ctx.authority,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                follow_up_pending,
-                state,
-            )
-            .await
-        } else {
-            stage_execution_loop(
-                &ctx.authority,
-                &ctx.intent_client,
-                ctx.outbox_client.as_ref(),
-                &ctx.transaction_preparator,
-                SingleStagePatcher {
-                    authority: &ctx.authority,
-                    intent_client: &ctx.intent_client,
-                    intent_id: self.intent_id,
-                    callback_scheduler: &ctx.actions_callback_executor,
-                    task_info_fetcher: &ctx.task_info_fetcher,
-                    committed_pubkeys: self.committed_pubkeys,
-                },
-                self.intent_id,
-                make_outbox_stage,
-                combined_pending,
-                state,
-            )
-            .await
+            .map_err(IntentExecutorError::FailedPreparation)?;
+
+            // Record in outbox before sending
+            let pending = PendingTransaction {
+                signature: *prepared_transaction.get_signature(),
+                blockhash: *prepared_transaction.get_recent_blockhash(),
+            };
+            self.report.progress.transaction = TransactionProgress::Prepared(pending.signature);
+            let recovery_commit_nonces = recovery_commit_nonces(&self.current.optimized_tasks);
+            ctx.outbox_client
+                .set_intent_execution_stage(
+                    self.intent_id,
+                    PendingExecution {
+                        transaction: pending,
+                        confirmed_commit,
+                        has_follow_up,
+                    }
+                    .into_stage(),
+                    recovery_commit_nonces,
+                )
+                .await
+                .map_err(Into::into)?;
+
+            // Now record locally signature of tx we about to send
+            // Precaution for timeout in between
+            self.pending_transaction = Some(pending);
+            self.report.progress.transaction = TransactionProgress::Submitted(pending.signature);
+            let signature = &pending.signature;
+
+            // Send signed tx
+            let execution_result = ctx
+                .intent_client
+                .send_signed_tx_with_retries(&prepared_transaction, &self.current.optimized_tasks)
+                .await;
+
+            // Result returned, cleanup pending signature
+            self.pending_transaction = None;
+
+            let execution_err = match execution_result {
+                Ok(()) => {
+                    self.report.progress.transaction = TransactionProgress::Confirmed(*signature);
+                    return Ok(Ok(*signature));
+                }
+                Err(err) => err,
+            };
+            if execution_err.is_rejected() {
+                self.report.progress.transaction = TransactionProgress::Rejected(*signature);
+            }
+            let flow = recovery.recover(&execution_err, &mut self.current, self.report).await?;
+            let cleanup = match flow {
+                ControlFlow::Continue(value) => value,
+                ControlFlow::Break(()) => return Ok(Err(execution_err)),
+            };
+            ctx.intent_client.invalidate_cached_blockhash().await;
+            self.report.dispose(cleanup);
+
+            if let Some(commit_signature) = confirmed_commit
+                && self.current.optimized_tasks.is_empty()
+            {
+                // Failed actions can leave no work after a confirmed commit.
+                // Keep undelegation failures visible even when patching removes all tasks.
+                if matches!(
+                    execution_err,
+                    TransactionStrategyExecutionError::ActionsError(..)
+                ) {
+                    self.report.add_patched_error(execution_err);
+                    return Ok(Ok(commit_signature));
+                }
+                return Ok(Err(execution_err));
+            }
+
+            if self.current_attempt >= TRANSACTION_LOOP_CEILING {
+                error!("CRITICAL! Recursion ceiling reached");
+                return Ok(Err(execution_err));
+            } else {
+                self.report.add_patched_error(execution_err);
+            }
+        }
+    }
+
+    async fn recover_pending_from_outbox(&self) -> Option<PendingTransaction> {
+        let reader = self.ctx.outbox_client.outbox_reader();
+        match reader.fetch_outbox_intent(self.intent_id).await {
+            Ok(Some(bundle)) => PendingExecution::from_status(bundle.status())
+                .filter(|pending| {
+                    pending.has_follow_up == self.follow_up.is_some()
+                        && pending.confirmed_commit.is_some()
+                            == self.report.progress.confirmed_commit.is_some()
+                })
+                .map(|pending| pending.transaction),
+            Ok(None) => None,
+            Err(_) => {
+                warn!(
+                    intent_id = self.intent_id,
+                    "Failed to reconcile pending transaction from outbox"
+                );
+                None
+            }
         }
     }
 
