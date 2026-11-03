@@ -83,4 +83,9 @@ async fn block_rpc_methods() {
         env.rpc.get_blocks_with_limit(start, 3).await.unwrap(),
         (start..start + 3).collect::<Vec<_>>()
     );
+
+    let parent = env.rpc.get_block(latest - 1).await.unwrap();
+    let child = env.rpc.get_block(latest).await.unwrap();
+    assert_ne!(child.previous_blockhash, Hash::default().to_string());
+    assert_eq!(child.previous_blockhash, parent.blockhash);
 }
