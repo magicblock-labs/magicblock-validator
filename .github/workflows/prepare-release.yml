@@ -9,7 +9,7 @@ name: Prepare release
         type: string
 
 concurrency:
-  group: prepare-release
+  group: prepare-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -19,26 +19,30 @@ permissions:
 jobs:
   prepare-release:
     name: Prepare release PR
-    if: github.ref_name == github.event.repository.default_branch
     runs-on: blacksmith-32vcpu-ubuntu-2404
     env:
       HOST_CARGO_JOBS: "8"
-      # Releases are always cut from master, regardless of the default branch.
-      RELEASE_BASE_BRANCH: master
+      RELEASE_BASE_BRANCH: ${{ github.ref_name }}
     steps:
+      - name: Require release base branch
+        if: github.ref_name != 'master' && github.ref_name != 'V1'
+        shell: bash
+        run: |
+          echo "::error::Releases are cut from ${RELEASE_BASE_BRANCH}; run this workflow on ${RELEASE_BASE_BRANCH}."
+          exit 1
+
+      # The workflow and the code it releases come from the same commit.
       - name: Checkout release base branch
         uses: actions/checkout@v5
         with:
           path: magicblock-validator
-          ref: ${{ env.RELEASE_BASE_BRANCH }}
           fetch-depth: 0
           persist-credentials: false
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
+        id: build-env
         with:
-          build_cache_key_name: "magicblock-validator-prepare-release-v001"
-          rust_toolchain_release: "1.94.1"
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+          cache-key: prepare-release
 
       - name: Determine release version
         working-directory: magicblock-validator
@@ -48,19 +52,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          current_version="$(
-            awk '
-              $0 == "[workspace.package]" { in_section = 1; next }
-              in_section && /^\[/ { exit }
-              in_section && /^version = "/ {
-                value = $0
-                sub(/^version = "/, "", value)
-                sub(/"$/, "", value)
-                print value
-                exit
-              }
-            ' Cargo.toml
-          )"
+          current_version="$(.github/scripts/workspace-version.sh)"
 
           if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "Invalid current workspace version: $current_version" >&2
@@ -93,6 +85,11 @@ jobs:
 
             version="${new_major}.${new_minor}.${new_patch}"
           fi
+
+          case "$RELEASE_BASE_BRANCH:$version" in
+            V1:1.*|master:2.*) ;;
+            *) echo "::error::V1 requires 1.x; master requires 2.x (specify 2.0.0 for its first release)."; exit 1 ;;
+          esac
 
           release_branch="release/v${version}"
           remote_branch="$(git ls-remote --heads origin "refs/heads/${release_branch}")"
@@ -144,17 +141,60 @@ jobs:
         shell: bash
         run: ./version-align.sh
 
-      - name: Build project and integration tests
+      # Re-resolving a lockfile can switch third-party versions (it paired five8 1.0.0
+      # with five8_core 0.1.2, which does not compile), so a release moves only the
+      # repository's own packages to the new version and builds what master tested.
+      - name: Set package versions in lockfiles
         working-directory: magicblock-validator
         shell: bash
         run: |
           set -euo pipefail
-          cargo build --workspace --jobs "$HOST_CARGO_JOBS"
-          cargo build --workspace --manifest-path test-integration/Cargo.toml --jobs "$HOST_CARGO_JOBS"
-          # Full dependency resolution so --locked actually validates the
-          # lockfiles (--no-deps skips resolution and never trips --locked).
-          cargo metadata --locked --format-version 1 >/dev/null
-          cargo metadata --manifest-path test-integration/Cargo.toml --locked --format-version 1 >/dev/null
+          for lockfile in Cargo.lock test-integration/Cargo.lock; do
+            [[ -f "$lockfile" ]] || continue
+            awk -v from="$CURRENT_VERSION" -v to="$VERSION" '
+              BEGIN { RS = "" }
+              # First pass: local packages (no source) at the old version.
+              NR == FNR {
+                if ($0 !~ /\nsource = / && index($0 "\n", "\nversion = \"" from "\"\n") && match($0, /\nname = "[^"]+"/))
+                  local[substr($0, RSTART + 9, RLENGTH - 10)] = 1
+                next
+              }
+              # Second pass: move them, and every reference pinned to them, to the new version.
+              {
+                block = $0
+                if (block !~ /\nsource = / && match(block, /\nname = "[^"]+"/) && substr(block, RSTART + 9, RLENGTH - 10) in local)
+                  block = swap(block, "\nversion = \"" from "\"", "\nversion = \"" to "\"")
+                for (name in local)
+                  block = swap(block, "\"" name " " from "\"", "\"" name " " to "\"")
+                printf "%s%s", (FNR > 1 ? "\n\n" : ""), block
+              }
+              END { print "" }
+              function swap(s, old, new,    i, out) {
+                out = ""
+                while ((i = index(s, old)) > 0) {
+                  out = out substr(s, 1, i - 1) new
+                  s = substr(s, i + length(old))
+                }
+                return out s
+              }
+            ' "$lockfile" "$lockfile" > "$lockfile.tmp"
+            mv "$lockfile.tmp" "$lockfile"
+          done
+
+      - name: Build workspaces
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          for manifest in Cargo.toml test-integration/Cargo.toml; do
+            [[ -f "$manifest" ]] || continue
+            cargo build --workspace --locked --manifest-path "$manifest" --jobs "$HOST_CARGO_JOBS"
+          done
+
+      - uses: ./magicblock-validator/.github/actions/save-build-cache
+        with:
+          key: ${{ steps.build-env.outputs.save-key }}
+          path: ${{ steps.build-env.outputs.cache-paths }}
 
       - name: Commit and push release branch
         working-directory: magicblock-validator
@@ -171,7 +211,7 @@ jobs:
             echo "No release changes were generated" >&2
             exit 1
           fi
-          git commit -m "release: v${VERSION}"
+          git commit -m "chore(release): prepare v${VERSION}"
           gh auth setup-git
           git push --set-upstream origin "$RELEASE_BRANCH"
 
@@ -184,5 +224,5 @@ jobs:
           gh pr create \
             --base "$RELEASE_BASE_BRANCH" \
             --head "$RELEASE_BRANCH" \
-            --title "release v${VERSION}" \
+            --title "chore(release): prepare v${VERSION}" \
             --body ""

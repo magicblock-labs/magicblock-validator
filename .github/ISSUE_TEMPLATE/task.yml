@@ -1,0 +1,27 @@
+name: Task
+description: Track a concrete, scoped unit of work
+type: Task
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        Title: the intended outcome.
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: >-
+        Useful context beyond the outcome: what needs to change, why, and where
+        it belongs, with links to relevant code or design context.
+    validations:
+      required: false
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      description: >-
+        The observable result that defines completion, with enough
+        context to understand the task on its own.
+    validations:
+      required: true

@@ -1,8 +1,12 @@
+//! Randomized v42 arithmetic that exercises CPI without intentional arithmetic faults.
+
 use rand::Rng;
 use v42_calculator_interface::builder::Expr;
 
+/// Keeps intermediate values bounded even for the longest multiplication chain.
 const MAX_TERM: i64 = 4;
 
+/// Builds a bounded arithmetic probe with CPI calls and nonzero divisor literals.
 pub(super) fn random() -> Expr {
     let mut rng = rand::rng();
     let mut expr = Expr::lit(term(&mut rng)).cpi();
@@ -20,6 +24,7 @@ pub(super) fn random() -> Expr {
     expr
 }
 
+/// Arithmetic choices with operand generation tailored to division's nonzero requirement.
 #[derive(Clone, Copy)]
 enum Op {
     Add,
@@ -38,6 +43,7 @@ impl Op {
         }
     }
 
+    /// Restricts divisor literals without excluding zero from other operations.
     fn term(self, rng: &mut impl Rng) -> i64 {
         match self {
             Self::Divide => {

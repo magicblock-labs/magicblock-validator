@@ -1,0 +1,29 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "magicblock-committor-program"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+committor-interface = { workspace = true }
+solana-account-info = { workspace = true }
+solana-program = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-system-interface = { workspace = true, features = ["wincode"] }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[features]
+custom-heap = []
+custom-panic = []
+default = []
+no-entrypoint = []
+
+[lints]
+workspace = true

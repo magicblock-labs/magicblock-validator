@@ -1,0 +1,532 @@
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicU64, AtomicUsize, Ordering},
+    time::{Duration, Instant},
+};
+
+use rocksdb::{PerfContext, PerfMetric, PerfStatsLevel, perf::set_perf_stats};
+use solana_metrics::datapoint_info;
+
+use crate::database::options::LedgerColumnOptions;
+
+pub(crate) const BLOCKSTORE_METRICS_ERROR: i64 = -1;
+
+// -----------------
+// PerfSamplingStatus
+// -----------------
+#[derive(Debug, Default)]
+/// A struct that holds the current status of RocksDB perf sampling.
+pub struct PerfSamplingStatus {
+    // The number of RocksDB operations since the last perf sample.
+    _op_count: AtomicUsize,
+    // The timestamp of the latest operation with perf stats collection.
+    _last_sample_time_ms: AtomicU64,
+}
+
+// -----------------
+// BlockstoreRocksDbColumnFamilyMetrics
+// -----------------
+/// A metrics struct that exposes RocksDB's column family properties.
+///
+/// Here we only expose a subset of all the internal properties which are
+/// relevant to the ledger store performance.
+///
+/// The list of completed RocksDB internal properties can be found
+/// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
+#[derive(Default)]
+pub(crate) struct BlockstoreRocksDbColumnFamilyMetrics {
+    // Size related
+
+    // The storage size occupied by the column family.
+    // RocksDB's internal property key: "rocksdb.total-sst-files-size"
+    pub total_sst_files_size: i64,
+    // The memory size occupied by the column family's in-memory buffer.
+    // RocksDB's internal property key: "rocksdb.size-all-mem-tables"
+    pub size_all_mem_tables: i64,
+
+    // Snapshot related
+
+    // Number of snapshots hold for the column family.
+    // RocksDB's internal property key: "rocksdb.num-snapshots"
+    pub num_snapshots: i64,
+    // Unit timestamp of the oldest unreleased snapshot.
+    // RocksDB's internal property key: "rocksdb.oldest-snapshot-time"
+    pub oldest_snapshot_time: i64,
+
+    // Write related
+
+    // The current actual delayed write rate. 0 means no delay.
+    // RocksDB's internal property key: "rocksdb.actual-delayed-write-rate"
+    pub actual_delayed_write_rate: i64,
+    // A flag indicating whether writes are stopped on this column family.
+    // 1 indicates writes have been stopped.
+    // RocksDB's internal property key: "rocksdb.is-write-stopped"
+    pub is_write_stopped: i64,
+
+    // Memory / block cache related
+
+    // The block cache capacity of the column family.
+    // RocksDB's internal property key: "rocksdb.block-cache-capacity"
+    pub block_cache_capacity: i64,
+    // The memory size used by the column family in the block cache.
+    // RocksDB's internal property key: "rocksdb.block-cache-usage"
+    pub block_cache_usage: i64,
+    // The memory size used by the column family in the block cache where
+    // entries are pinned.
+    // RocksDB's internal property key: "rocksdb.block-cache-pinned-usage"
+    pub block_cache_pinned_usage: i64,
+
+    // The estimated memory size used for reading SST tables in this column
+    // family such as filters and index blocks. Note that this number does not
+    // include the memory used in block cache.
+    // RocksDB's internal property key: "rocksdb.estimate-table-readers-mem"
+    pub estimate_table_readers_mem: i64,
+
+    // Flush and compaction
+
+    // A 1 or 0 flag indicating whether a memtable flush is pending.
+    // If this number is 1, it means a memtable is waiting for being flushed,
+    // but there might be too many L0 files that prevents it from being flushed.
+    // RocksDB's internal property key: "rocksdb.mem-table-flush-pending"
+    pub mem_table_flush_pending: i64,
+
+    // A 1 or 0 flag indicating whether a compaction job is pending.
+    // If this number is 1, it means some part of the column family requires
+    // compaction in order to maintain shape of LSM tree, but the compaction
+    // is pending because the desired compaction job is either waiting for
+    // other dependnent compactions to be finished or waiting for an available
+    // compaction thread.
+    // RocksDB's internal property key: "rocksdb.compaction-pending"
+    pub compaction_pending: i64,
+
+    // The number of compactions that are currently running for the column family.
+    // RocksDB's internal property key: "rocksdb.num-running-compactions"
+    pub num_running_compactions: i64,
+
+    // The number of flushes that are currently running for the column family.
+    // RocksDB's internal property key: "rocksdb.num-running-flushes"
+    pub num_running_flushes: i64,
+
+    // FIFO Compaction related
+
+    // returns an estimation of the oldest key timestamp in the DB. Only vailable
+    // for FIFO compaction with compaction_options_fifo.allow_compaction = false.
+    // RocksDB's internal property key: "rocksdb.estimate-oldest-key-time"
+    pub estimate_oldest_key_time: i64,
+
+    // Misc
+
+    // The accumulated number of RocksDB background errors.
+    // RocksDB's internal property key: "rocksdb.background-errors"
+    pub background_errors: i64,
+}
+
+impl BlockstoreRocksDbColumnFamilyMetrics {
+    /// Report metrics with the specified metric name and column family tag.
+    /// The metric name and the column family tag is embedded in the parameter
+    /// `metric_name_and_cf_tag` with the following format.
+    ///
+    /// For example, "blockstore_rocksdb_cfs,cf_name=shred_data".
+    pub(crate) fn report_metrics(
+        &self,
+        cf_name: &'static str,
+        column_options: &LedgerColumnOptions,
+    ) {
+        datapoint_info!(
+            "blockstore_rocksdb_cfs",
+            // tags that support group-by operations
+            "cf_name" => cf_name,
+            "storage" => column_options.get_storage_type_string(),
+            "compression" => column_options.get_compression_type_string(),
+            // Size related
+            (
+                "total_sst_files_size",
+                self.total_sst_files_size,
+                i64
+            ),
+            ("size_all_mem_tables", self.size_all_mem_tables, i64),
+            // Snapshot related
+            ("num_snapshots", self.num_snapshots, i64),
+            (
+                "oldest_snapshot_time",
+                self.oldest_snapshot_time,
+                i64
+            ),
+            // Write related
+            (
+                "actual_delayed_write_rate",
+                self.actual_delayed_write_rate,
+                i64
+            ),
+            ("is_write_stopped", self.is_write_stopped, i64),
+            // Memory / block cache related
+            (
+                "block_cache_capacity",
+                self.block_cache_capacity,
+                i64
+            ),
+            ("block_cache_usage", self.block_cache_usage, i64),
+            (
+                "block_cache_pinned_usage",
+                self.block_cache_pinned_usage,
+                i64
+            ),
+            (
+                "estimate_table_readers_mem",
+                self.estimate_table_readers_mem,
+                i64
+            ),
+            // Flush and compaction
+            (
+                "mem_table_flush_pending",
+                self.mem_table_flush_pending,
+                i64
+            ),
+            ("compaction_pending", self.compaction_pending, i64),
+            (
+                "num_running_compactions",
+                self.num_running_compactions,
+                i64
+            ),
+            ("num_running_flushes", self.num_running_flushes, i64),
+            // FIFO Compaction related
+            (
+                "estimate_oldest_key_time",
+                self.estimate_oldest_key_time,
+                i64
+            ),
+            // Misc
+            ("background_errors", self.background_errors, i64),
+        );
+    }
+}
+
+pub(crate) const PERF_METRIC_OP_NAME_GET: &str = "get";
+pub(crate) const PERF_METRIC_OP_NAME_MULTI_GET: &str = "multi_get";
+pub(crate) const PERF_METRIC_OP_NAME_PUT: &str = "put";
+
+// Thread local instance of RocksDB's PerfContext.
+thread_local! {
+    static PER_THREAD_ROCKS_PERF_CONTEXT: RefCell<PerfContext> = RefCell::new(PerfContext::default());
+}
+
+/// The function enables RocksDB PerfContext once for every `sample_interval`.
+///
+/// PerfContext is a thread-local struct defined in RocksDB for collecting
+/// per-thread read / write performance metrics.
+///
+/// When this function enables PerfContext, the function will return true,
+/// and the PerfContext of the ubsequent RocksDB operation will be collected.
+pub(crate) fn maybe_enable_rocksdb_perf(
+    _sample_interval: usize,
+    _perf_status: &PerfSamplingStatus,
+) -> Option<Instant> {
+    None
+}
+
+// -----------------
+// report_rocksdb_read_perf
+// -----------------
+
+/// Reports the collected PerfContext and disables the PerfContext after
+/// reporting.
+pub(crate) fn report_rocksdb_read_perf(
+    cf_name: &'static str,
+    op_name: &'static str,
+    total_op_duration: &Duration,
+    column_options: &LedgerColumnOptions,
+) {
+    PER_THREAD_ROCKS_PERF_CONTEXT.with(|perf_context_cell| {
+        set_perf_stats(PerfStatsLevel::Disable);
+        let perf_context = perf_context_cell.borrow();
+        datapoint_info!(
+            "blockstore_rocksdb_read_perf",
+            // tags that support group-by operations
+            "op" => op_name,
+            "cf_name" => cf_name,
+            "storage" => column_options.get_storage_type_string(),
+            "compression" => column_options.get_compression_type_string(),
+            // total nanos spent on the entire operation.
+            ("total_op_nanos", total_op_duration.as_nanos() as i64, i64),
+            (
+                "user_key_comparison_count",
+                perf_context.metric(PerfMetric::UserKeyComparisonCount) as i64,
+                i64
+            ),
+            (
+                "block_cache_hit_count",
+                perf_context.metric(PerfMetric::BlockCacheHitCount) as i64,
+                i64
+            ),
+            (
+                "block_read_count",
+                perf_context.metric(PerfMetric::BlockReadCount) as i64,
+                i64
+            ),
+            (
+                "block_read_byte",
+                perf_context.metric(PerfMetric::BlockReadByte) as i64,
+                i64
+            ),
+            (
+                "block_read_nanos",
+                perf_context.metric(PerfMetric::BlockReadTime) as i64,
+                i64
+            ),
+            (
+                "block_checksum_nanos",
+                perf_context.metric(PerfMetric::BlockChecksumTime) as i64,
+                i64
+            ),
+            (
+                "block_decompress_nanos",
+                perf_context.metric(PerfMetric::BlockDecompressTime) as i64,
+                i64
+            ),
+            (
+                "get_read_bytes",
+                perf_context.metric(PerfMetric::GetReadBytes) as i64,
+                i64
+            ),
+            (
+                "multiget_read_bytes",
+                perf_context.metric(PerfMetric::MultigetReadBytes) as i64,
+                i64
+            ),
+            (
+                "get_snapshot_nanos",
+                perf_context.metric(PerfMetric::GetSnapshotTime) as i64,
+                i64
+            ),
+            (
+                "get_from_memtable_nanos",
+                perf_context.metric(PerfMetric::GetFromMemtableTime) as i64,
+                i64
+            ),
+            (
+                "get_from_memtable_count",
+                perf_context.metric(PerfMetric::GetFromMemtableCount) as i64,
+                i64
+            ),
+            (
+                // total nanos spent after Get() finds a key
+                "get_post_process_nanos",
+                perf_context.metric(PerfMetric::GetPostProcessTime) as i64,
+                i64
+            ),
+            (
+                // total nanos reading from output files
+                "get_from_output_files_nanos",
+                perf_context.metric(PerfMetric::GetFromOutputFilesTime) as i64,
+                i64
+            ),
+            (
+                // time spent on acquiring DB mutex
+                "db_mutex_lock_nanos",
+                perf_context.metric(PerfMetric::DbMutexLockNanos) as i64,
+                i64
+            ),
+            (
+                // time spent on waiting with a condition variable created with DB mutex.
+                "db_condition_wait_nanos",
+                perf_context.metric(PerfMetric::DbConditionWaitNanos) as i64,
+                i64
+            ),
+            (
+                "merge_operator_nanos",
+                perf_context.metric(PerfMetric::MergeOperatorTimeNanos) as i64,
+                i64
+            ),
+            (
+                "read_index_block_nanos",
+                perf_context.metric(PerfMetric::ReadIndexBlockNanos) as i64,
+                i64
+            ),
+            (
+                "read_filter_block_nanos",
+                perf_context.metric(PerfMetric::ReadFilterBlockNanos) as i64,
+                i64
+            ),
+            (
+                "new_table_block_iter_nanos",
+                perf_context.metric(PerfMetric::NewTableBlockIterNanos) as i64,
+                i64
+            ),
+            (
+                "block_seek_nanos",
+                perf_context.metric(PerfMetric::BlockSeekNanos) as i64,
+                i64
+            ),
+            (
+                "find_table_nanos",
+                perf_context.metric(PerfMetric::FindTableNanos) as i64,
+                i64
+            ),
+            (
+                "bloom_memtable_hit_count",
+                perf_context.metric(PerfMetric::BloomMemtableHitCount) as i64,
+                i64
+            ),
+            (
+                "bloom_memtable_miss_count",
+                perf_context.metric(PerfMetric::BloomMemtableMissCount) as i64,
+                i64
+            ),
+            (
+                "bloom_sst_hit_count",
+                perf_context.metric(PerfMetric::BloomSstHitCount) as i64,
+                i64
+            ),
+            (
+                "bloom_sst_miss_count",
+                perf_context.metric(PerfMetric::BloomSstMissCount) as i64,
+                i64
+            ),
+            (
+                "key_lock_wait_time",
+                perf_context.metric(PerfMetric::KeyLockWaitTime) as i64,
+                i64
+            ),
+            (
+                "key_lock_wait_count",
+                perf_context.metric(PerfMetric::KeyLockWaitCount) as i64,
+                i64
+            ),
+            // nanos spent on file/directory operations.
+            (
+                "env_file_ops_nanos",
+                (perf_context.metric(PerfMetric::EnvFileExistsNanos)
+                    + perf_context.metric(PerfMetric::EnvGetChildrenNanos)
+                    + perf_context.metric(PerfMetric::EnvLockFileNanos)
+                    + perf_context.metric(PerfMetric::EnvUnlockFileNanos)) as i64,
+                i64
+            ),
+        );
+    });
+}
+
+/// Reports the collected PerfContext and disables the PerfContext after
+/// reporting.
+pub(crate) fn report_rocksdb_write_perf(
+    cf_name: &'static str,
+    op_name: &'static str,
+    total_op_duration: &Duration,
+    column_options: &LedgerColumnOptions,
+) {
+    PER_THREAD_ROCKS_PERF_CONTEXT.with(|perf_context_cell| {
+        set_perf_stats(PerfStatsLevel::Disable);
+        let perf_context = perf_context_cell.borrow();
+        datapoint_info!(
+            "blockstore_rocksdb_write_perf",
+            // tags that support group-by operations
+            "op" => op_name,
+            "cf_name" => cf_name,
+            "storage" => column_options.get_storage_type_string(),
+            "compression" => column_options.get_compression_type_string(),
+            // total nanos spent on the entire operation.
+            ("total_op_nanos", total_op_duration.as_nanos() as i64, i64),
+            // total nanos spent on writing to WAL
+            (
+                "write_wal_nanos",
+                perf_context.metric(PerfMetric::WriteWalTime) as i64,
+                i64
+            ),
+            // total nanos spent on writing to mem tables
+            (
+                "write_memtable_nanos",
+                perf_context.metric(PerfMetric::WriteMemtableTime) as i64,
+                i64
+            ),
+            // total nanos spent on delaying or throttling write
+            (
+                "write_delay_nanos",
+                perf_context.metric(PerfMetric::WriteDelayTime) as i64,
+                i64
+            ),
+            // total nanos spent on writing a record, excluding the above four things
+            (
+                "write_pre_and_post_process_nanos",
+                perf_context.metric(PerfMetric::WritePreAndPostProcessTime) as i64,
+                i64
+            ),
+            // time spent on acquiring DB mutex.
+            (
+                "db_mutex_lock_nanos",
+                perf_context.metric(PerfMetric::DbMutexLockNanos) as i64,
+                i64
+            ),
+            // Time spent on waiting with a condition variable created with DB mutex.
+            (
+                "db_condition_wait_nanos",
+                perf_context.metric(PerfMetric::DbConditionWaitNanos) as i64,
+                i64
+            ),
+            // Time spent on merge operator.
+            (
+                "merge_operator_nanos_nanos",
+                perf_context.metric(PerfMetric::MergeOperatorTimeNanos) as i64,
+                i64
+            ),
+            // Time spent waiting on key locks in transaction lock manager.
+            (
+                "key_lock_wait_nanos",
+                perf_context.metric(PerfMetric::KeyLockWaitTime) as i64,
+                i64
+            ),
+            // number of times acquiring a lock was blocked by another transaction.
+            (
+                "key_lock_wait_count",
+                perf_context.metric(PerfMetric::KeyLockWaitCount) as i64,
+                i64
+            ),
+        );
+    });
+}
+
+// -----------------
+// LedgerRpcApiMetrics
+// -----------------
+
+/// A metrics struct to track the number of times Ledger RPC function are called.
+#[derive(Default)]
+pub(crate) struct LedgerRpcApiMetrics {
+    pub num_get_complete_transaction: AtomicU64,
+    pub num_get_confirmed_signatures_for_address: AtomicU64,
+    pub num_get_transaction_status: AtomicU64,
+}
+
+impl LedgerRpcApiMetrics {
+    #[allow(unused)]
+    pub(crate) fn report(&self) {
+        let num_get_complete_transaction =
+            self.num_get_complete_transaction.swap(0, Ordering::Relaxed);
+        let num_get_confirmed_signatures_for_address =
+            self.num_get_confirmed_signatures_for_address.swap(0, Ordering::Relaxed);
+        let num_get_transaction_status = self.num_get_transaction_status.swap(0, Ordering::Relaxed);
+
+        let total_num_queries = num_get_complete_transaction
+            .saturating_add(num_get_confirmed_signatures_for_address)
+            .saturating_add(num_get_transaction_status);
+
+        if total_num_queries > 0 {
+            datapoint_info!(
+                "blockstore-rpc-api",
+                (
+                    "num_get_complete_transaction",
+                    num_get_complete_transaction as i64,
+                    i64
+                ),
+                (
+                    "num_get_confirmed_signatures_for_address",
+                    num_get_confirmed_signatures_for_address as i64,
+                    i64
+                ),
+                (
+                    "num_get_transaction_status",
+                    num_get_transaction_status as i64,
+                    i64
+                ),
+            );
+        }
+    }
+}

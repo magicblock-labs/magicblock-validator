@@ -1,0 +1,38 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "magicblock-task-scheduler"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+engine = { workspace = true }
+hydra-api = { workspace = true, features = ["client", "ephemeral"] }
+keeper = { workspace = true }
+magic-root-interface = { workspace = true }
+program = { workspace = true }
+nucleus = { workspace = true }
+rand = { workspace = true }
+solana-account = { workspace = true }
+solana-instruction = { workspace = true, features = ["wincode"] }
+solana-keypair = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-sha256-hasher = { workspace = true }
+solana-signer = { workspace = true }
+solana-system-interface = { workspace = true, features = ["bincode"] }
+solana-transaction = { workspace = true }
+solana-rpc-client = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tracing = { workspace = true }
+wincode = { workspace = true }
+
+[dev-dependencies]
+engine = { workspace = true, features = ["testkit"] }
+mbv-core = { workspace = true }
+
+[lints]
+workspace = true

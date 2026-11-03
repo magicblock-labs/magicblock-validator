@@ -1,1 +1,19 @@
+msrv = "1.96.1"
 
+cognitive-complexity-threshold = 20
+
+array-size-threshold = 8192
+enum-variant-size-threshold = 192
+future-size-threshold = 8192
+large-error-threshold = 96
+stack-size-threshold = 131072
+
+allow-expect-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-panic-in-tests = true
+allow-unwrap-in-tests = true
+
+max-fn-params-bools = 1
+max-struct-bools = 2
+
+check-private-items = true

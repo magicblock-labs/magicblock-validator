@@ -1,0 +1,158 @@
+use std::{error::Error, fmt::Display};
+
+use serde::Serialize;
+use solana_transaction_error::TransactionError;
+
+pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
+pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
+pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
+pub(crate) const INVALID_REQUEST: i16 = -32600;
+pub(crate) const METHOD_NOT_FOUND: i16 = -32601;
+pub(crate) const INVALID_PARAMS: i16 = -32602;
+pub(crate) const INTERNAL_ERROR: i16 = -32603;
+pub(crate) const PARSE_ERROR: i16 = -32700;
+
+#[derive(thiserror::Error, Debug)]
+pub enum ApertureError {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Keeper(#[from] keeper::error::KeeperError),
+}
+
+#[derive(Serialize, Debug, thiserror::Error)]
+#[error("Code: {code}. Message: {message}")]
+pub(crate) struct RpcError {
+    code: i16,
+    message: String,
+    // HTTP status to use when rendering this error. Defaults to 200 (the
+    // JSON-RPC convention). Set to 503 for transient unavailability so that
+    // upstream retry-aware proxies can absorb the failure instead of
+    // forwarding a JSON-RPC error body to the client.
+    #[serde(skip)]
+    http_status: u16,
+}
+
+impl From<hyper::Error> for RpcError {
+    fn from(value: hyper::Error) -> Self {
+        Self::invalid_request(value)
+    }
+}
+
+impl From<TransactionError> for RpcError {
+    fn from(value: TransactionError) -> Self {
+        // ClusterMaintenance is returned when the scheduler channels are
+        // closed during shutdown. Surface it as HTTP 503 so the upstream
+        // retry buffer can absorb the brief restart gap.
+        let http_status =
+            if matches!(value, TransactionError::ClusterMaintenance) { 503 } else { 200 };
+        Self {
+            http_status,
+            ..Self::transaction_verification(value)
+        }
+    }
+}
+
+impl From<engine::EngineError> for RpcError {
+    fn from(value: engine::EngineError) -> Self {
+        use engine::EngineError::*;
+        match value {
+            // Failures attributable to the submitted transaction itself.
+            SignatureVerification | Sanitization(_) | Signature(_) | TransactionExecution(_) => {
+                Self::transaction_verification(value)
+            }
+            // Transient shutdown: surface as HTTP 503 so retry-aware proxies
+            // can absorb the brief validator restart gap.
+            ServiceUnavailable(_) => Self {
+                http_status: 503,
+                ..Self::internal(value)
+            },
+            _ => Self::internal(value),
+        }
+    }
+}
+
+impl RpcError {
+    pub(crate) fn http_status(&self) -> u16 {
+        self.http_status
+    }
+
+    pub(crate) fn invalid_params<E: Display>(error: E) -> Self {
+        Self {
+            code: INVALID_PARAMS,
+            message: format!("invalid request params: {error}"),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn transaction_simulation<E: Display>(error: E) -> Self {
+        Self {
+            code: TRANSACTION_SIMULATION,
+            message: error.to_string(),
+            http_status: 200,
+        }
+    }
+
+    /// Maps a scheduler simulation error to an `RpcError`, preserving the
+    /// `TRANSACTION_SIMULATION` JSON-RPC code while surfacing the transient
+    /// shutdown case (`ClusterMaintenance`) as HTTP 503 so upstream retry
+    /// proxies can absorb the validator restart gap. Mirrors the behavior of
+    /// `From<TransactionError> for RpcError`, which routes scheduler errors
+    /// from `send_transaction` / `execute` through HTTP 503 the same way.
+    pub(crate) fn transaction_simulation_from_scheduler(error: TransactionError) -> Self {
+        let http_status =
+            if matches!(error, TransactionError::ClusterMaintenance) { 503 } else { 200 };
+        Self {
+            http_status,
+            ..Self::transaction_simulation(error)
+        }
+    }
+
+    pub(crate) fn transaction_verification<E: Display>(error: E) -> Self {
+        Self {
+            code: TRANSACTION_VERIFICATION,
+            message: format!("transaction verification error: {error}"),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn invalid_request<E: Display>(error: E) -> Self {
+        Self {
+            code: INVALID_REQUEST,
+            message: format!("invalid request: {error}"),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn method_not_found() -> Self {
+        Self {
+            code: METHOD_NOT_FOUND,
+            message: "Method not found".to_owned(),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn parse_error<E: Error>(error: E) -> Self {
+        Self {
+            code: PARSE_ERROR,
+            message: format!("error parsing request body: {error}"),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn internal<E: Display>(error: E) -> Self {
+        Self {
+            code: INTERNAL_ERROR,
+            message: format!("internal server error: {error}"),
+            http_status: 200,
+        }
+    }
+
+    pub(crate) fn custom<E: Display>(error: E, code: i16) -> Self {
+        Self {
+            code,
+            message: error.to_string(),
+            http_status: 200,
+        }
+    }
+}

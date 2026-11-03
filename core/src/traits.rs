@@ -1,0 +1,97 @@
+use std::{collections::HashMap, fmt};
+
+use solana_program::instruction::InstructionError;
+use solana_pubkey::Pubkey;
+use solana_signature::Signature;
+use solana_transaction_error::TransactionError;
+
+use crate::intent::{BaseActionCallback, MagicIntentBundle, types::CommittedAccount};
+
+/// Trait that provides access to system calls implemented outside of SVM,
+/// accessible in magic-program.
+pub trait MagicSys: Sync + Send + 'static {
+    fn fetch_current_commit_nonces(
+        &self,
+        commits: &[CommittedAccount],
+    ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
+
+    /// Returns `Ok(())` if `intent` could ever fit on the base layer, even
+    /// under the smallest possible task representation (buffer-mode commits,
+    /// address lookup tables, 2-stage execution). If it can never fit no
+    /// matter how it gets optimized at execution time, returns `Err` so the
+    /// intent can be refused up front instead of failing later during
+    /// commit/finalize.
+    fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError>;
+}
+
+/// Interface for service handling callback execution/scheduling
+pub trait ActionsCallbackScheduler: Send + Sync + 'static {
+    /// Schedules callback txs.
+    /// Returns signature or construction error per callback.
+    fn schedule(
+        &self,
+        callbacks: Vec<BaseActionCallback>,
+        signature: Option<Signature>,
+        result: ActionResult,
+    ) -> Vec<Result<Signature, CallbackScheduleError>>;
+}
+
+#[derive(Debug)]
+pub enum CallbackScheduleError {
+    SerializationError(wincode::WriteError),
+    SigningError(String),
+}
+
+impl fmt::Display for CallbackScheduleError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SerializationError(err) => {
+                write!(f, "Callback serialization failed: {err}")
+            }
+            Self::SigningError(msg) => {
+                write!(f, "Callback signing failed: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for CallbackScheduleError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::SerializationError(err) => Some(err),
+            Self::SigningError(_) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ActionError {
+    TimeoutError,
+    ActionsError(TransactionError, Option<Signature>),
+    IntentFailedError(String),
+}
+
+impl fmt::Display for ActionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::TimeoutError => write!(f, "Actions expired"),
+            Self::ActionsError(err, sig) => {
+                write!(f, "User supplied actions are ill-formed: {err}. {sig:?}")
+            }
+            Self::IntentFailedError(msg) => {
+                write!(f, "Intent execution failed: {msg}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ActionError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ActionsError(err, _) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+pub type ActionResult = Result<(), ActionError>;

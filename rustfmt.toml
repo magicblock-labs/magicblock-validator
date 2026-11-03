@@ -1,2 +1,10 @@
-edition = "2021"
-max_width = 80
+array_width = 80
+attr_fn_like_width = 80
+chain_width = 80
+max_width = 100
+single_line_if_else_max_width = 80
+single_line_let_else_max_width = 80
+struct_lit_width = 32
+struct_variant_width = 48
+use_field_init_shorthand = true
+use_try_shorthand = true

@@ -1,0 +1,61 @@
+name: Setup Protoc
+description: Restore or install the pinned Protobuf compiler
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Protoc installation
+      id: protoc
+      shell: bash
+      run: |
+        version=$(tr -d '[:space:]' < "$GITHUB_ACTION_PATH/protoc-version")
+        case "$RUNNER_OS/$RUNNER_ARCH" in
+          Linux/X64) platform=linux-x86_64 ;;
+          Linux/ARM64) platform=linux-aarch_64 ;;
+          macOS/X64) platform=osx-x86_64 ;;
+          macOS/ARM64) platform=osx-aarch_64 ;;
+          *) echo "Unsupported protoc platform: $RUNNER_OS/$RUNNER_ARCH" >&2; exit 1 ;;
+        esac
+        {
+          echo "version=$version"
+          echo "platform=$platform"
+          echo "path=$HOME/.cache/mbv/protoc/$version"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Restore Protoc
+      id: protoc-cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ${{ steps.protoc.outputs.path }}
+        key: protoc-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.protoc.outputs.version }}
+
+    - name: Install Protoc
+      if: steps.protoc-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        VERSION: ${{ steps.protoc.outputs.version }}
+        PLATFORM: ${{ steps.protoc.outputs.platform }}
+        INSTALL_DIR: ${{ steps.protoc.outputs.path }}
+      run: |
+        mkdir -p "$INSTALL_DIR"
+        archive=$(mktemp "$RUNNER_TEMP/protoc.XXXXXX")
+        curl --fail --silent --show-error --location --retry 3 \
+          "https://github.com/protocolbuffers/protobuf/releases/download/v$VERSION/protoc-$VERSION-$PLATFORM.zip" \
+          --output "$archive"
+        unzip -qo "$archive" -d "$INSTALL_DIR"
+        "$INSTALL_DIR/bin/protoc" --version
+
+    - name: Save Protoc
+      if: steps.protoc-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ${{ steps.protoc.outputs.path }}
+        key: ${{ steps.protoc-cache.outputs.cache-primary-key }}
+
+    - name: Configure Protoc
+      shell: bash
+      env:
+        INSTALL_DIR: ${{ steps.protoc.outputs.path }}
+      run: |
+        echo "$INSTALL_DIR/bin" >> "$GITHUB_PATH"
+        echo "PROTOC=$INSTALL_DIR/bin/protoc" >> "$GITHUB_ENV"

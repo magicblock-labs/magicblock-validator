@@ -1,114 +1,52 @@
-# Contributing to magicblock-validator
+# Contributing
 
-Thanks for contributing. This repository implements a high-performance, long-running solana execution engine.  
-Correctness, determinism, and operational safety matter more than velocity.
+Use the [issue templates](../.github/ISSUE_TEMPLATE/) for bug reports, questions,
+and change proposals. Report vulnerabilities privately through the
+[security policy](SECURITY.md).
 
-Please keep contributions **small, explicit, and reviewable**.
+Open pull requests using the [template](../.github/PULL_REQUEST_TEMPLATE.md).
+Use its title convention for commit subjects too. Contributors are expected to
+follow the [code of conduct](CODE_OF_CONDUCT.md).
 
----
+[MagicBlock Engine](https://github.com/magicblock-labs/magicblock-engine) is the
+execution, account storage, and replication layer. Changes to those components
+belong in that repository; this workspace owns validator orchestration and
+application services.
 
-## Scope & Philosophy
+## Getting started
 
-- Prefer **minimal changes** over broad refactors.
-- Avoid speculative abstractions.
-- Treat config, CLI flags, and on-disk formats as **public interfaces**.
-- Backward compatibility is the default.
+Install Rust through `rustup`; the checkout selects its toolchain through
+[rust-toolchain.toml](../rust-toolchain.toml). Native builds require a C/C++
+toolchain, libclang, and the Protobuf compiler (`protoc`).
 
-If you are unsure whether a change belongs here, start a **Discussion**.
+From the workspace root, build the leader and verifier:
 
----
+```sh
+cargo build --locked -p magicblock-validator -p magicblock-verifier
+```
 
-## Pull Requests
+See [validator setup](../bins/validator/README.md) to configure and run a leader,
+or [verifier setup](../bins/verifier/README.md) to follow an existing leader.
 
+## Checks
 
-### Title format
-PR titles must follow:
+Install [cargo-nextest](https://nexte.st/docs/installation/pre-built-binaries/) to
+run the tests.
+Use `-p <package>` to scope Clippy and tests to the crates affected by your change.
+The workspace-wide checks are:
 
-type(scope): short summary
+```sh
+cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
+```
 
-Where:
-- `type` ∈ `feat | fix | docs | chore | refactor | test | perf | ci | build`
-- `scope` is optional
-- use lowercase, no trailing period
+## Validator qualification
 
-Examples:
-- `fix: prevent panic on empty slot`
-- `feat(rpc): add account snapshot endpoint`
+Use [RedSuite](https://github.com/magicblock-labs/redsuite) for validator-backed
+correctness, security, and performance checks. Follow its
+[setup guide](https://github.com/magicblock-labs/redsuite#-get-started) to build the
+fixtures and run scenarios against this checkout's leader, verifier, and
+committor program. Scenario selection and benchmark options are documented there.
 
-The PR title becomes the commit title when merged.
-
-Under **What changed**, explain why the change is needed and what it does.
-Every non-release PR description must include exactly one `Closes #<issue>`
-link to the concrete work it completes.
-
----
-
-### Compatibility & Safety
-
-Explicitly call out any of the following in the PR description:
-- config changes
-- migrations (disk, state, network, protocol)
-- behavior changes affecting operators
-
-Describe these concerns under **Compatibility**. Write `None` when none apply.
-
----
-
-### Validation
-
-- Changes affecting correctness, consensus, or state handling **must** be tested.
-- Small refactors may rely on existing coverage; explain why if no new tests are added.
-- Performance-sensitive changes should include rationale or benchmarks where relevant.
-- Under **Validation**, list the exact commands or scenarios and their results.
-
----
-
-## Commits
-
-- Keep commits focused.
-- Avoid drive-by formatting or unrelated cleanups.
-- Squash merges are used; intermediate commit messages are not critical.
-
----
-
-## Code Style
-
-- Follow existing patterns.
-- Prefer explicitness over cleverness.
-- Avoid macros or unsafe code unless there is a clear, documented need.
-- Performance optimizations should be obvious and justified.
-
----
-
-## Configs & Interfaces
-
-Assume that:
-- config files
-- CLI flags
-- RPC / API surfaces
-- on-disk formats
-
-are relied upon by external operators.
-
-Changes here require:
-- documentation updates
-- compatibility notes in the PR
-- clear migration paths if breaking
-
----
-
-## Security
-
-If you believe you’ve found a security issue, **do not open a public issue**.  
-Use the repository’s security policy instead.
-
----
-
-## Questions & Ideas
-
-- Use **Issues** for concrete, actionable work.
-- Use **Discussions** for design questions, ideas, or uncertain proposals.
-
----
-
-Thanks for helping keep the codebase fast, predictable, and boring in the best way.
+For publishing, see the [release process](RELEASE_PROCESS.md).
