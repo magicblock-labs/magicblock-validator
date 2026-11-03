@@ -34,7 +34,7 @@ runs:
       with:
         repository: magicblock-labs/redsuite
         # Receipt discovery for the outbox protocol: magicblock-labs/redsuite#302.
-        ref: c50547e65a4d45fb34dc32d3102a35862b9dce49
+        ref: 922e92d36d9083b891e66c4b8bf5e0738552d1c6
         path: redsuite
         persist-credentials: false
 
