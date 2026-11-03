@@ -5,6 +5,7 @@ use engine::Engine;
 use hyper::body::Bytes;
 use serde::Serialize;
 use tokio::{sync::mpsc, task::JoinHandle};
+use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::{
@@ -33,15 +34,18 @@ pub(crate) struct WsDispatcher {
     pub(crate) unsubs: HashMap<SubscriptionID, JoinHandle<()>>,
     /// The communication channel for this specific connection.
     pub(crate) tx: ConnectionTx,
+    /// Cancels only this connection; server shutdown propagates through its parent.
+    pub(super) cancel: CancellationToken,
 }
 
 impl WsDispatcher {
     /// Creates a new dispatcher for a single client connection.
-    pub(crate) fn new(engine: Engine, tx: ConnectionTx) -> Self {
+    pub(crate) fn new(engine: Engine, tx: ConnectionTx, cancel: CancellationToken) -> Self {
         Self {
             engine,
             unsubs: Default::default(),
             tx,
+            cancel,
         }
     }
 
@@ -86,13 +90,17 @@ impl WsDispatcher {
         encode: impl Fn(T) -> RpcResult<Option<Bytes>> + Send + 'static,
     ) {
         let tx = self.tx.clone();
+        let cancel = self.cancel.clone();
         let handle = tokio::spawn(async move {
             while let Some(update) = rx.recv().await {
                 let bytes = match encode(update) {
                     Ok(Some(bytes)) => bytes,
                     Ok(None) => continue,
                     Err(error) => {
-                        warn!(?error, id, "subscription serialization failed");
+                        warn!(
+                            ?error,
+                            "subscription serialization failed; closing WebSocket"
+                        );
                         break;
                     }
                 };
@@ -100,6 +108,7 @@ impl WsDispatcher {
                     return;
                 }
             }
+            cancel.cancel();
         });
         self.register(id, handle);
     }
