@@ -276,25 +276,13 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     let metadata_pubkey = delegation_metadata_pda_from_delegated_account(&delegated_pubkey);
     let accounts = this
         .remote_account_provider
-        .try_get_multi_until_slots_match(
+        .fetch_snapshot_until_slot(
             &[record_pubkey, metadata_pubkey],
-            Some(MatchSlotsConfig {
-                min_context_slot: Some(request.source_slots().view),
-                ..MatchSlotsConfig::new(ChainlinkCompanionFetchKind::DelegationRecord)
-            }),
+            request.source_slots().view,
             fetch_context,
+            ChainlinkCompanionFetchKind::DelegationRecord,
         )
-        .await;
-    let releases: Vec<_> = [record_pubkey, metadata_pubkey]
-        .into_iter()
-        .filter(|key| !this.contains_account(key))
-        .map(|pubkey| SubscriptionRelease::Pubkey {
-            pubkey,
-            reason: SubscriptionReason::DirectAccount,
-        })
-        .collect();
-    release_subs(&this.remote_account_provider, releases).await;
-    let accounts = accounts?;
+        .await?;
     let invalid =
         || ChainlinkError::InvalidDelegationRecord(record_pubkey, ProgramError::InvalidAccountData);
     let [record, metadata] = accounts.as_slice() else {
