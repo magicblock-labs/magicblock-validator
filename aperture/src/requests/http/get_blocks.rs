@@ -1,10 +1,7 @@
 use mbv_core::Slot;
 
 use super::{HandlerResult, RpcHandlers};
-use crate::{
-    error::RpcError,
-    requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
-};
+use crate::requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload};
 
 const MAX_BLOCKS: u64 = 500_000;
 
@@ -25,11 +22,7 @@ impl RpcHandlers {
                     .unwrap_or(latest)
                     .min(latest)
                     .min(start.saturating_add(MAX_BLOCKS));
-                if start > end {
-                    return Err(RpcError::invalid_params(
-                        "start slot is greater than the end slot",
-                    ));
-                }
+                // An empty range, like Agave, rather than an error past the tip.
                 (start..=end).collect()
             }
             BlockRange::Limit => {
