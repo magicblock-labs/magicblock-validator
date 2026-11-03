@@ -55,8 +55,8 @@ impl<F, A> SingleStagePatcher<'_, F, A> {
         self.intent_client
             .finalize_account(self.authority, delegated_account)
             .await
-            .map_err(IntentExecutorError::FailedFinalizePreparationError)?
-            .map_err(|err| IntentExecutorError::from_finalize_execution_error(err, None))?;
+            .map_err(IntentExecutorError::FailedPreparation)?
+            .map_err(IntentExecutorError::FailedExecution)?;
         Ok(ControlFlow::Continue(TransactionStrategy::default()))
     }
 }
@@ -176,8 +176,8 @@ impl<F, A> CommitStagePatcher<'_, F, A> {
         self.intent_client
             .finalize_account(self.authority, delegated_account)
             .await
-            .map_err(IntentExecutorError::FailedCommitPreparationError)?
-            .map_err(IntentExecutorError::from_commit_execution_error)?;
+            .map_err(IntentExecutorError::FailedPreparation)?
+            .map_err(IntentExecutorError::FailedExecution)?;
         Ok(ControlFlow::Continue(TransactionStrategy::default()))
     }
 }

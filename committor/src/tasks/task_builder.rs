@@ -23,8 +23,8 @@ pub trait TasksBuilder {
         base_intent: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
 
-    // Create tasks for finalize stage
-    async fn finalize_tasks<C: TaskInfoFetcher>(
+    // Create remaining actions and undelegation tasks
+    async fn follow_up_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         base_intent: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>>;
@@ -71,7 +71,7 @@ impl TaskBuilderImpl {
         task_info_fetcher.get_base_accounts(&diffable_pubkeys, min_context_slot).await
     }
 
-    fn get_finalize_stage_metadata_accounts(
+    fn get_follow_up_metadata_accounts(
         intent_bundle: &ScheduledIntentBundle,
     ) -> Vec<(Pubkey, u64)> {
         [
@@ -177,8 +177,8 @@ impl TasksBuilder for TaskBuilderImpl {
         Ok(tasks)
     }
 
-    /// Returns [`Task`]s for Finalize stage
-    async fn finalize_tasks<C: TaskInfoFetcher>(
+    /// Returns tasks for remaining actions and undelegation
+    async fn follow_up_tasks<C: TaskInfoFetcher>(
         info_fetcher: &Arc<C>,
         intent_bundle: &ScheduledIntentBundle,
     ) -> TaskBuilderResult<Vec<BaseTaskImpl>> {
@@ -198,7 +198,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         // Helper to process commit types
-        fn create_finalize_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
+        fn create_follow_up_tasks(commit: &CommitType) -> Vec<BaseTaskImpl> {
             match commit {
                 CommitType::Standalone(_) => Vec::new(),
                 CommitType::WithBaseActions { base_actions, .. } => {
@@ -237,7 +237,7 @@ impl TasksBuilder for TaskBuilderImpl {
         }
 
         let mut tasks = Vec::new();
-        let finalize_metadata_accounts = Self::get_finalize_stage_metadata_accounts(intent_bundle);
+        let follow_up_metadata_accounts = Self::get_follow_up_metadata_accounts(intent_bundle);
         let min_context_slot = intent_bundle
             .get_all_committed_accounts()
             .iter()
@@ -245,16 +245,16 @@ impl TasksBuilder for TaskBuilderImpl {
             .max()
             .unwrap_or(0);
         let delegation_metadata = info_fetcher
-            .fetch_delegation_metadata(&finalize_metadata_accounts, min_context_slot)
+            .fetch_delegation_metadata(&follow_up_metadata_accounts, min_context_slot)
             .await
-            .map_err(TaskBuilderError::FinalizedTasksBuildError)?;
+            .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit {
-            tasks.extend(create_finalize_tasks(value));
+            tasks.extend(create_follow_up_tasks(value));
         }
 
         if let Some(ref value) = intent_bundle.intent_bundle.commit_and_undelegate {
-            tasks.extend(create_finalize_tasks(&value.commit_action));
+            tasks.extend(create_follow_up_tasks(&value.commit_action));
             tasks.extend(create_undelegate_tasks(value, &delegation_metadata)?);
         }
 
@@ -306,8 +306,8 @@ fn delegation_metadata_for_pubkey(
 pub enum TaskBuilderError {
     #[error("CommitIdFetchError: {0}")]
     CommitTasksBuildError(#[source] TaskInfoFetcherError),
-    #[error("FinalizedTasksBuildError: {0}")]
-    FinalizedTasksBuildError(#[source] TaskInfoFetcherError),
+    #[error("FollowUpTasksBuildError: {0}")]
+    FollowUpTasksBuildError(#[source] TaskInfoFetcherError),
     #[error("Missing delegation metadata for {0}")]
     MissingDelegationMetadata(Pubkey),
 }
@@ -316,14 +316,14 @@ impl TaskBuilderError {
     pub fn signature(&self) -> Option<Signature> {
         match self {
             Self::CommitTasksBuildError(err) => err.signature(),
-            Self::FinalizedTasksBuildError(err) => err.signature(),
+            Self::FollowUpTasksBuildError(err) => err.signature(),
             Self::MissingDelegationMetadata(_) => None,
         }
     }
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::CommitTasksBuildError(err) | Self::FinalizedTasksBuildError(err) => {
+            Self::CommitTasksBuildError(err) | Self::FollowUpTasksBuildError(err) => {
                 err.is_transient()
             }
             Self::MissingDelegationMetadata(_) => false,

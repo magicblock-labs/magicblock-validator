@@ -1,12 +1,13 @@
 use std::{collections::HashMap, sync::Arc};
 
 use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
-use program::outbox::PendingTransaction;
+use program::outbox::{ExecutionStage, PendingTransaction, TwoStageProgress};
 use rpc_client::MagicblockRpcClient;
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::{mock_sender::MocksMap, nonblocking::rpc_client::RpcClient};
 use solana_rpc_client_api::request::RpcRequest;
+use solana_signature::Signature;
 
 use super::*;
 use crate::{
@@ -84,9 +85,17 @@ enum Failure {
     Reporting,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum IntentKind {
+    CommitAndUndelegate,
+    Actions,
+    CommitOnly,
+}
+
 #[tokio::test(start_paused = true)]
 async fn intent_execution_preserves_recovery_and_completion() {
     use Failure::{None, Preparation as PreparationFailure, Reporting};
+    use IntentKind::{Actions, CommitAndUndelegate, CommitOnly};
     use Resolution::{Confirmed, Expired, Rejected, Unavailable};
 
     let pending = PendingTransaction {
@@ -109,35 +118,74 @@ async fn intent_execution_preserves_recovery_and_completion() {
     let combined_tasks: &[(usize, usize, usize)] = &[(2, 1, 0)];
     let split_tasks: &[(usize, usize, usize)] = &[(2, 0, 0), (0, 1, 0)];
     let follow_up_tasks: &[(usize, usize, usize)] = &[(0, 1, 0)];
-    for (status, resolution, failure, expected_tasks, actions_only) in [
-        (&accepted, Confirmed, None, combined_tasks, false),
-        (&accepted, Confirmed, None, &[(0, 0, 1)], true),
-        (&combined, Expired, None, &[(0, 0, 1)], true),
-        (&combined, Confirmed, None, &[], false),
-        (&combined, Rejected, None, combined_tasks, false),
-        (&committing, Confirmed, None, follow_up_tasks, false),
-        (&committing, Rejected, None, split_tasks, false),
-        (&following, Confirmed, None, &[], false),
-        (&following, Rejected, None, follow_up_tasks, false),
-        (&combined, Unavailable, None, &[], false),
+    for (status, resolution, failure, expected_tasks, kind) in [
+        (
+            &accepted,
+            Confirmed,
+            None,
+            combined_tasks,
+            CommitAndUndelegate,
+        ),
+        (&accepted, Confirmed, None, &[(0, 0, 1)], Actions),
+        (&combined, Expired, None, &[(0, 0, 1)], Actions),
+        (&combined, Confirmed, None, &[], CommitAndUndelegate),
+        (
+            &combined,
+            Rejected,
+            None,
+            combined_tasks,
+            CommitAndUndelegate,
+        ),
+        (
+            &committing,
+            Confirmed,
+            None,
+            follow_up_tasks,
+            CommitAndUndelegate,
+        ),
+        (
+            &committing,
+            Rejected,
+            None,
+            split_tasks,
+            CommitAndUndelegate,
+        ),
+        (&following, Confirmed, None, &[], CommitAndUndelegate),
+        (
+            &following,
+            Rejected,
+            None,
+            follow_up_tasks,
+            CommitAndUndelegate,
+        ),
+        (&combined, Unavailable, None, &[], CommitAndUndelegate),
         (
             &accepted,
             Confirmed,
             PreparationFailure,
             combined_tasks,
-            false,
+            CommitAndUndelegate,
         ),
         (
             &following,
             Rejected,
             PreparationFailure,
             follow_up_tasks,
-            false,
+            CommitAndUndelegate,
         ),
-        (&accepted, Confirmed, Reporting, combined_tasks, false),
+        (
+            &accepted,
+            Confirmed,
+            Reporting,
+            combined_tasks,
+            CommitAndUndelegate,
+        ),
+        (&committing, Confirmed, None, &[], CommitOnly),
     ] {
+        let actions_only = kind == Actions;
         let undelegated = Pubkey::new_unique();
-        let mut intent = create_test_intent_bundle(42, &[ACCOUNT], &[undelegated]).inner;
+        let undelegations = if kind == CommitAndUndelegate { vec![undelegated] } else { vec![] };
+        let mut intent = create_test_intent_bundle(42, &[ACCOUNT], &undelegations).inner;
         if actions_only {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
@@ -178,7 +226,10 @@ async fn intent_execution_preserves_recovery_and_completion() {
             expected_commit_nonces: if actions_only {
                 vec![]
             } else {
-                vec![(ACCOUNT, 2), (undelegated, 2)]
+                std::iter::once(ACCOUNT)
+                    .chain(undelegations.iter().copied())
+                    .map(|key| (key, 2))
+                    .collect()
             },
             fail_reporting: failure == Reporting,
             ..Default::default()
@@ -213,8 +264,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
         match failure {
             PreparationFailure => assert!(matches!(
                 result.inner,
-                Err(IntentExecutorError::FailedCommitPreparationError(_))
-                    | Err(IntentExecutorError::FailedFinalizePreparationError(_))
+                Err(IntentExecutorError::FailedPreparation(_))
             )),
             Reporting => assert!(matches!(
                 result.inner,
@@ -222,25 +272,22 @@ async fn intent_execution_preserves_recovery_and_completion() {
             )),
             None if resolution == Unavailable => assert!(matches!(result.inner,
                 Err(IntentExecutorError::PendingSignatureResolutionError(sig)) if sig == pending.signature)),
-            None => match result.inner.as_ref().unwrap() {
-                ExecutionOutput::SingleStage(signature) => {
+            None => match result.inner.as_ref().unwrap().confirmed_commit {
+                Option::None => {
                     assert!(status == &accepted || status == &combined);
                     if status == &combined && expected_tasks.is_empty() {
-                        assert_eq!(*signature, pending.signature);
+                        assert_eq!(result.inner.as_ref().unwrap().signature, pending.signature);
                     }
                 }
-                ExecutionOutput::TwoStage {
-                    commit_signature,
-                    finalize_signature,
-                } => {
+                Some(commit_signature) => {
                     assert!(status == &committing || status == &following);
                     if status == &following {
-                        assert_eq!(*commit_signature, earlier_commit);
+                        assert_eq!(commit_signature, earlier_commit);
                     } else if resolution == Confirmed {
-                        assert_eq!(*commit_signature, pending.signature);
+                        assert_eq!(commit_signature, pending.signature);
                     }
                     if expected_tasks.is_empty() {
-                        assert_eq!(*finalize_signature, pending.signature);
+                        assert_eq!(result.inner.as_ref().unwrap().signature, pending.signature);
                     }
                 }
             },
@@ -271,14 +318,6 @@ async fn intent_execution_preserves_recovery_and_completion() {
                 vec![Some(42)]
             );
         }
-        assert_eq!(
-            *outbox.reports.lock().unwrap(),
-            if failure == PreparationFailure || resolution == Unavailable {
-                vec![]
-            } else {
-                vec![true]
-            }
-        );
         assert_eq!(callbacks.0.lock().unwrap().len(), usize::from(actions_only));
         assert_eq!(result.callbacks_report.len(), usize::from(actions_only));
         assert_eq!(
@@ -287,8 +326,34 @@ async fn intent_execution_preserves_recovery_and_completion() {
         );
         assert_eq!(
             info.peek_commit_nonce(&undelegated).await.is_some(),
-            actions_only
+            kind != CommitAndUndelegate
         );
+        let mut expected_signatures = vec![];
+        if let Some(stage) = outbox.stages.lock().unwrap().last() {
+            if let ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, .. }) = stage {
+                expected_signatures.push(*commit);
+            }
+            expected_signatures.push(stage.pending_transaction().signature);
+        }
+        assert_eq!(
+            result.progress.signatures(result.inner.as_ref().err()).collect::<Vec<_>>(),
+            expected_signatures,
+            "{status:?}, {resolution:?}, {failure:?}"
+        );
+        {
+            let reports = outbox.reports.lock().unwrap();
+            assert_eq!(
+                reports.len(),
+                usize::from(failure != PreparationFailure && resolution != Unavailable)
+            );
+            if let Some(sent) = reports.first() {
+                assert!(sent.error_message.is_none());
+                assert_eq!(sent.chain_signatures, expected_signatures);
+            }
+        }
+        if result.is_err() {
+            assert!(!result.is_retriable(true));
+        }
         cleanup.clean().await.unwrap();
         let cleaned = preparator.cleaned.lock().unwrap();
         assert!(cleaned.iter().all(|(_, close_buffers)| *close_buffers == succeeds));

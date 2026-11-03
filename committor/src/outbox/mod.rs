@@ -11,6 +11,7 @@ use crate::{
 
 pub mod outbox_client;
 pub mod outbox_intent_bundles_reader;
+pub(crate) mod progress;
 pub(crate) mod utils;
 
 #[async_trait]

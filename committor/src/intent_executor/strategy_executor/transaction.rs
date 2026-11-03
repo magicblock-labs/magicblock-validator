@@ -1,7 +1,7 @@
 use std::{mem, time::Duration};
 
 use mbv_core::traits::{ActionError, ActionsCallbackScheduler};
-use program::outbox::{ExecutionStage, PendingTransaction, TwoStageProgress};
+use program::outbox::PendingTransaction;
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_signer::Signer;
@@ -12,20 +12,21 @@ use super::{
     error::TransactionStrategyExecutionError,
     patcher::{CommitStagePatcher, FinalizeStagePatcher, SingleStagePatcher},
     utils::{
-        ExecutionState, committing_pending, finalizing_pending, handle_actions_result,
-        handle_cpi_limit_error, single_stage_pending, stage_execution_loop,
+        ExecutionState, combined_pending, committing_pending, follow_up_pending,
+        handle_actions_result, handle_cpi_limit_error, stage_execution_loop,
     },
 };
 use crate::{
     intent_executor::{
         ExecutionOutput, IntentExecutionReport, IntentExecutorCtx,
         error::{IntentExecutorError, IntentExecutorResult},
+        progress::ExecutionProgress,
     },
-    outbox::OutboxClient,
+    outbox::{OutboxClient, progress::PendingExecution},
     tasks::{
         BaseTaskImpl,
         task_info_fetcher::TaskInfoFetcher,
-        task_strategist::{StrategyExecutionMode, TransactionStrategy, TwoStageExecutionMode},
+        task_strategist::{TransactionPlan, TransactionStrategy},
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -42,7 +43,6 @@ pub(in crate::intent_executor) struct TransactionExecutor<'a, T, F, A, O> {
     committed_pubkeys: &'a [Pubkey],
     current: TransactionStrategy,
     follow_up: Option<TransactionStrategy>,
-    commit_signature: Option<Signature>,
     pending_transaction: Option<PendingTransaction>,
     current_attempt: u8,
 }
@@ -60,15 +60,9 @@ where
         report: &'a mut IntentExecutionReport,
         intent_id: u64,
         committed_pubkeys: &'a [Pubkey],
-        strategy: StrategyExecutionMode,
+        plan: TransactionPlan,
     ) -> Self {
-        let (current, follow_up) = match strategy {
-            StrategyExecutionMode::SingleStage(strategy) => (strategy, None),
-            StrategyExecutionMode::TwoStage(TwoStageExecutionMode {
-                commit_stage,
-                finalize_stage,
-            }) => (commit_stage, Some(finalize_stage)),
-        };
+        let TransactionPlan { current, follow_up } = plan;
         Self {
             ctx,
             report,
@@ -76,7 +70,6 @@ where
             committed_pubkeys,
             current,
             follow_up,
-            commit_signature: None,
             pending_transaction: None,
             current_attempt: 0,
         }
@@ -89,14 +82,8 @@ where
         commit_signature: Signature,
         strategy: TransactionStrategy,
     ) -> Self {
-        let mut executor = Self::new(
-            ctx,
-            report,
-            intent_id,
-            &[],
-            StrategyExecutionMode::SingleStage(strategy),
-        );
-        executor.commit_signature = Some(commit_signature);
+        let executor = Self::new(ctx, report, intent_id, &[], strategy.into());
+        executor.report.progress.confirmed_commit = Some(commit_signature);
         executor
     }
 
@@ -111,7 +98,7 @@ where
                     if self.is_combined()
                         && !self.committed_pubkeys.is_empty()
                         && self.has_tasks_after_commit()
-                        && err.is_recoverable_by_two_stage() =>
+                        && err.is_recoverable_by_splitting() =>
                 {
                     let (current, follow_up, cleanup) = handle_cpi_limit_error(
                         &self.ctx.authority.pubkey(),
@@ -130,19 +117,8 @@ where
             // Combined execution reports all terminal errors to callbacks.
             // Split execution leaves preparation/outbox/patch failures to the caller.
             let report_callbacks = self.is_combined() || result.is_ok();
-            let result = match result {
-                Ok(result) => result.map_err(|err| {
-                    if self.follow_up.is_some() {
-                        IntentExecutorError::from_commit_execution_error(err)
-                    } else {
-                        IntentExecutorError::from_finalize_execution_error(
-                            err,
-                            self.commit_signature,
-                        )
-                    }
-                }),
-                Err(err) => Err(err),
-            };
+            let result =
+                result.and_then(|result| result.map_err(IntentExecutorError::FailedExecution));
 
             if let Some(follow_up) = &mut self.follow_up {
                 // A nonce retry can turn this into a first commit; both transactions
@@ -161,17 +137,19 @@ where
                 Ok(signature) => {
                     if let Some(follow_up) = self.follow_up.take() {
                         self.current = follow_up;
-                        self.commit_signature = Some(signature);
+                        self.report.progress = ExecutionProgress {
+                            confirmed_commit: Some(signature),
+                            ..Default::default()
+                        };
                         self.pending_transaction = None;
                         self.current_attempt = 0;
                     } else {
-                        return Ok(match self.commit_signature {
-                            Some(commit_signature) => ExecutionOutput::TwoStage {
-                                commit_signature,
-                                finalize_signature: signature,
-                            },
-                            None => ExecutionOutput::SingleStage(signature),
-                        });
+                        let output = ExecutionOutput {
+                            confirmed_commit: self.report.progress.confirmed_commit,
+                            signature,
+                        };
+                        self.report.progress = output.progress();
+                        return Ok(output);
                     }
                 }
                 Err(err) => {
@@ -206,21 +184,31 @@ where
 
     #[tracing::instrument(skip_all, fields(stage =
         if self.follow_up.is_some() { "commit" }
-        else if self.commit_signature.is_some() { "finalize" }
-        else { "single_stage" }
+        else if self.report.progress.confirmed_commit.is_some() { "follow_up" }
+        else { "combined" }
     ))]
     async fn execute_current(
         &mut self,
     ) -> IntentExecutorResult<Result<Signature, TransactionStrategyExecutionError>> {
         let ctx = self.ctx;
+        let confirmed_commit = self.report.progress.confirmed_commit;
+        let has_follow_up = self.follow_up.is_some();
+        let make_outbox_stage = |transaction| {
+            PendingExecution {
+                transaction,
+                confirmed_commit,
+                has_follow_up,
+            }
+            .into_stage()
+        };
         let state = ExecutionState {
             current_attempt: &mut self.current_attempt,
             transaction_strategy: &mut self.current,
             pending_transaction: &mut self.pending_transaction,
             execution_report: self.report,
-            commit_signature: self.commit_signature,
+            commit_signature: confirmed_commit,
         };
-        if self.follow_up.is_some() {
+        if has_follow_up {
             stage_execution_loop(
                 &ctx.authority,
                 &ctx.intent_client,
@@ -235,13 +223,12 @@ where
                     committed_pubkeys: self.committed_pubkeys,
                 },
                 self.intent_id,
-                |pending| ExecutionStage::TwoStage(TwoStageProgress::Committing(pending)),
+                make_outbox_stage,
                 committing_pending,
-                IntentExecutorError::FailedCommitPreparationError,
                 state,
             )
             .await
-        } else if let Some(commit) = self.commit_signature {
+        } else if confirmed_commit.is_some() {
             stage_execution_loop(
                 &ctx.authority,
                 &ctx.intent_client,
@@ -252,11 +239,8 @@ where
                     callback_scheduler: &ctx.actions_callback_executor,
                 },
                 self.intent_id,
-                |finalize| {
-                    ExecutionStage::TwoStage(TwoStageProgress::Finalizing { commit, finalize })
-                },
-                finalizing_pending,
-                IntentExecutorError::FailedFinalizePreparationError,
+                make_outbox_stage,
+                follow_up_pending,
                 state,
             )
             .await
@@ -275,9 +259,8 @@ where
                     committed_pubkeys: self.committed_pubkeys,
                 },
                 self.intent_id,
-                ExecutionStage::SingleStage,
-                single_stage_pending,
-                IntentExecutorError::FailedFinalizePreparationError,
+                make_outbox_stage,
+                combined_pending,
                 state,
             )
             .await
@@ -308,7 +291,7 @@ where
     }
 
     fn is_combined(&self) -> bool {
-        self.follow_up.is_none() && self.commit_signature.is_none()
+        self.follow_up.is_none() && self.report.progress.confirmed_commit.is_none()
     }
 
     fn has_tasks_after_commit(&self) -> bool {
