@@ -65,8 +65,7 @@ pub(crate) struct ResponsePayload<'id, R> {
 pub(crate) struct ResponseErrorPayload<'id> {
     jsonrpc: &'static str,
     error: RpcError,
-    /// The request ID, which is optional in case of parse errors.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// The request ID, serialized as `null` when it could not be read (e.g. parse errors).
     id: Option<&'id Value>,
 }
 
