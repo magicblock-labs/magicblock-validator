@@ -1,6 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
-use mbv_core::traits::{ActionError, ActionResult, ActionsCallbackScheduler};
+use mbv_core::{
+    intent::BaseActionCallback,
+    traits::{ActionError, ActionResult, ActionsCallbackScheduler},
+};
 use program::outbox::PendingTransaction;
 use solana_commitment_config::CommitmentConfig;
 use solana_keypair::Keypair;
@@ -22,7 +25,10 @@ use crate::{
         task_info_fetcher::{CacheTaskInfoFetcher, ResetType, TaskInfoFetcher},
         task_strategist::{TaskStrategist, TransactionStrategy},
     },
-    transaction_preparator::{TransactionPreparator, error::TransactionPreparatorError},
+    transaction_preparator::{
+        TransactionPreparator, cleanup_resources::CleanupResources,
+        error::TransactionPreparatorError,
+    },
 };
 
 /// How long to wait between re-checks of a pending signature that is still
@@ -47,10 +53,11 @@ pub async fn prepare_transaction<T: TransactionPreparator>(
     client: &IntentExecutionClient,
     authority: &Keypair,
     transaction_preparator: &T,
-    transaction_strategy: &mut TransactionStrategy,
+    transaction_strategy: &TransactionStrategy,
+    cleanup: &mut CleanupResources,
 ) -> Result<VersionedTransaction, TransactionPreparatorError> {
     let mut prepared_message = transaction_preparator
-        .prepare_for_strategy(authority, transaction_strategy)
+        .prepare_for_strategy(authority, transaction_strategy, cleanup)
         .await?;
 
     // Get latest blockhash(Part of preparation I guess)
@@ -183,15 +190,13 @@ pub(in crate::intent_executor) async fn resolve_pending_signature(
 }
 
 /// Handles out of sync commit id error, fixes current strategy
-/// Returns strategy to be cleaned up
-/// TODO(edwin): TransactionStrategy -> CleanupStrategy or something, naming is confusing for something that is cleaned up
 pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetcher>(
     authority: &Pubkey,
     task_info_fetcher: &CacheTaskInfoFetcher<T>,
     committed_pubkeys: &[Pubkey],
     strategy: &mut TransactionStrategy,
     intent_id: u64,
-) -> Result<TransactionStrategy, TaskBuilderError> {
+) -> Result<(), TaskBuilderError> {
     let snapshot_slots: HashMap<Pubkey, u64> = strategy
         .optimized_tasks
         .iter()
@@ -220,21 +225,13 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
         .await
         .map_err(TaskBuilderError::CommitTasksBuildError)?;
 
-    // Here we find the broken tasks and reset them
-    // Broken tasks are prepared incorrectly so they have to be cleaned up
-    let mut to_cleanup = Vec::new();
+    // Old buffer identities remain in the preparation attempt's cleanup record.
     for task in &mut strategy.optimized_tasks {
         if let BaseTaskImpl::CommitFinalize(task) = task {
             let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
                 continue;
             };
-            if commit_id == &task.commit_id {
-                continue;
-            }
-
-            // Handle invalid tasks
-            to_cleanup.push(BaseTaskImpl::CommitFinalize(task.clone()));
-            task.reset_commit_id(*commit_id);
+            task.commit_id = *commit_id;
         }
     }
 
@@ -244,12 +241,8 @@ pub(in crate::intent_executor) async fn handle_commit_id_error<T: TaskInfoFetche
         strategy.uniqueness_nonce = Some(intent_id);
     }
 
-    let old_alts = strategy.dummy_revaluate_alts(authority);
-    Ok(TransactionStrategy {
-        optimized_tasks: to_cleanup,
-        lookup_tables_keys: old_alts,
-        uniqueness_nonce: strategy.uniqueness_nonce,
-    })
+    strategy.refresh_lookup_table_keys(authority);
+    Ok(())
 }
 
 /// On the first commit of a delegation instance the nonce restarts at 1, so the
@@ -263,26 +256,20 @@ pub(in crate::intent_executor) fn requires_uniqueness_nonce(commit_tasks: &[Base
 }
 
 /// Handle CPI limit error, splits single strategy flow into 2
-/// Returns Commit stage strategy, Finalize stage strategy and strategy to clean up
+/// Returns a commit transaction and its follow-up.
 pub(in crate::intent_executor) fn handle_cpi_limit_error(
     authority: &Pubkey,
     strategy: TransactionStrategy,
-) -> (
-    TransactionStrategy,
-    TransactionStrategy,
-    TransactionStrategy,
-) {
-    // We encountered error "Max instruction trace length exceeded"
-    // All the tasks a prepared to be executed at this point
-    // We attempt Two stages commit flow, need to split tasks up
+) -> (TransactionStrategy, TransactionStrategy) {
+    // Keep tasks through the last commit together; the remaining tasks form the follow-up.
     let last_commit_ind = strategy
         .optimized_tasks
         .iter()
         .rposition(|el| matches!(el, BaseTaskImpl::CommitFinalize(_)));
-    let (mut commit_stage_tasks, mut follow_up_tasks) = (vec![], vec![]);
+    let (mut commit_tasks, mut follow_up_tasks) = (vec![], vec![]);
     for (i, el) in strategy.optimized_tasks.into_iter().enumerate() {
         if Some(i) <= last_commit_ind {
-            commit_stage_tasks.push(el);
+            commit_tasks.push(el);
         } else {
             follow_up_tasks.push(el);
         }
@@ -293,12 +280,12 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
     } else {
         TaskStrategist::collect_lookup_table_keys(
             authority,
-            &commit_stage_tasks,
+            &commit_tasks,
             strategy.uniqueness_nonce,
         )
     };
     let commit_strategy = TransactionStrategy {
-        optimized_tasks: commit_stage_tasks,
+        optimized_tasks: commit_tasks,
         lookup_tables_keys: commit_alt_pubkeys,
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
@@ -318,22 +305,14 @@ pub(in crate::intent_executor) fn handle_cpi_limit_error(
         uniqueness_nonce: strategy.uniqueness_nonce,
     };
 
-    // We clean up only ALTs
-    let to_cleanup = TransactionStrategy {
-        optimized_tasks: vec![],
-        lookup_tables_keys: strategy.lookup_tables_keys,
-        uniqueness_nonce: None,
-    };
-
-    (commit_strategy, follow_up_strategy, to_cleanup)
+    (commit_strategy, follow_up_strategy)
 }
 
 /// Handles undelegation error, stripping away actions
-/// Returns [`TransactionStrategy`] to be cleaned up
 pub(in crate::intent_executor) fn handle_undelegation_error(
     authority: &Pubkey,
     strategy: &mut TransactionStrategy,
-) -> TransactionStrategy {
+) -> Vec<BaseActionCallback> {
     let position = strategy
         .optimized_tasks
         .iter()
@@ -341,19 +320,18 @@ pub(in crate::intent_executor) fn handle_undelegation_error(
 
     if let Some(position) = position {
         // Remove everything after undelegation including post undelegation actions
-        let removed_task = strategy.optimized_tasks.drain(position..).collect();
-        let old_alts = strategy.dummy_revaluate_alts(authority);
-        TransactionStrategy {
-            optimized_tasks: removed_task,
-            lookup_tables_keys: old_alts,
-            uniqueness_nonce: None,
-        }
+        let callbacks = strategy
+            .optimized_tasks
+            .drain(position..)
+            .filter_map(|task| match task {
+                BaseTaskImpl::BaseAction(mut action) => action.extract_callback(),
+                _ => None,
+            })
+            .collect();
+        strategy.refresh_lookup_table_keys(authority);
+        callbacks
     } else {
-        TransactionStrategy {
-            optimized_tasks: vec![],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        }
+        Vec::new()
     }
 }
 
@@ -364,31 +342,21 @@ pub(in crate::intent_executor) fn handle_actions_result<A>(
     transaction_strategy: &mut TransactionStrategy,
     signature: Option<Signature>,
     result: ActionResult,
-) -> TransactionStrategy
-where
+) where
     A: ActionsCallbackScheduler,
 {
-    let (callbacks, junk) = match result {
+    let callbacks = match result {
         // TODO(edwin): add in PR description
         // Timeout may be triggered right after tx was sent
         // It could also be triggered prior
         // In order to give simple contract to user we keep actions in both cases
-        Ok(()) | Err(ActionError::TimeoutError) => {
-            let callbacks = transaction_strategy.extract_action_callbacks();
-            (callbacks, TransactionStrategy::default())
-        }
-        _ => {
-            let mut removed_actions = transaction_strategy.remove_actions(authority);
-            let callbacks = removed_actions.extract_action_callbacks();
-            (callbacks, removed_actions)
-        }
+        Ok(()) | Err(ActionError::TimeoutError) => transaction_strategy.extract_action_callbacks(),
+        _ => transaction_strategy.remove_actions(authority),
     };
     if !callbacks.is_empty() {
         let result = callback_scheduler.schedule(callbacks, signature, result);
         execution_report.add_callback_report(result);
     }
-
-    junk
 }
 
 #[cfg(test)]
@@ -499,7 +467,7 @@ mod tests {
         };
 
         let fetcher = CacheTaskInfoFetcher::new(FreshDelegationFetcher(Some(unchanged_pubkey)));
-        let cleanup = handle_commit_id_error(
+        handle_commit_id_error(
             &Pubkey::new_unique(),
             &fetcher,
             &[pubkey, unchanged_pubkey],
@@ -510,7 +478,7 @@ mod tests {
         .expect("commit id recovery succeeds");
 
         assert_eq!(strategy.uniqueness_nonce, Some(42));
-        assert_eq!(cleanup.uniqueness_nonce, Some(42));
-        assert_eq!(cleanup.optimized_tasks.len(), 1);
+        let ids: Vec<_> = recovery_commit_nonces(&strategy.optimized_tasks);
+        assert_eq!(ids, vec![(pubkey, 1), (unchanged_pubkey, 5)]);
     }
 }

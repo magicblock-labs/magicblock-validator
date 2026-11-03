@@ -1,4 +1,4 @@
-use std::{mem, ops::ControlFlow, time::Duration};
+use std::{mem, time::Duration};
 
 use mbv_core::traits::{ActionError, ActionsCallbackScheduler};
 use program::outbox::PendingTransaction;
@@ -32,7 +32,7 @@ use crate::{
         task_info_fetcher::TaskInfoFetcher,
         task_strategist::{TransactionPlan, TransactionStrategy},
     },
-    transaction_preparator::TransactionPreparator,
+    transaction_preparator::{TransactionPreparator, cleanup_resources::CleanupResources},
 };
 
 #[cfg(test)]
@@ -106,14 +106,13 @@ where
                         && self.has_tasks_after_commit()
                         && err.is_recoverable_by_splitting() =>
                 {
-                    let (current, follow_up, cleanup) = handle_cpi_limit_error(
+                    let (current, follow_up) = handle_cpi_limit_error(
                         &self.ctx.authority.pubkey(),
                         mem::take(&mut self.current),
                     );
                     self.current = current;
                     self.follow_up = Some(follow_up);
                     self.current_attempt = 0;
-                    self.report.dispose(cleanup);
                     self.report.add_patched_error(err);
                     continue;
                 }
@@ -137,7 +136,6 @@ where
                     result.as_ref().map(|_| ()).map_err(ActionError::from),
                 );
             }
-            self.report.dispose(mem::take(&mut self.current));
 
             match result {
                 Ok(signature) => {
@@ -158,12 +156,7 @@ where
                         return Ok(output);
                     }
                 }
-                Err(err) => {
-                    if let Some(follow_up) = self.follow_up.take() {
-                        self.report.dispose(follow_up);
-                    }
-                    return Err(err);
-                }
+                Err(err) => return Err(err),
             }
         }
     }
@@ -235,12 +228,14 @@ where
 
             self.current_attempt += 1;
 
-            // Prepare message
+            // Keep this attempt's resources outside the cancellable preparation future.
+            let cleanup = self.report.cleanup.push_mut(CleanupResources::default());
             let prepared_transaction = prepare_transaction(
                 &ctx.intent_client,
                 &ctx.authority,
                 &ctx.transaction_preparator,
-                &mut self.current,
+                &self.current,
+                cleanup,
             )
             .await
             .map_err(IntentExecutorError::FailedPreparation)?;
@@ -292,12 +287,10 @@ where
                 self.report.progress.transaction = TransactionProgress::Rejected(*signature);
             }
             let flow = recovery.recover(&execution_err, &mut self.current, self.report).await?;
-            let cleanup = match flow {
-                ControlFlow::Continue(value) => value,
-                ControlFlow::Break(()) => return Ok(Err(execution_err)),
-            };
+            if flow.is_break() {
+                return Ok(Err(execution_err));
+            }
             ctx.intent_client.invalidate_cached_blockhash().await;
-            self.report.dispose(cleanup);
 
             if let Some(commit_signature) = confirmed_commit
                 && self.current.optimized_tasks.is_empty()
@@ -345,7 +338,7 @@ where
     }
 
     fn execute_callbacks(&mut self, signature: Option<Signature>, result: Result<(), ActionError>) {
-        let cleanup = handle_actions_result(
+        handle_actions_result(
             &self.ctx.authority.pubkey(),
             &self.ctx.actions_callback_executor,
             self.report,
@@ -353,9 +346,8 @@ where
             signature,
             result.clone(),
         );
-        self.report.dispose(cleanup);
         if let (Err(_), Some(follow_up)) = (&result, &mut self.follow_up) {
-            let cleanup = handle_actions_result(
+            handle_actions_result(
                 &self.ctx.authority.pubkey(),
                 &self.ctx.actions_callback_executor,
                 self.report,
@@ -363,7 +355,6 @@ where
                 signature,
                 result,
             );
-            self.report.dispose(cleanup);
         }
     }
 

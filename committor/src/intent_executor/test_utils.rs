@@ -37,12 +37,14 @@ use crate::{
     },
     tasks::{
         BaseTaskImpl,
+        buffer_task::CleanupTask,
         task_info_fetcher::{CacheTaskInfoFetcher, RpcTaskInfoFetcher},
         task_strategist::TransactionStrategy,
         utils::TransactionUtils,
     },
     transaction_preparator::{
         TransactionPreparator,
+        cleanup_resources::CleanupResources,
         delivery_preparator::{BufferExecutionError, DeliveryPreparatorResult},
         error::{PreparatorResult, TransactionPreparatorError},
     },
@@ -164,14 +166,12 @@ pub(super) enum Preparation {
     Wait,
 }
 
-type CleanupRecords = Vec<(Vec<Pubkey>, bool)>;
-
 #[derive(Clone, Default)]
 pub(super) struct RecordingPreparator {
     pub steps: Arc<Mutex<VecDeque<Preparation>>>,
     pub prepared: Arc<Mutex<Vec<Vec<BaseTaskImpl>>>>,
     pub uniqueness_nonces: Arc<Mutex<Vec<Option<u64>>>>,
-    pub cleaned: Arc<Mutex<CleanupRecords>>,
+    pub cleaned: Arc<Mutex<Vec<(CleanupResources, bool)>>>,
 }
 
 #[async_trait]
@@ -179,12 +179,22 @@ impl TransactionPreparator for RecordingPreparator {
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
-        strategy: &mut TransactionStrategy,
+        strategy: &TransactionStrategy,
+        cleanup: &mut CleanupResources,
     ) -> PreparatorResult<VersionedMessage> {
         self.prepared.lock().unwrap().push(strategy.optimized_tasks.clone());
         self.uniqueness_nonces.lock().unwrap().push(strategy.uniqueness_nonce);
         // Represent a reservation made before preparation succeeds or fails.
-        strategy.lookup_tables_keys = vec![RESERVED_ALT_KEY];
+        cleanup.alt_reservation.insert(RESERVED_ALT_KEY);
+        cleanup.uniqueness_nonce = strategy.uniqueness_nonce;
+        cleanup.buffers = strategy
+            .optimized_tasks
+            .iter()
+            .filter_map(|task| match task {
+                BaseTaskImpl::CommitFinalize(task) => CleanupTask::from_commit_finalize(task),
+                _ => None,
+            })
+            .collect();
         let step = self.steps.lock().unwrap().pop_front().unwrap_or(Preparation::Ready);
         match step {
             Preparation::Fail => Err(TransactionPreparatorError::FailedToFitError),
@@ -213,16 +223,13 @@ impl TransactionPreparator for RecordingPreparator {
         }
     }
 
-    async fn cleanup_for_strategy(
+    async fn cleanup_resources(
         &self,
         _: &Keypair,
-        strategy: &TransactionStrategy,
+        resources: &CleanupResources,
         close_buffers: bool,
     ) -> DeliveryPreparatorResult<(), BufferExecutionError> {
-        self.cleaned
-            .lock()
-            .unwrap()
-            .push((strategy.lookup_tables_keys.clone(), close_buffers));
+        self.cleaned.lock().unwrap().push((resources.clone(), close_buffers));
         Ok(())
     }
 }

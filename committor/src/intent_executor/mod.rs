@@ -27,7 +27,8 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_execution_client::IntentExecutionClient,
     },
-    tasks::{task_info_fetcher::CacheTaskInfoFetcher, task_strategist::TransactionStrategy},
+    tasks::task_info_fetcher::CacheTaskInfoFetcher,
+    transaction_preparator::cleanup_resources::CleanupResources,
 };
 
 #[async_trait]
@@ -117,8 +118,8 @@ impl IntentExecutionResult {
 #[derive(Default)]
 pub struct IntentExecutionReport {
     pub progress: ExecutionProgress,
-    /// Junk that needs to be cleaned up
-    junk: Vec<TransactionStrategy>,
+    /// Resource ownership from each preparation attempt, including failed attempts.
+    cleanup: Vec<CleanupResources>,
     /// Errors we patched trying to recover intent
     patched_errors: Vec<TransactionStrategyExecutionError>,
     /// Report of scheduled callbacks
@@ -126,10 +127,6 @@ pub struct IntentExecutionReport {
 }
 
 impl IntentExecutionReport {
-    pub fn dispose(&mut self, value: TransactionStrategy) {
-        self.junk.push(value);
-    }
-
     pub fn add_patched_error(&mut self, value: TransactionStrategyExecutionError) {
         self.patched_errors.push(value);
     }
@@ -147,9 +144,5 @@ impl IntentExecutionReport {
         values: impl IntoIterator<Item = Result<Signature, CallbackScheduleError>>,
     ) {
         self.callbacks_report.extend(values);
-    }
-
-    pub fn junk(&self) -> &Vec<TransactionStrategy> {
-        &self.junk
     }
 }

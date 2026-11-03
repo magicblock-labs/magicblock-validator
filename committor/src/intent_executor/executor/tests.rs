@@ -358,7 +358,10 @@ async fn intent_execution_preserves_recovery_and_completion() {
         let cleaned = preparator.cleaned.lock().unwrap();
         assert!(cleaned.iter().all(|(_, close_buffers)| *close_buffers == succeeds));
         assert_eq!(
-            cleaned.iter().filter(|(keys, _)| keys.contains(&RESERVED_ALT_KEY)).count(),
+            cleaned
+                .iter()
+                .filter(|(resources, _)| resources.alt_reservation.contains(&RESERVED_ALT_KEY))
+                .count(),
             expected_tasks.len()
         );
     }

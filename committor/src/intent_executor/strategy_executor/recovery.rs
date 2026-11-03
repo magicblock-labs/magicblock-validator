@@ -33,14 +33,14 @@ pub(in crate::intent_executor) struct TransactionRecovery<'a, F, A> {
 }
 
 impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F, A> {
-    /// Repairs rejected work and returns resources to clean up before completion.
+    /// Repairs rejected work; preparation records already own its cleanup resources.
     /// Follow-ups cannot repair commits, and standalone actions cannot be replayed.
     pub(in crate::intent_executor) async fn recover(
         &self,
         err: &TransactionStrategyExecutionError,
         strategy: &mut TransactionStrategy,
         report: &mut IntentExecutionReport,
-    ) -> IntentExecutorResult<ControlFlow<(), TransactionStrategy>> {
+    ) -> IntentExecutorResult<ControlFlow<()>> {
         let can_repair_commits = report.progress.confirmed_commit.is_none()
             && !self.committed_pubkeys.is_empty()
             && strategy
@@ -51,7 +51,7 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
             return Ok(ControlFlow::Break(()));
         }
 
-        let cleanup = match err {
+        match err {
             TransactionStrategyExecutionError::ActionsError(err, signature) => {
                 handle_actions_result(
                     &self.authority.pubkey(),
@@ -88,7 +88,6 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
                     .await
                     .map_err(IntentExecutorError::FailedPreparation)?
                     .map_err(IntentExecutorError::FailedExecution)?;
-                TransactionStrategy::default()
             }
             TransactionStrategyExecutionError::UndelegationError(_, _)
                 if strategy
@@ -96,9 +95,8 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
                     .iter()
                     .any(|task| matches!(task, BaseTaskImpl::Undelegate(_))) =>
             {
-                let mut removed = handle_undelegation_error(&self.authority.pubkey(), strategy);
                 // Report only discarded actions; retained actions still need to execute.
-                let callbacks = removed.extract_action_callbacks();
+                let callbacks = handle_undelegation_error(&self.authority.pubkey(), strategy);
                 if !callbacks.is_empty() {
                     report.add_callback_report(self.callback_scheduler.schedule(
                         callbacks,
@@ -106,10 +104,9 @@ impl<F: TaskInfoFetcher, A: ActionsCallbackScheduler> TransactionRecovery<'_, F,
                         Err(ActionError::from(err)),
                     ));
                 }
-                removed
             }
             _ => return Ok(ControlFlow::Break(())),
         };
-        Ok(ControlFlow::Continue(cleanup))
+        Ok(ControlFlow::Continue(()))
     }
 }
