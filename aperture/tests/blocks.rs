@@ -70,7 +70,7 @@ async fn block_rpc_methods() {
     assert!(env.rpc.get_block(transaction_slot + 100).await.is_err());
 
     env.engine.advance(10).await;
-    drop(env.engine.barrier().await.expect("advanced blocks are applied"));
+    env.engine.sync().await;
     let latest = env.rpc.get_slot().await.unwrap();
     let start = latest - 3;
     assert_eq!(
