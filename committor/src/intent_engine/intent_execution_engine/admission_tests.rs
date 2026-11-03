@@ -86,7 +86,7 @@ impl IntentExecutor<MockTransactionPreparator> for ControlledExecutor {
                 Ok(output)
             } else {
                 Err(IntentExecutorError::FailedExecution(
-                    TransactionStrategyExecutionError::InternalError(InternalError::from(
+                    TransactionExecutionError::InternalError(InternalError::from(
                         MagicBlockRpcClientError::SentTransactionError(
                             TransactionError::BlockhashNotFound,
                             Signature::default(),

@@ -7,7 +7,7 @@ use solana_signer::SignerError;
 
 use crate::{
     intent_engine::intent_scheduler::IntentSchedulerError,
-    intent_executor::strategy_executor::error::TransactionStrategyExecutionError,
+    intent_executor::strategy_executor::error::TransactionExecutionError,
     outbox::outbox_client::InternalOutboxClientError,
     tasks::{task_builder::TaskBuilderError, task_strategist::TaskStrategistError},
     transaction_preparator::error::TransactionPreparatorError,
@@ -71,7 +71,7 @@ pub enum IntentExecutorError {
     #[error("TaskBuilderError: {0}")]
     TaskBuilderError(#[from] TaskBuilderError),
     #[error("Transaction execution failed: {0}")]
-    FailedExecution(#[from] TransactionStrategyExecutionError),
+    FailedExecution(#[from] TransactionExecutionError),
     #[error("Transaction preparation failed: {0}")]
     FailedPreparation(#[from] TransactionPreparatorError),
 }
@@ -141,45 +141,42 @@ mod tests {
 
     use super::InternalError;
     use crate::intent_executor::{
-        strategy_executor::error::TransactionStrategyExecutionError,
-        test_utils::send_transaction_error,
+        strategy_executor::error::TransactionExecutionError, test_utils::send_transaction_error,
     };
 
     #[test]
     fn transport_errors_are_transient() {
-        let err = TransactionStrategyExecutionError::InternalError(
+        let err = TransactionExecutionError::InternalError(
             send_transaction_error("connection reset").into(),
         );
         assert!(err.is_transient());
 
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::SentTransactionError(
+        let err =
+            TransactionExecutionError::InternalError(InternalError::MagicBlockRpcClientError(
+                Box::new(MagicBlockRpcClientError::SentTransactionError(
                     solana_transaction_error::TransactionError::BlockhashNotFound,
                     solana_signature::Signature::default(),
-                ),
-            )),
-        );
+                )),
+            ));
         assert!(err.is_transient());
     }
 
     #[test]
     fn deterministic_errors_are_not_transient() {
         // Landed on-chain with an instruction error - deterministic
-        let err = TransactionStrategyExecutionError::InternalError(
-            InternalError::MagicBlockRpcClientError(Box::new(
-                MagicBlockRpcClientError::SentTransactionError(
+        let err =
+            TransactionExecutionError::InternalError(InternalError::MagicBlockRpcClientError(
+                Box::new(MagicBlockRpcClientError::SentTransactionError(
                     solana_transaction_error::TransactionError::InstructionError(
                         2,
                         solana_instruction::error::InstructionError::Custom(1),
                     ),
                     solana_signature::Signature::default(),
-                ),
-            )),
-        );
+                )),
+            ));
         assert!(!err.is_transient());
 
-        let err = TransactionStrategyExecutionError::InternalError(InternalError::SignerError(
+        let err = TransactionExecutionError::InternalError(InternalError::SignerError(
             solana_signer::SignerError::Custom("oops".to_string()),
         ));
         assert!(!err.is_transient());
@@ -269,7 +266,7 @@ mod tests {
         use solana_signature::Signature;
 
         let transient_err = || {
-            TransactionStrategyExecutionError::InternalError(
+            TransactionExecutionError::InternalError(
                 send_transaction_error("connection reset").into(),
             )
         };

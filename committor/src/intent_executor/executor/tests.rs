@@ -14,7 +14,7 @@ use crate::{
     intent_engine::intent_scheduler::create_test_intent_bundle,
     intent_executor::{intent_execution_client::IntentExecutionClient, test_utils::*},
     tasks::{
-        BaseTaskImpl,
+        Task,
         task_info_fetcher::{CacheTaskInfoFetcher, TaskInfoFetcherResult},
     },
 };
@@ -301,9 +301,9 @@ async fn intent_execution_preserves_recovery_and_completion() {
                 tasks.iter().fold(
                     (0, 0, 0),
                     |(commits, undelegations, actions), task| match task {
-                        BaseTaskImpl::CommitFinalize(_) => (commits + 1, undelegations, actions),
-                        BaseTaskImpl::Undelegate(_) => (commits, undelegations + 1, actions),
-                        BaseTaskImpl::BaseAction(_) => (commits, undelegations, actions + 1),
+                        Task::CommitFinalize(_) => (commits + 1, undelegations, actions),
+                        Task::Undelegate(_) => (commits, undelegations + 1, actions),
+                        Task::BaseAction(_) => (commits, undelegations, actions + 1),
                     },
                 )
             })

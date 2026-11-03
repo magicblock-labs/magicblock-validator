@@ -535,9 +535,59 @@ pub enum IntentSchedulerError {
 
 pub type IntentSchedulerResult<T, E = IntentSchedulerError> = Result<T, E>;
 
-/// Set of simple tests
 #[cfg(test)]
-mod simple_test {
+pub(crate) fn create_test_intent_bundle(
+    id: u64,
+    commit_pubkeys: &[Pubkey],
+    commit_and_undelegate_pubkeys: &[Pubkey],
+) -> OutboxIntentBundle {
+    use mbv_core::intent::{
+        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
+        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
+    };
+    use program::magic_scheduled_base_intent::ScheduledIntentBundle;
+    use solana_account::Account;
+    use solana_hash::Hash;
+
+    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
+        keys.iter()
+            .copied()
+            .map(|pubkey| CommittedAccount {
+                pubkey,
+                account: Account::default(),
+                remote_slot: Default::default(),
+            })
+            .collect()
+    };
+
+    let mut intent = ScheduledIntentBundle {
+        intent_id: id,
+        slot: 0,
+        blockhash: Hash::default(),
+        sent_transaction: Default::default(),
+        payer: Pubkey::default(),
+        intent_bundle: MagicIntentBundle::default(),
+    };
+
+    if !commit_pubkeys.is_empty() {
+        intent.intent_bundle.commit = Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
+    }
+
+    if !commit_and_undelegate_pubkeys.is_empty() {
+        intent.intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(to_accounts(commit_and_undelegate_pubkeys)),
+            undelegate_action: UndelegateType::Standalone,
+        });
+    }
+
+    let bump = outbox_intent_pda_with_bump(id).1;
+    OutboxIntentBundle::accepted(intent, bump)
+}
+
+#[cfg(test)]
+mod tests {
+    use mbv_core::intent::{MagicIntentBundle, types::CommittedAccount};
+    use solana_account::Account;
     use solana_pubkey::pubkey;
 
     use super::*;
@@ -600,19 +650,6 @@ mod simple_test {
         // 1 intent executing, NUM_INTENTS - 1 are blocked
         assert_eq!(scheduler.intents_blocked() as u64, NUM_INTENTS - 1);
     }
-}
-
-/// Set of simple completion tests
-#[cfg(test)]
-mod completion_simple_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
-    }
 
     #[test]
     fn test_completion_unblocks_intents() {
@@ -667,18 +704,6 @@ mod completion_simple_test {
         let expected_msg3 = scheduler.pop_next_scheduled_intent().unwrap();
         assert_eq!(expected_msg3, msg3);
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod complex_blocking_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     /// Case:
@@ -847,18 +872,6 @@ mod complex_blocking_test {
         assert!(next_intents.contains(&msg5));
         assert_eq!(scheduler.intents_blocked(), 0);
     }
-}
-
-#[cfg(test)]
-mod edge_cases_test {
-    use mbv_core::intent::MagicIntentBundle;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
-    }
 
     #[test]
     fn test_intent_without_pubkeys() {
@@ -870,20 +883,6 @@ mod edge_cases_test {
         // Should execute immediately since it has no pubkeys
         assert!(scheduler.schedule(msg.clone()).is_some());
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod complete_error_test {
-    use mbv_core::intent::types::CommittedAccount;
-    use solana_account::Account;
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     #[test]
@@ -1005,13 +1004,6 @@ mod complete_error_test {
             Err(IntentSchedulerError::CompletingBlockedIntentError)
         ));
     }
-}
-
-#[cfg(test)]
-mod intent_bundle_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
 
     /// Bundle contains BOTH Commit and CommitAndUndelegate.
     /// Scheduler must treat committed pubkeys as UNION across both.
@@ -1083,18 +1075,6 @@ mod intent_bundle_test {
         assert!(next2 == msg2 || next2 == msg3);
         assert_ne!(next1, next2);
         assert_eq!(scheduler.intents_blocked(), 0);
-    }
-}
-
-#[cfg(test)]
-mod poisoned_test {
-    use solana_pubkey::pubkey;
-
-    use super::*;
-    use crate::test_utils;
-
-    fn setup() {
-        test_utils::init_test_logger();
     }
 
     /// # Case 1 — poison propagates through a chain, but spares an
@@ -1430,53 +1410,4 @@ mod poisoned_test {
              already landed"
         );
     }
-}
-
-#[cfg(test)]
-pub(crate) fn create_test_intent_bundle(
-    id: u64,
-    commit_pubkeys: &[Pubkey],
-    commit_and_undelegate_pubkeys: &[Pubkey],
-) -> OutboxIntentBundle {
-    use mbv_core::intent::{
-        CommitAndUndelegate, CommitType, MagicIntentBundle, UndelegateType,
-        outbox::outbox_intent_pda_with_bump, types::CommittedAccount,
-    };
-    use program::magic_scheduled_base_intent::ScheduledIntentBundle;
-    use solana_account::Account;
-    use solana_hash::Hash;
-
-    let to_accounts = |keys: &[Pubkey]| -> Vec<CommittedAccount> {
-        keys.iter()
-            .copied()
-            .map(|pubkey| CommittedAccount {
-                pubkey,
-                account: Account::default(),
-                remote_slot: Default::default(),
-            })
-            .collect()
-    };
-
-    let mut intent = ScheduledIntentBundle {
-        intent_id: id,
-        slot: 0,
-        blockhash: Hash::default(),
-        sent_transaction: Default::default(),
-        payer: Pubkey::default(),
-        intent_bundle: MagicIntentBundle::default(),
-    };
-
-    if !commit_pubkeys.is_empty() {
-        intent.intent_bundle.commit = Some(CommitType::Standalone(to_accounts(commit_pubkeys)));
-    }
-
-    if !commit_and_undelegate_pubkeys.is_empty() {
-        intent.intent_bundle.commit_and_undelegate = Some(CommitAndUndelegate {
-            commit_action: CommitType::Standalone(to_accounts(commit_and_undelegate_pubkeys)),
-            undelegate_action: UndelegateType::Standalone,
-        });
-    }
-
-    let bump = outbox_intent_pda_with_bump(id).1;
-    OutboxIntentBundle::accepted(intent, bump)
 }

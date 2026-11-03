@@ -13,7 +13,6 @@ use solana_account::ReadableAccount;
 /// need to track ordering (e.g. by id) - the intent bundle itself already
 /// lives durably in the outbox account on-chain.
 pub trait BacklogDB: Send + 'static {
-    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()>;
     fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()>;
 
     /// Returns the oldest (first stored) intent bundle
@@ -36,14 +35,6 @@ impl AccountsDbIntentBacklog {
 }
 
 impl BacklogDB for AccountsDbIntentBacklog {
-    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()> {
-        let mut queue = self.queue.borrow_mut();
-        queue.push_back(intent_bundle.inner.intent_id);
-
-        metrics::set_committor_intents_backlog_count(queue.len() as i64);
-        Ok(())
-    }
-
     fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
         queue.extend(intent_bundles.into_iter().map(|el| el.inner.intent_id));
@@ -98,11 +89,6 @@ impl DummyDB {
 
 #[cfg(test)]
 impl BacklogDB for DummyDB {
-    fn store_intent_bundle(&self, intent_bundle: OutboxIntentBundle) -> DBResult<()> {
-        self.db.lock().push_back(intent_bundle);
-        Ok(())
-    }
-
     fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
         self.db.lock().extend(intent_bundles);
         Ok(())

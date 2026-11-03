@@ -7,13 +7,13 @@ use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
 
 use crate::{
-    tasks::{BaseActionTask, BaseTask, BaseTaskImpl, utils::TransactionUtils},
+    tasks::{BaseActionTask, Task, utils::TransactionUtils},
     utils::{MAX_TRANSACTION_V1_WIRE_SIZE, MAX_TRANSACTION_WIRE_SIZE, serialized_transaction_size},
 };
 
 #[derive(Default, Clone)]
 pub struct TransactionStrategy {
-    pub optimized_tasks: Vec<BaseTaskImpl>,
+    pub tasks: Vec<Task>,
     pub lookup_tables_keys: Vec<Pubkey>,
     // TODO(edwin): remove this
     pub uniqueness_nonce: Option<u64>,
@@ -35,7 +35,7 @@ impl TransactionStrategy {
         if self.uses_alts() {
             self.lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
                 authority,
-                &self.optimized_tasks,
+                &self.tasks,
                 self.uniqueness_nonce,
             );
         }
@@ -43,11 +43,11 @@ impl TransactionStrategy {
 
     /// Extracts callbacks from actions
     pub fn extract_action_callbacks(&mut self) -> Vec<BaseActionCallback> {
-        self.optimized_tasks
+        self.tasks
             .iter_mut()
             .filter_map(
                 |el| {
-                    if let BaseTaskImpl::BaseAction(value) = el { Some(value) } else { None }
+                    if let Task::BaseAction(value) = el { Some(value) } else { None }
                 },
             )
             .filter_map(BaseActionTask::extract_callback)
@@ -57,17 +57,17 @@ impl TransactionStrategy {
     /// Removes failed actions and returns their callbacks.
     pub fn remove_actions(&mut self, authority: &Pubkey) -> Vec<BaseActionCallback> {
         let callbacks = self.extract_action_callbacks();
-        self.optimized_tasks.retain(|task| !matches!(task, BaseTaskImpl::BaseAction(_)));
+        self.tasks.retain(|task| !matches!(task, Task::BaseAction(_)));
         self.refresh_lookup_table_keys(authority);
         callbacks
     }
 
     pub fn has_actions_callbacks(&self) -> bool {
-        self.optimized_tasks
+        self.tasks
             .iter()
             .filter_map(
                 |el| {
-                    if let BaseTaskImpl::BaseAction(value) = el { Some(value) } else { None }
+                    if let Task::BaseAction(value) = el { Some(value) } else { None }
                 },
             )
             .any(BaseActionTask::has_callback)
@@ -96,21 +96,21 @@ impl From<TransactionStrategy> for TransactionPlan {
     }
 }
 
-/// Takes [`BaseTask`]s and chooses the best way to fit them in TX
+/// Takes [`Task`]s and chooses the best way to fit them in TX
 /// It may change Task execution strategy so all task would fit in tx
 pub struct TaskStrategist;
 impl TaskStrategist {
     /// Fits tasks into transactions and chooses a combined or split plan.
     pub fn build_plan(
-        commit_tasks: Vec<BaseTaskImpl>,
-        follow_up_tasks: Vec<BaseTaskImpl>,
+        commit_tasks: Vec<Task>,
+        follow_up_tasks: Vec<Task>,
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionPlan> {
         const MAX_UNITED_TASKS_LEN: usize = 22;
         // Combined commits need no empty follow-up transaction.
         if follow_up_tasks.is_empty()
-            && commit_tasks.iter().any(|task| matches!(task, BaseTaskImpl::CommitFinalize(_)))
+            && commit_tasks.iter().any(|task| matches!(task, Task::CommitFinalize(_)))
         {
             return Self::build_strategy(commit_tasks, authority, uniqueness_nonce).map(Into::into);
         }
@@ -162,8 +162,8 @@ impl TaskStrategist {
     }
 
     pub fn build_split_plan(
-        commit_tasks: Vec<BaseTaskImpl>,
-        follow_up_tasks: Vec<BaseTaskImpl>,
+        commit_tasks: Vec<Task>,
+        follow_up_tasks: Vec<Task>,
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionPlan> {
@@ -184,7 +184,7 @@ impl TaskStrategist {
     /// Returns [`TransactionStrategy`] for tasks
     /// Returns Error if all optimizations weren't enough
     pub fn build_strategy(
-        tasks: Vec<BaseTaskImpl>,
+        tasks: Vec<Task>,
         validator: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
@@ -196,7 +196,7 @@ impl TaskStrategist {
             <= MAX_TRANSACTION_V1_WIRE_SIZE
         {
             return Ok(TransactionStrategy {
-                optimized_tasks,
+                tasks: optimized_tasks,
                 lookup_tables_keys: vec![],
                 uniqueness_nonce,
             });
@@ -211,7 +211,7 @@ impl TaskStrategist {
         let lookup_tables_keys =
             Self::collect_lookup_table_keys(validator, &optimized_tasks, uniqueness_nonce);
         Ok(TransactionStrategy {
-            optimized_tasks,
+            tasks: optimized_tasks,
             lookup_tables_keys,
             uniqueness_nonce,
         })
@@ -220,7 +220,7 @@ impl TaskStrategist {
     /// Attempt to use ALTs for ALL keys in tx
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
-    pub fn attempt_lookup_tables(tasks: &[BaseTaskImpl], uniqueness_nonce: Option<u64>) -> bool {
+    pub fn attempt_lookup_tables(tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
         if TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce) > 1_400_000 {
             return false;
         }
@@ -246,7 +246,7 @@ impl TaskStrategist {
 
     pub fn collect_lookup_table_keys(
         authority: &Pubkey,
-        tasks: &[BaseTaskImpl],
+        tasks: &[Task],
         uniqueness_nonce: Option<u64>,
     ) -> Vec<Pubkey> {
         let budgets = TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce);
@@ -265,11 +265,11 @@ impl TaskStrategist {
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the v1 wire limit. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
-        tasks: &mut [BaseTaskImpl],
+        tasks: &mut [Task],
         uniqueness_nonce: Option<u64>,
     ) -> Result<usize, SignerError> {
         // Get initial transaction size
-        let calculate_tx_length = |tasks: &[BaseTaskImpl]| {
+        let calculate_tx_length = |tasks: &[Task]| {
             // Include the constant-size uniqueness noop so fit decisions
             // match the assembled transaction.
             match TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
@@ -313,18 +313,9 @@ impl TaskStrategist {
                 break;
             }
 
-            if tasks[index].try_optimize_tx_size() {
-                // If we can decrease:
-                // 1. Calculate new tx size & ix size
-                // 2. Insert item's data back in the heap
-                // 3. Update overall tx size
-                let new_ix = tasks[index].instruction(&Pubkey::new_unique());
-                // Possible serialization failures are possible only due to size in our case
-                // In that case we set size to max
-                let new_ix_size = wincode::serialized_size(&new_ix).unwrap_or(u64::MAX);
-                let new_ix_size = usize::try_from(new_ix_size).unwrap_or(usize::MAX);
+            if tasks[index].try_use_buffer() {
+                // Buffer delivery is the only conversion, so each task needs one attempt.
                 current_tx_length = calculate_tx_length(tasks)?;
-                map.push((new_ix_size, index));
             }
         }
 
@@ -369,7 +360,7 @@ mod tests {
             BaseActionTask, BaseActionTaskV1, UndelegateTask,
             commit_delivery::CommitDelivery,
             commit_finalize_task::CommitFinalizeTask,
-            task_builder::{TaskBuilderImpl, TasksBuilder},
+            task_builder::TaskBuilder,
             utils::{COMMIT_STATE_SIZE_THRESHOLD, create_commit_finalize_task},
         },
         test_utils,
@@ -485,8 +476,8 @@ mod tests {
         .into()
     }
 
-    fn commit_delivery(task: &BaseTaskImpl) -> &CommitDelivery {
-        let BaseTaskImpl::CommitFinalize(task) = task else {
+    fn commit_delivery(task: &Task) -> &CommitDelivery {
+        let Task::CommitFinalize(task) = task else {
             panic!("expected a combined commit");
         };
         &task.delivery
@@ -512,7 +503,7 @@ mod tests {
         let strategy =
             TaskStrategist::build_strategy(tasks, &validator, None).expect("Should build strategy");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.tasks.len(), 1);
         assert!(strategy.lookup_tables_keys.is_empty());
     }
 
@@ -526,9 +517,9 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.tasks.len(), 1);
         assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
+            commit_delivery(&strategy.tasks[0]),
             CommitDelivery::StateInBuffer
         ));
     }
@@ -544,7 +535,7 @@ mod tests {
             .expect("Buffer delivery must fit even when inline data exceeds u16");
 
         assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
+            commit_delivery(&strategy.tasks[0]),
             CommitDelivery::StateInBuffer
         ));
         assert!(strategy.lookup_tables_keys.is_empty());
@@ -560,9 +551,9 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.tasks.len(), 1);
         assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
+            commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInArgs { .. }
         ));
     }
@@ -577,9 +568,9 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.tasks.len(), 1);
         assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
+            commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInArgs { .. }
         ));
     }
@@ -594,9 +585,9 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
+        assert_eq!(strategy.tasks.len(), 1);
         assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
+            commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInBuffer { .. }
         ));
     }
@@ -618,7 +609,7 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        for optimized_task in &strategy.optimized_tasks {
+        for optimized_task in &strategy.tasks {
             assert!(matches!(
                 commit_delivery(optimized_task),
                 CommitDelivery::StateInBuffer
@@ -635,7 +626,7 @@ mod tests {
 
         let validator = Pubkey::new_unique();
 
-        let mut tasks: Vec<BaseTaskImpl> = (0..NUM_COMMITS)
+        let mut tasks: Vec<Task> = (0..NUM_COMMITS)
             .map(|i| {
                 // Large task
                 let task = create_test_commit_task(i, 1000, 0);
@@ -657,7 +648,7 @@ mod tests {
         let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
             .expect("Should build strategy with buffer optimization");
 
-        for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize] {
+        for optimized_task in &strategy.tasks[..NUM_COMMITS as usize] {
             assert!(matches!(
                 commit_delivery(optimized_task),
                 CommitDelivery::StateInBuffer
@@ -723,10 +714,7 @@ mod tests {
             .expect("should fall back to v0 + ALTs");
 
         assert!(!strategy.lookup_tables_keys.is_empty());
-        assert!(matches!(
-            strategy.optimized_tasks.as_slice(),
-            [BaseTaskImpl::BaseAction(_)]
-        ));
+        assert!(matches!(strategy.tasks.as_slice(), [Task::BaseAction(_)]));
     }
 
     #[test]
@@ -786,7 +774,7 @@ mod tests {
 
     #[test]
     fn test_optimize_strategy_prioritizes_largest_tasks() {
-        let mut tasks: [BaseTaskImpl; 3] = [
+        let mut tasks: [Task; 3] = [
             create_test_commit_task(1, 100, 0).into(),
             create_test_commit_task(2, 5000, 0).into(), // Larger task
             create_test_commit_task(3, 5000, 0).into(), // Larger task
@@ -807,7 +795,7 @@ mod tests {
     #[test]
     fn test_mixed_task_types_with_optimization() {
         let validator = Pubkey::new_unique();
-        let tasks: Vec<BaseTaskImpl> = vec![
+        let tasks: Vec<Task> = vec![
             create_test_commit_task(1, 5000, 0).into(),
             create_test_undelegate_task().into(),
             create_test_base_action_task(500).into(),
@@ -817,15 +805,15 @@ mod tests {
         let strategy =
             TaskStrategist::build_strategy(tasks, &validator, None).expect("Should build strategy");
 
-        assert_eq!(strategy.optimized_tasks.len(), 4);
+        assert_eq!(strategy.tasks.len(), 4);
 
         assert!(matches!(
-            strategy.optimized_tasks.as_slice(),
+            strategy.tasks.as_slice(),
             [
-                BaseTaskImpl::CommitFinalize(task),
-                BaseTaskImpl::Undelegate(_),
-                BaseTaskImpl::BaseAction(_),
-                BaseTaskImpl::Undelegate(_),
+                Task::CommitFinalize(task),
+                Task::Undelegate(_),
+                Task::BaseAction(_),
+                Task::Undelegate(_),
             ] if matches!(task.delivery, CommitDelivery::StateInBuffer)
         ));
         assert!(strategy.lookup_tables_keys.is_empty());
@@ -843,9 +831,9 @@ mod tests {
             ..Default::default()
         });
 
-        let tasks = TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+        let tasks = TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
 
-        let BaseTaskImpl::Undelegate(task) = &tasks[0] else {
+        let Task::Undelegate(task) = &tasks[0] else {
             panic!("expected undelegate task");
         };
         assert_eq!(task.delegated_account, delegated_account);
@@ -908,11 +896,11 @@ mod tests {
                     };
                     intent.intent_bundle = base_intent.into();
                     let mut commits =
-                        TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
+                        TaskBuilder::commit_tasks(&info_fetcher, &intent).await.unwrap();
                     let follow_ups =
-                        TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+                        TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
                     assert_eq!(commits.len(), 1 + usize::from(combined));
-                    let BaseTaskImpl::CommitFinalize(task) = &mut commits[0] else {
+                    let Task::CommitFinalize(task) = &mut commits[0] else {
                         panic!("all commit intents must use CommitFinalize");
                     };
                     assert_eq!(task.allow_undelegation, undelegate);
@@ -922,7 +910,7 @@ mod tests {
                         use_diff
                     );
                     let inline_ix = task.instruction(&authority);
-                    assert!(task.try_optimize_tx_size());
+                    assert!(task.try_use_buffer());
                     let buffer_ix = task.instruction(&authority);
                     assert!(inline_ix.data.starts_with(&DlpDiscriminator::CommitFinalize.to_vec()));
                     assert!(
@@ -938,11 +926,11 @@ mod tests {
                     );
                     let mut tail = follow_ups.iter();
                     if !combined {
-                        assert!(matches!(tail.next(), Some(BaseTaskImpl::BaseAction(_))));
+                        assert!(matches!(tail.next(), Some(Task::BaseAction(_))));
                     }
                     if undelegate {
-                        assert!(matches!(tail.next(), Some(BaseTaskImpl::Undelegate(_))));
-                        assert!(matches!(tail.next(), Some(BaseTaskImpl::BaseAction(_))));
+                        assert!(matches!(tail.next(), Some(Task::Undelegate(_))));
+                        assert!(matches!(tail.next(), Some(Task::BaseAction(_))));
                     }
                     assert!(tail.next().is_none());
                 }
@@ -971,8 +959,8 @@ mod tests {
                 }
                 intent.intent_bundle.standalone_actions.push(action.action);
                 let fetcher = Arc::new(MockInfoFetcher::default());
-                let commits = TaskBuilderImpl::commit_tasks(&fetcher, &intent).await.unwrap();
-                let follow_ups = TaskBuilderImpl::follow_up_tasks(&fetcher, &intent).await.unwrap();
+                let commits = TaskBuilder::commit_tasks(&fetcher, &intent).await.unwrap();
+                let follow_ups = TaskBuilder::follow_up_tasks(&fetcher, &intent).await.unwrap();
                 assert!(follow_ups.is_empty());
                 let plan =
                     TaskStrategist::build_plan(commits, follow_ups, &Pubkey::new_unique(), Some(1))
@@ -980,7 +968,7 @@ mod tests {
                 assert!(plan.follow_up.is_none());
                 let strategy = plan.current;
                 assert_eq!(strategy.uses_alts(), use_alts);
-                let BaseTaskImpl::CommitFinalize(task) = &strategy.optimized_tasks[1] else {
+                let Task::CommitFinalize(task) = &strategy.tasks[1] else {
                     panic!("format fallback must retain CommitFinalize");
                 };
                 assert_eq!(
@@ -996,9 +984,8 @@ mod tests {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
         let info_fetcher = Arc::new(MockInfoFetcher::default());
-        let commit_tasks = TaskBuilderImpl::commit_tasks(&info_fetcher, &intent).await.unwrap();
-        let follow_up_tasks =
-            TaskBuilderImpl::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
+        let commit_tasks = TaskBuilder::commit_tasks(&info_fetcher, &intent).await.unwrap();
+        let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_fetcher, &intent).await.unwrap();
 
         // Six commits and six undelegations need 1.44M CU together;
         // each group fits separately with 720K CU.
@@ -1006,7 +993,7 @@ mod tests {
             TaskStrategist::build_plan(commit_tasks, follow_up_tasks, &Pubkey::new_unique(), None)
                 .expect("Both transactions fit separately");
 
-        assert_eq!(plan.current.optimized_tasks.len(), 6);
-        assert_eq!(plan.follow_up.unwrap().optimized_tasks.len(), 6);
+        assert_eq!(plan.current.tasks.len(), 6);
+        assert_eq!(plan.follow_up.unwrap().tasks.len(), 6);
     }
 }

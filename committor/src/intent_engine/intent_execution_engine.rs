@@ -29,7 +29,7 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         intent_executor_factory::IntentExecutorBuilder,
         progress::ExecutionProgress,
-        strategy_executor::error::TransactionStrategyExecutionError,
+        strategy_executor::error::TransactionExecutionError,
     },
     transaction_preparator::TransactionPreparator,
 };
@@ -59,7 +59,7 @@ struct ExecutionLimits {
     capacity_changed: Arc<Notify>,
 }
 
-pub(super) type PatchedErrors = Vec<TransactionStrategyExecutionError>;
+pub(super) type PatchedErrors = Vec<TransactionExecutionError>;
 
 #[derive(Clone, Debug)]
 pub struct BroadcastedIntentExecutionResult {
@@ -676,7 +676,7 @@ mod tests {
             &[pubkey!("1111111111111111111111111111111111111111111")],
             &[],
         );
-        db.lock().store_intent_bundle(msg.clone()).unwrap();
+        db.lock().store_intent_bundles(vec![msg.clone()]).unwrap();
 
         // Start worker
         let result_subscriber = worker.spawn();
@@ -1166,12 +1166,12 @@ mod tests {
                 MockFailureMode::None => success,
                 MockFailureMode::Persistent => IntentExecutionResult {
                     inner: Err(ExecutorError::FailedExecution(
-                        TransactionStrategyExecutionError::InternalError(
-                            InternalError::SignerError(SignerError::Custom("oops".to_string())),
-                        ),
+                        TransactionExecutionError::InternalError(InternalError::SignerError(
+                            SignerError::Custom("oops".to_string()),
+                        )),
                     )),
                     progress: ExecutionProgress::default(),
-                    patched_errors: vec![TransactionStrategyExecutionError::ActionsError(
+                    patched_errors: vec![TransactionExecutionError::ActionsError(
                         TransactionError::AccountNotFound,
                         None,
                     )],
@@ -1191,14 +1191,12 @@ mod tests {
                         };
                         IntentExecutionResult {
                             inner: Err(ExecutorError::FailedExecution(
-                                TransactionStrategyExecutionError::InternalError(
-                                    InternalError::from(
-                                        MagicBlockRpcClientError::SentTransactionError(
-                                            TransactionError::BlockhashNotFound,
-                                            Signature::default(),
-                                        ),
+                                TransactionExecutionError::InternalError(InternalError::from(
+                                    MagicBlockRpcClientError::SentTransactionError(
+                                        TransactionError::BlockhashNotFound,
+                                        Signature::default(),
                                     ),
-                                ),
+                                )),
                             )),
                             progress: ExecutionProgress {
                                 transaction:

@@ -23,7 +23,7 @@ use cleanup_resources::CleanupResources;
 #[async_trait]
 pub trait TransactionPreparator: Send + Sync + 'static {
     /// Return [`VersionedMessage`] corresponding to [`TransactionStrategy`]
-    /// Handles all necessary preparation needed for successful [`BaseTask`] execution
+    /// Handles all preparation needed to execute the strategy's tasks.
     async fn prepare_for_strategy(
         &self,
         authority: &Keypair,
@@ -80,7 +80,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
             // Validate the final representation before preparing buffers.
             let message = TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
                 authority,
-                &tx_strategy.optimized_tasks,
+                &tx_strategy.tasks,
                 self.compute_budget_config.compute_unit_price,
                 tx_strategy.uniqueness_nonce,
             )?
@@ -99,7 +99,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
                 TransactionUtils::dummy_lookup_table(&tx_strategy.lookup_tables_keys);
             let _ = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
                 authority,
-                &tx_strategy.optimized_tasks,
+                &tx_strategy.tasks,
                 self.compute_budget_config.compute_unit_price,
                 &dummy_lookup_tables,
                 tx_strategy.uniqueness_nonce,
@@ -115,7 +115,7 @@ impl TransactionPreparator for TransactionPreparatorImpl {
 
         let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             authority,
-            &tx_strategy.optimized_tasks,
+            &tx_strategy.tasks,
             self.compute_budget_config.compute_unit_price,
             &lookup_tables,
             tx_strategy.uniqueness_nonce,
