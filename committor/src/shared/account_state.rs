@@ -1,0 +1,1053 @@
+use std::{collections::HashMap, mem, num::NonZeroUsize, sync::Arc, time::Duration};
+
+use async_trait::async_trait;
+use delegation_program_api::{
+    delegation_metadata_seeds_from_delegated_account,
+    delegation_record_seeds_from_delegated_account,
+    state::{DelegationMetadata, DelegationRecord},
+};
+use lru::LruCache;
+use metrics::metrics;
+use parking_lot::Mutex;
+use rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
+use solana_account::Account;
+use solana_account_decoder::UiAccountEncoding;
+use solana_pubkey::Pubkey;
+use solana_rpc_client_api::{
+    client_error::ErrorKind, config::RpcAccountInfoConfig,
+    custom_error::JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED, request::RpcError,
+};
+use solana_signature::Signature;
+use tokio::sync::{Mutex as TMutex, MutexGuard};
+use tracing::{error, info, warn};
+
+const NUM_FETCH_RETRIES: NonZeroUsize = NonZeroUsize::new(5).unwrap();
+
+/// A delegated account paired with the base-layer slot of the state
+/// snapshot being committed for it (`CommittedAccount::remote_slot`).
+/// The slot pins the delegation session: a delegation record created
+/// after it belongs to a newer delegation of the same account.
+pub type AccountSnapshot = (Pubkey, u64);
+
+#[async_trait]
+pub(crate) trait TaskInfoProvider: Send + Sync + 'static {
+    /// Fetches correct commit nonces for accounts
+    /// Those nonces can be used as correct commit_nonce during Commit
+    async fn fetch_next_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>>;
+
+    /// Fetches current commit nonces for accounts
+    /// Missing nonces will be fetched from chain
+    async fn fetch_current_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>>;
+
+    /// Fetches delegation metadata keyed by delegated account pubkey.
+    async fn fetch_delegation_metadata(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>>;
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>>;
+}
+
+// ---------------------------------------------------------------------------
+// RpcTaskInfoProvider
+// ---------------------------------------------------------------------------
+
+/// Pure RPC implementation of [`TaskInfoProvider`] — no caching.
+pub(crate) struct RpcTaskInfoProvider {
+    rpc_client: MagicblockRpcClient,
+}
+
+impl RpcTaskInfoProvider {
+    pub(crate) fn new(rpc_client: MagicblockRpcClient) -> Self {
+        Self { rpc_client }
+    }
+
+    /// Fetches [`DelegationMetadata`]s with some num of retries
+    pub(crate) async fn fetch_metadata_with_retries(
+        rpc_client: &MagicblockRpcClient,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+    ) -> TaskInfoProviderResult<Vec<DelegationMetadata>> {
+        if accounts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Fetch the delegation record alongside the metadata to pin the
+        // delegation session: a record created after the account's
+        // snapshot slot belongs to a newer delegation of the same
+        // account, and committing the old snapshot into it must fail
+        // terminally.
+        let pda_accounts: Vec<Pubkey> = accounts
+            .iter()
+            .flat_map(|(delegated_account, _)| {
+                [
+                    Pubkey::find_program_address(
+                        delegation_record_seeds_from_delegated_account!(delegated_account),
+                        &delegation_program_api::id(),
+                    )
+                    .0,
+                    Pubkey::find_program_address(
+                        delegation_metadata_seeds_from_delegated_account!(delegated_account),
+                        &delegation_program_api::id(),
+                    )
+                    .0,
+                ]
+            })
+            .collect();
+
+        let fetched = Self::fetch_accounts_with_retries(
+            rpc_client,
+            &pda_accounts,
+            min_context_slot,
+            max_retries,
+        )
+        .await?;
+
+        fetched
+            .chunks_exact(2)
+            .zip(pda_accounts.chunks_exact(2))
+            .zip(accounts)
+            .map(|((pair, pdas), (delegated_account, snapshot_slot))| {
+                let record = DelegationRecord::try_from_bytes_with_discriminator(&pair[0].data)
+                    .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[0]))?;
+                // Snapshot slot 0 means the intent carries no snapshot
+                // provenance (synthetic/test intents); skip the session
+                // comparison since there is nothing to compare against.
+                if *snapshot_slot > 0 && record.delegation_slot > *snapshot_slot {
+                    return Err(TaskInfoProviderError::DelegationSessionChangedError {
+                        delegated_account: *delegated_account,
+                        delegation_slot: record.delegation_slot,
+                        snapshot_slot: *snapshot_slot,
+                    });
+                }
+                DelegationMetadata::try_from_bytes_with_discriminator(&pair[1].data)
+                    .map_err(|_| TaskInfoProviderError::InvalidAccountDataError(pdas[1]))
+            })
+            .collect()
+    }
+
+    /// Fetches [`Account`]s with some num of retries
+    pub(crate) async fn fetch_accounts_with_retries(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        max_retries: NonZeroUsize,
+    ) -> TaskInfoProviderResult<Vec<Account>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut i = 0;
+        loop {
+            i += 1;
+            let err = match Self::fetch_accounts(rpc_client, pubkeys, min_context_slot).await {
+                Ok(value) => break Ok(value),
+                Err(err) => err,
+            };
+
+            match err {
+                // A load-balanced RPC can briefly miss a newly created account.
+                TaskInfoProviderError::AccountNotFoundError(ref pubkey) => {
+                    warn!(
+                        %pubkey,
+                        min_context_slot,
+                        attempt = i,
+                        "Account not found, possibly stale RPC read"
+                    );
+                }
+                err @ (TaskInfoProviderError::InvalidAccountDataError(_)
+                | TaskInfoProviderError::DelegationSessionChangedError { .. }) => {
+                    error!(error = ?err, "Unexpected error");
+                    break Err(err);
+                }
+                TaskInfoProviderError::MinContextSlotNotReachedError(_, _) => {
+                    info!(
+                        min_context_slot,
+                        attempt = i,
+                        "Min context slot not reached"
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                TaskInfoProviderError::MagicBlockRpcClientError(ref err) => {
+                    warn!(error = ?err, attempt = i, "Fetch account error");
+                }
+            }
+
+            if i >= max_retries.get() {
+                break Err(err);
+            }
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Fetches specified list of accounts
+    pub(crate) async fn fetch_accounts(
+        rpc_client: &MagicblockRpcClient,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<Vec<Account>> {
+        if pubkeys.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        metrics::inc_task_info_fetcher_a_count();
+        let commitment = rpc_client.commitment();
+        let mut accounts = rpc_client
+            .get_multiple_accounts_with_config(
+                pubkeys,
+                RpcAccountInfoConfig {
+                    encoding: Some(UiAccountEncoding::Base64Zstd),
+                    commitment: Some(commitment),
+                    data_slice: None,
+                    min_context_slot: Some(min_context_slot),
+                },
+                None,
+            )
+            .await
+            .map_err(|err| TaskInfoProviderError::map_client_error(min_context_slot, err))?;
+
+        let accounts = pubkeys
+            .iter()
+            .enumerate()
+            .map(|(i, pubkey)| {
+                let account = if let Some(account) = accounts.get_mut(i) {
+                    account
+                } else {
+                    return Err(TaskInfoProviderError::AccountNotFoundError(*pubkey));
+                };
+                if let Some(account) = account.take() {
+                    Ok(account)
+                } else {
+                    Err(TaskInfoProviderError::AccountNotFoundError(*pubkey))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(accounts)
+    }
+}
+
+#[async_trait]
+impl TaskInfoProvider for RpcTaskInfoProvider {
+    async fn fetch_next_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        if accounts.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let nonces = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            accounts,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.last_commit_id + 1);
+        Ok(accounts.iter().map(|(pk, _)| *pk).zip(nonces).collect())
+    }
+
+    async fn fetch_current_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        if accounts.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let nonces = Self::fetch_metadata_with_retries(
+            &self.rpc_client,
+            accounts,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?
+        .into_iter()
+        .map(|m| m.last_commit_id);
+        Ok(accounts.iter().map(|(pk, _)| *pk).zip(nonces).collect())
+    }
+
+    async fn fetch_delegation_metadata(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+        Ok(accounts
+            .iter()
+            .map(|(pk, _)| *pk)
+            .zip(
+                Self::fetch_metadata_with_retries(
+                    &self.rpc_client,
+                    accounts,
+                    min_context_slot,
+                    NUM_FETCH_RETRIES,
+                )
+                .await?,
+            )
+            .collect())
+    }
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
+        let accounts = Self::fetch_accounts_with_retries(
+            &self.rpc_client,
+            pubkeys,
+            min_context_slot,
+            NUM_FETCH_RETRIES,
+        )
+        .await?;
+        Ok(pubkeys.iter().copied().zip(accounts).collect())
+    }
+}
+
+/// Per-account async mutex protecting the cached nonce value.
+type NonceLock = Arc<TMutex<u64>>;
+
+/// Split-map cache: `active` is the live LRU window; `retiring` holds locks
+/// evicted from `active` that are still held by in-flight requests.
+struct CacheInner {
+    active: LruCache<Pubkey, NonceLock>,
+    retiring: HashMap<Pubkey, NonceLock>,
+}
+
+impl CacheInner {
+    fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            active: LruCache::new(capacity),
+            retiring: HashMap::new(),
+        }
+    }
+}
+
+/// RAII guard returned by [`CachedTaskInfoProvider::acquire_nonce_locks`].
+/// Holds clones of the reserved [`NonceLock`]s and cleans up retiring entries
+/// on drop.
+struct CacheInnerGuard<'a> {
+    inner: &'a Mutex<CacheInner>,
+    nonce_locks: Vec<(Pubkey, NonceLock)>,
+}
+
+impl<'a> CacheInnerGuard<'a> {
+    // Acquire per-account locks sequentially in sorted order (see sort above).
+    // join_all would poll all futures concurrently, allowing partial acquisition
+    // and producing the classic A→B / B→A deadlock across concurrent callers.
+    async fn lock<'s>(&'s self) -> Vec<(&'s Pubkey, MutexGuard<'s, u64>)> {
+        let mut output = Vec::with_capacity(self.nonce_locks.len());
+        for (pubkey, lock) in self.nonce_locks.iter() {
+            let guard = lock.lock().await;
+            output.push((pubkey, guard))
+        }
+
+        output
+    }
+}
+
+impl<'a> Drop for CacheInnerGuard<'a> {
+    fn drop(&mut self) {
+        let mut inner = self.inner.lock();
+        let nonce_locks = mem::take(&mut self.nonce_locks);
+        for (pubkey, lock) in nonce_locks {
+            // Drop our clone first so strong_count reflects only other
+            // live holders when we check below
+            drop(lock);
+            let should_remove =
+                inner.retiring.get(&pubkey).is_some_and(|l| Arc::strong_count(l) == 1);
+            if should_remove {
+                inner.retiring.remove(&pubkey);
+            }
+        }
+
+        metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
+    }
+}
+
+/// Caches commit IDs while forwarding cache misses and other queries to the inner provider.
+pub(crate) struct CachedTaskInfoProvider {
+    inner: Arc<dyn TaskInfoProvider>,
+    cache: Mutex<CacheInner>,
+}
+
+impl CachedTaskInfoProvider {
+    pub(crate) fn new(inner: impl TaskInfoProvider) -> Self {
+        const CACHE_SIZE: NonZeroUsize = NonZeroUsize::new(10_000).unwrap();
+
+        Self {
+            inner: Arc::new(inner),
+            cache: Mutex::new(CacheInner::new(CACHE_SIZE)),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_capacity(capacity: NonZeroUsize, inner: impl TaskInfoProvider) -> Self {
+        Self {
+            inner: Arc::new(inner),
+            cache: Mutex::new(CacheInner::new(capacity)),
+        }
+    }
+
+    /// Returns the cached nonce without promoting LRU order or incrementing.
+    #[cfg(test)]
+    pub(crate) async fn peek_commit_nonce(&self, pubkey: &Pubkey) -> Option<u64> {
+        let lock = {
+            let inner = self.cache.lock();
+            inner.active.peek(pubkey).or_else(|| inner.retiring.get(pubkey)).cloned()
+        }?;
+
+        let locks_guard = CacheInnerGuard {
+            inner: &self.cache,
+            nonce_locks: vec![(*pubkey, lock)],
+        };
+        let guards = locks_guard.lock().await;
+        let value = *guards[0].1;
+
+        (value != u64::MAX).then_some(value)
+    }
+
+    /// Invalidates cached nonces for the given accounts.
+    pub(crate) fn invalidate_nonces(&self, pubkeys: &[Pubkey]) {
+        let mut cache = self.cache.lock();
+        for pubkey in pubkeys {
+            cache.active.pop(pubkey);
+            cache.retiring.remove(pubkey);
+        }
+    }
+
+    /// Ensures a [`NonceLock`] exists in the cache for each pubkey and returns
+    /// a [`CacheInnerGuard`] holding clones of those locks.
+    fn acquire_nonce_locks(&self, pubkeys: &[Pubkey]) -> CacheInnerGuard<'_> {
+        // Sorted order is required: all callers acquire per-key locks in the same
+        // order, preventing the A→B / B→A circular-wait deadlock.
+        let mut pubkeys = pubkeys.to_vec();
+        pubkeys.sort_unstable();
+        pubkeys.dedup();
+
+        let mut nonce_locks = vec![];
+        {
+            let mut inner = self.cache.lock();
+            for pubkey in pubkeys {
+                let (lock, evicted) = if let Some(val) = inner.active.get(&pubkey) {
+                    (val.clone(), None)
+                } else if let Some(val) = inner.retiring.remove(&pubkey) {
+                    // This promotes retiring to active
+                    let evicted = inner.active.push(pubkey, val.clone());
+                    (val, evicted)
+                } else {
+                    let val = Arc::new(TMutex::new(u64::MAX));
+                    let evicted = inner.active.push(pubkey, val.clone());
+                    (val, evicted)
+                };
+
+                if let Some((evicted_pk, evicted_lock)) = evicted {
+                    // If value isn't used by anyone then it can be dropped
+                    if Arc::strong_count(&evicted_lock) > 1 {
+                        // Value used in by another request
+                        // We can't drop evicted lock in that case
+                        // We move it to retiring, which will be cleaned up on exit
+                        // Race condition scenario:
+                        // 1. set of accs A evicted due to surge of requests - locks are dropped
+                        // 2. request for set A still ongoing
+                        // 3, another request with set A comes in, creating new locks in `CacheInner::active`
+                        // 4. 2 simultaneous requestors receive same value
+                        let old = inner.retiring.insert(evicted_pk, evicted_lock);
+                        if old.is_some() {
+                            // Safety
+                            // assume that is true:
+                            // That means that value was active & retiring at the same time
+                            // This is impossible as per logic above, contradiction. Q.E.D.
+                            debug_assert!(false, "Just evicted value can't be in retiring");
+                            error!(
+                                "Retiring map already contained lock with pubkey: {}",
+                                evicted_pk
+                            );
+                        }
+                    }
+                }
+
+                nonce_locks.push((pubkey, lock));
+            }
+            metrics::set_task_info_fetcher_retiring_count(inner.retiring.len() as i64);
+        }
+
+        CacheInnerGuard { inner: &self.cache, nonce_locks }
+    }
+
+    async fn commit_ids(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+        advance: bool,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        if accounts.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let snapshot_slots = snapshot_slots_by_pubkey(accounts);
+        let pubkeys: Vec<Pubkey> = accounts.iter().map(|(pk, _)| *pk).collect();
+        let locks_guard = self.acquire_nonce_locks(&pubkeys);
+        let nonce_guards = locks_guard.lock().await;
+        let mut result = HashMap::with_capacity(nonce_guards.len());
+        let (mut existing, mut missing) = (vec![], vec![]);
+        for (pubkey, guard) in nonce_guards {
+            if *guard == u64::MAX {
+                missing.push((pubkey, guard));
+            } else if advance {
+                // Allocation retains these locks until missing IDs have been fetched.
+                existing.push((pubkey, guard));
+            } else {
+                // Reads release cached-account locks before fetching missing IDs.
+                result.insert(*pubkey, *guard);
+            }
+        }
+
+        let fetched_nonces = if missing.is_empty() {
+            HashMap::new()
+        } else {
+            let missing_accounts: Vec<AccountSnapshot> =
+                missing.iter().map(|(pubkey, _)| (**pubkey, snapshot_slots[*pubkey])).collect();
+            self.inner
+                .fetch_current_commit_nonces(&missing_accounts, min_context_slot)
+                .await?
+        };
+
+        for (pubkey, mut guard) in existing {
+            *guard += 1;
+            result.insert(*pubkey, *guard);
+        }
+        for (pubkey, mut guard) in missing {
+            let nonce = fetched_nonces
+                .get(pubkey)
+                .ok_or(TaskInfoProviderError::AccountNotFoundError(*pubkey))?;
+            *guard = nonce + u64::from(advance);
+            result.insert(*pubkey, *guard);
+        }
+        Ok(result)
+    }
+}
+
+#[async_trait]
+impl TaskInfoProvider for CachedTaskInfoProvider {
+    async fn fetch_next_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        self.commit_ids(accounts, min_context_slot, true).await
+    }
+
+    async fn fetch_current_commit_nonces(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+        self.commit_ids(accounts, min_context_slot, false).await
+    }
+
+    async fn fetch_delegation_metadata(
+        &self,
+        accounts: &[AccountSnapshot],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+        self.inner.fetch_delegation_metadata(accounts, min_context_slot).await
+    }
+
+    async fn get_base_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
+        self.inner.get_base_accounts(pubkeys, min_context_slot).await
+    }
+}
+
+/// Deduplicates snapshots by pubkey, keeping the newest snapshot slot.
+fn snapshot_slots_by_pubkey(accounts: &[AccountSnapshot]) -> HashMap<Pubkey, u64> {
+    let mut slots: HashMap<Pubkey, u64> = HashMap::with_capacity(accounts.len());
+    for (pubkey, slot) in accounts {
+        let entry = slots.entry(*pubkey).or_insert(*slot);
+        *entry = (*entry).max(*slot);
+    }
+    slots
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum TaskInfoProviderError {
+    #[error("Metadata not found for: {0}")]
+    AccountNotFoundError(Pubkey),
+    #[error("InvalidAccountDataError for: {0}")]
+    InvalidAccountDataError(Pubkey),
+    #[error(
+        "Delegation session changed for {delegated_account}: delegated at slot {delegation_slot}, committed state is from slot {snapshot_slot}"
+    )]
+    DelegationSessionChangedError {
+        delegated_account: Pubkey,
+        delegation_slot: u64,
+        snapshot_slot: u64,
+    },
+    #[error("Minimum context slot {0} not reached: {1}")]
+    MinContextSlotNotReachedError(u64, Box<MagicBlockRpcClientError>),
+    #[error("MagicBlockRpcClientError: {0}")]
+    MagicBlockRpcClientError(Box<MagicBlockRpcClientError>),
+}
+
+impl TaskInfoProviderError {
+    /// RPC-side fetch failures are transient; malformed delegation
+    /// accounts are deterministic. Not-found is transient too: the
+    /// accounts fetched here exist from the ER's perspective, so it is
+    /// most likely a lagging RPC node. Retries are session-guarded — a
+    /// delegation created after the committed snapshot fails terminally
+    /// via `DelegationSessionChangedError`, as does a genuinely absent
+    /// account once the bounded intent-level retries are exhausted.
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::AccountNotFoundError(_) => true,
+            Self::MinContextSlotNotReachedError(_, _) => true,
+            Self::MagicBlockRpcClientError(err) => err.is_transient(),
+            Self::InvalidAccountDataError(_) => false,
+            Self::DelegationSessionChangedError { .. } => false,
+        }
+    }
+
+    pub fn map_client_error(min_context_slot: u64, e: MagicBlockRpcClientError) -> Self {
+        const MIN_CONTEXT_SLOT_MSG1: &str = "Minimum context slot has not been reached";
+        const MIN_CONTEXT_SLOT_MSG2: &str = "Min context slot not reached";
+        fn is_min_context_slot_msg(msg: &str) -> bool {
+            msg.contains(MIN_CONTEXT_SLOT_MSG1) || msg.contains(MIN_CONTEXT_SLOT_MSG2)
+        }
+
+        let orig = e;
+        let err = match &orig {
+            MagicBlockRpcClientError::RpcClientError(err)
+            | MagicBlockRpcClientError::SendTransaction(err) => Some(err),
+            _ => None,
+        };
+        let Some(err) = err else {
+            return Self::MagicBlockRpcClientError(Box::new(orig));
+        };
+
+        match &*err.kind {
+            ErrorKind::RpcError(rpc_err) => match rpc_err {
+                RpcError::ForUser(msg) if is_min_context_slot_msg(msg) => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                }
+                RpcError::RpcResponseError {
+                    code: JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED,
+                    ..
+                } => Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig)),
+                RpcError::RpcResponseError { message, .. } if is_min_context_slot_msg(message) => {
+                    Self::MinContextSlotNotReachedError(min_context_slot, Box::new(orig))
+                }
+                _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+            },
+            _ => Self::MagicBlockRpcClientError(Box::new(orig)),
+        }
+    }
+}
+
+impl From<MagicBlockRpcClientError> for TaskInfoProviderError {
+    fn from(e: MagicBlockRpcClientError) -> Self {
+        Self::MagicBlockRpcClientError(Box::new(e))
+    }
+}
+
+impl TaskInfoProviderError {
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            Self::AccountNotFoundError(_) => None,
+            Self::InvalidAccountDataError(_) => None,
+            Self::DelegationSessionChangedError { .. } => None,
+            Self::MinContextSlotNotReachedError(_, err) => err.signature(),
+            Self::MagicBlockRpcClientError(err) => err.signature(),
+        }
+    }
+}
+
+pub type TaskInfoProviderResult<T, E = TaskInfoProviderError> = Result<T, E>;
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::VecDeque, sync::Arc, time::Duration};
+
+    use async_trait::async_trait;
+    use solana_account::Account;
+    use solana_pubkey::Pubkey;
+
+    use super::*;
+
+    #[test]
+    fn snapshot_slots_keep_newest_on_duplicates() {
+        let pk = Pubkey::new_unique();
+        let slots = snapshot_slots_by_pubkey(&[(pk, 5), (pk, 9), (pk, 7)]);
+        assert_eq!(slots[&pk], 9);
+    }
+
+    #[tokio::test]
+    async fn cache_miss_then_hit() {
+        let pk = Pubkey::new_unique();
+        let provider = ProviderBuilder::new(vec![10]).build();
+
+        let r1 = provider.fetch_next_commit_nonces(&[(pk, 0)], 0).await.unwrap();
+        assert_eq!(r1[&pk], 11);
+
+        // Cache hit: no RPC (only 1 response queued), increments
+        let r2 = provider.fetch_next_commit_nonces(&[(pk, 0)], 0).await.unwrap();
+        assert_eq!(r2[&pk], 12);
+    }
+
+    #[tokio::test]
+    async fn partial_cache_hit() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // prime pk1 (nonce 5), then mixed call fetches only cold pk2 (nonce 20)
+        let provider = ProviderBuilder::new(vec![5, 20]).build();
+
+        provider.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 = 6
+        let r = provider.fetch_next_commit_nonces(&[(pk1, 0), (pk2, 0)], 0).await.unwrap();
+        assert_eq!(r[&pk1], 7); // cached, incremented
+        assert_eq!(r[&pk2], 21); // fetched from chain
+    }
+
+    #[tokio::test]
+    async fn lru_eviction_forces_refetch() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // pk1 initial, pk2 evicts pk1, pk1 re-fetch after eviction
+        let provider = ProviderBuilder::new(vec![1, 2, 10]).capacity(1).build();
+
+        provider.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 cached = 2
+        provider.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap(); // pk2 cached = 3, pk1 evicted
+
+        assert!(provider.peek_commit_nonce(&pk1).await.is_none()); // evicted
+
+        let r = provider.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
+        assert_eq!(r[&pk1], 11); // re-fetched (10 + 1)
+
+        // Sequential eviction: pk1's guard was dropped before pk2 evicted it,
+        // so Arc strong_count was 1 — never moved to retiring.
+        assert_eq!(provider.cache.lock().retiring.len(), 0);
+    }
+
+    // Phase 1: fetch phase1_keys one-by-one → barrier → outer verification →
+    // barrier. Phase 2: fetch phase2_keys one-by-one for `iters` passes, then
+    // fetch shared_b in chunks of 2.
+    async fn run_worker(
+        provider: Arc<CachedTaskInfoProvider>,
+        barrier: Arc<tokio::sync::Barrier>,
+        phase1_keys: Vec<Pubkey>,
+        phase2_keys: Vec<Pubkey>,
+        shared_b: Vec<Pubkey>,
+        iters: usize,
+    ) {
+        for pk in &phase1_keys {
+            provider.fetch_next_commit_nonces(&[(*pk, 0)], 0).await.unwrap();
+        }
+        barrier.wait().await; // signal phase 1 done
+        barrier.wait().await; // wait for outer verification
+        for _ in 0..iters {
+            for pk in &phase2_keys {
+                provider.fetch_next_commit_nonces(&[(*pk, 0)], 0).await.unwrap();
+            }
+        }
+        for chunk in shared_b.chunks(2) {
+            let chunk: Vec<_> = chunk.iter().map(|pk| (*pk, 0)).collect();
+            provider.fetch_next_commit_nonces(&chunk, 0).await.unwrap();
+        }
+    }
+
+    // Three concurrent workers operating in two phases, separated by a barrier.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn three_concurrent_workers_two_phase() {
+        const ITERS: usize = 50;
+        const NUM_WORKERS: usize = 3;
+        const SHARED_A: usize = 10;
+        const SHARED_B: usize = 40;
+        const EXCLUSIVE: usize = 50;
+        const CAPACITY: usize = 30;
+        const PHASE2_KEYS: usize = EXCLUSIVE + SHARED_A; // 60
+
+        let shared_a: Vec<Pubkey> = (0..SHARED_A).map(|_| Pubkey::new_unique()).collect();
+        let shared_b: Vec<Pubkey> = (0..SHARED_B).map(|_| Pubkey::new_unique()).collect();
+        let excl: [Vec<Pubkey>; NUM_WORKERS] =
+            std::array::from_fn(|_| (0..EXCLUSIVE).map(|_| Pubkey::new_unique()).collect());
+        let phase2_keys: [Vec<Pubkey>; NUM_WORKERS] =
+            std::array::from_fn(|i| excl[i].iter().chain(shared_a.iter()).cloned().collect());
+
+        // Flat queue: each mock call pops exactly N entries (N cold keys).
+        // Upper bounds:
+        //   phase 1 loop:       SHARED_A × 1
+        //   phase 2 excl+sa:    ITERS × PHASE2_KEYS × NUM_WORKERS × 1
+        //   phase 2 shared_b:   (SHARED_B / chunk_size) × chunk_size × NUM_WORKERS
+        //                     = SHARED_B × NUM_WORKERS
+        let total = SHARED_A + ITERS * PHASE2_KEYS * NUM_WORKERS + SHARED_B * NUM_WORKERS;
+
+        let provider = Arc::new(
+            ProviderBuilder::new(vec![0; total])
+                .capacity(CAPACITY)
+                .rpc_delay(Duration::from_millis(2))
+                .build(),
+        );
+
+        // Barrier resets automatically: round 1 syncs after phase 1, round 2
+        // releases workers into phase 2 after outer verification.
+        let barrier = Arc::new(tokio::sync::Barrier::new(NUM_WORKERS + 1));
+
+        let handles: Vec<_> = (0..NUM_WORKERS)
+            .map(|i| {
+                tokio::spawn(run_worker(
+                    provider.clone(),
+                    barrier.clone(),
+                    shared_a.clone(),
+                    phase2_keys[i].clone(),
+                    shared_b.clone(),
+                    ITERS,
+                ))
+            })
+            .collect();
+
+        barrier.wait().await; // all workers done with phase 1
+
+        // No eviction during phase 1 (10 keys < capacity 30).
+        // Per-key lock serialises 3 workers → exactly NUM_WORKERS increments each.
+        for pk in &shared_a {
+            assert_eq!(
+                provider.peek_commit_nonce(pk).await,
+                Some(NUM_WORKERS as u64)
+            );
+        }
+
+        barrier.wait().await; // release workers into phase 2
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // Workers fetched shared_b in chunks of 2 (40 / 2 = 20 calls each).
+        // Due to eviction (40 keys > capacity 30) not all may remain in cache.
+        // Any key still in cache must have nonce >= 1.
+        let mut found = 0usize;
+        for pk in &shared_b {
+            if let Some(n) = provider.peek_commit_nonce(pk).await {
+                assert!(n >= 1);
+                found += 1;
+            }
+        }
+        assert!(
+            found > 0,
+            "expected some shared_b keys in cache after workers"
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_current_no_increment() {
+        let pk = Pubkey::new_unique();
+        let cold = Pubkey::new_unique();
+        let provider = ProviderBuilder::new(vec![10, 20]).build();
+
+        let r1 = provider.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
+        assert_eq!(r1[&pk], 10); // stored as-is
+
+        // Cache hit: still 10, fetch_current never increments
+        let r2 = provider.fetch_current_commit_nonces(&[(pk, 0)], 0).await.unwrap();
+        assert_eq!(r2[&pk], 10);
+
+        let accounts = [(pk, 0), (cold, 0)];
+        let mixed = provider.fetch_current_commit_nonces(&accounts, 0).await.unwrap();
+        assert_eq!(mixed, HashMap::from([(pk, 10), (cold, 20)]));
+
+        // Reading and filling the cache must not reserve the next IDs.
+        let next = provider.fetch_next_commit_nonces(&accounts, 0).await.unwrap();
+        assert_eq!(next, HashMap::from([(pk, 11), (cold, 21)]));
+    }
+
+    #[tokio::test]
+    async fn reset_specific_only_clears_that_key() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // pk1 initial, pk2 initial, pk1 after reset
+        let provider = ProviderBuilder::new(vec![1, 2, 50]).build();
+
+        provider.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap(); // pk1 cached = 2
+        provider.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap(); // pk2 cached = 3
+        provider.invalidate_nonces(&[pk1]);
+
+        assert!(provider.peek_commit_nonce(&pk1).await.is_none()); // cleared
+        assert_eq!(provider.peek_commit_nonce(&pk2).await, Some(3)); // still cached
+
+        let r1 = provider.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
+        assert_eq!(r1[&pk1], 51); // re-fetched (50 + 1)
+    }
+
+    #[tokio::test]
+    async fn peek_awaits_inflight_fetch() {
+        let pk1 = Pubkey::new_unique();
+        let pk2 = Pubkey::new_unique();
+        // capacity=1: pk2 fetch evicts pk1 into retiring while Task A is still in-flight.
+        // pk1 nonce=7 (stored as 8), pk2 nonce=9 (stored as 10).
+        let provider = Arc::new(
+            ProviderBuilder::new(vec![7, 9])
+                .rpc_delay(Duration::from_millis(50))
+                .capacity(1)
+                .build(),
+        );
+
+        // Spawn Task A: slow fetch for pk1 acquires its nonce lock and sleeps.
+        let provider2 = provider.clone();
+        let task_a = tokio::spawn(async move {
+            provider2.fetch_next_commit_nonces(&[(pk1, 0)], 0).await.unwrap();
+        });
+
+        // Let Task A acquire pk1's nonce lock and start the slow fetch.
+        tokio::task::yield_now().await;
+
+        // Spawn Task B: inserts pk2 (capacity=1), evicting pk1 into retiring
+        // because Task A's guard still holds a clone of pk1's Arc.
+        let provider3 = provider.clone();
+        let task_b = tokio::spawn(async move {
+            provider3.fetch_next_commit_nonces(&[(pk2, 0)], 0).await.unwrap();
+        });
+
+        // Let Task B run through acquire_nonce_locks (eviction happens here).
+        tokio::task::yield_now().await;
+
+        // pk1 is in retiring: Task A is in-flight and holds its Arc clone.
+        assert_eq!(provider.cache.lock().retiring.len(), 1);
+
+        // peek finds pk1 in retiring, blocks on its in-flight lock, returns the value.
+        let peeked = provider.peek_commit_nonce(&pk1).await;
+        assert_eq!(peeked, Some(8)); // 7 + 1
+
+        task_a.await.unwrap();
+        task_b.await.unwrap();
+
+        // All CacheInnerGuards dropped: retiring fully cleaned up.
+        assert_eq!(provider.cache.lock().retiring.len(), 0);
+    }
+
+    /// Provider mock
+    struct QueuedInfoProvider {
+        nonces: Mutex<VecDeque<u64>>,
+        delay: Option<Duration>,
+    }
+
+    impl QueuedInfoProvider {
+        fn new(nonces: Vec<u64>) -> Self {
+            Self {
+                nonces: Mutex::new(nonces.into()),
+                delay: None,
+            }
+        }
+
+        fn with_delay(mut self, delay: Duration) -> Self {
+            self.delay = Some(delay);
+            self
+        }
+    }
+
+    #[async_trait]
+    impl TaskInfoProvider for QueuedInfoProvider {
+        async fn fetch_next_commit_nonces(
+            &self,
+            accounts: &[AccountSnapshot],
+            min_context_slot: u64,
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+            self.fetch_current_commit_nonces(accounts, min_context_slot).await
+        }
+
+        async fn fetch_current_commit_nonces(
+            &self,
+            accounts: &[AccountSnapshot],
+            _: u64,
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
+            if let Some(delay) = self.delay {
+                tokio::time::sleep(delay).await;
+            }
+            let mut q = self.nonces.lock();
+            Ok(accounts
+                .iter()
+                .map(|(pk, _)| {
+                    let nonce = q.pop_front().expect("mock nonce queue exhausted");
+                    (*pk, nonce)
+                })
+                .collect())
+        }
+
+        async fn fetch_delegation_metadata(
+            &self,
+            accounts: &[AccountSnapshot],
+            _: u64,
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+            Ok(accounts
+                .iter()
+                .map(|(pubkey, _)| {
+                    (
+                        *pubkey,
+                        DelegationMetadata {
+                            last_commit_id: 0,
+                            undelegation_requester:
+                                delegation_program_api::state::UndelegationRequester::None,
+                            seeds: vec![],
+                            rent_payer: *pubkey,
+                        },
+                    )
+                })
+                .collect())
+        }
+
+        async fn get_base_accounts(
+            &self,
+            _: &[Pubkey],
+            _: u64,
+        ) -> TaskInfoProviderResult<HashMap<Pubkey, Account>> {
+            panic!("mock info provider should not load base accounts")
+        }
+    }
+
+    struct ProviderBuilder {
+        inner: QueuedInfoProvider,
+        capacity: Option<NonZeroUsize>,
+    }
+
+    impl ProviderBuilder {
+        fn new(nonces: Vec<u64>) -> Self {
+            Self {
+                inner: QueuedInfoProvider::new(nonces),
+                capacity: None,
+            }
+        }
+
+        fn rpc_delay(mut self, d: Duration) -> Self {
+            self.inner = self.inner.with_delay(d);
+            self
+        }
+
+        fn capacity(mut self, n: usize) -> Self {
+            self.capacity = Some(n.try_into().unwrap());
+            self
+        }
+
+        fn build(self) -> CachedTaskInfoProvider {
+            match self.capacity {
+                Some(cap) => CachedTaskInfoProvider::with_capacity(cap, self.inner),
+                None => CachedTaskInfoProvider::new(self.inner),
+            }
+        }
+    }
+}

@@ -31,16 +31,6 @@ pub struct ActionsCallbackService {
     engine: Engine,
 }
 
-impl Clone for ActionsCallbackService {
-    fn clone(&self) -> Self {
-        Self {
-            rpc_client: self.rpc_client.clone(),
-            authority: self.authority.insecure_clone(),
-            engine: self.engine.clone(),
-        }
-    }
-}
-
 impl ActionsCallbackService {
     pub fn new(rpc_client: Arc<RpcClient>, authority: Keypair, engine: Engine) -> Self {
         Self { rpc_client, authority, engine }

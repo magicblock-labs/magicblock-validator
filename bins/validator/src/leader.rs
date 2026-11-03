@@ -9,11 +9,7 @@ use chainlink::{
     errors::ChainlinkError,
     remote_account_provider::{Endpoints, config::RemoteAccountProviderConfig},
 };
-use committor::{
-    ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT, committor_processor::CommittorProcessor,
-    config::ChainConfig, intent_engine::db::AccountsDbIntentBacklog,
-    outbox::outbox_client::InternalOutboxClient, service::IntentExecutionService,
-};
+use committor::{CommittorConfig, CommittorService, ComputeBudgetConfig, DEFAULT_ACTIONS_TIMEOUT};
 use config::LeaderParams;
 use engine::Engine;
 use metrics::MetricsService;
@@ -43,11 +39,6 @@ use crate::{
     magic_sys_adapter::MagicSysAdapter,
 };
 
-type CommittorProcessorImpl = CommittorProcessor<AccountsDbIntentBacklog>;
-
-type IntentExecutionServiceImpl =
-    IntentExecutionService<InternalOutboxClient, AccountsDbIntentBacklog>;
-
 // -----------------
 // Leader
 // -----------------
@@ -56,7 +47,7 @@ pub(crate) struct Leader {
     engine: Engine,
     chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
-    intent_execution_service: IntentExecutionServiceImpl,
+    committor: CommittorService,
     undelegation_request_service: UndelegationRequestService,
     metrics: MetricsService,
     task_scheduler: TaskSchedulerService,
@@ -116,26 +107,12 @@ impl Leader {
             Arc::new(Self::init_chainlink(&config, &engine, shared_chain_slot.clone()).await?);
         timer.record("Chainlink initialized");
 
-        let outbox_client = Arc::new(Self::init_outbox_client(&config, &engine));
-        let committor_processor = {
-            let processor = Self::init_committor_processor(
-                &config,
-                &engine,
-                &outbox_client,
-                &Some(shared_chain_slot),
-            );
-            Arc::new(processor)
-        };
-        let intent_execution_service = Self::init_intent_execution_service(
-            &chainlink,
-            &outbox_client,
-            &committor_processor,
-            config.engine.blockstore.blocktime,
-        );
+        let committor =
+            Self::init_committor(&config, &engine, chainlink.clone(), shared_chain_slot);
         timer.record("Committor service initialized");
         init_magic_sys(Arc::new(MagicSysAdapter::new(
             tokio::runtime::Handle::current(),
-            committor_processor.clone(),
+            committor.commit_id_provider(),
         )));
         timer.record("Magic syscall adapter initialized");
 
@@ -183,60 +160,40 @@ impl Leader {
             engine,
             chainlink,
             shutdown,
-            intent_execution_service,
+            committor,
             undelegation_request_service,
             metrics,
             task_scheduler,
         })
     }
 
-    fn init_outbox_client(config: &LeaderParams, engine: &Engine) -> InternalOutboxClient {
-        let rpc_client = Arc::new(RpcClient::new(config.aperture.listen.http()));
-        InternalOutboxClient::new(engine.clone(), rpc_client)
-    }
-
-    pub(crate) fn init_committor_processor(
+    fn init_committor(
         config: &LeaderParams,
         engine: &Engine,
-        outbox_client: &Arc<InternalOutboxClient>,
-        shared_chain_slot: &Option<Arc<AtomicU64>>,
-    ) -> CommittorProcessorImpl {
-        let authority = config.engine.authority.local.insecure_clone();
-        let base_chain_config = ChainConfig {
-            rpc_uri: config.rpc_url().to_owned(),
-            commitment: CommitmentConfig::confirmed(),
-            websocket_uri: config.websocket_urls().next().map(ToOwned::to_owned),
-            compute_budget_config: ComputeBudgetConfig::new(config.commit.compute_unit_price),
-            actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
-        };
-
-        // TODO(thlorenz): if startup roles change, revisit whether this service is needed for that role.
-        let actions_callback_executor = ActionsCallbackService::new(
-            Arc::new(RpcClient::new(config.aperture.listen.http())),
+        chainlink: Arc<ProdChainlink>,
+        chain_slot: Arc<AtomicU64>,
+    ) -> CommittorService {
+        let er_rpc = Arc::new(RpcClient::new(config.aperture.listen.http()));
+        let callbacks = Arc::new(ActionsCallbackService::new(
+            er_rpc.clone(),
             config.engine.authority.local.insecure_clone(),
             engine.clone(),
-        );
-        CommittorProcessor::new(
-            authority,
-            base_chain_config,
-            shared_chain_slot.clone(),
-            AccountsDbIntentBacklog::new(engine.clone()),
-            outbox_client.clone(),
-            actions_callback_executor,
-        )
-    }
-
-    fn init_intent_execution_service(
-        chainlink: &Arc<ProdChainlink>,
-        outbox_client: &Arc<InternalOutboxClient>,
-        committor_processor: &Arc<CommittorProcessorImpl>,
-        slot_interval: Duration,
-    ) -> IntentExecutionServiceImpl {
-        IntentExecutionServiceImpl::new(
-            chainlink.clone(),
-            outbox_client.clone(),
-            committor_processor.clone(),
-            slot_interval,
+        ));
+        CommittorService::new(
+            config.engine.authority.local.insecure_clone(),
+            CommittorConfig {
+                rpc_uri: config.rpc_url().to_owned(),
+                commitment: CommitmentConfig::confirmed(),
+                websocket_uri: config.websocket_urls().next().map(ToOwned::to_owned),
+                compute_budget_config: ComputeBudgetConfig::new(config.commit.compute_unit_price),
+                actions_timeout: DEFAULT_ACTIONS_TIMEOUT,
+                slot_interval: config.engine.blockstore.blocktime,
+            },
+            chain_slot,
+            engine.clone(),
+            chainlink,
+            er_rpc,
+            callbacks,
         )
     }
 
@@ -471,7 +428,7 @@ impl Leader {
         timer.record("Undelegation request service started");
 
         let shutdown = self.shutdown.handle(Service::IntentExecution);
-        tokio::spawn(self.intent_execution_service.run(shutdown));
+        tokio::spawn(self.committor.run(shutdown));
         timer.record("Intent execution service started");
 
         let shutdown = self.shutdown.handle(Service::TaskScheduler);

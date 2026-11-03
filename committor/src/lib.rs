@@ -1,19 +1,17 @@
 #![doc = include_str!("../README.md")]
 
-pub mod committor_processor;
-mod compute_budget;
-pub mod config;
-pub mod error;
-pub mod intent_engine;
-pub mod intent_executor;
-pub mod tasks;
-pub mod transaction_preparator;
-
-pub mod outbox;
-pub mod service;
+mod config;
+mod execution;
+mod intake;
+mod service;
+mod shared;
 #[cfg(test)]
-pub mod test_utils;
-pub(crate) mod utils;
+mod test_utils;
 
-pub use compute_budget::ComputeBudgetConfig;
-pub use config::DEFAULT_ACTIONS_TIMEOUT;
+pub use config::{CommittorConfig, DEFAULT_ACTIONS_TIMEOUT};
+pub use intake::{CommitIdProvider, is_intent_within_limits};
+pub use service::CommittorService;
+pub use shared::{
+    account_state::{AccountSnapshot, TaskInfoProviderError, TaskInfoProviderResult},
+    compute_budget::ComputeBudgetConfig,
+};

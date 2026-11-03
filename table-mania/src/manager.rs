@@ -125,6 +125,22 @@ impl TableMania {
         me
     }
 
+    /// Starts the collector explicitly so its owner can supervise and stop it.
+    pub fn spawn_garbage_collector(
+        &self,
+        authority: &Keypair,
+        config: GarbageCollectorConfig,
+    ) -> tokio::task::JoinHandle<()> {
+        Self::launch_garbage_collector(
+            &self.rpc_client,
+            authority,
+            self.released_tables.clone(),
+            config,
+            self.compute_budgets.deactivate.clone(),
+            self.compute_budgets.close.clone(),
+        )
+    }
+
     /// Returns the number of currently active tables
     pub async fn active_tables_count(&self) -> usize {
         self.active_tables.read().await.len()
