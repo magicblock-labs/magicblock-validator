@@ -2,7 +2,6 @@ use engine::Engine;
 use ledger::request::{AccountSignaturesParams, BlockDetails, BlockParams, BlockResponse};
 use ledger_deprecated::{Ledger, errors::LedgerError};
 use mbv_core::Slot;
-use solana_hash::Hash;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;
 use solana_signature::Signature;
@@ -295,8 +294,7 @@ fn encode_engine_block(
 ) -> Result<UiConfirmedBlock, RpcError> {
     let block = *response.block();
     let base = UiConfirmedBlock {
-        // Engine does not retain the previous blockhash on this RPC path.
-        previous_blockhash: Hash::default().to_string(),
+        previous_blockhash: block.parent.to_string(),
         blockhash: block.hash.to_string(),
         parent_slot: block.slot.saturating_sub(1),
         transactions: None,
