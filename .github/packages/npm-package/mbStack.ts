@@ -113,15 +113,6 @@ if (WITH_CRANKER && !CRANKER_KEYPAIR) {
   process.exit(1);
 }
 
-// The remaining CLI args passed to `mb-stack` are forwarded to the
-// mb-test-validator (base L1), which appends them to solana-test-validator — the
-// service operators most often need to customize (extra --bpf-program /
-// --account / --clone / --reset). They are appended after mb-stack's own base
-// args, so on last-wins flags the user's value takes priority. (Use
-// MB_STACK_BASE_PORT instead of --rpc-port, which solana-test-validator rejects
-// if given twice.)
-const PASSTHROUGH_ARGS = CLI_ARGS.filter((arg) => arg !== "--cranker");
-
 // Extra CLI args passed to `mb-stack` are forwarded to the mb-test-validator
 // (base L1), which appends them to solana-test-validator — the service operators
 // most often need to customize (extra --bpf-program / --account / --clone / --reset).
@@ -140,7 +131,7 @@ const SERVICES: Service[] = [
   {
     name: "mb-test-validator (base L1)",
     script: "mbTestValidator.js",
-    args: ["--rpc-port", String(BASE_PORT), ...PASSTHROUGH_ARGS],
+    args: ["--rpc-port", String(BASE_PORT), ...passthroughArgs],
     healthPort: BASE_PORT,
     requiredAccount: "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
     readyOutput: /^JSON RPC URL:/,
@@ -351,6 +342,9 @@ async function pingHealth(
 
 async function waitForHealth(svc: Service, timeoutMs = 120000): Promise<void> {
   const { name, healthPort } = svc;
+  if (healthPort === undefined) {
+    throw new Error(`${name} has no healthPort to poll`);
+  }
   const requireRpcHealth = svc.requireRpcHealth ?? true;
   const waitForReadyOutput = svc.readyOutput !== undefined;
   const endpoints =
