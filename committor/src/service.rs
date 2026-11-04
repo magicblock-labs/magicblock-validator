@@ -49,7 +49,6 @@ impl CommittorService {
         chain_slot: Arc<AtomicU64>,
         engine: Engine,
         chainlink: Arc<ProdChainlink>,
-        er_rpc: Arc<RpcClient>,
         callbacks: Arc<dyn ActionsCallbackScheduler>,
     ) -> Self {
         let rpc = MagicblockRpcClient::new_with_chain_slot_and_websocket(
@@ -62,7 +61,7 @@ impl CommittorService {
         );
         let tables = TableMania::new(rpc.clone(), &authority, None);
         let task_info_provider = Arc::new(RpcTaskInfoProvider::new(rpc.clone()));
-        let outbox = Arc::new(InternalOutboxClient::new(engine.clone(), er_rpc));
+        let outbox = Arc::new(InternalOutboxClient::new(engine.clone()));
         let backlog = Arc::new(Mutex::new(AccountsDbIntentBacklog::new(engine)));
         let (sender, receiver) = mpsc::channel(1000);
         let tasks = TaskTracker::new();

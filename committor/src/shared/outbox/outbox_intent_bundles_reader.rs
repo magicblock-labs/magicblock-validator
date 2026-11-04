@@ -143,20 +143,21 @@ impl InternalOutboxIntentBundlesReader {
         let take = n.min(self.buffer.len());
         Ok(self.buffer.drain(..take).collect())
     }
+}
 
-    pub(crate) async fn fetch_outbox_intent(
-        &self,
-        intent_id: u64,
-    ) -> Result<Option<OutboxIntentBundle>, OutboxIntentBundlesReaderError> {
-        let pda = outbox_intent_pda(intent_id);
-        let Some(outbox_intent) = self.engine.accounts().loader().read(&pda, |account| {
+pub(crate) fn fetch_outbox_intent(
+    engine: &Engine,
+    intent_id: u64,
+) -> Result<Option<OutboxIntentBundle>, OutboxIntentBundlesReaderError> {
+    let pda = outbox_intent_pda(intent_id);
+    engine
+        .accounts()
+        .loader()
+        .read(&pda, |account| {
             OutboxIntentBundle::try_from_bytes(account.data())
         })?
-        else {
-            return Ok(None);
-        };
-        Ok(Some(outbox_intent?))
-    }
+        .transpose()
+        .map_err(Into::into)
 }
 
 #[derive(thiserror::Error, Debug)]

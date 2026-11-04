@@ -22,7 +22,7 @@ const PDA_IDX: u16 = 1;
 
 /// Creates and populates the outbox intent PDA. CPI-only, called by the
 /// magic program's `AcceptScheduleCommits`. Initializes independent local state,
-/// ignoring any balance held at the same address on base.
+/// using a zero-balance target prepared locally before acceptance.
 pub(crate) fn process_create_outbox_intent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext<'_, '_>,
@@ -32,18 +32,21 @@ pub(crate) fn process_create_outbox_intent(
 
     let pda = get_instruction_account_with_idx(invoke_context.transaction_context, PDA_IDX)?;
     let mut acc = pda.borrow_mut()?;
-    if !acc.is_any([AccountMode::Missing, AccountMode::Mirrored])
+    if !acc.is_any([AccountMode::Missing, AccountMode::Magic])
+        || acc.lamports() != 0
         || *acc.owner() != system_program::ID
         || !acc.data().is_empty()
     {
         return Err(InstructionError::InvalidAccountData);
     }
 
-    acc.set_lamports(0);
     acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);
     acc.resize(data.len(), 0);
     acc.data_as_mut_slice().copy_from_slice(&data);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Magic)
+    if !acc.is(AccountMode::Magic) {
+        set_account_mode(invoke_context, &mut acc, AccountMode::Magic)?;
+    }
+    Ok(())
 }
 
 fn validate(
