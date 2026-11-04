@@ -34,9 +34,8 @@ pub enum DebounceState {
         /// Earliest Instant at which we are allowed to forward the
         /// next update for this pubkey.
         next_allowed_forward: Instant,
-        /// Latest update observed while waiting for next_allowed_forward.
-        /// Replaced on subsequent arrivals to ensure we forward the
-        /// freshest state.
+        /// Highest-slot update observed while waiting for next_allowed_forward.
+        /// Equal slots retain the latest arrival.
         pending: Option<SubscriptionUpdate>,
     },
 }
