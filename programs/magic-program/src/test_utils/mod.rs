@@ -1,18 +1,7 @@
-use core::fmt;
-use std::{
-    collections::HashMap,
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-};
+use std::{collections::HashMap, sync::Arc};
 
 use magic_program_api::{
     EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
-};
-use mbv_core::{
-    intent::{MagicIntentBundle, types::CommittedAccount},
-    traits::MagicSys,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, error::InstructionError};
@@ -52,11 +41,22 @@ pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub const COUNTER_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
 
+/// Initializes only the current thread's public identity, preserving any
+/// authority already supplied by Engine or the test.
+pub(crate) fn ensure_authority() -> Pubkey {
+    let mut authority = validator::authority();
+    if authority == Pubkey::default() {
+        authority = Pubkey::new_unique();
+        nucleus::tls::AUTHORITY.set(authority);
+    }
+    authority
+}
+
 pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
     nonces: Option<StubNonces>,
 ) {
-    let validator_authority_id = validator::generate_validator_authority_if_needed();
+    let validator_authority_id = ensure_authority();
     map.entry(validator_authority_id)
         .or_insert_with(|| AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id()));
 
@@ -75,14 +75,17 @@ pub fn ensure_started_validator(
     map.entry(OUTBOX_INTENT_PROGRAM_ID)
         .or_insert_with(|| AccountSharedData::new(0, 0, &native_loader::id()));
 
-    let stub = Arc::new(match nonces {
-        None => MagicSysStub::default(),
-        Some(n) => MagicSysStub {
-            nonces: n,
-            ..MagicSysStub::default()
-        },
-    });
-    init_magic_sys(stub);
+    if let Some(nonces) = nonces {
+        for (pubkey, account) in map.iter_mut() {
+            let nonce = match &nonces {
+                StubNonces::Global(nonce) => *nonce,
+                StubNonces::PerAccount(nonces) => nonces.get(pubkey).copied().unwrap_or_default(),
+            };
+            assert!(nonce <= u64::from(u32::MAX), "stub nonce fits u32");
+            *account =
+                AccountBuilder::from(std::mem::take(account)).commit_seq(nonce as u32).build();
+        }
+    }
 }
 
 pub fn process_instruction(
@@ -172,64 +175,4 @@ pub fn process_outbox_intent_instruction_with_logs(
 pub enum StubNonces {
     Global(u64),
     PerAccount(HashMap<Pubkey, u64>),
-}
-
-pub struct MagicSysStub {
-    id: u64,
-    nonces: StubNonces,
-}
-
-impl Default for MagicSysStub {
-    fn default() -> Self {
-        static ID: AtomicU64 = AtomicU64::new(0);
-        Self {
-            id: ID.fetch_add(1, Ordering::Relaxed),
-            nonces: StubNonces::Global(0),
-        }
-    }
-}
-
-impl MagicSysStub {
-    pub fn with_nonce(nonce: u64) -> Self {
-        Self {
-            nonces: StubNonces::Global(nonce),
-            ..Self::default()
-        }
-    }
-
-    pub fn with_per_account_nonces(nonces: HashMap<Pubkey, u64>) -> Self {
-        Self {
-            nonces: StubNonces::PerAccount(nonces),
-            ..Self::default()
-        }
-    }
-}
-
-impl fmt::Display for MagicSysStub {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "MagicSysStub({})", self.id)
-    }
-}
-
-impl MagicSys for MagicSysStub {
-    fn fetch_current_commit_nonces(
-        &self,
-        commits: &[CommittedAccount],
-    ) -> Result<HashMap<Pubkey, u64>, InstructionError> {
-        match &self.nonces {
-            StubNonces::Global(nonce) => Ok(commits.iter().map(|c| (c.pubkey, *nonce)).collect()),
-            StubNonces::PerAccount(nonces) => commits
-                .iter()
-                .map(|c| {
-                    nonces.get(&c.pubkey).copied().map(|n| (c.pubkey, n)).ok_or(
-                        InstructionError::Custom(magic_sys::MISSING_COMMIT_NONCE_ERR),
-                    )
-                })
-                .collect(),
-        }
-    }
-
-    fn validate_intent_size(&self, _intent: &MagicIntentBundle) -> Result<(), InstructionError> {
-        Ok(())
-    }
 }

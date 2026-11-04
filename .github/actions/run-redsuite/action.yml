@@ -33,7 +33,8 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: 3.2.0
+        # Receipt discovery for the outbox protocol: magicblock-labs/redsuite#302.
+        ref: 836747856bf9e4e09d2ea42c0a883f1eb7190e74
         path: redsuite
         persist-credentials: false
 

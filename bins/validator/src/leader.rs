@@ -17,7 +17,6 @@ use nucleus::{
     metrics::EventTimer,
     shutdown::{Service, ShutdownManager, ShutdownReason},
 };
-use program::{init_magic_sys, validator::init_validator_authority};
 use replicator::ReplicationDispatcher;
 use runtime::keeper_builder;
 use services::{
@@ -36,7 +35,6 @@ use tracing::*;
 use crate::{
     errors::{ApiError, ApiResult},
     ledger,
-    magic_sys_adapter::MagicSysAdapter,
 };
 
 // -----------------
@@ -67,7 +65,6 @@ impl Leader {
         let mut timer = EventTimer::new("init");
 
         let engine_ledger = config.engine.ledger.directory.clone();
-        init_validator_authority(config.engine.authority.local.clone());
 
         let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
         let ledger = Arc::new(ledger);
@@ -110,11 +107,6 @@ impl Leader {
         let committor =
             Self::init_committor(&config, &engine, chainlink.clone(), shared_chain_slot);
         timer.record("Committor service initialized");
-        init_magic_sys(Arc::new(MagicSysAdapter::new(
-            tokio::runtime::Handle::current(),
-            committor.commit_id_provider(),
-        )));
-        timer.record("Magic syscall adapter initialized");
 
         let metrics = MetricsService::bind(config.metrics.address.0)
             .await

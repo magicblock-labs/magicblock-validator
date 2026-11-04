@@ -7,7 +7,6 @@ use engine::{Engine, EngineError, IntoTransactionView};
 use program::{
     MAGIC_CONTEXT_PUBKEY, MagicContext, SentCommit, instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent,
 };
 use solana_account::ReadableAccount;
 use solana_keypair::Address as Pubkey;
@@ -16,13 +15,13 @@ use solana_rpc_client_api::{
     client_error, client_error::ErrorKind as RpcClientErrorKind, request::RpcError,
 };
 use solana_signature::Signature;
+use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tokio::time::{Instant, sleep};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::shared::outbox::{
-    IntentSentTransaction, OutboxClient,
-    outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
+    OutboxClient, outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
 };
 
 const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
@@ -34,7 +33,7 @@ const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 /// Accept/set-stage go through the RPC client (aperture) with backoff retries;
 /// `notify_commit_sent` submits directly through the engine and closes the intent.
 pub(crate) struct InternalOutboxClient {
-    /// Engine handle: reads MagicContext, provides blockhash, and submits the
+    /// Engine handle: reads MagicContext, provides signer/blockhash, and submits the
     /// `ScheduledCommitSent` notification directly.
     engine: Engine,
     /// RPC client for sending accept/set-stage transactions to the ER
@@ -155,9 +154,15 @@ impl InternalOutboxClient {
         let mut accepted = Vec::with_capacity(remaining.len());
         while !remaining.is_empty() {
             let chunk_size = CHUNK_SIZE.min(remaining.len());
-            let tx = InstructionUtils::accept_scheduled_commits(
-                self.engine.blockhash(),
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                self.engine.authority(),
                 remaining[..chunk_size].iter().map(|i| i.intent_id),
+            );
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&self.engine.authority()),
+                &[self.engine.signer()],
+                self.engine.blockhash(),
             );
             let backoff_config = ExponentialBackoff {
                 max_elapsed_time: Some(Duration::from_secs(25)),
@@ -179,15 +184,6 @@ impl InternalOutboxClient {
         }
 
         Ok(accepted)
-    }
-
-    /// Builds and executes a notification using the engine's current blockhash.
-    async fn send_fresh_commit_sent_tx(
-        &self,
-        intent_id: u64,
-    ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::scheduled_commit_sent(intent_id, self.engine.blockhash());
-        self.execute_via_engine(tx).await
     }
 }
 
@@ -274,11 +270,17 @@ impl OutboxClient for InternalOutboxClient {
         stage: ExecutionStage,
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::set_intent_execution_stage(
-            self.engine.blockhash(),
+        let ix = InstructionUtils::set_intent_execution_stage_instruction(
+            self.engine.authority(),
             intent_id,
             stage,
             recovery_commit_nonces,
+        );
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.engine.authority()),
+            &[self.engine.signer()],
+            self.engine.blockhash(),
         );
 
         self.send_with_backoff(
@@ -304,38 +306,15 @@ impl OutboxClient for InternalOutboxClient {
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        transaction: IntentSentTransaction,
     ) -> Result<(), InternalOutboxClientError> {
-        let intent_id = sent_commit.message_id;
-        // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
-        // Register once before submission. Only BlockhashNotFound permits a
-        // fallback because it occurs before the processor can consume this payload.
-        register_scheduled_commit_sent(sent_commit);
-        match transaction {
-            IntentSentTransaction::Known(tx) => {
-                let signature = tx.signatures[0];
-                match self.execute_via_engine(tx).await {
-                    Err(InternalOutboxClientError::TransactionError(
-                        TransactionError::BlockhashNotFound,
-                    )) => {
-                        warn!(
-                            %signature,
-                            intent_id,
-                            "Pre-signed commit notification expired; its logged signature is best-effort"
-                        );
-                        self.send_fresh_commit_sent_tx(intent_id).await
-                    }
-                    result => result,
-                }
-            }
-            IntentSentTransaction::Recovered => {
-                self.send_fresh_commit_sent_tx(intent_id).await
-            }
-        }
-        .inspect(|_| debug!("Sent commit signaled"))
-        .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))?;
-
-        Ok(())
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            self.engine.authority(),
+            sent_commit,
+        )?;
+        self.execute_via_engine(&[ix])
+            .await
+            .inspect(|_| debug!("Sent commit signaled"))
+            .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))
     }
 
     async fn fetch_outbox_intent(
@@ -359,6 +338,8 @@ pub enum InternalOutboxClientError {
     EngineError(#[from] EngineError),
     #[error("WincodeError: {0}")]
     WincodeError(#[from] wincode::ReadError),
+    #[error("Receipt encoding error: {0}")]
+    ReceiptEncoding(#[from] wincode::WriteError),
     #[error("AccountsDbError: {0}")]
     AccountsDbError(#[from] AccountsDBError),
     #[error(transparent)]

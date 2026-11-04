@@ -11,8 +11,6 @@ use crate::shared::account_state::{AccountSnapshot, TaskInfoProvider, TaskInfoPr
 #[derive(Default)]
 pub(crate) struct MockInfoProvider {
     pub default_commit_id: u64,
-    pub commit_ids: HashMap<Pubkey, u64>,
-    pub next_commit_id: Option<u64>,
     pub delegation_metadata: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
     /// `None` allows a lookup that intentionally returns no account.
     pub base_accounts: HashMap<Pubkey, Option<Account>>,
@@ -20,33 +18,6 @@ pub(crate) struct MockInfoProvider {
 
 #[async_trait::async_trait]
 impl TaskInfoProvider for MockInfoProvider {
-    async fn fetch_next_commit_nonces(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        let id = self
-            .next_commit_id
-            .expect("unexpected next-ID request; the cache allocates IDs");
-        Ok(accounts.iter().map(|(pubkey, _)| (*pubkey, id)).collect())
-    }
-
-    async fn fetch_current_commit_nonces(
-        &self,
-        accounts: &[AccountSnapshot],
-        _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, u64>> {
-        Ok(accounts
-            .iter()
-            .map(|(pubkey, _)| {
-                (
-                    *pubkey,
-                    self.commit_ids.get(pubkey).copied().unwrap_or(self.default_commit_id),
-                )
-            })
-            .collect())
-    }
-
     async fn fetch_delegation_metadata(
         &self,
         accounts: &[AccountSnapshot],

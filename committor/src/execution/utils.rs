@@ -13,19 +13,22 @@ use crate::{
 /// as it is part of intent execution lifecycle.
 pub(in crate::execution) async fn report_and_close_intent(
     result: IntentExecutorResult<ExecutionOutput>,
-    mut meta: ScheduledBaseIntentMeta,
+    meta: ScheduledBaseIntentMeta,
     execution_report: &mut IntentExecutionReport,
     outbox_client: &dyn OutboxClient,
 ) -> IntentExecutorResult<ExecutionOutput> {
+    // An unsettled reservation cannot be discarded: later IDs depend on it.
+    // Retain its outbox for recovery even when the delivery error is permanent.
     if let Err(err) = &result
-        && !is_terminal_execution_error(err)
+        && (!is_terminal_execution_error(err)
+            || (!meta.included_pubkeys.is_empty()
+                && execution_report.progress.confirmed_commit.is_none()))
     {
         return result;
     }
 
-    let transaction = std::mem::take(&mut meta.intent_sent_transaction);
     let payload = crate::execution::report::build_sent_commit(meta, &result, execution_report);
-    outbox_client.notify_commit_sent(payload, transaction).await?;
+    outbox_client.notify_commit_sent(payload).await?;
 
     result
 }

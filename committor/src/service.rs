@@ -22,9 +22,9 @@ use crate::{
         client::IntentExecutionClient, preparation::Preparator, queue::IntentQueue,
         stream::IntentStream,
     },
-    intake::{CommitIdProvider, worker::IntentIntake},
+    intake::worker::IntentIntake,
     shared::{
-        account_state::{CachedTaskInfoProvider, RpcTaskInfoProvider},
+        account_state::RpcTaskInfoProvider,
         outbox::{
             outbox_client::InternalOutboxClient,
             outbox_intent_bundles_reader::OutboxIntentBundlesReaderError,
@@ -61,9 +61,7 @@ impl CommittorService {
             config.websocket_uri,
         );
         let tables = TableMania::new(rpc.clone(), &authority, None);
-        let task_info_provider = Arc::new(CachedTaskInfoProvider::new(RpcTaskInfoProvider::new(
-            rpc.clone(),
-        )));
+        let task_info_provider = Arc::new(RpcTaskInfoProvider::new(rpc.clone()));
         let outbox = Arc::new(InternalOutboxClient::new(engine.clone(), er_rpc));
         let backlog = Arc::new(Mutex::new(AccountsDbIntentBacklog::new(engine)));
         let (sender, receiver) = mpsc::channel(1000);
@@ -96,7 +94,6 @@ impl CommittorService {
             queue: Arc::new(IntentQueue {
                 chainlink,
                 outbox_client: outbox,
-                task_info_provider,
                 backlog,
                 intent_sender: sender,
             }),
@@ -108,10 +105,6 @@ impl CommittorService {
             context,
             tables,
         }
-    }
-
-    pub fn commit_id_provider(&self) -> CommitIdProvider {
-        CommitIdProvider(self.context.task_info_provider.clone())
     }
 
     pub async fn run(self, mut shutdown: ShutdownHandle) {
