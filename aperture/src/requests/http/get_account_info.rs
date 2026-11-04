@@ -1,7 +1,10 @@
-use crate::account::Accounts;
+use crate::{
+    RpcResult,
+    account::{Accounts, check_base58_size},
+};
 use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
-use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
+use solana_account_decoder::{UiAccount, UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
@@ -21,8 +24,10 @@ impl RpcHandlers {
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
         let slice = config.data_slice;
         let reader = |account: &AccountSharedData| {
-            Accounts::account_is_visible(account)
-                .then(|| encode_ui_account(&pubkey, account, encoding, None, slice))
+            Accounts::account_is_visible(account).then(|| -> RpcResult<UiAccount> {
+                check_base58_size(account, encoding, slice)?;
+                Ok(encode_ui_account(&pubkey, account, encoding, None, slice))
+            })
         };
 
         let account = self
@@ -34,7 +39,7 @@ impl RpcHandlers {
                 reader,
             )
             .await;
-        let account = account.flatten();
+        let account = account.flatten().transpose()?;
 
         let slot = self.engine.blocks().latest().slot;
         ResponsePayload::encode(&request.id, account, slot)
