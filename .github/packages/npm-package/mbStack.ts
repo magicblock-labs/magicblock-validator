@@ -131,7 +131,7 @@ const SERVICES: Service[] = [
   {
     name: "mb-test-validator (base L1)",
     script: "mbTestValidator.js",
-    args: ["--rpc-port", String(BASE_PORT), ...passthroughArgs],
+    args: ["--rpc-port", String(BASE_PORT), ...PASSTHROUGH_ARGS],
     healthPort: BASE_PORT,
     requiredAccount: "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh",
     readyOutput: /^JSON RPC URL:/,

@@ -9,7 +9,7 @@ export function parseStackArgs(args: string[]): StackArgs {
     enableVrf: args.includes("--vrf"),
     enableErVrf: args.includes("--vrf-er"),
     passthroughArgs: args.filter(
-      (arg) => arg !== "--vrf" && arg !== "--vrf-er",
+      (arg) => arg !== "--vrf" && arg !== "--vrf-er" && arg !== "--cranker",
     ),
   };
 }
