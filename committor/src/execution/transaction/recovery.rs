@@ -31,7 +31,7 @@ impl super::runner::TransactionExecutor<'_> {
 
         match err {
             TransactionExecutionError::ActionsError(err, signature) => handle_actions_result(
-                &self.ctx.authority.pubkey(),
+                &self.ctx.signer().pubkey(),
                 self.ctx.actions_callback_executor.as_ref(),
                 self.report,
                 &mut self.current,
@@ -51,7 +51,7 @@ impl super::runner::TransactionExecutor<'_> {
                 // Keep the pre-upgrade DLP bridge until #1801's rollout is complete.
                 self.ctx
                     .intent_client
-                    .finalize_legacy_commit(&self.ctx.authority, task.committed_account.pubkey)
+                    .finalize_legacy_commit(self.ctx.signer(), task.committed_account.pubkey)
                     .await
                     .map_err(IntentExecutorError::FailedPreparation)?
                     .map_err(IntentExecutorError::FailedExecution)?;
@@ -61,7 +61,7 @@ impl super::runner::TransactionExecutor<'_> {
             {
                 // Report only discarded actions; retained actions still need to execute.
                 let callbacks =
-                    handle_undelegation_error(&self.ctx.authority.pubkey(), &mut self.current);
+                    handle_undelegation_error(&self.ctx.signer().pubkey(), &mut self.current);
                 if !callbacks.is_empty() {
                     self.report.add_callback_report(
                         self.ctx.actions_callback_executor.as_ref().schedule(

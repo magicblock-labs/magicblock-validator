@@ -100,45 +100,27 @@ enum ExtendTableErrorAction {
 }
 
 impl TableMania {
-    pub fn new(
-        rpc_client: MagicblockRpcClient,
-        authority: &Keypair,
-        garbage_collector_config: Option<GarbageCollectorConfig>,
-    ) -> Self {
-        let me = Self {
+    pub fn new(rpc_client: MagicblockRpcClient, authority_pubkey: Pubkey) -> Self {
+        Self {
             active_tables: Arc::<RwLock<Vec<LookupTableRc>>>::default(),
             released_tables: Arc::<Mutex<Vec<LookupTableRc>>>::default(),
-            authority_pubkey: authority.pubkey(),
+            authority_pubkey,
             rpc_client,
             compute_budgets: TableManiaComputeBudgets::default(),
-        };
-        if let Some(config) = garbage_collector_config {
-            Self::launch_garbage_collector(
-                &me.rpc_client,
-                authority,
-                me.released_tables.clone(),
-                config,
-                me.compute_budgets.deactivate.clone(),
-                me.compute_budgets.close.clone(),
-            );
         }
-        me
     }
 
-    /// Starts the collector explicitly so its owner can supervise and stop it.
-    pub fn spawn_garbage_collector(
-        &self,
-        authority: &Keypair,
-        config: GarbageCollectorConfig,
-    ) -> tokio::task::JoinHandle<()> {
-        Self::launch_garbage_collector(
+    /// Runs the collector until its owner cancels the task.
+    pub async fn run_garbage_collector(&self, authority: &Keypair, config: GarbageCollectorConfig) {
+        Self::garbage_collector_loop(
             &self.rpc_client,
             authority,
-            self.released_tables.clone(),
+            &self.released_tables,
             config,
-            self.compute_budgets.deactivate.clone(),
-            self.compute_budgets.close.clone(),
+            &self.compute_budgets.deactivate,
+            &self.compute_budgets.close,
         )
+        .await;
     }
 
     /// Returns the number of currently active tables
@@ -813,53 +795,43 @@ impl TableMania {
     // The next cycle will try the operation again so in case chain was congested
     // the problem should resolve itself.
     // Otherwise we can run a tool later to manually deactivate + close tables.
-    fn launch_garbage_collector(
+    async fn garbage_collector_loop(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
-        released_tables: Arc<Mutex<Vec<LookupTableRc>>>,
+        released_tables: &Mutex<Vec<LookupTableRc>>,
         config: GarbageCollectorConfig,
-        deactivate_compute_budget: TableManiaComputeBudget,
-        close_compute_budget: TableManiaComputeBudget,
-    ) -> tokio::task::JoinHandle<()> {
-        let rpc_client = rpc_client.clone();
-        let authority = authority.insecure_clone();
-
-        tokio::spawn(async move {
-            let mut last_deactivate = tokio::time::Instant::now();
-            let mut last_close = tokio::time::Instant::now();
-            let mut sleep_ms = config.deactivate_interval_ms.min(config.close_interval_ms);
-            loop {
-                let now = tokio::time::Instant::now();
-                if now.duration_since(last_deactivate).as_millis().try_into().unwrap_or(u64::MAX)
-                    >= config.deactivate_interval_ms
-                {
-                    Self::deactivate_tables(
-                        &rpc_client,
-                        &authority,
-                        &released_tables,
-                        &deactivate_compute_budget,
-                    )
-                    .await;
-                    last_deactivate = now;
-                    sleep_ms = sleep_ms.min(config.deactivate_interval_ms);
-                }
-                if now.duration_since(last_close).as_millis().try_into().unwrap_or(u64::MAX)
-                    >= config.close_interval_ms
-                {
-                    Self::close_tables(
-                        &rpc_client,
-                        &authority,
-                        &released_tables,
-                        &close_compute_budget,
-                    )
-                    .await;
-                    last_close = now;
-                    sleep_ms = sleep_ms.min(config.close_interval_ms);
-                }
-
-                sleep(Duration::from_millis(sleep_ms)).await;
+        deactivate_compute_budget: &TableManiaComputeBudget,
+        close_compute_budget: &TableManiaComputeBudget,
+    ) {
+        let mut last_deactivate = tokio::time::Instant::now();
+        let mut last_close = tokio::time::Instant::now();
+        let mut sleep_ms = config.deactivate_interval_ms.min(config.close_interval_ms);
+        loop {
+            let now = tokio::time::Instant::now();
+            if now.duration_since(last_deactivate).as_millis().try_into().unwrap_or(u64::MAX)
+                >= config.deactivate_interval_ms
+            {
+                Self::deactivate_tables(
+                    rpc_client,
+                    authority,
+                    released_tables,
+                    deactivate_compute_budget,
+                )
+                .await;
+                last_deactivate = now;
+                sleep_ms = sleep_ms.min(config.deactivate_interval_ms);
             }
-        })
+            if now.duration_since(last_close).as_millis().try_into().unwrap_or(u64::MAX)
+                >= config.close_interval_ms
+            {
+                Self::close_tables(rpc_client, authority, released_tables, close_compute_budget)
+                    .await;
+                last_close = now;
+                sleep_ms = sleep_ms.min(config.close_interval_ms);
+            }
+
+            sleep(Duration::from_millis(sleep_ms)).await;
+        }
     }
 
     /// Deactivates tables that were previously released

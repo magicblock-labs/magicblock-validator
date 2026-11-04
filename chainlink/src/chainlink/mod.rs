@@ -13,7 +13,6 @@ use keeper::error::KeeperError;
 use mbv_core::token_programs::{is_ata, try_derive_eata_address_and_bump};
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_commitment_config::CommitmentConfig;
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use tokio::{
     sync::{broadcast, mpsc},
@@ -178,7 +177,6 @@ impl InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>> {
         endpoints: &Endpoints,
         commitment: CommitmentConfig,
         engine: Engine,
-        validator_keypair: Keypair,
         provider_config: RemoteAccountProviderConfig,
         chainlink_config: &ChainLinkConfig,
         chain_slot: Arc<AtomicU64>,
@@ -210,7 +208,6 @@ impl InnerChainlink<ChainRpcClientImpl, SubMuxClient<ChainUpdatesClient>> {
         let fetch_cloner = FetchCloner::new_with_undelegation_request_sender(
             &provider,
             engine.clone(),
-            validator_keypair,
             rx,
             chainlink_config.allowed_programs.clone(),
             risk_service,
