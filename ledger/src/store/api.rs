@@ -35,7 +35,6 @@ use crate::{
     },
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
-    store::utils::adjust_ulimit_nofile,
 };
 
 #[derive(Default, Debug)]
@@ -103,7 +102,6 @@ impl Ledger {
         fs::create_dir_all(ledger_path)?;
         let ledger_path =
             ledger_path.join(options.column_options.shred_storage_type.blockstore_directory());
-        adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
 
         // Open the database
         let mut measure = Measure::start("ledger open");

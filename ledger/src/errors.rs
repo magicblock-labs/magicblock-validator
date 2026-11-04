@@ -16,8 +16,6 @@ pub enum LedgerError {
     ProtobufEncodeError(#[from] prost::EncodeError),
     #[error("protobuf decode error: {0}")]
     ProtobufDecodeError(#[from] prost::DecodeError),
-    #[error("unable to set open file descriptor limit")]
-    UnableToSetOpenFileDescriptorLimit,
     #[error("transaction not found")]
     TransactionNotFound,
     #[error("transaction status meta not found")]
