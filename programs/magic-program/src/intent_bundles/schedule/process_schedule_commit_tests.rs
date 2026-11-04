@@ -30,7 +30,8 @@ use crate::{
     schedule_transactions::COMMIT_LIMIT,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
-        StubNonces, ensure_started_validator, process_instruction, process_instruction_with_logs,
+        StubNonces, ensure_authority, ensure_started_validator, process_instruction,
+        process_instruction_with_logs,
     },
     utils::DELEGATION_PROGRAM_ID,
 };
@@ -109,7 +110,7 @@ fn prepare_schedule_accounts(
     accounts_data.insert(MAGIC_CONTEXT_PUBKEY, magic_context_account());
 
     let fee_vault_pubkey = fee_vault_delegated.map(|is_delegated| {
-        crate::validator::generate_validator_authority_if_needed();
+        ensure_authority();
         let pubkey = magic_fee_vault_pubkey();
         let vault_acc = AccountBuilder::from(AccountSharedData::new(0, 0, &system_program::id()))
             .mode(mode_for(is_delegated))
@@ -591,7 +592,10 @@ mod tests {
                 .into_iter()
                 .map(|i| i.intent_id)
                 .collect::<Vec<_>>();
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                validator::authority(),
+                intent_ids.into_iter(),
+            );
             ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
@@ -751,7 +755,10 @@ mod tests {
                 .into_iter()
                 .map(|i| i.intent_id)
                 .collect::<Vec<_>>();
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                validator::authority(),
+                intent_ids.into_iter(),
+            );
             ensure_outbox_pda_accounts_exist(&mut account_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
@@ -817,8 +824,10 @@ mod tests {
             .into_iter()
             .map(|i| i.intent_id)
             .collect::<Vec<_>>();
-        let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            validator::authority(),
+            intent_ids.into_iter(),
+        );
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(&payer, Pubkey::new_unique(), ata_pubkey);
         ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
@@ -947,8 +956,10 @@ mod tests {
             .into_iter()
             .map(|i| i.intent_id)
             .collect::<Vec<_>>();
-        let ix_accept =
-            InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+        let ix_accept = InstructionUtils::accept_scheduled_commits_instruction(
+            validator::authority(),
+            intent_ids.into_iter(),
+        );
         let (mut account_data2, mut transaction_accounts2) =
             prepare_transaction_with_single_committee(&payer, Pubkey::new_unique(), ata_pubkey);
         ensure_outbox_pda_accounts_exist(&mut account_data2, &ix_accept);
@@ -1045,7 +1056,10 @@ mod tests {
                 .into_iter()
                 .map(|i| i.intent_id)
                 .collect::<Vec<_>>();
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                validator::authority(),
+                intent_ids.into_iter(),
+            );
             ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
@@ -1149,7 +1163,10 @@ mod tests {
                 .into_iter()
                 .map(|i| i.intent_id)
                 .collect::<Vec<_>>();
-            let ix = InstructionUtils::accept_scheduled_commits_instruction(intent_ids.into_iter());
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                validator::authority(),
+                intent_ids.into_iter(),
+            );
             ensure_outbox_pda_accounts_exist(&mut accounts_data, &ix);
             extend_transaction_accounts_from_ix_adding_magic_context(
                 &ix,
@@ -1510,7 +1527,7 @@ mod tests {
         HashMap<Pubkey, AccountSharedData>,
         Vec<(Pubkey, AccountSharedData)>,
     ) {
-        validator::generate_validator_authority_if_needed();
+        ensure_authority();
         let fee_vault_pubkey = magic_fee_vault_pubkey();
 
         let mut account_data = {

@@ -15,6 +15,7 @@ use solana_rpc_client_api::{
     client_error, client_error::ErrorKind as RpcClientErrorKind, request::RpcError,
 };
 use solana_signature::Signature;
+use solana_transaction::Transaction;
 use solana_transaction_error::TransactionError;
 use tokio::time::{Instant, sleep};
 use tracing::{debug, error};
@@ -32,7 +33,7 @@ const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 /// Accept/set-stage go through the RPC client (aperture) with backoff retries;
 /// `notify_commit_sent` submits directly through the engine and closes the intent.
 pub(crate) struct InternalOutboxClient {
-    /// Engine handle: reads MagicContext, provides blockhash, and submits the
+    /// Engine handle: reads MagicContext, provides signer/blockhash, and submits the
     /// `ScheduledCommitSent` notification directly.
     engine: Engine,
     /// RPC client for sending accept/set-stage transactions to the ER
@@ -153,9 +154,15 @@ impl InternalOutboxClient {
         let mut accepted = Vec::with_capacity(remaining.len());
         while !remaining.is_empty() {
             let chunk_size = CHUNK_SIZE.min(remaining.len());
-            let tx = InstructionUtils::accept_scheduled_commits(
-                self.engine.blockhash(),
+            let ix = InstructionUtils::accept_scheduled_commits_instruction(
+                self.engine.authority(),
                 remaining[..chunk_size].iter().map(|i| i.intent_id),
+            );
+            let tx = Transaction::new_signed_with_payer(
+                &[ix],
+                Some(&self.engine.authority()),
+                &[self.engine.signer()],
+                self.engine.blockhash(),
             );
             let backoff_config = ExponentialBackoff {
                 max_elapsed_time: Some(Duration::from_secs(25)),
@@ -263,11 +270,17 @@ impl OutboxClient for InternalOutboxClient {
         stage: ExecutionStage,
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::set_intent_execution_stage(
-            self.engine.blockhash(),
+        let ix = InstructionUtils::set_intent_execution_stage_instruction(
+            self.engine.authority(),
             intent_id,
             stage,
             recovery_commit_nonces,
+        );
+        let tx = Transaction::new_signed_with_payer(
+            &[ix],
+            Some(&self.engine.authority()),
+            &[self.engine.signer()],
+            self.engine.blockhash(),
         );
 
         self.send_with_backoff(

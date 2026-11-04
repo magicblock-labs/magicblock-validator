@@ -41,11 +41,22 @@ pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub const COUNTER_PROGRAM_ID: Pubkey =
     Pubkey::from_str_const("2jQZbSfAfqT5nZHGrLpDG2vXuEGtTgZYnNy7AZEjMCYz");
 
+/// Initializes only the current thread's public identity, preserving any
+/// authority already supplied by Engine or the test.
+pub(crate) fn ensure_authority() -> Pubkey {
+    let mut authority = validator::authority();
+    if authority == Pubkey::default() {
+        authority = Pubkey::new_unique();
+        nucleus::tls::AUTHORITY.set(authority);
+    }
+    authority
+}
+
 pub fn ensure_started_validator(
     map: &mut HashMap<Pubkey, AccountSharedData>,
     nonces: Option<StubNonces>,
 ) {
-    let validator_authority_id = validator::generate_validator_authority_if_needed();
+    let validator_authority_id = ensure_authority();
     map.entry(validator_authority_id)
         .or_insert_with(|| AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id()));
 
