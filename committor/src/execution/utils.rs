@@ -17,8 +17,12 @@ pub(in crate::execution) async fn report_and_close_intent(
     execution_report: &mut IntentExecutionReport,
     outbox_client: &dyn OutboxClient,
 ) -> IntentExecutorResult<ExecutionOutput> {
+    // An unsettled reservation cannot be discarded: later IDs depend on it.
+    // Retain its outbox for recovery even when the delivery error is permanent.
     if let Err(err) = &result
-        && !is_terminal_execution_error(err)
+        && (!is_terminal_execution_error(err)
+            || (!meta.included_pubkeys.is_empty()
+                && execution_report.progress.confirmed_commit.is_none()))
     {
         return result;
     }

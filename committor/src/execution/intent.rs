@@ -22,7 +22,7 @@ use crate::{
         utils::report_and_close_intent,
     },
     shared::{
-        account_state::{AccountSnapshot, TaskInfoProvider},
+        account_state::AccountSnapshot,
         outbox::{ScheduledBaseIntentMeta, progress::PendingExecution},
         tasks::task_strategist::{TaskStrategist, TransactionPlan, TransactionStrategy},
     },
@@ -147,33 +147,16 @@ impl ExecutionContext {
 
         // The commit is confirmed; only actions and undelegation remain.
         let tasks = TaskBuilder::follow_up_tasks(&self.task_info_provider, intent).await?;
-        let uniqueness_nonce = self.follow_up_uniqueness_nonce(intent).await?;
+        let uniqueness_nonce = intent
+            .get_all_committed_accounts()
+            .iter()
+            .any(|account| account.commit_id == 1)
+            .then_some(intent.intent_id);
         Ok(TaskStrategist::build_strategy(
             tasks,
             &self.authority.pubkey(),
             uniqueness_nonce,
         )?)
-    }
-
-    async fn follow_up_uniqueness_nonce(
-        &self,
-        intent: &ScheduledIntentBundle,
-    ) -> IntentExecutorResult<Option<u64>> {
-        let accounts = intent
-            .get_all_committed_accounts()
-            .into_iter()
-            .map(|account| (account.pubkey, account.remote_slot))
-            .collect::<Vec<AccountSnapshot>>();
-        if accounts.is_empty() {
-            return Ok(None);
-        }
-        let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
-        let nonces = self
-            .task_info_provider
-            .fetch_current_commit_nonces(&accounts, min_context_slot)
-            .await
-            .map_err(TaskBuilderError::CommitTasksBuildError)?;
-        Ok(nonces.values().any(|nonce| *nonce <= 1).then_some(intent.intent_id))
     }
 }
 
@@ -188,21 +171,11 @@ impl ExecutionContext {
     ) {
         let started_at = Instant::now();
         let meta = ScheduledBaseIntentMeta::new(intent);
-        let pubkeys = intent.get_all_committed_pubkeys();
-        let undelegated_pubkeys = intent.get_undelegated_pubkeys();
         let mut report = IntentExecutionReport::default();
         let result = self.execute_inner(status, intent, &mut report, started_at).await;
         let result =
             report_and_close_intent(result, meta, &mut report, self.outbox_client.as_ref()).await;
 
-        if result.is_err() {
-            // We can't know what landed on chain, resync everything.
-            self.task_info_provider.invalidate_nonces(&pubkeys);
-        } else if !undelegated_pubkeys.is_empty() {
-            // Keep other nonces cached: a chain re-fetch can race the just-landed
-            // commit and reuse a nonce (buffer PDA collision).
-            self.task_info_provider.invalidate_nonces(&undelegated_pubkeys);
-        }
         let result = IntentExecutionResult {
             inner: result,
             progress: report.progress,

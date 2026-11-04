@@ -104,6 +104,54 @@ async fn setup_provider_multi(accounts: Vec<(Pubkey, Account)>) -> ProviderTestC
     }
 }
 
+#[tokio::test]
+async fn snapshot_retries_lagging_rpc_without_subscribing() {
+    let record = Pubkey::new_unique();
+    let metadata = Pubkey::new_unique();
+    let ctx = setup_provider_multi(vec![
+        (record, Account::default()),
+        (metadata, Account::default()),
+    ])
+    .await;
+    let provider = ctx.provider.clone();
+    let task = tokio::spawn(async move {
+        provider
+            .fetch_snapshot_until_slot(
+                &[record, metadata],
+                101,
+                AccountFetchContext::rpc_get_multiple_accounts(),
+                ChainlinkCompanionFetchKind::DelegationRecord,
+            )
+            .await
+    });
+
+    let started = time::Instant::now();
+    // The second request starts only after the first response failed the slot floor.
+    while ctx.rpc_client.multi_account_fetches() < 2 {
+        assert!(started.elapsed() < Duration::from_secs(2));
+        time::sleep(Duration::from_millis(10)).await;
+    }
+    ctx.rpc_client.set_slot(101);
+
+    let accounts = task.await.unwrap().unwrap();
+    assert_eq!(accounts.len(), 2);
+    assert!(accounts.iter().all(|account| account.slot() == 101));
+    assert!(ctx.rpc_client.multi_account_fetches() >= 2);
+    let subscriptions = ctx.pubsub_client.subscriptions_union();
+    assert!(!subscriptions.contains(&record));
+    assert!(!subscriptions.contains(&metadata));
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(&record, SubscriptionReason::DirectAccount)
+            .await
+    );
+    assert!(
+        !ctx.provider
+            .has_subscription_reason(&metadata, SubscriptionReason::DirectAccount)
+            .await
+    );
+}
+
 fn pending_accounts_value(
     origin: impl Into<AccountFetchContext>,
     outcome: ChainlinkPendingFetchOutcome,

@@ -22,6 +22,7 @@ fn commit() -> Task {
         2,
         true,
         CommittedAccount {
+            commit_id: 2,
             pubkey: ACCOUNT,
             account: Account {
                 data: vec![1; 512],
@@ -224,8 +225,7 @@ async fn recovery_preserves_progress_and_resources() {
         TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT,
         delegation_program_api::error::DlpError::NonceOutOfOrder as u32
     );
-    // The RPC mock has no delegation record, so nonce recovery fails after
-    // preparing the first transaction and receiving its on-chain nonce error.
+    // A rejected reserved ID must stop execution without renumbering or rebuilding.
     for (steps, error) in [
         (vec![Preparation::Fail], None),
         (vec![Preparation::Ready], Some(nonce_error.as_str())),
@@ -245,7 +245,12 @@ async fn recovery_preserves_progress_and_resources() {
         .await;
         if error.is_some() {
             assert!(
-                matches!(result, Err(IntentExecutorError::TaskBuilderError(_))),
+                matches!(
+                    result,
+                    Err(IntentExecutorError::FailedExecution(
+                        TransactionExecutionError::CommitIDError(_, _)
+                    ))
+                ),
                 "{result:?}"
             );
         } else {
@@ -257,7 +262,9 @@ async fn recovery_preserves_progress_and_resources() {
         {
             let prepared = executor.transaction_preparator.prepared.lock().unwrap();
             assert_eq!(prepared.len(), expected_preparations);
-            assert!(matches!(prepared[0].as_slice(), [Task::CommitFinalize(_)]));
+            assert!(
+                matches!(prepared[0].as_slice(), [Task::CommitFinalize(task)] if task.commit_id == 2)
+            );
             if expected_preparations == 2 {
                 assert!(matches!(
                     prepared[1].as_slice(),

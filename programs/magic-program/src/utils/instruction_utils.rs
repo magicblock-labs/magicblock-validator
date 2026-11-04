@@ -40,7 +40,7 @@ impl InstructionUtils {
         let mut account_metas =
             vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
         for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
         Instruction::new_with_wincode(
             crate::id(),
@@ -113,7 +113,7 @@ impl InstructionUtils {
             AccountMeta::new(fee_vault, false),
         ];
         for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
         Instruction::new_with_wincode(
             crate::id(),

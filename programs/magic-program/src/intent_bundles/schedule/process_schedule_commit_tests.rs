@@ -26,8 +26,8 @@ use solana_signer::Signer;
 use crate::{
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
-    magic_sys::COMMIT_LIMIT,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
+    schedule_transactions::COMMIT_LIMIT,
     schedule_transactions::magic_fee_vault_pubkey,
     test_utils::{
         StubNonces, ensure_started_validator, process_instruction, process_instruction_with_logs,
@@ -1199,7 +1199,7 @@ mod tests {
         let mut account_metas =
             vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
         for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
         account_metas
     }
@@ -1386,7 +1386,7 @@ mod tests {
         let (mut account_data, mut transaction_accounts) =
             prepare_transaction_with_single_committee(&payer, program, committee);
 
-        // Override stub to return nonce at the commit limit
+        // Seed account state at the commit limit
         ensure_started_validator(&mut account_data, Some(StubNonces::Global(COMMIT_LIMIT)));
 
         let ix = InstructionUtils::schedule_commit_instruction(&payer.pubkey(), vec![committee]);
@@ -1396,7 +1396,9 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+            Err(InstructionError::Custom(
+                crate::schedule_transactions::COMMIT_LIMIT_ERR,
+            )),
         );
     }
 
@@ -1419,12 +1421,16 @@ mod tests {
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
-            Err(InstructionError::Custom(crate::magic_sys::COMMIT_LIMIT_ERR)),
+            Err(InstructionError::Custom(
+                crate::schedule_transactions::COMMIT_LIMIT_ERR,
+            )),
         );
 
         let expected_log = format!(
-            "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
-            committee, COMMIT_LIMIT, COMMIT_LIMIT
+            "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: reserved commit ID {} exceeds the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
+            committee,
+            COMMIT_LIMIT + 1,
+            COMMIT_LIMIT
         );
         assert!(
             logs.iter().any(|log| log == &expected_log),
@@ -1443,7 +1449,7 @@ mod tests {
         let (mut account_data, mut transaction_accounts) =
             prepare_transaction_with_single_committee(&payer, program, committee);
 
-        // Override stub to return nonce at the commit limit
+        // Seed account state at the commit limit
         ensure_started_validator(&mut account_data, Some(StubNonces::Global(COMMIT_LIMIT)));
 
         let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
@@ -1665,7 +1671,7 @@ mod tests {
             AccountMeta::new(payer.pubkey(), true),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
             AccountMeta::new(fee_vault.unwrap(), false),
-            AccountMeta::new_readonly(committee, true),
+            AccountMeta::new(committee, true),
         ]);
         extend_transaction_accounts_from_ix(&ix, &mut account_data, &mut transaction_accounts);
 
@@ -1732,4 +1738,108 @@ mod tests {
             Err(InstructionError::MissingAccount),
         );
     }
+}
+
+/// Exercise reservations in real Engine transactions, including a failure after
+/// scheduling. The instruction harness alone cannot prove transaction rollback.
+#[tokio::test]
+#[serial_test::serial]
+async fn commit_reservations_are_atomic_and_reused_after_rollback() {
+    use crate::{magicblock_processor::Entrypoint, utils::instruction_utils::InstructionUtils};
+    use engine::testkit::{Pacing, TestEngine};
+    use keeper::testkit::{Dirs, keeper_builder};
+    use magic_program_api::args::CommitTypeArgs;
+    use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
+
+    crate::validator::generate_validator_authority_if_needed();
+    let dirs = Dirs::default();
+    let mut builder = keeper_builder(&dirs);
+    builder.authority = crate::validator::validator_authority().into();
+    builder.builtins.insert(crate::id(), (Entrypoint::vm, Entrypoint::codegen));
+    builder.accounts.insert(
+        MAGIC_CONTEXT_PUBKEY,
+        AccountBuilder::from(magic_context_account()).mode(AccountMode::Magic).build(),
+    );
+    let committee = Pubkey::new_unique();
+    builder.accounts.insert(
+        committee,
+        AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
+            .mode(AccountMode::Delegated)
+            .commit_seq(3)
+            .build(),
+    );
+    let overflow = Pubkey::new_unique();
+    builder.accounts.insert(
+        overflow,
+        AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
+            .mode(AccountMode::Delegated)
+            .commit_seq(u32::MAX)
+            .build(),
+    );
+    let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
+    let mut schedule = InstructionUtils::schedule_commit_instruction(
+        &engine.authority(),
+        vec![committee, committee],
+    );
+    for meta in &mut schedule.accounts[2..] {
+        meta.is_signer = false;
+    }
+    let bundle = Instruction::new_with_wincode(
+        crate::id(),
+        &MagicBlockInstruction::ScheduleIntentBundle(MagicIntentBundleArgs {
+            commit_finalize: Some(CommitTypeArgs::Standalone(vec![2])),
+            ..Default::default()
+        }),
+        schedule.accounts[..3].to_vec(),
+    );
+    let fail = Instruction {
+        program_id: crate::id(),
+        accounts: vec![],
+        data: vec![255],
+    };
+    let initial_context = engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data().to_vec();
+    assert!(engine.execute(&[schedule.clone(), bundle.clone(), fail]).await.is_err());
+    assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 3);
+    assert_eq!(
+        engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data(),
+        initial_context
+    );
+
+    let mut readonly = bundle.clone();
+    readonly.accounts[2].is_writable = false;
+    assert!(matches!(
+        engine.execute(&[readonly]).await,
+        Err(solana_transaction::TransactionError::InstructionError(
+            _,
+            InstructionError::ReadonlyDataModified
+        ))
+    ));
+    let mut overflowing = bundle.clone();
+    overflowing.accounts[2].pubkey = overflow;
+    assert!(matches!(
+        engine.execute(&[overflowing]).await,
+        Err(solana_transaction::TransactionError::InstructionError(
+            _,
+            InstructionError::ArithmeticOverflow
+        ))
+    ));
+    assert_eq!(engine.get_account(overflow).unwrap().commit_seq(), u32::MAX);
+    assert_eq!(
+        engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data(),
+        initial_context
+    );
+
+    engine.execute(&[schedule, bundle]).await.unwrap();
+    assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 5);
+    let context =
+        MagicContext::deserialize(engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data())
+            .unwrap();
+    let ids: Vec<_> = context
+        .scheduled_base_intents
+        .iter()
+        .flat_map(|intent| intent.get_all_committed_accounts())
+        .map(|account| account.commit_id)
+        .collect();
+    assert_eq!(ids, vec![4, 5]);
+    engine.close().await;
 }
