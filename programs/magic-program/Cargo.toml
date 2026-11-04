@@ -51,7 +51,7 @@ assert_matches = { workspace = true }
 chainlink = { workspace = true, features = ["dev-context"] }
 rand = { workspace = true }
 serial_test = { workspace = true }
-solana-signature = { workspace = true }
+solana-signature = { workspace = true, features = ["rand"] }
 solana-signer = { workspace = true }
 
 [lib]

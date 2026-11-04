@@ -22,6 +22,10 @@ queues the intent in the same transaction. A failed transaction rolls all three
 back. The serialized intent includes the reserved ID; this changes the WIP
 intent/outbox format and does not migrate previously persisted intents.
 
+Scheduling logs `ScheduledCommitSent outbox: <address>` for each intent instead
+of signing a future notification. See the committor's
+[receipt contract](../../committor/README.md#settlement-receipts) for tracking completion.
+
 Host integrations must prepare the runtime and wire the leader's services before
 accepting application work.
 

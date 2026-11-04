@@ -215,8 +215,8 @@ declare_process_instruction!(
                 stage,
                 recovery_commit_nonces,
             ),
-            OutboxIntentInstruction::ScheduledCommitSent((id, _bump)) => {
-                process_scheduled_commit_sent(signers, invoke_context, id)
+            OutboxIntentInstruction::ScheduledCommitSent(receipt) => {
+                process_scheduled_commit_sent(signers, invoke_context, receipt)
             }
         }
     }

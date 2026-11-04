@@ -1,10 +1,8 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::ScheduleTaskArgs,
     instruction::{MagicBlockInstruction, OutboxIntentInstruction},
-    outbox,
+    outbox::{self, SentCommit},
 };
 use mbv_core::intent::outbox::outbox_intent_pda;
 use solana_hash::Hash;
@@ -18,9 +16,8 @@ use crate::validator::{validator_authority, validator_authority_id};
 
 /// Builders for the MagicBlock program instructions.
 ///
-/// Most builders return bare [`Instruction`]s for the engine to compose and
-/// sign. `scheduled_commit_sent` is pre-signed while scheduling so its future
-/// signature can be returned in the scheduling transaction logs.
+/// Completion builders return bare [`Instruction`]s for the engine to compose
+/// and sign after settlement, outside program execution.
 pub struct InstructionUtils;
 impl InstructionUtils {
     // -----------------
@@ -125,25 +122,26 @@ impl InstructionUtils {
     // -----------------
     // Scheduled Commit Sent
     // -----------------
-    pub fn scheduled_commit_sent(intent_id: u64, recent_blockhash: Hash) -> Transaction {
-        let ix = Self::scheduled_commit_sent_instruction(intent_id);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
-    pub(crate) fn scheduled_commit_sent_instruction(intent_id: u64) -> Instruction {
-        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
+    pub fn scheduled_commit_sent_instruction(
+        validator: Pubkey,
+        receipt: SentCommit,
+    ) -> Result<Instruction, wincode::WriteError> {
+        let intent_id = receipt.message_id;
+        let data = wincode::serialize(&OutboxIntentInstruction::ScheduledCommitSent(receipt))?;
+        // Solana's signing path unwraps message serialization. Reject data that
+        // cannot fit its u16 instruction length before handing it to Engine.
+        if data.len() > u16::MAX as usize {
+            return Err(wincode::WriteError::LengthEncodingOverflow("u16::MAX"));
+        }
         let account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator, true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
-        Instruction::new_with_wincode(
-            OUTBOX_INTENT_PROGRAM_ID,
-            &OutboxIntentInstruction::ScheduledCommitSent((
-                intent_id,
-                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
-            )),
-            account_metas,
-        )
+        Ok(Instruction {
+            program_id: OUTBOX_INTENT_PROGRAM_ID,
+            data,
+            accounts: account_metas,
+        })
     }
 
     // -----------------

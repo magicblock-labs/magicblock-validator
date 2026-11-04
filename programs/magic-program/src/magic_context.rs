@@ -18,6 +18,9 @@ impl MagicContext {
     pub const SIZE: usize = MAGIC_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
 
+    // This persisted layout is unversioned. Changes to `ScheduledIntentBundle`
+    // can make queued intents from an earlier validator version unreadable;
+    // upgrade handling is tracked in https://github.com/magicblock-labs/magicblock-validator/issues/1882.
     pub fn deserialize(data: &[u8]) -> Result<Self, wincode::ReadError> {
         if data.is_empty() || is_zeroed(data) {
             Ok(Self::default())

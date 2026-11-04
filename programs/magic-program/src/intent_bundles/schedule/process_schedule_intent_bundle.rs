@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use magic_program_api::args::MagicIntentBundleArgs;
+use mbv_core::intent::outbox::outbox_intent_pda;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -143,8 +144,6 @@ pub(crate) fn process_schedule_intent_bundle(
         }
     }
 
-    let sent_signature = scheduled_intent.sent_transaction.signatures[0];
-
     context.add_scheduled_action(scheduled_intent);
     let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
@@ -152,8 +151,8 @@ pub(crate) fn process_schedule_intent_bundle(
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent signature: {}",
-        sent_signature,
+        "ScheduledCommitSent outbox: {}",
+        outbox_intent_pda(intent_id),
     );
 
     Ok(())

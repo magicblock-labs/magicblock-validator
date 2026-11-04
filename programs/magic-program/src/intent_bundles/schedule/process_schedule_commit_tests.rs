@@ -505,13 +505,6 @@ fn assert_first_commit(
                 assert!(intent_bundle.commit_finalize.is_some());
                 assert!(intent_bundle.commit_finalize_and_undelegate.is_none());
             }
-            let _instruction =
-                MagicBlockInstruction::ScheduledCommitSent((*id, 0));
-            // TODO(edwin) @@@ this fails in CI only with the similar to the below
-            //   left: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0]
-            //  right: [4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
-            // See: https://github.com/magicblock-labs/magicblock-validator/actions/runs/18565403532/job/52924982063#step:6:1063
-            // assert_eq!(action_sent_transaction.data(0), instruction.try_to_vec().unwrap());
             assert_eq!(intent_bundle.has_undelegate_intent(), expected_request_undelegation);
         }
     );
@@ -1751,17 +1744,15 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     use magic_program_api::args::CommitTypeArgs;
     use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
 
-    crate::validator::generate_validator_authority_if_needed();
     let dirs = Dirs::default();
     let mut builder = keeper_builder(&dirs);
-    builder.authority = crate::validator::validator_authority().into();
     builder.builtins.insert(crate::id(), (Entrypoint::vm, Entrypoint::codegen));
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         MAGIC_CONTEXT_PUBKEY,
         AccountBuilder::from(magic_context_account()).mode(AccountMode::Magic).build(),
     );
     let committee = Pubkey::new_unique();
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         committee,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
@@ -1769,7 +1760,7 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
             .build(),
     );
     let overflow = Pubkey::new_unique();
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         overflow,
         AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &system_program::id()))
             .mode(AccountMode::Delegated)
@@ -1829,7 +1820,28 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
         initial_context
     );
 
-    engine.execute(&[schedule, bundle]).await.unwrap();
+    let instructions = [schedule, bundle];
+    let first = engine.simulate(&instructions).await.unwrap().result.unwrap();
+    let replay = engine.simulate(&instructions).await.unwrap().result.unwrap();
+    assert_eq!(first.execution_details.status, Ok(()));
+    assert_eq!(
+        first.execution_details.log_messages,
+        replay.execution_details.log_messages
+    );
+    let scheduled_context = |accounts: &[(Pubkey, AccountSharedData)]| {
+        accounts
+            .iter()
+            .find(|(key, _)| key == &MAGIC_CONTEXT_PUBKEY)
+            .unwrap()
+            .1
+            .data()
+            .to_vec()
+    };
+    assert_eq!(
+        scheduled_context(&first.loaded_transaction.accounts),
+        scheduled_context(&replay.loaded_transaction.accounts)
+    );
+    engine.execute(&instructions).await.unwrap();
     assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 5);
     let context =
         MagicContext::deserialize(engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data())
@@ -1841,5 +1853,13 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
         .map(|account| account.commit_id)
         .collect();
     assert_eq!(ids, vec![4, 5]);
+    let logs = first.execution_details.log_messages.unwrap();
+    for intent in &context.scheduled_base_intents {
+        assert!(logs.contains(&format!(
+            "ScheduledCommitSent outbox: {}",
+            mbv_core::intent::outbox::outbox_intent_pda(intent.intent_id)
+        )));
+    }
+    assert!(!logs.iter().any(|line| line.starts_with("ScheduledCommitSent signature:")));
     engine.close().await;
 }

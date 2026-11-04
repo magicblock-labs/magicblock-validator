@@ -2,8 +2,8 @@
 //!
 //! While a transaction executes, the engine publishes its authority's pubkey
 //! on the current thread through [`nucleus::tls::AUTHORITY`]. The configured
-//! signer is also retained so scheduling can pre-sign the later
-//! `ScheduledCommitSent` transaction and expose its signature to callers.
+//! signer is still retained for legacy host-side transaction builders.
+//! Scheduling itself uses only the thread-local public identity.
 
 use std::sync::{Arc, OnceLock};
 

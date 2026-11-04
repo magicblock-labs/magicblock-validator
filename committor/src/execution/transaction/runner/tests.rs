@@ -191,7 +191,6 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
         blockhash: Default::default(),
         payer: ACCOUNT,
         included_pubkeys: vec![ACCOUNT],
-        intent_sent_transaction: Default::default(),
         requested_undelegation: false,
     };
     let receipt = crate::execution::report::build_sent_commit(meta, &result, &report);

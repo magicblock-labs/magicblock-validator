@@ -23,9 +23,6 @@ use solana_transaction_context::transaction::TransactionContext;
 pub(crate) use crate::intent_bundles::{
     process_accept_scheduled_commits::*, process_execute_callback::*,
 };
-pub use crate::outbox_intent::process_scheduled_commit_sent::{
-    SentCommit, register_scheduled_commit_sent,
-};
 use crate::{
     utils::accounts::{
         InstructionAccount, get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
