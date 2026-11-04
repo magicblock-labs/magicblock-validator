@@ -158,7 +158,9 @@ block-cache-size = 536_870_912
 # Env: MBV_LEDGER__VERIFY_KEYPAIR
 verify-keypair = true
 
-# If true, deletes the existing ledger directory on startup.
+# If true, removes the deprecated ledger (`<engine.ledger.directory>/rocksdb`)
+# and its validator keypair file on startup. The Engine ledger and AccountsDB
+# are not cleared; delete their directories to start from scratch.
 # Default: false
 # Env: MBV_LEDGER__RESET
 reset = false

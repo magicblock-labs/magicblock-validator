@@ -6,7 +6,9 @@ use crate::consts;
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct LedgerConfig {
-    /// If true, the existing ledger database will be wiped on startup.
+    /// If true, the deprecated ledger database (`<engine.ledger.directory>/rocksdb`)
+    /// and the validator keypair file next to it are removed on startup.
+    /// The Engine ledger and AccountsDB are not touched.
     /// Useful for ephemeral or testing environments.
     pub reset: bool,
 
