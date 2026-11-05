@@ -4,7 +4,7 @@ name: Prepare release
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (for example 0.13.11); defaults to the next patch version"
+        description: "Release version (for example 2.0.0 or 2.0.0-rc.1); defaults to RC promotion or the next patch"
         required: false
         type: string
 
@@ -54,7 +54,7 @@ jobs:
 
           current_version="$(.github/scripts/workspace-version.sh)"
 
-          if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([1-9][0-9]*))?$ ]]; then
             echo "Invalid current workspace version: $current_version" >&2
             exit 1
           fi
@@ -62,28 +62,45 @@ jobs:
           current_major=$((10#${BASH_REMATCH[1]}))
           current_minor=$((10#${BASH_REMATCH[2]}))
           current_patch=$((10#${BASH_REMATCH[3]}))
+          current_rc=${BASH_REMATCH[5]:-}
 
           if [[ -z "$INPUT_VERSION" ]]; then
-            version="${current_major}.${current_minor}.$((current_patch + 1))"
+            if [[ -n "$current_rc" ]]; then
+              version="${current_major}.${current_minor}.${current_patch}"
+            else
+              version="${current_major}.${current_minor}.$((current_patch + 1))"
+            fi
           else
             requested_version="${INPUT_VERSION#v}"
-            if [[ ! "$requested_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "Version must have the form X.Y.Z or vX.Y.Z" >&2
+            if [[ ! "$requested_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([1-9][0-9]*))?$ ]]; then
+              echo "Version must have the form X.Y.Z or X.Y.Z-rc.N, optionally prefixed with v" >&2
               exit 1
             fi
 
             new_major=$((10#${BASH_REMATCH[1]}))
             new_minor=$((10#${BASH_REMATCH[2]}))
             new_patch=$((10#${BASH_REMATCH[3]}))
+            new_rc=${BASH_REMATCH[5]:-}
 
-            if (( new_major < current_major ||
-                  (new_major == current_major && new_minor < current_minor) ||
-                  (new_major == current_major && new_minor == current_minor && new_patch <= current_patch) )); then
+            newer=false
+            if (( new_major > current_major ||
+                  (new_major == current_major && new_minor > current_minor) ||
+                  (new_major == current_major && new_minor == current_minor && new_patch > current_patch) )); then
+              newer=true
+            elif (( new_major == current_major && new_minor == current_minor && new_patch == current_patch )) && [[ -n "$current_rc" ]]; then
+              if [[ -z "$new_rc" ]] || (( new_rc > current_rc )); then
+                newer=true
+              fi
+            fi
+            if [[ "$newer" != true ]]; then
               echo "Version must be newer than $current_version" >&2
               exit 1
             fi
 
             version="${new_major}.${new_minor}.${new_patch}"
+            if [[ -n "$new_rc" ]]; then
+              version+="-rc.${new_rc}"
+            fi
           fi
 
           case "$RELEASE_BASE_BRANCH:$version" in

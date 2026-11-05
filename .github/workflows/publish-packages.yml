@@ -95,14 +95,23 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: gh release edit "$RELEASE_VERSION" --latest=${{ startsWith(github.event.release.tag_name, 'v2.') && 'true' || 'false' }}
+        run: |
+          if [[ "$RELEASE_VERSION" == *-rc.* ]]; then
+            gh release edit "$RELEASE_VERSION" --prerelease --latest=false
+          else
+            gh release edit "$RELEASE_VERSION" --latest=${{ startsWith(github.event.release.tag_name, 'v2.') && !github.event.release.prerelease && 'true' || 'false' }}
+          fi
 
   publish-binaries:
     name: Publish Binaries
     permissions:
       contents: write
     needs: verify-release
-    if: ${{ !cancelled() && github.event_name != 'push' && needs.verify-release.result != 'failure' }}
+    if: >-
+      ${{ !cancelled() && github.event_name != 'push' &&
+          needs.verify-release.result != 'failure' &&
+          !github.event.release.prerelease &&
+          !contains(github.event.release.tag_name || inputs.release_version, '-rc.') }}
     runs-on: ${{ matrix.build.OS }}
     strategy:
       fail-fast: false
