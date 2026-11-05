@@ -2,7 +2,9 @@
 
 use anyhow::{Context, Result};
 use config::LeaderParams;
-use delegation_program_api::instruction_builder::validator_claim_fees;
+use delegation_program_interface::{
+    self as dpi, legacy::instruction_builder::validator_claim_fees,
+};
 use solana_commitment_config::CommitmentConfig;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
@@ -21,7 +23,7 @@ pub(super) async fn run(config: LeaderParams) -> Result<()> {
     // signer is also the authority whose vault we can claim.
     let signer = config.engine.authority.local;
     let validator = signer.pubkey();
-    let vault = delegation_program_api::pda::validator_fees_vault_pda_from_validator(&validator);
+    let vault = dpi::legacy::pda::validator_fees_vault_pda_from_validator(&validator);
     let balance = rpc
         .get_balance(&vault)
         .await

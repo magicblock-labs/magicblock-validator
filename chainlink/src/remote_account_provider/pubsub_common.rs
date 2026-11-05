@@ -1,6 +1,6 @@
 use std::{collections::HashSet, fmt};
 
-use delegation_program_api::state::{
+use delegation_program_interface::legacy::state::{
     CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
 };
 use solana_account::Account;
@@ -106,7 +106,7 @@ pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         args::{
             EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
         },

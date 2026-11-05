@@ -1,4 +1,4 @@
-use delegation_program_api::state::DelegationRecord;
+use delegation_program_interface::legacy::state::DelegationRecord;
 use solana_pubkey::Pubkey;
 use tracing::*;
 
@@ -80,7 +80,7 @@ pub(crate) fn account_still_undelegating_on_chain(
 
 #[cfg(test)]
 mod tests {
-    use delegation_program_api::state::DelegationRecord;
+    use delegation_program_interface::legacy::state::DelegationRecord;
     use solana_pubkey::Pubkey;
 
     use super::*;

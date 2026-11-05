@@ -1,8 +1,13 @@
-use delegation_program_api::{
-    AccountSizeClass,
-    args::CommitFinalizeArgs,
+use delegation_program_interface::{
+    self as dpi,
     diff::compute_diff,
-    instruction_builder::{commit_finalize_from_buffer_size_budget, commit_finalize_size_budget},
+    legacy::{
+        AccountSizeClass,
+        args::CommitFinalizeArgs,
+        instruction_builder::{
+            commit_finalize_from_buffer_size_budget, commit_finalize_size_budget,
+        },
+    },
 };
 use mbv_core::intent::types::CommittedAccount;
 use solana_account::{Account, ReadableAccount};
@@ -49,7 +54,7 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        delegation_program_api::instruction_builder::commit_finalize(
+        dpi::legacy::instruction_builder::commit_finalize(
             *validator,
             self.committed_account.pubkey,
             &mut args,
@@ -79,7 +84,7 @@ impl CommitFinalizeTask {
             reserved_padding: Default::default(),
         };
 
-        delegation_program_api::instruction_builder::commit_finalize_from_buffer(
+        dpi::legacy::instruction_builder::commit_finalize_from_buffer(
             *validator,
             self.committed_account.pubkey,
             data_buffer_pubkey,

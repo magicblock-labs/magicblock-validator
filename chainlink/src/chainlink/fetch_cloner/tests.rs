@@ -183,7 +183,7 @@ async fn undelegation_completion_requires_newer_base_slot() {
     };
 
     let transient = AccountBuilder::from(remote_account(7))
-        .owner(delegation_program_api::id())
+        .owner(dpi::id())
         .mode(AccountMode::Undelegating)
         .slot(100)
         .build();
@@ -343,7 +343,7 @@ async fn released_collision_candidate_does_not_retry_settled_delegation() {
         Account {
             lamports: 1_000_000,
             data: vec![1],
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             executable: false,
             rent_epoch: 0,
         },
@@ -405,7 +405,7 @@ async fn released_collision_candidate_settles_after_successful_clone() {
         Account {
             lamports: 1_000_000,
             data: vec![2],
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             executable: false,
             rent_epoch: 0,
         },

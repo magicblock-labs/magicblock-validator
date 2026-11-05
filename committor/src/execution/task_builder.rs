@@ -1,6 +1,6 @@
 use std::{collections::HashMap, sync::Arc};
 
-use delegation_program_api::state::{DelegationMetadata, UndelegationRequester};
+use delegation_program_interface::legacy::state::{DelegationMetadata, UndelegationRequester};
 use mbv_core::intent::{CommitAndUndelegate, CommitType, UndelegateType, types::CommittedAccount};
 use program::magic_scheduled_base_intent::ScheduledIntentBundle;
 use solana_account::Account;

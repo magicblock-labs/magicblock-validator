@@ -173,7 +173,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
         if failure == CommitRejected {
             let error = format!(
                 r#"{{"InstructionError":[2,{{"Custom":{}}}]}}"#,
-                delegation_program_api::error::DlpError::NonceOutOfOrder as u32
+                delegation_program_interface::error::DlpError::NonceOutOfOrder as u32
             );
             mock_response(
                 &mut mocks,
