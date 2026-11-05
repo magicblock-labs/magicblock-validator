@@ -1,10 +1,10 @@
 use std::{collections::HashMap, num::NonZeroUsize, time::Duration};
 
 use async_trait::async_trait;
-use delegation_program_api::{
-    delegation_metadata_seeds_from_delegated_account,
+use delegation_program_interface::{
+    self as dpi, delegation_metadata_seeds_from_delegated_account,
     delegation_record_seeds_from_delegated_account,
-    state::{DelegationMetadata, DelegationRecord},
+    legacy::state::{DelegationMetadata, DelegationRecord},
 };
 use metrics::metrics;
 use rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
@@ -78,12 +78,12 @@ impl RpcTaskInfoProvider {
                 [
                     Pubkey::find_program_address(
                         delegation_record_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &delegation_program_interface::id(),
                     )
                     .0,
                     Pubkey::find_program_address(
                         delegation_metadata_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &delegation_program_interface::id(),
                     )
                     .0,
                 ]
@@ -103,7 +103,7 @@ impl RpcTaskInfoProvider {
             .zip(pda_accounts.chunks_exact(2))
             .zip(accounts)
             .map(|((pair, pdas), (delegated_account, snapshot_slot))| {
-                if pair.iter().any(|account| account.owner != delegation_program_api::id()) {
+                if pair.iter().any(|account| account.owner != dpi::id()) {
                     return Err(TaskInfoProviderError::InvalidAccountDataError(pdas[0]));
                 }
                 let record_data = pair[0]

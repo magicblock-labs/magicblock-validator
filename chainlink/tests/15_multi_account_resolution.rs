@@ -1,5 +1,6 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use delegation_program_interface as dpi;
 use engine::IntoTransactionView;
 use magicblock_chainlink::{
     AccountFetchEntrypoint, assert_cloned_as_delegated, assert_cloned_as_undelegated,
@@ -35,7 +36,7 @@ async fn resolves_mixed_transaction_accounts_in_one_request() {
         writable,
         Account {
             lamports: 1_000_000,
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             ..Default::default()
         },
     );

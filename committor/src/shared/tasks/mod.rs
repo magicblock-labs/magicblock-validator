@@ -1,5 +1,8 @@
 use ::metrics::metrics::LabelValue;
-use delegation_program_api::{AccountSizeClass, args::CallHandlerArgs};
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{AccountSizeClass, args::CallHandlerArgs},
+};
 use mbv_core::intent::{BaseAction, BaseActionCallback};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
@@ -54,13 +57,11 @@ impl Task {
             Self::BaseAction(value) => value.accounts_size_budget(),
             Self::Undelegate(value) => {
                 if value.include_undelegation_request {
-                    delegation_program_api::instruction_builder::undelegate_with_request_size_budget(
+                    dpi::legacy::instruction_builder::undelegate_with_request_size_budget(
                         AccountSizeClass::Huge,
                     )
                 } else {
-                    delegation_program_api::instruction_builder::undelegate_size_budget(
-                        AccountSizeClass::Huge,
-                    )
+                    dpi::legacy::instruction_builder::undelegate_size_budget(AccountSizeClass::Huge)
                 }
             }
         }
@@ -95,14 +96,14 @@ pub struct UndelegateTask {
 impl UndelegateTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         if self.include_undelegation_request {
-            delegation_program_api::instruction_builder::undelegate_with_request(
+            dpi::legacy::instruction_builder::undelegate_with_request(
                 *validator,
                 self.delegated_account,
                 self.owner_program,
                 self.rent_reimbursement,
             )
         } else {
-            delegation_program_api::instruction_builder::undelegate(
+            dpi::legacy::instruction_builder::undelegate(
                 *validator,
                 self.delegated_account,
                 self.owner_program,
@@ -178,17 +179,15 @@ impl BaseActionTask {
             action.account_metas_per_program.len() as u32 * AccountSizeClass::Small.size_budget();
 
         match self {
-            Self::V1(_) => delegation_program_api::instruction_builder::call_handler_size_budget(
+            Self::V1(_) => dpi::legacy::instruction_builder::call_handler_size_budget(
                 AccountSizeClass::Medium,
                 other_accounts_budget,
             ),
-            Self::V2(_) => {
-                delegation_program_api::instruction_builder::call_handler_v2_size_budget(
-                    AccountSizeClass::Medium,
-                    AccountSizeClass::Medium,
-                    other_accounts_budget,
-                )
-            }
+            Self::V2(_) => dpi::legacy::instruction_builder::call_handler_v2_size_budget(
+                AccountSizeClass::Medium,
+                AccountSizeClass::Medium,
+                other_accounts_budget,
+            ),
         }
     }
 }
@@ -202,7 +201,7 @@ impl BaseActionTaskV1 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
         #[allow(deprecated)]
-        delegation_program_api::instruction_builder::call_handler(
+        dpi::legacy::instruction_builder::call_handler(
             *validator,
             action.destination_program,
             action.escrow_authority,
@@ -252,7 +251,7 @@ pub struct BaseActionTaskV2 {
 impl BaseActionTaskV2 {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         let action = &self.action;
-        delegation_program_api::instruction_builder::call_handler_v2(
+        dpi::legacy::instruction_builder::call_handler_v2(
             *validator,
             action.destination_program,
             self.source_program,
@@ -279,7 +278,7 @@ impl From<BaseActionTaskV2> for BaseActionTask {
 
 #[cfg(test)]
 mod tests {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         discriminator::DlpDiscriminator, pda::undelegation_request_pda_from_delegated_account,
     };
     use mbv_core::intent::ProgramArgs;
@@ -361,7 +360,7 @@ mod tests {
         }
         .instruction(&Pubkey::new_unique());
 
-        assert_eq!(ix.program_id, delegation_program_api::id());
+        assert_eq!(ix.program_id, dpi::id());
         assert_eq!(ix.data, DlpDiscriminator::Undelegate.to_vec());
         assert_eq!(ix.accounts.len(), 13);
         assert_eq!(

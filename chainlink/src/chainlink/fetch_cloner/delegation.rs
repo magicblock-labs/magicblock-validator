@@ -1,12 +1,14 @@
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use delegation_program_api::{
-    args::PostDelegationActions,
+use delegation_program_interface::{
     decrypt::Decrypt,
-    pda::{
-        delegation_record_pda_from_delegated_account,
-        undelegation_request_pda_from_delegated_account,
+    legacy::{
+        args::PostDelegationActions,
+        pda::{
+            delegation_record_pda_from_delegated_account,
+            undelegation_request_pda_from_delegated_account,
+        },
+        state::{DelegationRecord, UndelegationRequest},
     },
-    state::{DelegationRecord, UndelegationRequest},
 };
 use mbv_core::token_programs::{EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump};
 use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
@@ -273,7 +275,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     request: &crate::cloner::AccountCloneRequest,
     fetch_context: metrics::AccountFetchContext,
 ) -> ChainlinkResult<u32> {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
     };
     let image = request.account.read();
@@ -307,8 +309,8 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     };
     let record = record.fresh_account().ok_or_else(invalid)?;
     let metadata = metadata.fresh_account().ok_or_else(invalid)?;
-    if record.owner() != &delegation_program_api::id()
-        || metadata.owner() != &delegation_program_api::id()
+    if record.owner() != &delegation_program_interface::id()
+        || metadata.owner() != &delegation_program_interface::id()
     {
         return Err(invalid());
     }
@@ -334,9 +336,12 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
 
 #[cfg(test)]
 mod tests {
-    use delegation_program_api::args::{
-        EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
-        MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
+    use delegation_program_interface::{
+        self as dpi,
+        legacy::args::{
+            EncryptedBuffer, MaybeEncryptedAccountMeta, MaybeEncryptedInstruction,
+            MaybeEncryptedIxData, MaybeEncryptedPubkey, PostDelegationActions,
+        },
     };
     use solana_instruction::{AccountMeta, Instruction};
     use solana_program::pubkey::Pubkey;
@@ -377,11 +382,11 @@ mod tests {
                     program_id: 1,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            delegation_program_api::compact::AccountMeta::new_readonly(0, true),
+                            dpi::compact::AccountMeta::new_readonly(0, true),
                         ),
-                        MaybeEncryptedAccountMeta::ClearText(
-                            delegation_program_api::compact::AccountMeta::new(2, false),
-                        ),
+                        MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new(
+                            2, false,
+                        )),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![7, 8, 9],
@@ -455,16 +460,14 @@ mod tests {
         let program_id = Pubkey::new_unique();
         let account = Pubkey::new_unique();
 
-        let encrypted_program_id = delegation_program_api::encryption::encrypt_ed25519_recipient(
+        let encrypted_program_id = dpi::encryption::encrypt_ed25519_recipient(
             program_id.as_array(),
             validator.pubkey().as_array(),
         )
         .unwrap();
-        let encrypted_suffix = delegation_program_api::encryption::encrypt_ed25519_recipient(
-            &[3, 4, 5],
-            validator.pubkey().as_array(),
-        )
-        .unwrap();
+        let encrypted_suffix =
+            dpi::encryption::encrypt_ed25519_recipient(&[3, 4, 5], validator.pubkey().as_array())
+                .unwrap();
 
         let payload = serialize_record_with_actions(
             validator.pubkey(),
@@ -479,11 +482,11 @@ mod tests {
                     program_id: 2,
                     accounts: vec![
                         MaybeEncryptedAccountMeta::ClearText(
-                            delegation_program_api::compact::AccountMeta::new_readonly(0, true),
+                            dpi::compact::AccountMeta::new_readonly(0, true),
                         ),
-                        MaybeEncryptedAccountMeta::ClearText(
-                            delegation_program_api::compact::AccountMeta::new(1, false),
-                        ),
+                        MaybeEncryptedAccountMeta::ClearText(dpi::compact::AccountMeta::new(
+                            1, false,
+                        )),
                     ],
                     data: MaybeEncryptedIxData {
                         prefix: vec![1, 2],
@@ -514,7 +517,7 @@ mod tests {
     fn fails_when_encrypted_actions_have_wrong_validator_keypair() {
         let validator = Keypair::new();
         let wrong_validator = Keypair::new();
-        let encrypted_program_id = delegation_program_api::encryption::encrypt_ed25519_recipient(
+        let encrypted_program_id = dpi::encryption::encrypt_ed25519_recipient(
             Pubkey::new_unique().as_array(),
             validator.pubkey().as_array(),
         )

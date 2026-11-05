@@ -1,11 +1,14 @@
 #[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::args::{
-    EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        args::{
+            EncryptedBuffer, MaybeEncryptedInstruction, MaybeEncryptedIxData, PostDelegationActions,
+        },
+        pda::delegation_record_pda_from_delegated_account,
+        state::DelegationRecord,
+    },
 };
-#[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
-#[cfg(any(test, feature = "dev-context"))]
-use delegation_program_api::state::DelegationRecord;
 #[cfg(any(test, feature = "dev-context"))]
 use solana_account::Account;
 #[cfg(any(test, feature = "dev-context"))]
@@ -61,7 +64,7 @@ pub fn add_delegation_record_with_slot_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data: delegation_record_to_vec(&deleg_record),
             ..Default::default()
         },
@@ -105,7 +108,7 @@ pub fn add_delegation_record_with_actions_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data,
             ..Default::default()
         },
@@ -124,7 +127,7 @@ pub fn add_invalid_delegation_record_for(
     rpc_client.add_account(
         deleg_record_pubkey,
         Account {
-            owner: delegation_program_api::id(),
+            owner: dpi::id(),
             data: invalid_data,
             ..Default::default()
         },
@@ -138,7 +141,7 @@ pub fn add_delegation_metadata_for(
     pubkey: Pubkey,
     last_commit_id: u64,
 ) {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account,
         state::{DelegationMetadata, UndelegationRequester},
     };
@@ -153,7 +156,7 @@ pub fn add_delegation_metadata_for(
     rpc_client.add_account(
         delegation_metadata_pda_from_delegated_account(&pubkey),
         Account {
-            owner: delegation_program_api::id(),
+            owner: delegation_program_interface::id(),
             data,
             ..Default::default()
         },

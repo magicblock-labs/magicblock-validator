@@ -11,6 +11,7 @@ use ::metrics::metrics::{
     inc_account_subscription_account_updates_count, inc_per_program_account_updates_count,
     inc_program_subscription_account_updates_count, inc_pubsub_unsubscribe_timeout_count,
 };
+use delegation_program_interface as dpi;
 use futures_util::{future::join_all, stream::FuturesUnordered};
 use mbv_core::logger::{log_trace_debug, log_trace_warn};
 use parking_lot::Mutex;
@@ -845,7 +846,7 @@ impl ChainPubsubActor {
                                         SubscriptionSource::Program,
                                     );
                                 let should_forward = is_directly_subscribed
-                                    || program_pubkey.eq(&delegation_program_api::id())
+                                    || program_pubkey.eq(&dpi::id())
                                         && sub_update.account.is_some();
 
                                 if should_forward {

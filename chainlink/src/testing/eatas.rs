@@ -1,3 +1,4 @@
+use delegation_program_interface as dpi;
 pub use mbv_core::token_programs::{
     EATA_PROGRAM_ID, EphemeralAta, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, derive_ata,
     derive_ata_with_token_program, derive_eata,
@@ -100,7 +101,7 @@ pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate:
     }
     .into();
 
-    let account_owner = if delegate { delegation_program_api::id() } else { EATA_PROGRAM_ID };
+    let account_owner = if delegate { dpi::id() } else { EATA_PROGRAM_ID };
 
     Account {
         owner: account_owner,

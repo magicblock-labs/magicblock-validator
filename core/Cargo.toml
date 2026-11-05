@@ -15,7 +15,7 @@ tokio = { workspace = true, features = ["sync"] }
 wincode = { workspace = true }
 
 committor-interface = { workspace = true }
-delegation-program-api = { workspace = true }
+magicblock-delegation-program-interface = { workspace = true }
 magic-program-api = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-account = { workspace = true, features = ["wincode"] }

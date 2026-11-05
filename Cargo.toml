@@ -69,7 +69,7 @@ chainlink = { package = "magicblock-chainlink", path = "chainlink" }
 committor = { package = "magicblock-committor-service", path = "committor" }
 committor-interface = { package = "magicblock-committor-interface", path = "programs/committor-interface" }
 config = { package = "magicblock-config", path = "config" }
-delegation-program-api = { package = "magicblock-delegation-program-api", git = "https://github.com/magicblock-labs/delegation-program.git", rev = "fb6668c7b5ffd6a89bedee1d13b16402fd0e65de" }
+magicblock-delegation-program-interface = { git = "https://github.com/magicblock-labs/delegation-program.git", branch = "dlp-v2" }
 ledger-deprecated = { package = "magicblock-ledger-deprecated", path = "ledger" }
 magic-program-api = { package = "magicblock-magic-program-api", path = "programs/magic-interface" }
 mbv-core = { package = "magicblock-core", path = "core" }

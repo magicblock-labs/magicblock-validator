@@ -18,9 +18,12 @@ use ::metrics::metrics::{
 };
 use aml::RiskService;
 use config::config::{AllowedProgram, AmlCheckStrategy};
-use delegation_program_api::{
-    pda::delegation_record_pda_from_delegated_account,
-    state::{DelegationRecord, UndelegationRequest, discriminator::AccountDiscriminator},
+use delegation_program_interface::{
+    self as dpi,
+    legacy::{
+        pda::delegation_record_pda_from_delegated_account,
+        state::{DelegationRecord, UndelegationRequest, discriminator::AccountDiscriminator},
+    },
 };
 use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;
@@ -563,7 +566,7 @@ where
         };
         let accounts = self
             .remote_account_provider
-            .get_program_accounts_with_config(&delegation_program_api::id(), config)
+            .get_program_accounts_with_config(&dpi::id(), config)
             .await?;
 
         let mut requests = Vec::with_capacity(accounts.len());
@@ -1110,14 +1113,12 @@ where
         // named separately, or a stale confinement would never be normalized.
         let claims_delegation =
             request.account.read().is_any([AccountMode::Delegated, AccountMode::Magic]);
-        if request.account.read().owner() != delegation_program_api::id() || !claims_delegation {
+        if request.account.read().owner() != dpi::id() || !claims_delegation {
             return Ok(());
         }
 
         if request.pubkey
-            == delegation_program_api::pda::magic_fee_vault_pda_from_validator(
-                &self.validator_pubkey,
-            )
+            == dpi::legacy::pda::magic_fee_vault_pda_from_validator(&self.validator_pubkey)
         {
             return Ok(());
         }
@@ -1201,8 +1202,8 @@ where
         update: ForwardedSubscriptionUpdate,
     ) {
         let fresh_update_account = update.account.fresh_account();
-        let is_dlp_owned_update = fresh_update_account
-            .is_some_and(|account| account.owner() == &delegation_program_api::id());
+        let is_dlp_owned_update =
+            fresh_update_account.is_some_and(|account| account.owner() == &dpi::id());
         let is_internal_dlp_update = fresh_update_account
             .is_some_and(|account| is_internal_dlp_account_data(account.data()));
         let is_undelegation_request = is_dlp_owned_update
@@ -1756,7 +1757,7 @@ where
             return false;
         };
 
-        if account.owner() != &delegation_program_api::id() {
+        if account.owner() != &dpi::id() {
             return false;
         }
 
@@ -1994,7 +1995,7 @@ where
             .and_then(|mut accounts| accounts.pop())
             .and_then(RemoteAccount::into_fresh_account);
         if let Some(account) = account
-            && account.owner() == &delegation_program_api::id()
+            && account.owner() == &dpi::id()
             && let Some(request) = delegation::parse_undelegation_request(pubkey, account.data())
         {
             self.publish_undelegation_request(pubkey, request, account.slot());
@@ -2134,7 +2135,7 @@ where
             companion_pubkey,
             companion_account,
         } = snapshot;
-        if account.read().owner() != delegation_program_api::id() {
+        if account.read().owner() != dpi::id() {
             return Some(
                 ata_projection::maybe_project_ata_from_subscription_update(
                     self,

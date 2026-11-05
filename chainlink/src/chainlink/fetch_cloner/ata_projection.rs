@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
-use delegation_program_api::state::DelegationRecord;
+use delegation_program_interface::legacy::state::DelegationRecord;
 use futures_util::future::{FutureExt, join_all};
 use mbv_core::token_programs::{
     AtaInfo, EATA_PROGRAM_ID, EphemeralAta, is_ata, try_derive_eata_address_and_bump,

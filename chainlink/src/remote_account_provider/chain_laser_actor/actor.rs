@@ -13,6 +13,7 @@ use ::metrics::metrics::{
     inc_program_subscription_account_updates_count,
 };
 use config::config::GrpcConfig;
+use delegation_program_interface as dpi;
 use helius_laserstream::{
     LaserstreamConfig, LaserstreamError,
     grpc::{CommitmentLevel, SubscribeUpdate, subscribe_update::UpdateOneof},
@@ -742,8 +743,7 @@ impl<H: StreamHandle, S: StreamFactory<H>> ChainLaserActor<H, S> {
         }
 
         let should_forward = self.stream_manager.is_subscribed(&pubkey)
-            || matches!(source, AccountUpdateSource::Program)
-                && owner.eq(&delegation_program_api::id());
+            || matches!(source, AccountUpdateSource::Program) && owner.eq(&dpi::id());
         if !should_forward {
             return;
         }

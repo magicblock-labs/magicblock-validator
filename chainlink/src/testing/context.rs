@@ -5,6 +5,7 @@ use std::{
 };
 
 use aml::RiskService;
+use delegation_program_interface as dpi;
 use engine::{
     Engine,
     testkit::{Pacing, TestEngine},
@@ -241,7 +242,7 @@ impl TestContext {
         // Magicblock program marks account as undelegated in the Ephem
         let reader = |account: &AccountSharedData| {
             AccountBuilder::from(AccountSharedData::from(account.owned()))
-                .owner(delegation_program_api::id())
+                .owner(dpi::id())
                 .mode(AccountMode::Undelegating)
         };
         let account = self
@@ -279,7 +280,7 @@ impl TestContext {
         .mode(AccountMode::Mirrored)
         .build();
         let delegation_record_pubkey =
-            delegation_program_api::pda::delegation_record_pda_from_delegated_account(pubkey);
+            dpi::legacy::pda::delegation_record_pda_from_delegated_account(pubkey);
         self.rpc_client.remove_account(&delegation_record_pubkey);
         self.materialize_subscription_update(
             *pubkey,
@@ -305,7 +306,7 @@ impl TestContext {
 
         // Update account to be delegated on chain and send a sub update
         let acc = self.rpc_client.get_account_at_slot(pubkey).unwrap();
-        let delegated_acc = account_shared_with_owner(&acc.account, delegation_program_api::id());
+        let delegated_acc = account_shared_with_owner(&acc.account, dpi::id());
         let mode = if authority == &self.validator_pubkey {
             AccountMode::Delegated
         } else {

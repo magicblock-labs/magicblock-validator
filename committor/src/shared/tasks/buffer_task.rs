@@ -8,7 +8,7 @@ use committor_interface::{
     },
     pdas,
 };
-use delegation_program_api::diff::compute_diff;
+use delegation_program_interface::diff::compute_diff;
 use program::Pubkey;
 use solana_instruction::Instruction;
 

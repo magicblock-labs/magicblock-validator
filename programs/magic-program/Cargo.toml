@@ -10,7 +10,7 @@ version = { workspace = true }
 [dependencies]
 lazy_static = { workspace = true }
 mbv-core = { workspace = true }
-delegation-program-api = { workspace = true }
+magicblock-delegation-program-interface = { workspace = true }
 magic-program-api = { workspace = true }
 nucleus = { workspace = true, features = ["tls"] }
 num-derive = { workspace = true }

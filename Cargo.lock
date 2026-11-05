@@ -3720,7 +3720,7 @@ dependencies = [
  "isocountry",
  "magic-domain-program",
  "magicblock-config",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "rand 0.9.5",
  "serde_json",
  "solana-commitment-config",
@@ -3856,7 +3856,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-keeper",
@@ -3939,7 +3939,7 @@ dependencies = [
  "magicblock-chainlink",
  "magicblock-committor-interface",
  "magicblock-core",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-metrics",
@@ -4006,7 +4006,7 @@ dependencies = [
  "console-subscriber",
  "git-version",
  "magicblock-committor-interface",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-magic-program-api",
  "serde",
  "solana-account 4.3.1",
@@ -4033,9 +4033,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-delegation-program-api"
-version = "3.1.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=fb6668c7b5ffd6a89bedee1d13b16402fd0e65de#fb6668c7b5ffd6a89bedee1d13b16402fd0e65de"
+name = "magicblock-delegation-program-interface"
+version = "0.1.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?branch=dlp-v2#7f3017e0c1384cbcf2b9b7ea6592333f0d9fb0f7"
 dependencies = [
  "bincode",
  "borsh",
@@ -4059,7 +4059,8 @@ dependencies = [
  "solana-system-interface 3.2.0",
  "static_assertions",
  "strum",
- "thiserror 2.0.20",
+ "thiserror 1.0.69",
+ "wheels",
 ]
 
 [[package]]
@@ -4291,7 +4292,7 @@ dependencies = [
  "lazy_static",
  "magicblock-chainlink",
  "magicblock-core",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-keeper",
@@ -4403,7 +4404,7 @@ dependencies = [
  "futures-util",
  "magicblock-chainlink",
  "magicblock-core",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-magic-program-api",
@@ -4492,7 +4493,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program-api",
+ "magicblock-delegation-program-interface",
  "magicblock-engine",
  "magicblock-engine-nucleus",
  "magicblock-ledger-deprecated",
@@ -10189,6 +10190,30 @@ dependencies = [
  "lazy_static",
  "serde",
  "wezterm-dynamic",
+]
+
+[[package]]
+name = "wheels"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "deaae74ac810f4d2fd67047aea6d16de516a6c272a6fe9414532d0e6936fdf33"
+dependencies = [
+ "bytemuck",
+ "pinocchio 0.10.2",
+ "pinocchio-log",
+ "solana-address 2.6.1",
+ "wheels-macros",
+]
+
+[[package]]
+name = "wheels-macros"
+version = "0.1.0-alpha.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "571c943c5397e6e49ce00b0fcded42904865d624c1098ac4292630f9547d7946"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
