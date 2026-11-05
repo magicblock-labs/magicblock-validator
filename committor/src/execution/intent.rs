@@ -93,7 +93,7 @@ impl ExecutionContext {
         intent: &ScheduledIntentBundle,
         committed_pubkeys: &[Pubkey],
     ) -> IntentExecutorResult<TransactionPlan> {
-        let authority = self.authority.pubkey();
+        let authority = self.signer().pubkey();
         let pending = PendingExecution::from_status(status);
         if pending.is_none() && committed_pubkeys.is_empty() {
             // Standalone actions use one transaction with a per-intent uniqueness nonce.
@@ -142,7 +142,7 @@ impl ExecutionContext {
                 .await
                 .map_err(TaskBuilderError::FollowUpTasksBuildError)?;
             let pubkeys: Vec<_> = accounts.iter().map(|(pubkey, _)| *pubkey).collect();
-            self.intent_client.finalize_legacy_commits(&self.authority, &pubkeys).await?;
+            self.intent_client.finalize_legacy_commits(self.signer(), &pubkeys).await?;
         }
 
         // The commit is confirmed; only actions and undelegation remain.
@@ -154,7 +154,7 @@ impl ExecutionContext {
             .then_some(intent.intent_id);
         Ok(TaskStrategist::build_strategy(
             tasks,
-            &self.authority.pubkey(),
+            &self.signer().pubkey(),
             uniqueness_nonce,
         )?)
     }

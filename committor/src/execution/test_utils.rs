@@ -1,9 +1,11 @@
 use std::{
     collections::VecDeque,
+    rc::Rc,
     sync::{Arc, Mutex},
 };
 
 use async_trait::async_trait;
+use engine::{Engine, testkit::TestEngine};
 use mbv_core::{
     intent::{BaseAction, BaseActionCallback, ProgramArgs},
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
@@ -238,6 +240,7 @@ impl ActionsCallbackScheduler for Callbacks {
 
 pub(super) struct Executor {
     pub context: ExecutionContext,
+    _test_engine: Rc<TestEngine>,
     pub transaction_preparator: RecordingPreparator,
     pub outbox_client: Arc<RecordingOutbox>,
     pub actions_callback_executor: Callbacks,
@@ -266,7 +269,7 @@ pub(super) fn mock_response(
     );
 }
 
-pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor {
+pub(super) async fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor {
     let mut mocks = MocksMap::default();
     if let Some(error) = error {
         mock_response(
@@ -287,8 +290,9 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
         ..Default::default()
     });
     let actions_callback_executor = Callbacks::default();
+    let test_engine = Rc::new(TestEngine::new().await);
     let context = ExecutionContext {
-        authority: Keypair::new(),
+        engine: Engine::clone(test_engine.as_ref()),
         intent_client: crate::execution::client::IntentExecutionClient::new(rpc.clone(), 0),
         transaction_preparator: Arc::new(transaction_preparator.clone()),
         task_info_provider: Arc::new(RpcTaskInfoProvider::new(rpc)),
@@ -300,6 +304,7 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
     };
     Executor {
         context,
+        _test_engine: test_engine,
         transaction_preparator,
         outbox_client,
         actions_callback_executor,

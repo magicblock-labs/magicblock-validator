@@ -69,7 +69,7 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
     for phase in ["combined", "commit", "follow_up"] {
         for has_pending_transaction in [false, true] {
             let steps = if has_pending_transaction { vec![] } else { vec![Preparation::Wait] };
-            let mut ctx = executor(steps, None);
+            let mut ctx = executor(steps, None).await;
             let pending = PendingTransaction {
                 signature: Signature::new_unique(),
                 blockhash: solana_hash::Hash::default(),
@@ -171,7 +171,7 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
     }
 
     // Resuming an empty follow-up reports only the transaction that actually ran.
-    let ctx = executor(vec![], None);
+    let ctx = executor(vec![], None).await;
     let mut report = IntentExecutionReport::default();
     let commit_signature = Signature::new_unique();
     let result = TransactionExecutor::resume_follow_up(
@@ -199,7 +199,7 @@ async fn timeout_preserves_actions_and_resolves_pending_transactions() {
 
 #[tokio::test(start_paused = true)]
 async fn timeout_keeps_attempts_already_spent_on_current_transaction() {
-    let executor = executor(vec![Preparation::Wait], None);
+    let executor = executor(vec![Preparation::Wait], None).await;
     let mut report = IntentExecutionReport::default();
     let mut runner = TransactionExecutor::new(
         &executor,
@@ -231,7 +231,7 @@ async fn recovery_preserves_progress_and_resources() {
         (vec![Preparation::Ready, Preparation::Fail], None),
     ] {
         let expected_preparations = steps.len();
-        let executor = executor(steps, error);
+        let executor = executor(steps, error).await;
         let mut report = IntentExecutionReport::default();
         let result = TransactionExecutor::new(
             &executor,
@@ -282,7 +282,7 @@ async fn recovery_preserves_progress_and_resources() {
             );
         }
         clean(
-            &executor.authority,
+            executor.signer(),
             &executor.transaction_preparator,
             report.cleanup,
             false,
@@ -338,7 +338,7 @@ async fn recovery_preserves_progress_and_resources() {
         let undelegation_failed = matches!(tasks[failed_task], Task::Undelegate(_));
         let instruction = TransactionUtils::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize + failed_task;
         let error = format!(r#"{{"InstructionError":[{instruction},{{"Custom":1}}]}}"#);
-        let mut ctx = executor(vec![], Some(&error));
+        let mut ctx = executor(vec![], Some(&error)).await;
         let has_commits = tasks.iter().any(|task| matches!(task, Task::CommitFinalize(_)));
         if !has_commits {
             let outbox = Arc::new(RecordingOutbox::default());
@@ -405,7 +405,7 @@ async fn recovery_preserves_progress_and_resources() {
             assert_eq!(report.cleanup.len(), prepared.len());
         }
         clean(
-            &ctx.authority,
+            ctx.signer(),
             &ctx.transaction_preparator,
             report.cleanup,
             succeeds,
@@ -429,7 +429,7 @@ async fn recovery_preserves_progress_and_resources() {
     use crate::execution::preparation::{Preparator, cleanup_resources::CleanupResources};
     let authority = solana_keypair::Keypair::new();
     let rpc = MagicblockRpcClient::from(RpcClient::new_mock("succeeds".to_owned()));
-    let tables = table_mania::TableMania::new(rpc.clone(), &authority, None);
+    let tables = table_mania::TableMania::new(rpc.clone(), authority.pubkey());
     let shared = HashSet::from([RESERVED_ALT_KEY]);
     let mut other_intent = HashSet::new();
     tables.reserve_pubkeys(&authority, &shared, &mut other_intent).await.unwrap();

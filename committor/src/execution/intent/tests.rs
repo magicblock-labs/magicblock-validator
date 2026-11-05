@@ -187,7 +187,8 @@ async fn intent_execution_preserves_recovery_and_completion() {
         let base = executor(
             if failure == PreparationFailure { vec![Preparation::Fail] } else { vec![] },
             Option::None,
-        );
+        )
+        .await;
         let outbox = Arc::new(RecordingOutbox {
             expected_commit_nonces: if actions_only {
                 vec![]
@@ -206,7 +207,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
         let preparator = base.transaction_preparator.clone();
         let callbacks = base.actions_callback_executor.clone();
         let ctx = ExecutionContext {
-            authority: base.context.authority,
+            engine: base.context.engine,
             intent_client: IntentExecutionClient::new(rpc, 0),
             transaction_preparator: Arc::new(base.transaction_preparator),
             task_info_provider: info.clone(),
@@ -322,7 +323,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
             assert!(!result.is_retriable(true));
         }
         crate::execution::cleanup::clean(
-            &ctx.authority,
+            ctx.signer(),
             ctx.transaction_preparator.as_ref(),
             cleanup,
             succeeds,
