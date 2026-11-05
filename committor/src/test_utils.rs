@@ -7,13 +7,11 @@ use solana_account::Account;
 use solana_pubkey::Pubkey;
 
 use crate::shared::account_state::{
-    AccountSnapshot, DelegationMetadata, DelegationProtocol, TaskInfoProvider,
-    TaskInfoProviderResult,
+    AccountSnapshot, DelegationInfo, DelegationVersion, TaskInfoProvider, TaskInfoProviderResult,
 };
 
 #[derive(Default)]
 pub(crate) struct MockInfoProvider {
-    pub default_commit_id: u64,
     pub delegation_info: HashMap<Pubkey, (UndelegationRequester, Pubkey)>,
     /// `None` allows a lookup that intentionally returns no account.
     pub base_accounts: HashMap<Pubkey, Option<Account>>,
@@ -25,7 +23,7 @@ impl TaskInfoProvider for MockInfoProvider {
         &self,
         accounts: &[AccountSnapshot],
         _: u64,
-    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationMetadata>> {
+    ) -> TaskInfoProviderResult<HashMap<Pubkey, DelegationInfo>> {
         Ok(accounts
             .iter()
             .map(|(pubkey, _)| {
@@ -36,10 +34,9 @@ impl TaskInfoProvider for MockInfoProvider {
                     .unwrap_or((UndelegationRequester::None, *pubkey));
                 (
                     *pubkey,
-                    DelegationMetadata {
-                        last_commit_id: self.default_commit_id,
+                    DelegationInfo {
                         undelegation_requester,
-                        protocol: DelegationProtocol::Legacy,
+                        version: DelegationVersion::Legacy,
                         rent_payer,
                     },
                 )

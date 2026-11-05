@@ -805,6 +805,7 @@ mod tests {
                         ..Account::default()
                     },
                     remote_slot: 1,
+                    commit_id: 1,
                 },
                 None,
             );

@@ -38,7 +38,6 @@ pub(crate) enum DelegationVersion {
 
 #[derive(Clone, Debug)]
 pub(crate) struct DelegationInfo {
-    pub last_commit_id: u64,
     pub undelegation_requester: UndelegationRequester,
     pub rent_payer: Pubkey,
     pub version: DelegationVersion,
@@ -106,7 +105,7 @@ impl RpcTaskInfoProvider {
             .flat_map(|(account, _)| {
                 [
                     dpi::legacy::pda::delegation_record_pda_from_delegated_account(account),
-                    dpi::legacy::pda::delegation_info_pda_from_delegated_account(account),
+                    dpi::legacy::pda::delegation_metadata_pda_from_delegated_account(account),
                     dpi::delegation_state_pda(account),
                 ]
             })
@@ -306,7 +305,6 @@ fn parse_delegation_info(
             Ok((
                 record.delegation_slot,
                 DelegationInfo {
-                    last_commit_id: metadata.last_commit_id,
                     undelegation_requester: requester,
                     rent_payer: metadata.rent_payer,
                     version: DelegationVersion::Legacy,
@@ -331,7 +329,6 @@ fn parse_delegation_info(
             Ok((
                 state.delegation_slot(),
                 DelegationInfo {
-                    last_commit_id: state.last_commit_id(),
                     undelegation_requester: requester,
                     rent_payer: *state.rent_payer(),
                     version: DelegationVersion::V2 {

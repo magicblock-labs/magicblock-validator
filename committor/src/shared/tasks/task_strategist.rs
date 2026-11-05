@@ -809,7 +809,6 @@ mod tests {
                     let mut base = accounts[0].account.clone();
                     base.data[0] = 0;
                     let info_provider = Arc::new(MockInfoProvider {
-                        default_commit_id: 7,
                         base_accounts: if use_diff {
                             HashMap::from([(pubkey, Some(base))])
                         } else {
