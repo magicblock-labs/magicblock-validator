@@ -78,12 +78,12 @@ impl RpcTaskInfoProvider {
                 [
                     Pubkey::find_program_address(
                         delegation_record_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &delegation_program_interface::id(),
                     )
                     .0,
                     Pubkey::find_program_address(
                         delegation_metadata_seeds_from_delegated_account!(delegated_account),
-                        &delegation_program_api::id(),
+                        &delegation_program_interface::id(),
                     )
                     .0,
                 ]
