@@ -15,10 +15,19 @@ pub(crate) enum BlockRange {
 }
 
 impl RpcHandlers {
-    pub(crate) fn get_blocks(&self, request: &JsonRequest, range: BlockRange) -> HandlerResult {
+    pub(crate) async fn first_available_block(&self, request: &JsonRequest) -> HandlerResult {
+        let slot = self.history.first_available_block().await?;
+        ResponsePayload::encode_no_context(&request.id, slot)
+    }
+
+    pub(crate) async fn get_blocks(
+        &self,
+        request: &JsonRequest,
+        range: BlockRange,
+    ) -> HandlerResult {
         let start = request.required::<Slot>(0)?;
         let latest = self.engine.blocks().latest().slot;
-        let slots: Vec<Slot> = match range {
+        let (end, limit) = match range {
             BlockRange::EndSlot => {
                 let end = request
                     .optional::<Slot>(1)?
@@ -30,14 +39,14 @@ impl RpcHandlers {
                         "start slot is greater than the end slot",
                     ));
                 }
-                (start..=end).collect()
+                (end, MAX_BLOCKS as usize + 1)
             }
             BlockRange::Limit => {
                 let limit = request.required::<Slot>(1)?.min(MAX_BLOCKS);
-                let end = start.saturating_add(limit).min(latest.saturating_add(1));
-                (start..end).collect()
+                (latest, limit as usize)
             }
         };
+        let slots = self.history.slots(start, end, limit).await?;
         ResponsePayload::encode_no_context(&request.id, slots)
     }
 }

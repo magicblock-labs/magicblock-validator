@@ -1,12 +1,19 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
+use engine::testkit::{Pacing, TestEngine};
+use keeper::testkit::{Dirs, keeper_builder};
 use setup::RpcTestEnv;
 use solana_hash::Hash;
-use solana_rpc_client_api::config::RpcBlockConfig;
+use solana_rpc_client_api::{
+    client_error::ErrorKind,
+    config::RpcBlockConfig,
+    request::{RpcError, RpcRequest},
+};
 use solana_transaction_status::UiTransactionEncoding;
 
 mod setup;
 
+/// Proves retained block reads, slot listings, and availability boundaries agree.
 #[tokio::test]
 async fn block_rpc_methods() {
     let mut env = RpcTestEnv::new().await;
@@ -84,7 +91,49 @@ async fn block_rpc_methods() {
         (start..start + 3).collect::<Vec<_>>()
     );
 
+    let first = *env.engine.blocks().retained_range().unwrap().start();
+    assert_eq!(env.rpc.get_first_available_block().await.unwrap(), first);
+    assert_eq!(env.rpc.minimum_ledger_slot().await.unwrap(), first);
+
     let parent = env.rpc.get_block(latest - 1).await.unwrap();
     let child = env.rpc.get_block(latest).await.unwrap();
     assert_eq!(child.previous_blockhash, parent.blockhash);
+}
+
+/// Proves pruning advances both boundaries, removes listed slots, and reports cleaned blocks.
+#[tokio::test]
+async fn pruned_block_history() {
+    let dirs = Dirs::default();
+    let mut builder = keeper_builder(&dirs);
+    builder.ledger.size_limit = 0;
+    builder.blockstore.superblock = 256;
+    let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
+    let mut env = RpcTestEnv::with_engine(engine).await;
+    env.engine.advance(514).await;
+    env.engine.sync().await;
+    let first = env.rpc.get_first_available_block().await.unwrap();
+    assert!(first > 0);
+    assert_eq!(env.rpc.minimum_ledger_slot().await.unwrap(), first);
+    assert_eq!(
+        env.rpc.get_blocks(0, Some(first)).await.unwrap(),
+        vec![first]
+    );
+    assert_eq!(
+        env.rpc.get_blocks_with_limit(0, 2).await.unwrap(),
+        vec![first, first + 1]
+    );
+    for method in ["getBlock", "getBlockTime"] {
+        let error = env
+            .rpc
+            .send::<json::Value>(RpcRequest::Custom { method }, json::json!([first - 1]))
+            .await
+            .unwrap_err();
+        match error.kind() {
+            ErrorKind::RpcError(RpcError::RpcResponseError { code, message, .. }) => {
+                assert_eq!(*code, -32001);
+                assert!(message.contains(&format!("First available block: {first}")));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
 }

@@ -16,7 +16,7 @@ use tokio::{sync::Semaphore, task::block_in_place};
 
 use crate::{
     RpcResult,
-    error::{BLOCK_NOT_FOUND, RpcError},
+    error::{BLOCK_CLEANED_UP, BLOCK_NOT_FOUND, RpcError},
     transaction::confirmed_transaction,
 };
 
@@ -89,6 +89,43 @@ impl History {
             .map(|block| block.block().time);
         encode(Some(confirmed_transaction(transaction, block_time)?))
     }
+    /// Lists available history across Engine and the read-only legacy ledger.
+    pub(crate) async fn slots(&self, start: Slot, end: Slot, limit: usize) -> RpcResult<Vec<Slot>> {
+        if start > end || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let Some(retained) = self.engine.blocks().retained_range() else {
+            return self.with_ledger(|ledger| ledger.get_block_slots(start..=end, limit)).await;
+        };
+        let first = *retained.start();
+        let mut slots = if start < first {
+            let legacy_end = end.min(first - 1);
+            self.with_ledger(|ledger| ledger.get_block_slots(start..=legacy_end, limit))
+                .await?
+        } else {
+            Vec::new()
+        };
+        slots.extend((start.max(first)..=end.min(*retained.end())).take(limit - slots.len()));
+        Ok(slots)
+    }
+
+    pub(crate) async fn first_available_block(&self) -> RpcResult<Slot> {
+        Ok(self.slots(0, Slot::MAX, 1).await?.first().copied().unwrap_or_default())
+    }
+
+    async fn check_cleaned_block(&self, slot: Slot) -> RpcResult<()> {
+        let first = self.first_available_block().await?;
+        if slot < first {
+            return Err(RpcError::custom(
+                format!(
+                    "Block {slot} cleaned up, does not exist on node. First available block: {first}"
+                ),
+                BLOCK_CLEANED_UP,
+            ));
+        }
+        Ok(())
+    }
+
     /// Encode the requested block details, falling back only when Engine has no record.
     pub(crate) async fn block(
         &self,
@@ -107,18 +144,23 @@ impl History {
         if let Some(block) = block {
             return encode_engine_block(block, encoding, options).map(Some);
         }
-        self.with_ledger(|ledger| {
-            ledger
-                .get_block(slot)?
-                .map(ConfirmedBlock::from)
-                .map(|block| {
-                    block.encode_with_options(encoding, options).map_err(|error| {
-                        RpcError::internal(format!("failed to encode legacy block: {error}"))
+        let block = self
+            .with_ledger(|ledger| {
+                ledger
+                    .get_block(slot)?
+                    .map(ConfirmedBlock::from)
+                    .map(|block| {
+                        block.encode_with_options(encoding, options).map_err(|error| {
+                            RpcError::internal(format!("failed to encode legacy block: {error}"))
+                        })
                     })
-                })
-                .transpose()
-        })
-        .await
+                    .transpose()
+            })
+            .await?;
+        if block.is_none() {
+            self.check_cleaned_block(slot).await?;
+        }
+        Ok(block)
     }
     /// Resolve a retained block time or report a skipped/unavailable slot.
     pub(crate) async fn block_time(&self, block: Slot) -> RpcResult<i64> {
@@ -134,7 +176,11 @@ impl History {
         if let Some(block) = engine_block {
             return Ok(block.block().time);
         }
-        self.with_ledger(|ledger| ledger.get_block_time(block)).await?.ok_or_else(|| {
+        let time = self.with_ledger(|ledger| ledger.get_block_time(block)).await?;
+        if time.is_none() {
+            self.check_cleaned_block(block).await?;
+        }
+        time.ok_or_else(|| {
             RpcError::custom(
                 format!("Slot {block} was skipped, or is not yet available"),
                 BLOCK_NOT_FOUND,

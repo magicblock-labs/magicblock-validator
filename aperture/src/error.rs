@@ -3,6 +3,7 @@ use std::{error::Error, fmt::Display};
 use serde::Serialize;
 use solana_transaction_error::TransactionError;
 
+pub(crate) const BLOCK_CLEANED_UP: i16 = -32001;
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
 pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;

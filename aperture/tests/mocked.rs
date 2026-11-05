@@ -27,19 +27,6 @@ async fn test_get_slot_leaders() {
     );
 }
 
-/// Verifies the mocked `getFirstAvailableBlock` RPC method.
-#[tokio::test]
-async fn test_get_first_available_block() {
-    let env = RpcTestEnv::new().await;
-    let block = env
-        .rpc
-        .get_first_available_block()
-        .await
-        .expect("get_first_available_block request failed");
-
-    assert_eq!(block, 0, "first available block should be 0");
-}
-
 /// Verifies the mocked `getLargestAccounts` RPC method.
 #[tokio::test]
 async fn test_get_largest_accounts() {
