@@ -144,10 +144,7 @@ async fn intent_execution_preserves_recovery_and_completion() {
             intent.intent_bundle = Default::default();
             intent.intent_bundle.standalone_actions.push(base_action());
         }
-        let info = Arc::new(MockInfoProvider {
-            default_commit_id: 1,
-            ..Default::default()
-        });
+        let info = Arc::new(MockInfoProvider { ..Default::default() });
         let mut mocks = MocksMap::default();
         if matches!(status, OutboxIntentBundleStatus::Executing(_)) {
             let statuses = match resolution {

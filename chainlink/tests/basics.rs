@@ -82,9 +82,9 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         .unwrap();
     assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);
 
-    // We fetch the account once then realize it is owned by the delegation record.
-    // Then we fetch both again to ensure same slot
-    assert_eq!(chainlink.fetch_count().unwrap(), 3);
+    // Fetch the account once, then fetch it with both delegation-record layouts
+    // to ensure all three accounts have the same slot.
+    assert_eq!(chainlink.fetch_count().unwrap(), 4);
 
     // 2. Ensure account again which gets it from bank (without fetching again)
     chainlink
@@ -93,5 +93,5 @@ async fn test_remote_slot_of_ensure_accounts_from_bank() {
         .unwrap();
     assert_cloned_as_delegated!(bank, &[pubkey], slot, owner);
     // Since the account is already in the bank, we don't fetch it again
-    assert_eq!(chainlink.fetch_count().unwrap(), 3);
+    assert_eq!(chainlink.fetch_count().unwrap(), 4);
 }

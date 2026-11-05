@@ -1,7 +1,8 @@
 use std::{collections::HashSet, fmt};
 
-use delegation_program_interface::legacy::state::{
-    CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig,
+use delegation_program_interface::{
+    DelegationState,
+    legacy::state::{CommitRecord, DelegationMetadata, DelegationRecord, ProgramConfig},
 };
 use solana_account::Account;
 use solana_account_decoder::UiAccount;
@@ -11,6 +12,7 @@ use solana_pubkey::Pubkey;
 use solana_rpc_client_api::response::Response as RpcResponse;
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
+use wheels::layout::Decodable;
 
 use crate::remote_account_provider::RemoteAccountProviderResult;
 
@@ -99,6 +101,8 @@ pub(crate) fn is_delegation_record_data(data: &[u8]) -> bool {
 
 pub(crate) fn is_internal_dlp_account_data(data: &[u8]) -> bool {
     is_delegation_record_data(data)
+        || DelegationState::decode(data)
+            .is_ok_and(|state| state.discriminator() == DelegationState::DISCRIMINATOR)
         || DelegationMetadata::try_from_bytes_with_discriminator(data).is_ok()
         || CommitRecord::try_from_bytes_with_discriminator(data).is_ok()
         || ProgramConfig::try_from_bytes_with_discriminator(data).is_ok()

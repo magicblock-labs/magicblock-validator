@@ -1,5 +1,6 @@
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use delegation_program_interface::{
+    self as dpi, DelegationCluster, DelegationState,
     decrypt::Decrypt,
     legacy::{
         args::PostDelegationActions, pda::delegation_record_pda_from_delegated_account,
@@ -13,6 +14,7 @@ use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use tracing::*;
+use wheels::layout::Decodable;
 
 use super::{
     CompanionFetchLogContext, FetchCloner, log_companion_fetch_failure,
@@ -25,6 +27,68 @@ use crate::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
     },
 };
+
+/// Resolves a v2 state into the shared delegation record used by Chainlink's
+/// account-mode projection. V2 authority comes from the validated cluster.
+pub(super) async fn parse_v2_delegation_record<T: ChainRpcClient, U: ChainPubsubClient>(
+    this: &FetchCloner<T, U>,
+    delegated_pubkey: Pubkey,
+    state_pubkey: Pubkey,
+    state_account: &AccountBuilder,
+    fetch_context: metrics::AccountFetchContext,
+) -> ChainlinkResult<DelegationRecord> {
+    let invalid =
+        || ChainlinkError::InvalidDelegationRecord(state_pubkey, ProgramError::InvalidAccountData);
+    let state = state_account.read();
+    if state.owner() != dpi::id() || dpi::delegation_state_pda(&delegated_pubkey) != state_pubkey {
+        return Err(invalid());
+    }
+    let state_slot = state.slot();
+    let state = DelegationState::decode(state.data()).map_err(|_| invalid())?;
+    let (owner, delegation_slot, lamports, cluster_pubkey) = (
+        *state.original_owner(),
+        state.delegation_slot(),
+        state.lamports(),
+        *state.delegation_cluster(),
+    );
+    if state.discriminator() != DelegationState::DISCRIMINATOR
+        || *state.delegated_account() != delegated_pubkey
+        || delegation_slot > state_slot
+    {
+        return Err(invalid());
+    }
+    let cluster_accounts = this
+        .remote_account_provider
+        .fetch_snapshot_until_slot(
+            &[cluster_pubkey],
+            state_slot,
+            fetch_context,
+            ChainlinkCompanionFetchKind::DelegationRecord,
+        )
+        .await?;
+    let [cluster_account] = cluster_accounts.as_slice() else {
+        return Err(invalid());
+    };
+    let cluster_account = cluster_account.fresh_account().ok_or_else(invalid)?;
+    if cluster_account.owner() != &dpi::id() {
+        return Err(invalid());
+    }
+    let cluster = DelegationCluster::decode(cluster_account.data()).map_err(|_| invalid())?;
+    if cluster.discriminator() != DelegationCluster::DISCRIMINATOR
+        || *cluster.cluster_id() != cluster_pubkey
+        || dpi::delegation_cluster_pda(cluster.cluster_id()) != cluster_pubkey
+        || cluster.challenge_config().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(DelegationRecord {
+        authority: *cluster.current_validator(),
+        owner,
+        delegation_slot,
+        lamports,
+        commit_frequency_ms: 0,
+    })
+}
 
 /// Parses a delegation record from account data bytes. Returns the parsed DelegationRecord
 /// or {InvalidDelegationRecord, InvalidDelegationActions} error if parsing fails.
@@ -259,6 +323,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     request: &crate::cloner::AccountCloneRequest,
     fetch_context: metrics::AccountFetchContext,
 ) -> ChainlinkResult<u32> {
+    use delegation_program_interface::DelegationState;
     use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
     };
@@ -277,10 +342,11 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     };
     let record_pubkey = delegation_record_pda_from_delegated_account(&delegated_pubkey);
     let metadata_pubkey = delegation_metadata_pda_from_delegated_account(&delegated_pubkey);
+    let state_pubkey = dpi::delegation_state_pda(&delegated_pubkey);
     let accounts = this
         .remote_account_provider
         .fetch_snapshot_until_slot(
-            &[record_pubkey, metadata_pubkey],
+            &[record_pubkey, metadata_pubkey, state_pubkey],
             request.source_slots().view,
             fetch_context,
             ChainlinkCompanionFetchKind::DelegationRecord,
@@ -288,9 +354,24 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
         .await?;
     let invalid =
         || ChainlinkError::InvalidDelegationRecord(record_pubkey, ProgramError::InvalidAccountData);
-    let [record, metadata] = accounts.as_slice() else {
+    let [record, metadata, state] = accounts.as_slice() else {
         return Err(invalid());
     };
+    if let Some(state) = state.fresh_account() {
+        if record.is_found() || metadata.is_found() || state.owner() != &dpi::id() {
+            return Err(invalid());
+        }
+        let state_view = DelegationState::decode(state.data()).map_err(|_| invalid())?;
+        if state_view.discriminator() != DelegationState::DISCRIMINATOR
+            || *state_view.delegated_account() != delegated_pubkey
+            || *state_view.original_owner()
+                != if request.is_ata_projection() { EATA_PROGRAM_ID } else { image.owner() }
+            || state_view.delegation_slot() != image.slot()
+        {
+            return Err(invalid());
+        }
+        return Ok(state_view.last_commit_seq());
+    }
     let record = record.fresh_account().ok_or_else(invalid)?;
     let metadata = metadata.fresh_account().ok_or_else(invalid)?;
     if record.owner() != &delegation_program_interface::id()

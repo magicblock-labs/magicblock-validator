@@ -1986,6 +1986,7 @@ where
 
         let min_context_slot = account.slot();
         let record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
+        let state_pubkey = dpi::delegation_state_pda(&pubkey);
         let acquired_record = self
             .acquire_subscription_reason(&record_pubkey, SubscriptionReason::DelegationRecord)
             .await
@@ -1998,13 +1999,23 @@ where
                 );
                 false
             });
+        let acquired_state = self
+            .acquire_subscription_reason(&state_pubkey, SubscriptionReason::DelegationRecord)
+            .await
+            .map(|_| true)
+            .unwrap_or_else(|error| {
+                warn!(
+                    pubkey = %state_pubkey,
+                    error = ?error,
+                    "Failed to acquire delegation state subscription reason"
+                );
+                false
+            });
         let fetched = self
-            .task_to_fetch_with_companion(
+            .task_to_fetch_with_delegation_record(
                 pubkey,
-                record_pubkey,
                 min_context_slot,
                 AccountFetchContext::subscription_update(AccountFetchReason::DelegationRecord),
-                ChainlinkCompanionFetchKind::DelegationRecord,
             )
             .await
             .unwrap_or_else(|error| Err(error.into()));
@@ -2030,6 +2041,12 @@ where
         if acquired_record {
             releases.push(SubscriptionRelease::Pubkey {
                 pubkey: record_pubkey,
+                reason: SubscriptionReason::DelegationRecord,
+            });
+        }
+        if acquired_state {
+            releases.push(SubscriptionRelease::Pubkey {
+                pubkey: state_pubkey,
                 reason: SubscriptionReason::DelegationRecord,
             });
         }
@@ -2090,14 +2107,31 @@ where
             }
             return None;
         };
-        let (record, actions) =
-            match self.parse_delegation_record(record.read().data(), companion_pubkey) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    error!(pubkey = %pubkey, error = %error, "Failed to parse delegation record");
-                    return None;
-                }
-            };
+        let parsed = if record.read().owner() == dpi::id()
+            && record.read().data().starts_with(&dpi::DelegationState::DISCRIMINATOR)
+        {
+            delegation::parse_v2_delegation_record(
+                self,
+                pubkey,
+                companion_pubkey,
+                &record,
+                companion_fetch_log_context
+                    .origin
+                    .clone()
+                    .with_reason(AccountFetchReason::DelegationRecord),
+            )
+            .await
+            .map(|record| (record, None))
+        } else {
+            self.parse_delegation_record(record.read().data(), companion_pubkey)
+        };
+        let (record, actions) = match parsed {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                error!(pubkey = %pubkey, error = %error, "Failed to parse delegation record");
+                return None;
+            }
+        };
         let source_slots = CloneSourceSlots::single(account.read().slot());
         let account = delegation::apply_record(&self.validator_pubkey, pubkey, account, &record);
 
@@ -2796,13 +2830,46 @@ where
         fetch_context: AccountFetchContext,
     ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
         let delegation_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
-        self.task_to_fetch_with_companion(
-            pubkey,
-            delegation_record_pubkey,
-            slot,
-            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
-            ChainlinkCompanionFetchKind::DelegationRecord,
-        )
+        let delegation_state_pubkey = dpi::delegation_state_pda(&pubkey);
+        let provider = self.remote_account_provider.clone();
+        let fetch_count = self.fetch_count.clone();
+        task::spawn(async move {
+            fetch_count.fetch_add(3, Ordering::Relaxed);
+            let accounts = provider
+                .try_get_multi_until_slots_match(
+                    &[pubkey, delegation_record_pubkey, delegation_state_pubkey],
+                    Some(MatchSlotsConfig {
+                        min_context_slot: Some(slot),
+                        ..MatchSlotsConfig::new(ChainlinkCompanionFetchKind::DelegationRecord)
+                    }),
+                    fetch_context.with_reason(AccountFetchReason::DelegationRecord),
+                )
+                .await
+                .map_err(ChainlinkError::from)?;
+            let [account, record, state] = accounts.as_slice() else {
+                return Err(ChainlinkError::UnexpectedAccountCount(format!(
+                    "Expected exactly 3 accounts for pubkey {pubkey}, delegation record {delegation_record_pubkey}, and state {delegation_state_pubkey}, got {}",
+                    accounts.len()
+                )));
+            };
+            let (companion_pubkey, companion) = match (record.is_found(), state.is_found()) {
+                (true, true) => {
+                    return Err(ChainlinkError::InvalidDelegationRecord(
+                        delegation_record_pubkey,
+                        solana_program::program_error::ProgramError::InvalidAccountData,
+                    ));
+                }
+                (true, false) => (delegation_record_pubkey, record.clone()),
+                (false, true) => (delegation_state_pubkey, state.clone()),
+                (false, false) => (delegation_record_pubkey, record.clone()),
+            };
+            Self::resolve_account_with_companion(
+                pubkey,
+                companion_pubkey,
+                account.clone(),
+                companion,
+            )
+        })
     }
 
     fn task_to_fetch_with_program_data(

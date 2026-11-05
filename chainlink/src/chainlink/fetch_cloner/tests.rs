@@ -445,7 +445,8 @@ async fn released_collision_candidate_settles_after_successful_clone() {
         state,
         (AccountMode::Delegated, DELEGATION_SLOT, owner, vec![2])
     );
-    // One attempt is 3 fetches; without the `settled` condition this is 9.
-    assert_eq!(fetches, 3, "expected a single clone attempt");
+    // The candidate refresh plus account/record/state resolution is 4 tracked
+    // fetches; without the `settled` condition this is 12.
+    assert_eq!(fetches, 4, "expected a single clone attempt");
     assert_eq!(fetch.dlp_collision_tracker.lock().parked.len(), 0);
 }
