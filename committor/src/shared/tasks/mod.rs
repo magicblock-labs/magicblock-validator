@@ -18,6 +18,8 @@ use crate::shared::{
     account_state::DelegationVersion, tasks::commit_finalize_task::CommitFinalizeTask,
 };
 
+/// DLP v2 uses `u32` sequences while the validator's shared intent model uses `u64` IDs.
+/// Reject overflow so encoding never silently targets a different on-chain sequence.
 pub(crate) fn checked_v2_commit_seq(commit_id: u64) -> Result<u32, DataLayoutError> {
     u32::try_from(commit_id).map_err(|_| DataLayoutError::InvalidDataLength)
 }
