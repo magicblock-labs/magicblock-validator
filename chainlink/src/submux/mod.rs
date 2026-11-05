@@ -95,14 +95,15 @@ pub struct DebounceConfig {
 ///     debounce_interval, or because pruning dropped the history below
 ///     N), we immediately transition back to
 ///     DebounceState::Disabled. This satisfies the rule: "we exit it
-///     immediately when an update is above the min interval". The very
-///     update that triggers exit is forwarded right away since we are no
-///     longer debouncing.
+///     immediately when an update is above the min interval". The
+///     higher-slot update of the pending and triggering updates is forwarded
+///     right away since we are no longer debouncing.
 ///
 /// - Forwarding while debounced:
 ///   - When in Enabled state, if an arrival occurs at or after the
-///     `next_allowed_forward` timestamp, it is forwarded immediately and
-///     `next_allowed_forward` is advanced by `debounce_interval`.
+///     `next_allowed_forward` timestamp, the highest-slot update is
+///     forwarded immediately and `next_allowed_forward` is advanced by
+///     `debounce_interval`.
 ///   - Otherwise, we store/replace a single pending update for that
 ///     account. A global flusher task runs periodically (at about a
 ///     quarter of the debounce interval) and forwards any pending update
@@ -111,9 +112,9 @@ pub struct DebounceConfig {
 ///     the corner case where bursts stop just before eligibility.
 ///
 /// - Always latest payload:
-///   - While waiting for eligibility in Enabled state, only the latest
-///     observed update is kept as pending so that the consumer receives
-///     the freshest state when the interval elapses.
+///   - While waiting for eligibility in Enabled state, only the
+///     highest-slot update (latest arrival on ties) is kept as pending
+///     so that the consumer receives the freshest state when the interval elapses.
 pub struct SubMuxClient<T>
 where
     T: ChainPubsubClient + ReconnectableClient,
@@ -929,87 +930,68 @@ where
         allowed_count: usize,
     ) -> Option<SubscriptionUpdate> {
         let pubkey = update.pubkey;
-        let mut maybe_forward_now = None;
-        {
-            let mut states = debounce_states.lock();
-            let debounce_state = states.entry(pubkey).or_insert_with(|| DebounceState::Disabled {
-                pubkey,
-                arrivals: VecDeque::new(),
-            });
+        let mut states = debounce_states.lock();
+        let debounce_state = states.entry(pubkey).or_insert_with(|| DebounceState::Disabled {
+            pubkey,
+            arrivals: VecDeque::new(),
+        });
 
-            // prune and push current
-            let arrivals_len = {
-                let arrivals = debounce_state.arrivals_mut();
-                while let Some(&front) = arrivals.front() {
-                    if now.duration_since(front) > detection_window {
-                        arrivals.pop_front();
-                    } else {
-                        break;
-                    }
-                }
-                arrivals.push_back(now);
-                arrivals.len()
-            };
-
-            let enable = if arrivals_len >= allowed_count {
-                let arrivals = debounce_state.arrivals_ref();
-
-                {
-                    let len = arrivals.len();
-                    if len < allowed_count {
-                        false
-                    } else {
-                        let start = len - allowed_count;
-                        let window_slice: Vec<Instant> =
-                            arrivals.iter().skip(start).cloned().collect();
-                        window_slice.windows(2).all(|w| {
-                            let dt = w[1].saturating_duration_since(w[0]);
-                            dt <= debounce_interval
-                        })
-                    }
-                }
-            } else {
-                false
-            };
-
-            if arrivals_len > allowed_count {
-                let arrivals = debounce_state.arrivals_mut();
-                while arrivals.len() > allowed_count {
-                    arrivals.pop_front();
-                }
+        let enable = {
+            let arrivals = debounce_state.arrivals_mut();
+            while arrivals
+                .front()
+                .is_some_and(|&front| now.duration_since(front) > detection_window)
+            {
+                arrivals.pop_front();
+            }
+            arrivals.push_back(now);
+            while arrivals.len() > allowed_count {
+                arrivals.pop_front();
             }
 
-            let changed = if enable {
-                debounce_state.maybe_enable(now)
-            } else {
-                debounce_state.maybe_disable()
-            };
-            if changed && tracing::enabled!(Level::TRACE) {
-                trace!(
-                    pubkey = %pubkey,
-                    state = %debounce_state.label(),
-                    "Debounce state"
-                );
-            }
+            arrivals.len() >= allowed_count
+                && arrivals
+                    .iter()
+                    .zip(arrivals.iter().skip(1))
+                    .all(|(prev, curr)| curr.saturating_duration_since(*prev) <= debounce_interval)
+        };
 
-            match debounce_state {
-                DebounceState::Disabled { .. } => {
-                    maybe_forward_now = Some(update);
-                }
-                DebounceState::Enabled {
-                    next_allowed_forward, pending, ..
-                } => {
-                    if now >= *next_allowed_forward {
-                        *next_allowed_forward = now + debounce_interval;
-                        *pending = None;
-                        maybe_forward_now = Some(update);
-                    } else {
-                        *pending = Some(update);
-                    }
+        // Select before transitioning: disabling debounce discards its pending field.
+        let update = match debounce_state {
+            DebounceState::Enabled { pending, .. } => match pending.take() {
+                Some(pending) if pending.slot > update.slot => pending,
+                _ => update,
+            },
+            DebounceState::Disabled { .. } => update,
+        };
+
+        let changed = if enable {
+            debounce_state.maybe_enable(now)
+        } else {
+            debounce_state.maybe_disable()
+        };
+        if changed && tracing::enabled!(Level::TRACE) {
+            trace!(
+                pubkey = %pubkey,
+                state = %debounce_state.label(),
+                "Debounce state"
+            );
+        }
+
+        match debounce_state {
+            DebounceState::Disabled { .. } => Some(update),
+            DebounceState::Enabled {
+                next_allowed_forward, pending, ..
+            } => {
+                if now >= *next_allowed_forward {
+                    *next_allowed_forward = now + debounce_interval;
+                    Some(update)
+                } else {
+                    *pending = Some(update);
+                    None
                 }
             }
         }
-        maybe_forward_now
     }
 
     /// Number of clients that must confirm an account subscription for it to be considered active.
@@ -1242,7 +1224,7 @@ mod tests {
     use crate::{
         remote_account_provider::{
             SubscribedAccounts, chain_pubsub_client::mock::ChainPubsubClientMock,
-            subscription_reconciler::reconcile_subscriptions,
+            pubsub_common::SubscriptionSource, subscription_reconciler::reconcile_subscriptions,
         },
         submux::subscribed_accounts_tracker::mock::MockSubscribedAccountsTracker,
         testing::{init_logger, utils::sleep_ms},
@@ -1663,6 +1645,69 @@ mod tests {
             slots.push(update.slot);
         }
         slots
+    }
+
+    /// Proves older replays cannot discard newer pending state when buffering,
+    /// forwarding immediately, or disabling debounce; equal slots use the latest payload.
+    #[test]
+    fn test_debounce_preserves_newest_update() {
+        let pubkey = Pubkey::new_unique();
+        let start = Instant::now();
+        let interval = Duration::from_millis(200);
+        let update = |slot, lamports| SubscriptionUpdate {
+            pubkey,
+            slot,
+            account: Some(account_with_lamports(lamports)),
+            source: SubscriptionSource::Account,
+        };
+        // (arrival time, incoming slot, expected slot, expected lamports)
+        for (millis, slot, expected_slot, expected_lamports) in [
+            (40, 94, 95, 1),
+            (40, 96, 96, 2),
+            (40, 95, 95, 2),
+            (200, 94, 95, 1),
+            (240, 94, 95, 1),
+        ] {
+            let states = Arc::new(Mutex::new(HashMap::from([(
+                pubkey,
+                DebounceState::Enabled {
+                    pubkey,
+                    arrivals: VecDeque::from([start]),
+                    next_allowed_forward: start + interval,
+                    pending: Some(update(95, 1)),
+                },
+            )])));
+            let forwarded =
+                SubMuxClient::<ChainPubsubClientMock>::handle_debounce_and_maybe_forward(
+                    &states,
+                    update(slot, 2),
+                    start + Duration::from_millis(millis),
+                    Duration::from_millis(1000),
+                    interval,
+                    2,
+                );
+            let state = states.lock().remove(&pubkey).unwrap();
+            // The 240ms gap disables debounce; 200ms is eligible without disabling it.
+            assert_eq!(
+                matches!(state, DebounceState::Disabled { .. }),
+                millis > 200
+            );
+            let selected = if millis < 200 {
+                assert!(forwarded.is_none());
+                let DebounceState::Enabled { pending, .. } = state else { unreachable!() };
+                pending.unwrap()
+            } else {
+                if let DebounceState::Enabled { pending, .. } = state {
+                    assert!(pending.is_none());
+                }
+                forwarded.unwrap()
+            };
+            assert_eq!(
+                selected.slot, expected_slot,
+                "arrival at {millis}ms, slot {slot}"
+            );
+            assert_eq!(selected.account.unwrap().lamports, expected_lamports);
+        }
     }
 
     #[tokio::test]

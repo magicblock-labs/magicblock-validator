@@ -121,9 +121,9 @@ mod test {
 
     use super::*;
     use crate::{
-        test_utils::{COUNTER_PROGRAM_ID, process_instruction},
+        test_utils::{COUNTER_PROGRAM_ID, ensure_authority, process_instruction},
         utils::instruction_utils::InstructionUtils,
-        validator::{generate_validator_authority_if_needed, validator_authority_id},
+        validator::authority,
     };
 
     fn create_simple_ix() -> Instruction {
@@ -147,7 +147,7 @@ mod test {
     }
 
     fn setup_accounts(n_pdas: usize) -> (Keypair, Vec<Pubkey>, Vec<(Pubkey, AccountSharedData)>) {
-        generate_validator_authority_if_needed();
+        ensure_authority();
         let payer = Keypair::new();
         let pdas = (0..n_pdas).map(|_| Keypair::new().pubkey()).collect::<Vec<_>>();
         let transaction_accounts = vec![(
@@ -228,7 +228,7 @@ mod test {
     #[test]
     fn fail_process_schedule_task_with_validator_authority() {
         let (payer, mut pdas, transaction_accounts) = setup_accounts(0);
-        pdas.push(validator_authority_id());
+        pdas.push(authority());
         let args = ScheduleTaskArgs {
             task_id: 1,
             execution_interval_millis: 1000,

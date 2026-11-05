@@ -8,7 +8,7 @@ use crate::{
     Pubkey,
     args::{AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs},
     compat::Instruction,
-    outbox::ExecutionStage,
+    outbox::{ExecutionStage, SentCommit},
 };
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -369,9 +369,7 @@ pub enum MagicBlockInstruction {
     CloseMagicAta,
 
     /// Closes the outbox intent PDA on successful execution of the intent.
-    /// Deterministic and mode-independent: runs identically on replicas
-    /// replaying the same transaction, unlike `ScheduledCommitSent` which
-    /// only logs on the validator that actually executed the intent.
+    /// Runs identically on replicas replaying the same transaction.
     ///
     /// # Account references
     /// | Index | Account | Access |
@@ -509,12 +507,13 @@ pub enum OutboxIntentInstruction {
     /// - **1.** `[WRITE]`  Outbox intent PDA to close, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     CloseOutboxIntent(u64),
 
-    /// Records the attempt to realize a scheduled commit on chain.
+    /// Records the settlement result, emits its receipt logs, and closes the outbox.
+    /// The payload is replayable and remains discoverable in transaction history.
     ///
     /// # Account references
     /// - 0. [SIGNER] Validator Authority
-    /// - 1. []       Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
-    ScheduledCommitSent((u64, u64)),
+    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", message_id.to_le_bytes()]`
+    ScheduledCommitSent(SentCommit),
 
     /// Sets or advances the execution stage of an outbox intent.
     /// Must be called before sending the L1 transaction.

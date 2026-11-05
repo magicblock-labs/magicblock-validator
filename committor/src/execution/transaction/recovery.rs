@@ -9,7 +9,7 @@ use crate::{
         error::{IntentExecutorError, IntentExecutorResult},
         transaction::{
             error::TransactionExecutionError,
-            utils::{handle_actions_result, handle_commit_id_error, handle_undelegation_error},
+            utils::{handle_actions_result, handle_undelegation_error},
         },
     },
     shared::tasks::Task,
@@ -38,16 +38,8 @@ impl super::runner::TransactionExecutor<'_> {
                 *signature,
                 Err(ActionError::ActionsError(err.clone(), *signature)),
             ),
-            TransactionExecutionError::CommitIDError(_, _) if can_repair_commits => {
-                handle_commit_id_error(
-                    &self.ctx.authority.pubkey(),
-                    &self.ctx.task_info_provider,
-                    self.committed_pubkeys,
-                    &mut self.current,
-                    self.intent_id,
-                )
-                .await?
-            }
+            // Reserved IDs cannot be renumbered. A rejected commit stays pending;
+            // recorded signatures are resolved by the normal resume path.
             TransactionExecutionError::UnfinalizedAccountError(_, _) if can_repair_commits => {
                 let task_index = err.task_index(self.current.task_instruction_offset());
                 let Some(Task::CommitFinalize(task)) =

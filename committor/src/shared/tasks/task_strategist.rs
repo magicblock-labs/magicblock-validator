@@ -370,6 +370,7 @@ mod tests {
         diff_len: usize,
     ) -> CommitFinalizeTask {
         let committed_account = CommittedAccount {
+            commit_id: 1,
             pubkey: Pubkey::new_unique(),
             account: Account {
                 lamports: 1000,
@@ -794,11 +795,12 @@ mod tests {
                         .unwrap()
                         .get_committed_accounts()
                         .clone();
+                    accounts[0].commit_id = 41;
                     accounts[0].account.data = vec![1; if use_diff { 1024 } else { 40 }];
                     let mut base = accounts[0].account.clone();
                     base.data[0] = 0;
                     let info_provider = Arc::new(MockInfoProvider {
-                        next_commit_id: Some(0),
+                        default_commit_id: 7,
                         base_accounts: if use_diff {
                             HashMap::from([(pubkey, Some(base))])
                         } else {
@@ -842,6 +844,7 @@ mod tests {
                     let Task::CommitFinalize(task) = &mut commits[0] else {
                         panic!("all commit intents must use CommitFinalize");
                     };
+                    assert_eq!(task.commit_id, 41, "use the reserved ID, not metadata + 1");
                     assert_eq!(task.allow_undelegation, undelegate);
                     assert_eq!(task.committed_account.pubkey, pubkey);
                     assert_eq!(
@@ -899,7 +902,6 @@ mod tests {
                 }
                 intent.intent_bundle.standalone_actions.push(action.action);
                 let provider = Arc::new(MockInfoProvider {
-                    next_commit_id: Some(0),
                     base_accounts: HashMap::from([(pubkey, None)]),
                     ..Default::default()
                 });
@@ -927,10 +929,7 @@ mod tests {
     async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
-        let info_provider = Arc::new(MockInfoProvider {
-            next_commit_id: Some(0),
-            ..Default::default()
-        });
+        let info_provider = Arc::new(MockInfoProvider { ..Default::default() });
         let commit_tasks = TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
         let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 

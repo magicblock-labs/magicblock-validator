@@ -109,17 +109,14 @@ impl<'a> TransactionExecutor<'a> {
                 result => result,
             };
 
-            // Combined execution reports all terminal errors to callbacks.
-            // Split execution leaves preparation/outbox/patch failures to the caller.
-            let report_callbacks = self.is_combined() || result.is_ok();
+            // Retain the existing callback policy after settlement and for actions
+            // alone. Unsettled reservations stay pending instead of reporting failure.
+            let unsettled = self.report.progress.confirmed_commit.is_none()
+                && !self.committed_pubkeys.is_empty();
+            let report_callbacks = (self.is_combined() || result.is_ok())
+                && (!unsettled || matches!(&result, Ok(Ok(_))));
             let result =
                 result.and_then(|result| result.map_err(IntentExecutorError::FailedExecution));
-
-            if let Some(follow_up) = &mut self.follow_up {
-                // A nonce retry can turn this into a first commit; both transactions
-                // then need the same per-intent uniqueness instruction.
-                follow_up.uniqueness_nonce = self.current.uniqueness_nonce;
-            }
             if report_callbacks {
                 self.execute_callbacks(
                     result.as_ref().ok().copied(),

@@ -82,6 +82,10 @@ jobs:
           fi
 
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --draft --verify-tag --generate-notes --target "$GITHUB_REF_NAME" --latest=false --title "$tag"
-            echo "Drafted release ${tag}; publish it to ship the packages" >> "$GITHUB_STEP_SUMMARY"
+            options=()
+            if [[ "$tag" == *-rc.* ]]; then
+              options+=(--prerelease)
+            fi
+            gh release create "$tag" --draft --verify-tag --generate-notes --target "$GITHUB_REF_NAME" --latest=false --title "$tag" "${options[@]}"
+            echo "Drafted release ${tag}; RC releases do not publish packages" >> "$GITHUB_STEP_SUMMARY"
           fi

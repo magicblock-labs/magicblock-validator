@@ -1,26 +1,23 @@
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID,
     args::ScheduleTaskArgs,
     instruction::{MagicBlockInstruction, OutboxIntentInstruction},
-    outbox,
+    outbox::{self, SentCommit},
 };
 use mbv_core::intent::outbox::outbox_intent_pda;
-use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
-use solana_signer::Signer;
-use solana_transaction::Transaction;
 
-use crate::validator::{validator_authority, validator_authority_id};
+#[cfg(test)]
+use {
+    solana_hash::Hash, solana_keypair::Keypair, solana_signer::Signer,
+    solana_transaction::Transaction,
+};
 
 /// Builders for the MagicBlock program instructions.
 ///
-/// Most builders return bare [`Instruction`]s for the engine to compose and
-/// sign. `scheduled_commit_sent` is pre-signed while scheduling so its future
-/// signature can be returned in the scheduling transaction logs.
+/// Builders take the authority pubkey explicitly; host code signs outside
+/// program execution.
 pub struct InstructionUtils;
 impl InstructionUtils {
     // -----------------
@@ -33,14 +30,14 @@ impl InstructionUtils {
         recent_blockhash: Hash,
     ) -> Transaction {
         let ix = Self::schedule_commit_instruction(&payer.pubkey(), pubkeys);
-        Self::into_transaction(payer, ix, recent_blockhash)
+        Transaction::new_signed_with_payer(&[ix], Some(&payer.pubkey()), &[payer], recent_blockhash)
     }
 
     pub fn schedule_commit_instruction(payer: &Pubkey, pdas: Vec<Pubkey>) -> Instruction {
         let mut account_metas =
             vec![AccountMeta::new(*payer, true), AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false)];
         for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
         Instruction::new_with_wincode(
             crate::id(),
@@ -113,7 +110,7 @@ impl InstructionUtils {
             AccountMeta::new(fee_vault, false),
         ];
         for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+            account_metas.push(AccountMeta::new(*pubkey, true));
         }
         Instruction::new_with_wincode(
             crate::id(),
@@ -125,38 +122,38 @@ impl InstructionUtils {
     // -----------------
     // Scheduled Commit Sent
     // -----------------
-    pub fn scheduled_commit_sent(intent_id: u64, recent_blockhash: Hash) -> Transaction {
-        let ix = Self::scheduled_commit_sent_instruction(intent_id);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
-    pub(crate) fn scheduled_commit_sent_instruction(intent_id: u64) -> Instruction {
-        static COMMIT_SENT_BUMP: AtomicU64 = AtomicU64::new(0);
+    pub fn scheduled_commit_sent_instruction(
+        validator: Pubkey,
+        receipt: SentCommit,
+    ) -> Result<Instruction, wincode::WriteError> {
+        let intent_id = receipt.message_id;
+        let data = wincode::serialize(&OutboxIntentInstruction::ScheduledCommitSent(receipt))?;
+        // Solana's signing path unwraps message serialization. Reject data that
+        // cannot fit its u16 instruction length before handing it to Engine.
+        if data.len() > u16::MAX as usize {
+            return Err(wincode::WriteError::LengthEncodingOverflow("u16::MAX"));
+        }
         let account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator, true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
-        Instruction::new_with_wincode(
-            OUTBOX_INTENT_PROGRAM_ID,
-            &OutboxIntentInstruction::ScheduledCommitSent((
-                intent_id,
-                COMMIT_SENT_BUMP.fetch_add(1, Ordering::SeqCst),
-            )),
-            account_metas,
-        )
+        Ok(Instruction {
+            program_id: OUTBOX_INTENT_PROGRAM_ID,
+            data,
+            accounts: account_metas,
+        })
     }
 
     // -----------------
     // Close Outbox Intent
     // -----------------
-    pub fn close_outbox_intent(intent_id: u64, recent_blockhash: Hash) -> Transaction {
-        let ix = Self::close_outbox_intent_instruction(intent_id);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
-    pub(crate) fn close_outbox_intent_instruction(intent_id: u64) -> Instruction {
+    #[cfg(test)]
+    pub(crate) fn close_outbox_intent_instruction(
+        validator: Pubkey,
+        intent_id: u64,
+    ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator, true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_wincode(
@@ -169,19 +166,12 @@ impl InstructionUtils {
     // -----------------
     // Accept Scheduled Commits
     // -----------------
-    pub fn accept_scheduled_commits(
-        recent_blockhash: Hash,
-        intent_ids: impl IntoIterator<Item = u64>,
-    ) -> Transaction {
-        let ix = Self::accept_scheduled_commits_instruction(intent_ids);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
     pub fn accept_scheduled_commits_instruction(
+        validator: Pubkey,
         intent_ids: impl IntoIterator<Item = u64>,
     ) -> Instruction {
         let mut account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator, true),
             AccountMeta::new_readonly(OUTBOX_INTENT_PROGRAM_ID, false),
             AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
         ];
@@ -204,24 +194,14 @@ impl InstructionUtils {
     // SetIntentExecutionStage
     // -----------------
 
-    pub fn set_intent_execution_stage(
-        recent_blockhash: Hash,
-        intent_id: u64,
-        stage: outbox::ExecutionStage,
-        recovery_commit_nonces: Vec<(Pubkey, u64)>,
-    ) -> Transaction {
-        let ix =
-            Self::set_intent_execution_stage_instruction(intent_id, stage, recovery_commit_nonces);
-        Self::into_transaction(&validator_authority(), ix, recent_blockhash)
-    }
-
-    pub(crate) fn set_intent_execution_stage_instruction(
+    pub fn set_intent_execution_stage_instruction(
+        validator: Pubkey,
         intent_id: u64,
         stage: outbox::ExecutionStage,
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Instruction {
         let account_metas = vec![
-            AccountMeta::new_readonly(validator_authority_id(), true),
+            AccountMeta::new_readonly(validator, true),
             AccountMeta::new(outbox_intent_pda(intent_id), false),
         ];
         Instruction::new_with_wincode(
@@ -232,23 +212,6 @@ impl InstructionUtils {
                 recovery_commit_nonces,
             },
             account_metas,
-        )
-    }
-
-    // -----------------
-    // Utils
-    // -----------------
-    pub(crate) fn into_transaction(
-        signer: &Keypair,
-        instruction: Instruction,
-        recent_blockhash: Hash,
-    ) -> Transaction {
-        let signers = &[signer];
-        Transaction::new_signed_with_payer(
-            &[instruction],
-            Some(&signer.pubkey()),
-            signers,
-            recent_blockhash,
         )
     }
 

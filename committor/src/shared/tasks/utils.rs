@@ -20,19 +20,8 @@ use crate::shared::tasks::{
     task_strategist::{TaskStrategistError, TaskStrategistResult},
 };
 
-// Accounts larger than COMMIT_STATE_SIZE_THRESHOLD use CommitDiff to
-// reduce instruction size. Below this threshold, the commit is sent
-// as CommitState. The value (256) is chosen because it is sufficient
-// for small accounts, which typically could hold up to 8 u32 fields or
-// 4 u64 fields. These integers are expected to be on the hot path
-// and updated continuously.
-pub(crate) const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
+pub(crate) use mbv_core::intent::limits::COMMIT_STATE_SIZE_THRESHOLD;
 
-/// Builds a [`Task`] for each `action`, used by both
-/// [`crate::execution::task_builder::TaskBuilder`] (real task construction)
-/// and [`crate::is_intent_within_limits`] (size
-/// estimation) -- actions carry no unknowns that need fetching, so both
-/// build them identically.
 pub(crate) fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item = Task> + '_ {
     actions.iter().map(|action| {
         let task = match action.source_program {

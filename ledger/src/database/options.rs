@@ -21,9 +21,6 @@ pub enum AccessType {
 pub struct LedgerOptions {
     // The access type of blockstore. Default: Primary
     pub access_type: AccessType,
-    // When opening the Blockstore, determines whether to error or not if the
-    // desired open file descriptor limit cannot be configured. Default: true.
-    pub enforce_ulimit_nofile: bool,
     pub column_options: LedgerColumnOptions,
     // Capacity in bytes of the block cache shared by all column families.
     // The only read caching layer since direct reads bypass the OS page
@@ -38,7 +35,6 @@ impl Default for LedgerOptions {
     fn default() -> Self {
         Self {
             access_type: AccessType::Primary,
-            enforce_ulimit_nofile: true,
             column_options: LedgerColumnOptions::default(),
             block_cache_size: crate::database::consts::BLOCK_CACHE_CAPACITY,
         }

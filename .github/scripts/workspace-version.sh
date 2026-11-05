@@ -28,7 +28,7 @@ version="$(
   ' <<< "$manifest"
 )"
 
-if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-rc\.[1-9][0-9]*)?$ ]]; then
   echo "Invalid workspace version in ${revision:-the working tree}'s Cargo.toml: \"$version\"" >&2
   exit 1
 fi

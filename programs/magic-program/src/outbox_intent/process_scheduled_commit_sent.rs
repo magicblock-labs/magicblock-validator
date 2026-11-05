@@ -1,17 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
-use lazy_static::lazy_static;
+use magic_program_api::{OUTBOX_INTENT_PROGRAM_ID, outbox::SentCommit};
 use mbv_core::intent::outbox::verify_outbox_intent_pda;
-use parking_lot::RwLock;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
-use solana_clock::Slot;
-use solana_hash::Hash;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
-use solana_signature::Signature;
 
 use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
@@ -25,100 +21,15 @@ use crate::{
 const VALIDATOR_IDX: u16 = 0;
 const CLOSING_PDA_IDX: u16 = VALIDATOR_IDX + 1;
 
-#[derive(Default, Debug, Clone)]
-pub struct SentCommit {
-    pub message_id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub payer: Pubkey,
-    pub chain_signatures: Vec<Signature>,
-    pub included_pubkeys: Vec<Pubkey>,
-    pub excluded_pubkeys: Vec<Pubkey>,
-    pub requested_undelegation: bool,
-    pub error_message: Option<String>,
-    pub patched_errors: Vec<String>,
-    /// Callbacks scheduling results: either the scheduled transaction signature
-    /// or a compilation/scheduling error.
-    pub callbacks_scheduling_results: Vec<String>,
-}
-
-/// This is a printable version of the SentCommit struct.
-/// We prepare this outside of the VM in order to reduce overhead there.
-#[derive(Debug, Clone)]
-struct SentCommitPrintable {
-    id: u64,
-    slot: Slot,
-    blockhash: String,
-    payer: String,
-    chain_signatures: Vec<String>,
-    included_pubkeys: String,
-    excluded_pubkeys: String,
-    requested_undelegation: bool,
-    error_message: Option<String>,
-    patched_errors: Vec<String>,
-    callbacks_scheduling_results: Vec<String>,
-}
-
-impl From<SentCommit> for SentCommitPrintable {
-    fn from(commit: SentCommit) -> Self {
-        Self {
-            id: commit.message_id,
-            slot: commit.slot,
-            blockhash: commit.blockhash.to_string(),
-            payer: commit.payer.to_string(),
-            chain_signatures: commit.chain_signatures.iter().map(|x| x.to_string()).collect(),
-            included_pubkeys: commit
-                .included_pubkeys
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            excluded_pubkeys: commit
-                .excluded_pubkeys
-                .iter()
-                .map(|x| x.to_string())
-                .collect::<Vec<_>>()
-                .join(", "),
-            requested_undelegation: commit.requested_undelegation,
-            error_message: commit.error_message,
-            patched_errors: commit.patched_errors,
-            callbacks_scheduling_results: commit.callbacks_scheduling_results,
-        }
-    }
-}
-
-lazy_static! {
-    // We need to determine the transaction signature before we even know the
-    // signature of the transaction we are sending to chain and we don't know
-    // what Pubkeys we will include before hand either.
-    // Therefore the transaction itself only includes the ID of the scheduled
-    // commit and we store the signature in a globally accessible hashmap.
-    static ref SENT_COMMITS: RwLock<HashMap<u64, SentCommitPrintable>> = RwLock::new(HashMap::new());
-}
-
-pub fn register_scheduled_commit_sent(commit: SentCommit) {
-    let id = commit.message_id;
-    SENT_COMMITS.write().insert(id, commit.into());
-}
-
-#[cfg(test)]
-fn get_scheduled_commit(id: u64) -> Option<SentCommitPrintable> {
-    SENT_COMMITS.read().get(&id).cloned()
-}
-
 pub(crate) fn process_scheduled_commit_sent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext<'_, '_>,
-    intent_id: u64,
+    commit: SentCommit,
 ) -> Result<(), InstructionError> {
-    validate(&signers, invoke_context, intent_id)?;
-
-    // Commit logs are leader-local; replicas must still apply the signed cleanup.
-    let commit = SENT_COMMITS.write().remove(&intent_id);
-    if let Some(commit) = commit {
-        log_sent_commit(invoke_context, &commit);
-    }
-    close_outbox_ephemeral_account(invoke_context)
+    validate(&signers, invoke_context, commit.message_id)?;
+    close_outbox_ephemeral_account(invoke_context)?;
+    log_sent_commit(invoke_context, &commit);
+    Ok(())
 }
 
 fn validate(
@@ -130,7 +41,7 @@ fn validate(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
 
     // Assert outbox intent program
-    if ix_ctx.get_program_key()? != &magic_program_api::OUTBOX_INTENT_PROGRAM_ID {
+    if ix_ctx.get_program_key()? != &OUTBOX_INTENT_PROGRAM_ID {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: outbox intent program account not found"
@@ -163,7 +74,14 @@ fn validate(
     // Deserialize first so the PDA can be validated cheaply against its
     // own stored bump, instead of re-deriving via find_program_address.
     let intent_acc = get_instruction_account_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    let bundle = OutboxIntentBundle::try_from_bytes(intent_acc.borrow()?.data()).map_err(|_| {
+    if !intent_acc.is_writable()? {
+        return Err(InstructionError::ReadonlyDataModified);
+    }
+    let account = intent_acc.borrow()?;
+    if account.owner() != &OUTBOX_INTENT_PROGRAM_ID {
+        return Err(InstructionError::InvalidAccountOwner);
+    }
+    let bundle = OutboxIntentBundle::try_from_bytes(account.data()).map_err(|_| {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: failed to deserialize outbox intent {}",
@@ -174,7 +92,9 @@ fn validate(
 
     // Validate outbox intent PDA
     let provided_pda = get_instruction_pubkey_with_idx(transaction_context, CLOSING_PDA_IDX)?;
-    if !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda) {
+    if bundle.inner.intent_id != intent_id
+        || !verify_outbox_intent_pda(intent_id, bundle.bump(), provided_pda)
+    {
         ic_msg!(
             invoke_context,
             "ScheduleCommitSent ERR: account at idx {} is {}, invalid PDA for intent {}",
@@ -203,11 +123,11 @@ fn close_outbox_ephemeral_account(
     Ok(())
 }
 
-fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPrintable) {
+fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) {
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent id: {}, slot: {}, blockhash: {}",
-        commit.id,
+        commit.message_id,
         commit.slot,
         commit.blockhash,
     );
@@ -219,12 +139,22 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPr
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent included: [{}]",
-        commit.included_pubkeys,
+        commit
+            .included_pubkeys
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", "),
     );
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent excluded: [{}]",
-        commit.excluded_pubkeys
+        commit
+            .excluded_pubkeys
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
@@ -264,166 +194,172 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommitPr
 
 #[cfg(test)]
 mod tests {
-    use magic_program_api::OUTBOX_INTENT_PROGRAM_ID;
+    use std::collections::HashMap;
+
     use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
-    use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
-    use solana_instruction::{Instruction, error::InstructionError};
-    use solana_keypair::Keypair;
-    use solana_sdk_ids::system_program;
-    use solana_signer::Signer;
-    use solana_transaction::Transaction;
+    use solana_account::{AccountBuilder, AccountSharedData};
+    use solana_hash::Hash;
+    use solana_instruction::Instruction;
+    use solana_signature::Signature;
 
     use super::*;
     use crate::{
         instruction_utils::InstructionUtils,
         magic_scheduled_base_intent::ScheduledIntentBundle,
-        test_utils::{ensure_started_validator, process_outbox_intent_instruction},
+        test_utils::{ensure_started_validator, process_outbox_intent_instruction_with_logs},
     };
 
-    fn single_acc_commit(intent_id: u64) -> SentCommit {
-        let slot = 10;
-        let sig = Signature::default();
-        let payer = Pubkey::new_unique();
-        let acc = Pubkey::new_unique();
-        SentCommit {
-            message_id: intent_id,
-            slot,
+    fn fixture() -> (SentCommit, Instruction, Vec<(Pubkey, AccountSharedData)>) {
+        let commit = SentCommit {
+            message_id: 42,
+            slot: 10,
             blockhash: Hash::default(),
-            payer,
-            chain_signatures: vec![sig],
-            included_pubkeys: vec![acc],
-            excluded_pubkeys: Default::default(),
-            requested_undelegation: false,
-            error_message: None,
-            patched_errors: vec![],
-            callbacks_scheduling_results: vec![],
+            payer: Pubkey::new_unique(),
+            chain_signatures: vec![Signature::new_unique()],
+            included_pubkeys: vec![Pubkey::new_unique()],
+            requested_undelegation: true,
+            patched_errors: vec!["recovered action error".into()],
+            callbacks_scheduling_results: vec!["OK: callback signature".into()],
+            ..Default::default()
+        };
+        let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
+        let bundle = OutboxIntentBundle::accepted(
+            ScheduledIntentBundle {
+                intent_id: commit.message_id,
+                slot: commit.slot,
+                blockhash: commit.blockhash,
+                payer: commit.payer,
+                intent_bundle: MagicIntentBundle::default(),
+            },
+            bump,
+        );
+        let account = AccountBuilder::default()
+            .data(bundle.try_to_bytes().unwrap())
+            .owner(OUTBOX_INTENT_PROGRAM_ID)
+            .mode(AccountMode::Magic)
+            .build();
+        let mut accounts = HashMap::from([(pda, account)]);
+        ensure_started_validator(&mut accounts, None);
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(authority(), commit.clone())
+            .unwrap();
+        let accounts = ix
+            .accounts
+            .iter()
+            .map(|meta| (meta.pubkey, accounts.remove(&meta.pubkey).unwrap()))
+            .collect();
+        (commit, ix, accounts)
+    }
+
+    #[test]
+    fn receipt_replay_preserves_logs_and_closes_outbox() {
+        for error in [None, Some("base action failed".to_owned())] {
+            let (mut commit, _, accounts) = fixture();
+            commit.error_message = error;
+            let ix =
+                InstructionUtils::scheduled_commit_sent_instruction(authority(), commit.clone())
+                    .unwrap();
+            let execute = || {
+                process_outbox_intent_instruction_with_logs(
+                    &ix.data,
+                    accounts.clone(),
+                    ix.accounts.clone(),
+                    Ok(()),
+                )
+            };
+            let (updated, logs) = execute();
+            // A replica starts from the same accounts and only needs the signed payload.
+            assert_eq!(execute(), (updated.clone(), logs.clone()));
+            assert!(updated[CLOSING_PDA_IDX as usize].is(AccountMode::Closed));
+            assert!(updated[CLOSING_PDA_IDX as usize].data().is_empty());
+            assert_eq!(
+                updated[CLOSING_PDA_IDX as usize].owner(),
+                &system_program::id()
+            );
+            assert!(logs.contains(&format!(
+                "ScheduledCommitSent signature[0]: {}",
+                commit.chain_signatures[0]
+            )));
+            assert!(logs.contains(&format!(
+                "ScheduledCommitSent included: [{}]",
+                commit.included_pubkeys[0]
+            )));
+            assert!(logs.contains(&"ScheduledCommitSent requested undelegation".to_string()));
+            assert!(logs.contains(
+                &"ScheduledCommitSent patched error[0]: recovered action error".to_string()
+            ));
+            assert!(
+                logs.contains(
+                    &"ScheduledCommitSent callback[0]: OK: callback signature".to_string()
+                )
+            );
+            assert_eq!(
+                logs.iter().any(|line| line.starts_with("ScheduledCommitSent error message:")),
+                commit.error_message.is_some()
+            );
         }
     }
 
-    fn transaction_accounts_from_map(
-        ix: &Instruction,
-        account_data: &mut HashMap<Pubkey, AccountSharedData>,
-    ) -> Vec<(Pubkey, AccountSharedData)> {
-        ix.accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data.remove(&acc.pubkey).map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect()
-    }
-
-    fn setup_registered_commit() -> SentCommit {
-        let id: u64 = rand::random();
-        let commit = single_acc_commit(id);
-        register_scheduled_commit_sent(commit.clone());
-        commit
-    }
-
     #[test]
-    fn test_registered_but_missing_validator_auth_signer() {
-        let commit = setup_registered_commit();
-
-        let mut account_data = HashMap::new();
-
-        ensure_started_validator(&mut account_data, None);
-
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
-        ix.accounts[0].is_signer = false;
-
-        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
-        process_outbox_intent_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::MissingRequiredSignature),
-        );
-
-        assert!(
-            get_scheduled_commit(commit.message_id).is_some(),
-            "does not remove scheduled commit data"
-        );
-    }
-
-    #[test]
-    fn test_registered_but_invalid_validator_auth() {
-        let commit = setup_registered_commit();
-
-        let fake_validator = Keypair::new();
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                fake_validator.pubkey(),
-                AccountSharedData::new(1_000_000, 0, &system_program::id()),
-            );
-            map
-        };
-        ensure_started_validator(&mut account_data, None);
-
-        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
-        ix.accounts[0].pubkey = fake_validator.pubkey();
-        let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
-        process_outbox_intent_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::IncorrectAuthority),
-        );
-
-        assert!(
-            get_scheduled_commit(commit.message_id).is_some(),
-            "does not remove scheduled commit data"
-        );
-    }
-
-    /// Proves signed outbox cleanup does not depend on leader-local commit logs.
-    #[test]
-    fn test_cleanup_with_or_without_local_registration() {
-        for registered in [false, true] {
-            let commit = setup_registered_commit();
-            if !registered {
-                SENT_COMMITS.write().remove(&commit.message_id);
-            }
-
-            let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
-            let bundle = OutboxIntentBundle::accepted(
-                ScheduledIntentBundle {
-                    intent_id: commit.message_id,
-                    slot: 0,
-                    blockhash: Hash::default(),
-                    sent_transaction: Transaction::default(),
-                    payer: Pubkey::new_unique(),
-                    intent_bundle: MagicIntentBundle::default(),
-                },
-                bump,
-            );
-            let data = bundle.try_to_bytes().unwrap();
-            let pda_account = AccountBuilder::default()
-                .data(data)
-                .owner(OUTBOX_INTENT_PROGRAM_ID)
-                .mode(AccountMode::Magic)
-                .build();
-            let mut account_data = HashMap::from([(pda, pda_account)]);
-
-            ensure_started_validator(&mut account_data, None);
-
-            let ix = InstructionUtils::scheduled_commit_sent_instruction(commit.message_id);
-
-            let transaction_accounts = transaction_accounts_from_map(&ix, &mut account_data);
-            let pda_index = transaction_accounts.iter().position(|(key, _)| key == &pda).unwrap();
-            let accounts = process_outbox_intent_instruction(
-                ix.data.as_slice(),
-                transaction_accounts,
+    fn invalid_receipt_does_not_change_outbox() {
+        enum Fault {
+            MissingSigner,
+            WrongAuthority,
+            Readonly,
+            WrongOwner,
+            WrongPda,
+            WrongIntent,
+        }
+        for fault in [
+            Fault::MissingSigner,
+            Fault::WrongAuthority,
+            Fault::Readonly,
+            Fault::WrongOwner,
+            Fault::WrongPda,
+            Fault::WrongIntent,
+        ] {
+            let (_, mut ix, mut accounts) = fixture();
+            let expected = match fault {
+                Fault::MissingSigner => {
+                    ix.accounts[0].is_signer = false;
+                    InstructionError::MissingRequiredSignature
+                }
+                Fault::WrongAuthority => {
+                    let other = Pubkey::new_unique();
+                    ix.accounts[0].pubkey = other;
+                    accounts[0].0 = other;
+                    InstructionError::IncorrectAuthority
+                }
+                Fault::Readonly => {
+                    ix.accounts[1].is_writable = false;
+                    InstructionError::ReadonlyDataModified
+                }
+                Fault::WrongOwner => {
+                    accounts[1].1.set_owner(system_program::id());
+                    InstructionError::InvalidAccountOwner
+                }
+                Fault::WrongPda => {
+                    let other = Pubkey::new_unique();
+                    ix.accounts[1].pubkey = other;
+                    accounts[1].0 = other;
+                    InstructionError::InvalidArgument
+                }
+                Fault::WrongIntent => {
+                    let mut bundle =
+                        OutboxIntentBundle::try_from_bytes(accounts[1].1.data()).unwrap();
+                    bundle.inner.intent_id += 1;
+                    accounts[1].1.set_data_from_slice(&bundle.try_to_bytes().unwrap());
+                    InstructionError::InvalidArgument
+                }
+            };
+            let initial = accounts[1].1.clone();
+            let (updated, logs) = process_outbox_intent_instruction_with_logs(
+                &ix.data,
+                accounts,
                 ix.accounts,
-                Ok(()),
+                Err(expected),
             );
-            assert!(accounts[pda_index].is(AccountMode::Closed));
-            assert!(accounts[pda_index].data().is_empty());
-            assert_eq!(accounts[pda_index].owner(), &system_program::id());
-
-            assert!(
-                get_scheduled_commit(commit.message_id).is_none(),
-                "removes scheduled commit data"
-            );
+            assert_eq!(updated[1], initial);
+            assert!(!logs.iter().any(|line| line.starts_with("ScheduledCommitSent id:")));
         }
     }
 }

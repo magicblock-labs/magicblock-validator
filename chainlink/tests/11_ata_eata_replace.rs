@@ -46,6 +46,11 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     // Add delegation record for ATA delegated to our validator
     let validator = ctx.validator_pubkey;
     add_delegation_record_for(&ctx.rpc_client, eata_pubkey, validator, EATA_PROGRAM_ID);
+    magicblock_chainlink::testing::deleg::add_delegation_metadata_for(
+        &ctx.rpc_client,
+        eata_pubkey,
+        7,
+    );
 
     // Ensure account (this triggers fetch_cloner logic including ATA/eATA handling)
     let pubkeys = [ata_pubkey];
@@ -81,7 +86,12 @@ async fn ixtest_ata_eata_replace_when_delegated_to_us() {
     assert_eq!(spl_token_account.state, AccountState::Initialized);
     assert_eq!(spl_token_account.delegated_amount, 0);
     assert!(spl_token_account.is_native.is_none());
-    assert!(delegated)
+    assert!(delegated);
+    let projected = ctx.test_engine.get_account(ata_pubkey).unwrap();
+    assert_eq!(projected.commit_seq(), 7);
+    let committed = mbv_core::intent::CommittedAccount::from_account_shared(ata_pubkey, &projected);
+    assert_eq!(committed.pubkey, eata_pubkey);
+    assert_eq!(committed.commit_id, 7);
 }
 
 #[tokio::test]

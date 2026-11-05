@@ -5,7 +5,6 @@ use program::{
 };
 use solana_hash::Hash;
 use solana_keypair::Address as Pubkey;
-use solana_transaction::Transaction;
 
 use outbox_client::InternalOutboxClientError;
 
@@ -25,15 +24,10 @@ pub(crate) trait OutboxClient: Send + Sync + 'static {
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), InternalOutboxClientError>;
 
-    /// Registers the result payload and submits its notification on the ER.
-    ///
-    /// Fresh intents preserve their scheduling-time signature. Recovered
-    /// intents, and fresh intents whose blockhash expired before execution,
-    /// are signed against the engine's current blockhash.
+    /// Submits the recorded settlement result and closes its outbox on the ER.
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        transaction: IntentSentTransaction,
     ) -> Result<(), InternalOutboxClientError>;
 
     async fn fetch_outbox_intent(
@@ -48,7 +42,6 @@ pub(crate) struct ScheduledBaseIntentMeta {
     pub blockhash: Hash,
     pub payer: Pubkey,
     pub included_pubkeys: Vec<Pubkey>,
-    pub intent_sent_transaction: IntentSentTransaction,
     pub requested_undelegation: bool,
 }
 
@@ -60,24 +53,7 @@ impl ScheduledBaseIntentMeta {
             blockhash: intent.blockhash,
             payer: intent.payer,
             included_pubkeys: intent.get_all_committed_pubkeys(),
-            intent_sent_transaction: if intent.sent_transaction.signatures.is_empty() {
-                IntentSentTransaction::Recovered
-            } else {
-                IntentSentTransaction::Known(intent.sent_transaction.clone())
-            },
             requested_undelegation: intent.has_undelegate_intent(),
         }
     }
-}
-
-/// Tracks the `ScheduledCommitSent` transaction for an in-flight intent.
-///
-/// Bundles recovered from the on-chain outbox have a stale `sent_transaction`
-/// (original blockhash is expired by restart time). `Recovered` signals that
-/// the transaction must be rebuilt at notification time with a fresh ER blockhash.
-#[derive(Default)]
-pub(crate) enum IntentSentTransaction {
-    Known(Transaction),
-    #[default]
-    Recovered,
 }

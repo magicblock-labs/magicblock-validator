@@ -59,6 +59,7 @@ url = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+magic-root-interface = { workspace = true }
 assert_matches = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
 chainlink = { package = "magicblock-chainlink", path = ".", features = ["dev-context"] }

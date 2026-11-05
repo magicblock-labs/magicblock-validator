@@ -3,7 +3,6 @@
 mod errors;
 mod leader;
 mod ledger;
-mod magic_sys_adapter;
 
 use std::process::ExitCode;
 

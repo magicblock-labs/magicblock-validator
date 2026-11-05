@@ -27,7 +27,7 @@ pub fn keeper_builder<R>(
         ledger: engine.ledger.clone(),
         blockstore: engine.blockstore,
         builtins: builtins(),
-        accounts: accounts::initial_accounts(&programs),
+        possibly_missing_accounts: accounts::possibly_missing_accounts(&programs),
         programs,
         rent: Rent::default(),
     })
