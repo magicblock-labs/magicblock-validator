@@ -3,6 +3,7 @@ use solana_message::CompileError;
 use solana_signature::Signature;
 use solana_signer::SignerError;
 use thiserror::Error;
+use wheels::DataLayoutError;
 
 use crate::{
     execution::preparation::delivery_preparator::DeliveryPreparatorError,
@@ -11,6 +12,8 @@ use crate::{
 
 #[derive(Error, Debug)]
 pub enum TransactionPreparatorError {
+    #[error("Failed to encode DLP instruction: {0}")]
+    InstructionEncoding(#[from] DataLayoutError),
     #[error("Failed to fit in single TX")]
     FailedToFit,
     #[error("Failed to compile transaction: {0}")]
@@ -39,7 +42,10 @@ impl TransactionPreparatorError {
 
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::FailedToFit | Self::Compile(_) | Self::Signer(_) => false,
+            Self::FailedToFit
+            | Self::Compile(_)
+            | Self::Signer(_)
+            | Self::InstructionEncoding(_) => false,
             Self::GetLatestBlockhash(err) => err.is_transient(),
             Self::DeliveryPreparation(err) => err.is_transient(),
         }
@@ -49,6 +55,7 @@ impl TransactionPreparatorError {
 impl From<TaskStrategistError> for TransactionPreparatorError {
     fn from(value: TaskStrategistError) -> Self {
         match value {
+            TaskStrategistError::InstructionEncoding(err) => Self::InstructionEncoding(err),
             TaskStrategistError::FailedToFit => Self::FailedToFit,
             TaskStrategistError::Compile(err) => Self::Compile(err),
             TaskStrategistError::Signer(err) => Self::Signer(err),

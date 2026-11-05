@@ -95,7 +95,15 @@ jobs:
           path: ${{ steps.build-env.outputs.cache-paths }}
 
   correctness:
-    name: RedSuite correctness
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: RedSuite correctness
+            family: redshift
+          - name: RedSuite DLP v2 compatibility
+            family: redshift-dlp
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
@@ -106,7 +114,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/run-redsuite
         with:
-          family: redshift
+          family: ${{ matrix.family }}
           clone-url: ${{ secrets.REDSUITE_CLONE_URL }}
 
   security:

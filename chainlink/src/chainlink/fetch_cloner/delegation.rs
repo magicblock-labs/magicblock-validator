@@ -1,5 +1,6 @@
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use delegation_program_interface::{
+    self as dpi, DelegationCluster, DelegationState,
     decrypt::Decrypt,
     legacy::{
         args::PostDelegationActions,
@@ -11,23 +12,19 @@ use delegation_program_interface::{
     },
 };
 use mbv_core::token_programs::{EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump};
-use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
+use solana_account::{AccountBuilder, AccountMode, ReadableAccount, StateFlags};
 use solana_keypair::Keypair;
 use solana_program::program_error::ProgramError;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 use tracing::*;
+use wheels::layout::Decodable;
 
-use super::{
-    CompanionFetchLogContext, FetchCloner, log_companion_fetch_failure,
-    subscription::{SubscriptionRelease, release_subs},
-};
+use super::{CompanionFetchLogContext, FetchCloner, log_companion_fetch_failure};
 use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::DelegationActions,
-    remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
-    },
+    remote_account_provider::{ChainPubsubClient, ChainRpcClient, RemoteAccount},
 };
 
 pub(super) fn parse_undelegation_request(
@@ -37,6 +34,111 @@ pub(super) fn parse_undelegation_request(
     let request = UndelegationRequest::try_from_bytes_with_discriminator(data).ok()?;
     (undelegation_request_pda_from_delegated_account(&request.delegated_account) == pubkey)
         .then_some(*request)
+}
+
+pub(super) fn lookup_keys(account: Pubkey) -> [Pubkey; 3] {
+    [
+        account,
+        delegation_record_pda_from_delegated_account(&account),
+        dpi::delegation_state_pda(&account),
+    ]
+}
+
+/// A delegated account can have either a legacy record or a v2 state in one snapshot.
+pub(super) fn select_record<'a>(
+    legacy_key: Pubkey,
+    legacy: &'a RemoteAccount,
+    state_key: Pubkey,
+    state: &'a RemoteAccount,
+) -> ChainlinkResult<(Pubkey, &'a RemoteAccount)> {
+    if let Some(image) = state.fresh_account() {
+        if legacy.is_found() || !image.data().starts_with(&DelegationState::DISCRIMINATOR) {
+            return Err(ChainlinkError::InvalidDelegationRecord(
+                state_key,
+                ProgramError::InvalidAccountData,
+            ));
+        }
+        Ok((state_key, state))
+    } else {
+        Ok((legacy_key, legacy))
+    }
+}
+
+/// Resolves a v2 state into the shared delegation record used by Chainlink's
+/// account-mode projection. V2 authority comes from the validated cluster.
+pub(super) async fn parse_v2_delegation_record<T: ChainRpcClient, U: ChainPubsubClient>(
+    this: &FetchCloner<T, U>,
+    delegated_pubkey: Pubkey,
+    state_pubkey: Pubkey,
+    state_account: &AccountBuilder,
+    fetch_context: metrics::AccountFetchContext,
+) -> ChainlinkResult<DelegationRecord> {
+    let invalid =
+        || ChainlinkError::InvalidDelegationRecord(state_pubkey, ProgramError::InvalidAccountData);
+    let state = state_account.read();
+    if state.owner() != dpi::id()
+        || state.flags().contains(StateFlags::EXECUTABLE)
+        || dpi::delegation_state_pda(&delegated_pubkey) != state_pubkey
+    {
+        return Err(invalid());
+    }
+    let state_slot = state.slot();
+    let state = DelegationState::decode(state.data()).map_err(|_| invalid())?;
+    let (owner, delegation_slot, lamports, cluster_pubkey) = (
+        *state.original_owner(),
+        state.delegation_slot(),
+        state.lamports(),
+        *state.delegation_cluster(),
+    );
+    if state.discriminator() != DelegationState::DISCRIMINATOR
+        || *state.delegated_account() != delegated_pubkey
+        || delegation_slot > state_slot
+    {
+        return Err(invalid());
+    }
+    let authority = fetch_v2_validator(this, cluster_pubkey, state_slot, fetch_context).await?;
+    Ok(DelegationRecord {
+        authority,
+        owner,
+        delegation_slot,
+        lamports,
+        commit_frequency_ms: 0,
+    })
+}
+
+async fn fetch_v2_validator<T: ChainRpcClient, U: ChainPubsubClient>(
+    this: &FetchCloner<T, U>,
+    cluster_pubkey: Pubkey,
+    state_slot: u64,
+    fetch_context: metrics::AccountFetchContext,
+) -> ChainlinkResult<Pubkey> {
+    let invalid = || {
+        ChainlinkError::InvalidDelegationRecord(cluster_pubkey, ProgramError::InvalidAccountData)
+    };
+    let cluster_accounts = this
+        .remote_account_provider
+        .fetch_snapshot_until_slot(
+            &[cluster_pubkey],
+            state_slot,
+            fetch_context,
+            Some(ChainlinkCompanionFetchKind::DelegationRecord),
+        )
+        .await?;
+    let [cluster_account] = cluster_accounts.as_slice() else {
+        return Err(invalid());
+    };
+    let cluster_account = cluster_account.fresh_account().ok_or_else(invalid)?;
+    if cluster_account.owner() != &dpi::id() || cluster_account.executable() {
+        return Err(invalid());
+    }
+    let cluster = DelegationCluster::decode(cluster_account.data()).map_err(|_| invalid())?;
+    if cluster.discriminator() != DelegationCluster::DISCRIMINATOR
+        || dpi::delegation_cluster_pda(cluster.cluster_id()) != cluster_pubkey
+        || cluster.challenge_config().is_some()
+    {
+        return Err(invalid());
+    }
+    Ok(*cluster.current_validator())
 }
 
 /// Parses a delegation record from account data bytes. Returns the parsed DelegationRecord
@@ -183,83 +285,43 @@ where
     T: ChainRpcClient,
     U: ChainPubsubClient,
 {
-    let delegation_record_pubkey = delegation_record_pda_from_delegated_account(&account_pubkey);
-
-    let acquired_delegation_record_reason = this
-        .acquire_subscription_reason(
-            &delegation_record_pubkey,
-            SubscriptionReason::DelegationRecord,
-        )
-        .await
-        .map(|_| true)
-        .unwrap_or_else(|err| {
-            warn!(
-                pubkey = %delegation_record_pubkey,
-                error = ?err,
-                "Failed to acquire delegation record subscription reason"
-            );
-            false
-        });
-
-    let res = match this
-        .remote_account_provider
-        .try_get_multi_until_slots_match(
-            &[delegation_record_pubkey],
-            Some(MatchSlotsConfig {
-                min_context_slot: Some(min_context_slot),
-                ..MatchSlotsConfig::new(ChainlinkCompanionFetchKind::DelegationRecord)
-            }),
-            fetch_context.with_reason(metrics::AccountFetchReason::DelegationRecord),
-        )
-        .await
-    {
-        Ok(mut delegation_records) => {
-            if let Some(delegation_record_remote) = delegation_records.pop() {
-                match delegation_record_remote.fresh_account() {
-                    Some(delegation_record_account) => this
-                        .parse_delegation_record(
-                            delegation_record_account.data(),
-                            delegation_record_pubkey,
-                        )
-                        .ok(),
-                    None => None,
-                }
-            } else {
-                None
-            }
-        }
+    let [_, legacy_key, state_key] = lookup_keys(account_pubkey);
+    let fetch_context = fetch_context.with_reason(metrics::AccountFetchReason::DelegationRecord);
+    let result = async {
+        let accounts = this
+            .remote_account_provider
+            .fetch_snapshot_until_slot(
+                &[legacy_key, state_key],
+                min_context_slot,
+                fetch_context.clone(),
+                Some(ChainlinkCompanionFetchKind::DelegationRecord),
+            )
+            .await?;
+        let [legacy, state] = accounts.as_slice() else {
+            return Err(ChainlinkError::UnexpectedAccountCount(format!(
+                "Expected two delegation companions for {account_pubkey}"
+            )));
+        };
+        let (key, record) = select_record(legacy_key, legacy, state_key, state)?;
+        let Some(image) = record.fresh_account() else { return Ok(None) };
+        let record = AccountBuilder::from(solana_account::AccountSharedData::from(image.owned()));
+        this.parse_delegation_companion(account_pubkey, key, &record, fetch_context)
+            .await
+            .map(Some)
+    }
+    .await;
+    match result {
+        Ok(record) => record,
         Err(err) => {
             log_companion_fetch_failure(
                 companion_fetch_log_context,
-                delegation_record_pubkey,
+                legacy_key,
                 ChainlinkCompanionFetchKind::DelegationRecord,
                 &err,
             );
             None
         }
-    };
-
-    let mut releases = Vec::new();
-    // Handle edge case where it was cloned in the meantime.
-    // The small possibility of a fetch + clone of this delegation record being in process
-    // still exists, but it's negligible.
-    if !this.contains_account(&delegation_record_pubkey) {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DirectAccount,
-        });
     }
-    if acquired_delegation_record_reason {
-        releases.push(SubscriptionRelease::Pubkey {
-            pubkey: delegation_record_pubkey,
-            reason: SubscriptionReason::DelegationRecord,
-        });
-    }
-    if !releases.is_empty() {
-        release_subs(&this.remote_account_provider, releases).await;
-    }
-
-    res
 }
 
 /// Seed only a newly materialized session. Existing protected images are skipped
@@ -275,6 +337,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     request: &crate::cloner::AccountCloneRequest,
     fetch_context: metrics::AccountFetchContext,
 ) -> ChainlinkResult<u32> {
+    use delegation_program_interface::DelegationState;
     use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
     };
@@ -293,20 +356,50 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     };
     let record_pubkey = delegation_record_pda_from_delegated_account(&delegated_pubkey);
     let metadata_pubkey = delegation_metadata_pda_from_delegated_account(&delegated_pubkey);
+    let state_pubkey = dpi::delegation_state_pda(&delegated_pubkey);
     let accounts = this
         .remote_account_provider
         .fetch_snapshot_until_slot(
-            &[record_pubkey, metadata_pubkey],
+            &[record_pubkey, metadata_pubkey, state_pubkey],
             request.source_slots().view,
-            fetch_context,
+            fetch_context.clone(),
             Some(ChainlinkCompanionFetchKind::DelegationRecord),
         )
         .await?;
     let invalid =
         || ChainlinkError::InvalidDelegationRecord(record_pubkey, ProgramError::InvalidAccountData);
-    let [record, metadata] = accounts.as_slice() else {
+    let [record, metadata, state] = accounts.as_slice() else {
         return Err(invalid());
     };
+    if let Some(state) = state.fresh_account() {
+        if record.is_found()
+            || metadata.is_found()
+            || state.owner() != &dpi::id()
+            || state.executable()
+        {
+            return Err(invalid());
+        }
+        let state_view = DelegationState::decode(state.data()).map_err(|_| invalid())?;
+        if state_view.discriminator() != DelegationState::DISCRIMINATOR
+            || *state_view.delegated_account() != delegated_pubkey
+            || *state_view.original_owner()
+                != if request.is_ata_projection() { EATA_PROGRAM_ID } else { image.owner() }
+            || state_view.delegation_slot() != image.slot()
+        {
+            return Err(invalid());
+        }
+        let authority = fetch_v2_validator(
+            this,
+            *state_view.delegation_cluster(),
+            state.slot(),
+            fetch_context,
+        )
+        .await?;
+        if authority != this.validator_pubkey {
+            return Err(invalid());
+        }
+        return Ok(state_view.last_commit_seq());
+    }
     let record = record.fresh_account().ok_or_else(invalid)?;
     let metadata = metadata.fresh_account().ok_or_else(invalid)?;
     if record.owner() != &delegation_program_interface::id()

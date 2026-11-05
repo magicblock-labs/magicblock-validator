@@ -3899,6 +3899,7 @@ dependencies = [
  "tracing",
  "url",
  "v42-calculator-interface",
+ "wheels",
  "wincode",
 ]
 
@@ -3934,7 +3935,6 @@ version = "2.0.5"
 dependencies = [
  "async-trait",
  "futures-util",
- "lru",
  "magicblock-accountsdb",
  "magicblock-chainlink",
  "magicblock-committor-interface",
@@ -3949,6 +3949,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.5",
+ "serde_json",
  "solana-account 4.3.1",
  "solana-account-decoder",
  "solana-commitment-config",
@@ -3975,6 +3976,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "wheels",
  "wincode",
 ]
 

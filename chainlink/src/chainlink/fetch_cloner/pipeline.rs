@@ -7,9 +7,7 @@ use ::metrics::metrics::{
     self, AccountFetchContext, AccountFetchReason, ChainlinkCloneIntent, ChainlinkCloneOutcome,
     ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
 };
-use delegation_program_interface::{
-    self as dpi, legacy::pda::delegation_record_pda_from_delegated_account,
-};
+use delegation_program_interface as dpi;
 use futures_util::future::join_all;
 use mbv_core::token_programs::is_ata;
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
@@ -139,9 +137,13 @@ where
     T: ChainRpcClient,
     U: ChainPubsubClient,
 {
-    let record_subs = owned_by_deleg
+    let lookups = owned_by_deleg
         .iter()
-        .map(|(pubkey, _, _)| delegation_record_pda_from_delegated_account(pubkey))
+        .map(|(pubkey, _, slot)| (delegation::lookup_keys(*pubkey), *slot))
+        .collect::<Vec<_>>();
+    let record_subs = lookups
+        .iter()
+        .flat_map(|([_, legacy_key, state_key], _)| [*legacy_key, *state_key])
         .collect::<Vec<_>>();
     acquire_subs(
         &this.remote_account_provider,
@@ -162,43 +164,15 @@ where
         release_subs(&this.remote_account_provider, releases)
     };
 
-    // Primaries are already watched by the initial fetch and records by the
-    // acquisition above. Read each pair in one RPC snapshot without taking
-    // additional direct subscription references.
-    let pairs_per_batch = MAX_MULTIPLE_ACCOUNTS_PER_REQUEST / 2;
     let min_context_slot = min_context_slot
         .unwrap_or_default()
         .max(this.remote_account_provider.chain_slot());
-    let batches = owned_by_deleg
-        .chunks(pairs_per_batch)
-        .zip(record_subs.chunks(pairs_per_batch))
-        .map(|(primaries, records)| {
-            let mut pubkeys = Vec::with_capacity(primaries.len() * 2);
-            let mut slot = min_context_slot;
-            for ((pubkey, _, account_slot), record) in primaries.iter().zip(records) {
-                pubkeys.extend([*pubkey, *record]);
-                slot = slot.max(*account_slot);
-            }
-            (pubkeys, slot)
-        })
-        .collect::<Vec<_>>();
     let fetch_context = fetch_context.with_reason(AccountFetchReason::DelegationRecord);
-    let fetched = join_all(batches.into_iter().map(|(pubkeys, slot)| {
-        let fetch_context = fetch_context.clone();
-        async move {
-            this.fetch_count.fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
-            let accounts = this
-                .remote_account_provider
-                .fetch_snapshot_until_slot(
-                    &pubkeys,
-                    slot,
-                    fetch_context,
-                    Some(ChainlinkCompanionFetchKind::DelegationRecord),
-                )
-                .await?;
-            Ok::<_, ChainlinkError>((pubkeys, accounts))
-        }
-    }))
+    let fetched = join_all(
+        lookups.chunks(MAX_MULTIPLE_ACCOUNTS_PER_REQUEST / 3).map(|batch| {
+            this.fetch_delegation_batch(batch, min_context_slot, fetch_context.clone())
+        }),
+    )
     .await;
 
     let mut missing_delegation_record = vec![];
@@ -207,22 +181,9 @@ where
         let mut errors = Vec::new();
         let mut accounts_fully_resolved = Vec::with_capacity(owned_by_deleg.len());
         for batch in fetched {
-            let (pubkeys, accounts) = match batch {
-                Ok(batch) => batch,
-                Err(err) => {
-                    errors.push(err);
-                    continue;
-                }
-            };
-            for ([pubkey, record], [account, companion]) in
-                pubkeys.as_chunks::<2>().0.iter().zip(accounts.as_chunks::<2>().0)
-            {
-                match FetchCloner::<T, U>::resolve_account_with_companion(
-                    *pubkey, *record, account, companion,
-                ) {
-                    Ok(resolved) => accounts_fully_resolved.push(resolved),
-                    Err(err) => errors.push(err),
-                }
+            match batch {
+                Ok(resolved) => accounts_fully_resolved.extend(resolved),
+                Err(err) => errors.push(err),
             }
         }
 
@@ -252,53 +213,58 @@ where
         {
             let source_slots = CloneSourceSlots::single(account.read().slot());
             // If the account is delegated we set the owner and delegation state
-            let (delegated_to_other, delegation_actions) = if let Some(record_data) =
-                delegation_record
-            {
-                // NOTE: failing here is fine when resolving all accounts for a transaction
-                // since if something is off we better not run it anyways
-                // However we may consider a different behavior when user is getting
-                // multiple accounts.
-                let (delegation_record, delegation_actions) = match this
-                    .parse_delegation_record(record_data.read().data(), delegation_record_pubkey)
-                {
-                    Ok(x) => x,
-                    Err(err) => {
-                        release_records().await;
-                        return Err(err);
+            let (delegated_to_other, delegation_actions) =
+                if let Some(record_data) = delegation_record {
+                    // NOTE: failing here is fine when resolving all accounts for a transaction
+                    // since if something is off we better not run it anyways
+                    // However we may consider a different behavior when user is getting
+                    // multiple accounts.
+                    let parsed = this
+                        .parse_delegation_companion(
+                            pubkey,
+                            delegation_record_pubkey,
+                            &record_data,
+                            fetch_context.clone(),
+                        )
+                        .await;
+                    let (delegation_record, delegation_actions) = match parsed {
+                        Ok(x) => x,
+                        Err(err) => {
+                            release_records().await;
+                            return Err(err);
+                        }
+                    };
+
+                    let delegated_to_other =
+                        delegation::delegated_to_other(&this.validator_pubkey, &delegation_record);
+
+                    account = delegation::apply_record(
+                        &this.validator_pubkey,
+                        pubkey,
+                        account,
+                        &delegation_record,
+                    );
+
+                    // Skip high-cardinality owner programs such as SPL Token.
+                    if account.read().is(AccountMode::Delegated)
+                        && !this.program_subscription_is_too_broad(&delegation_record.owner)
+                    {
+                        owner_programs_to_subscribe.insert(delegation_record.owner);
                     }
-                };
 
-                let delegated_to_other =
-                    delegation::delegated_to_other(&this.validator_pubkey, &delegation_record);
+                    let delegation_actions = if account.read().is(AccountMode::Delegated) {
+                        delegation_actions
+                    } else {
+                        None
+                    };
 
-                account = delegation::apply_record(
-                    &this.validator_pubkey,
-                    pubkey,
-                    account,
-                    &delegation_record,
-                );
-
-                // Skip high-cardinality owner programs such as SPL Token.
-                if account.read().is(AccountMode::Delegated)
-                    && !this.program_subscription_is_too_broad(&delegation_record.owner)
-                {
-                    owner_programs_to_subscribe.insert(delegation_record.owner);
-                }
-
-                let delegation_actions = if account.read().is(AccountMode::Delegated) {
-                    delegation_actions
+                    (delegated_to_other, delegation_actions)
                 } else {
-                    None
+                    if !is_internal_dlp_account_data(account.read().data()) {
+                        missing_delegation_record.push((pubkey, account.read().slot()));
+                    }
+                    (None, None)
                 };
-
-                (delegated_to_other, delegation_actions)
-            } else {
-                if !is_internal_dlp_account_data(account.read().data()) {
-                    missing_delegation_record.push((pubkey, account.read().slot()));
-                }
-                (None, None)
-            };
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account,

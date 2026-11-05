@@ -2061,38 +2061,36 @@ where
         }
 
         let min_context_slot = account.slot();
-        let record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
-        let acquired_record = self
-            .acquire_subscription_reason(&record_pubkey, SubscriptionReason::DelegationRecord)
-            .await
-            .map(|_| true)
-            .unwrap_or_else(|error| {
-                warn!(
-                    pubkey = %record_pubkey,
-                    error = ?error,
-                    "Failed to acquire delegation record subscription reason"
-                );
+        let keys = delegation::lookup_keys(pubkey);
+        let [_, record_pubkey, state_pubkey] = keys;
+        let companions = [record_pubkey, state_pubkey];
+        let subscribed = match subscription::acquire_subs(
+            &self.remote_account_provider,
+            companions,
+            SubscriptionReason::DelegationRecord,
+        )
+        .await
+        {
+            Ok(()) => true,
+            Err(error) => {
+                warn!(%pubkey, ?error, "Failed to subscribe to delegation companions");
                 false
-            });
+            }
+        };
         let fetched = self
-            .task_to_fetch_with_companion(
-                pubkey,
-                record_pubkey,
+            .fetch_delegation_batch(
+                &[(keys, min_context_slot)],
                 min_context_slot,
                 AccountFetchContext::subscription_update(AccountFetchReason::DelegationRecord),
-                ChainlinkCompanionFetchKind::DelegationRecord,
             )
-            .await
-            .unwrap_or_else(|error| Err(error.into()));
-        let mut releases = Vec::new();
+            .await;
         let resolved = match fetched {
-            Ok(snapshot) => {
-                releases.push(SubscriptionRelease::Pubkey {
-                    pubkey: snapshot.companion_pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                });
-                self.resolve_subscription_snapshot(snapshot, companion_fetch_log_context).await
-            }
+            Ok(mut accounts) => match accounts.pop() {
+                Some(snapshot) => {
+                    self.resolve_subscription_snapshot(snapshot, companion_fetch_log_context).await
+                }
+                None => None,
+            },
             Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(_)) => {
                 error!(
                     primary_pubkey = %pubkey,
@@ -2112,14 +2110,15 @@ where
                 None
             }
         };
-        if acquired_record {
-            releases.push(SubscriptionRelease::Pubkey {
-                pubkey: record_pubkey,
-                reason: SubscriptionReason::DelegationRecord,
-            });
-        }
-        if !releases.is_empty() {
-            release_subs(&self.remote_account_provider, releases).await;
+        if subscribed {
+            release_subs(
+                &self.remote_account_provider,
+                companions.into_iter().map(|pubkey| SubscriptionRelease::Pubkey {
+                    pubkey,
+                    reason: SubscriptionReason::DelegationRecord,
+                }),
+            )
+            .await;
         }
         resolved
     }
@@ -2158,14 +2157,24 @@ where
             }
             return None;
         };
-        let (record, actions) =
-            match self.parse_delegation_record(record.read().data(), companion_pubkey) {
-                Ok(parsed) => parsed,
-                Err(error) => {
-                    error!(pubkey = %pubkey, error = %error, "Failed to parse delegation record");
-                    return None;
-                }
-            };
+        let parsed = self
+            .parse_delegation_companion(
+                pubkey,
+                companion_pubkey,
+                &record,
+                companion_fetch_log_context
+                    .origin
+                    .clone()
+                    .with_reason(AccountFetchReason::DelegationRecord),
+            )
+            .await;
+        let (record, actions) = match parsed {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                error!(pubkey = %pubkey, error = %error, "Failed to parse delegation record");
+                return None;
+            }
+        };
         let source_slots = CloneSourceSlots::single(account.read().slot());
         let account = delegation::apply_record(&self.validator_pubkey, pubkey, account, &record);
 
@@ -2213,15 +2222,32 @@ where
         .await
     }
 
-    /// Parses a delegation record from account data bytes.
-    /// Returns the parsed DelegationRecord, or InvalidDelegationRecord error
-    /// if parsing fails.
-    fn parse_delegation_record(
+    async fn parse_delegation_companion(
         &self,
-        data: &[u8],
-        delegation_record_pubkey: Pubkey,
+        account: Pubkey,
+        companion_key: Pubkey,
+        companion: &AccountBuilder,
+        fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
-        delegation::parse_delegation_record(data, delegation_record_pubkey, self.engine.signer())
+        let image = companion.read();
+        if image.owner() != dpi::id() {
+            return Err(ChainlinkError::InvalidDelegationRecord(
+                companion_key,
+                solana_program::program_error::ProgramError::InvalidAccountData,
+            ));
+        }
+        if image.data().starts_with(&dpi::DelegationState::DISCRIMINATOR) {
+            return delegation::parse_v2_delegation_record(
+                self,
+                account,
+                companion_key,
+                companion,
+                fetch_context,
+            )
+            .await
+            .map(|record| (record, None));
+        }
+        delegation::parse_delegation_record(image.data(), companion_key, self.engine.signer())
     }
 
     /// Fetches and parses the delegation record for an account, returning the
@@ -2843,6 +2869,39 @@ where
         };
 
         Ok(batch.result)
+    }
+
+    /// Fetch each primary with both possible records at one RPC context slot.
+    async fn fetch_delegation_batch(
+        &self,
+        batch: &[([Pubkey; 3], u64)],
+        min_context_slot: u64,
+        fetch_context: AccountFetchContext,
+    ) -> ChainlinkResult<Vec<AccountWithCompanion>> {
+        let keys = batch.iter().flat_map(|(keys, _)| *keys).collect::<Vec<_>>();
+        let slot = batch.iter().fold(min_context_slot, |floor, (_, slot)| floor.max(*slot));
+        self.fetch_count.fetch_add(keys.len() as u64, Ordering::Relaxed);
+        let images = self
+            .remote_account_provider
+            .fetch_snapshot_until_slot(
+                &keys,
+                slot,
+                fetch_context,
+                Some(ChainlinkCompanionFetchKind::DelegationRecord),
+            )
+            .await?;
+        // The provider checks response cardinality before returning the snapshot.
+        batch
+            .iter()
+            .zip(images.as_chunks::<3>().0)
+            .map(
+                |(([pubkey, legacy_key, state_key], _), [account, legacy, state])| {
+                    let (key, companion) =
+                        delegation::select_record(*legacy_key, legacy, *state_key, state)?;
+                    Self::resolve_account_with_companion(*pubkey, key, account, companion)
+                },
+            )
+            .collect()
     }
 
     fn task_to_fetch_with_program_data(

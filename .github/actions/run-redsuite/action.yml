@@ -3,7 +3,7 @@ description: Build or restore artifacts, run one family, and collect logs
 
 inputs:
   family:
-    description: Redshift correctness, Redhat security, or Redline benchmarks
+    description: Redshift correctness, DLP v2 compatibility, Redhat security, or Redline benchmarks
     required: true
   clone-url:
     description: Base-chain RPC override
@@ -33,11 +33,14 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: 3.7.1
+        ref: ${{ inputs.family == 'redshift-dlp' && '731aa2a738ed1ea1009d05bc4b56bcf063353519' || '3.7.1' }}
+        fetch-depth: ${{ inputs.family == 'redshift-dlp' && '0' || '1' }}
         path: redsuite
         persist-credentials: false
 
     - uses: ./magicblock-validator/.github/actions/build-redsuite
+      with:
+        dlp-v2: ${{ inputs.family == 'redshift-dlp' }}
 
     - uses: ./magicblock-validator/.github/actions/build-er
 

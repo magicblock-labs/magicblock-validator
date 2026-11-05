@@ -57,6 +57,7 @@ tonic = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
 wincode = { workspace = true }
+wheels = { workspace = true }
 
 [dev-dependencies]
 magic-root-interface = { workspace = true }

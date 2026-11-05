@@ -8,6 +8,7 @@ use solana_keypair::Keypair;
 use solana_message::CompileError;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
+use wheels::DataLayoutError;
 
 use crate::shared::{
     tasks::{BaseActionTask, Task, utils::TransactionUtils},
@@ -38,11 +39,14 @@ impl TransactionStrategy {
     /// some tasks were reset, number of tasks didn't increase
     pub(crate) fn refresh_lookup_table_keys(&mut self, authority: &Pubkey) {
         if self.uses_alts() {
-            self.lookup_tables_keys = TaskStrategist::collect_lookup_table_keys(
+            // Keep the prior keys if encoding fails; final assembly reports the error.
+            if let Ok(keys) = TaskStrategist::collect_lookup_table_keys(
                 authority,
                 &self.tasks,
                 self.uniqueness_nonce,
-            );
+            ) {
+                self.lookup_tables_keys = keys;
+            }
         }
     }
 
@@ -149,10 +153,7 @@ impl TaskStrategist {
                         uniqueness_nonce,
                     );
                 }
-                Err(TaskStrategistError::Signer(err)) => {
-                    return Err(err.into());
-                }
-                Err(err @ TaskStrategistError::Compile(_)) => return Err(err),
+                Err(err) => return Err(err),
             };
 
         // If ALTs aren't used then we sure this will be optimal - return
@@ -197,7 +198,7 @@ impl TaskStrategist {
         let optimized_tx_size =
             Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?;
         if optimized_tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE
-            && Self::v1_account_lock_count(&optimized_tasks, validator, uniqueness_nonce)
+            && Self::v1_account_lock_count(&optimized_tasks, validator, uniqueness_nonce)?
                 <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
         {
             return Ok(TransactionStrategy {
@@ -214,7 +215,7 @@ impl TaskStrategist {
             return Err(TaskStrategistError::FailedToFit);
         };
         let lookup_tables_keys =
-            Self::collect_lookup_table_keys(validator, &optimized_tasks, uniqueness_nonce);
+            Self::collect_lookup_table_keys(validator, &optimized_tasks, uniqueness_nonce)?;
         Ok(TransactionStrategy {
             tasks: optimized_tasks,
             lookup_tables_keys,
@@ -227,9 +228,12 @@ impl TaskStrategist {
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub(crate) fn attempt_lookup_tables(tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
         let placeholder = Keypair::new();
-        let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
-            &Self::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce),
-        );
+        let Ok(keys) =
+            Self::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce)
+        else {
+            return false;
+        };
+        let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(&keys);
 
         // Assemble through the same path used for the real transaction so
         // fit decisions cannot diverge from the assembled message.
@@ -253,7 +257,7 @@ impl TaskStrategist {
         authority: &Pubkey,
         tasks: &[Task],
         uniqueness_nonce: Option<u64>,
-    ) -> Vec<Pubkey> {
+    ) -> Result<Vec<Pubkey>, DataLayoutError> {
         let budgets = TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce);
         let size_budgets = TransactionUtils::tasks_accounts_size_budget(tasks);
         let mut service_instructions =
@@ -269,8 +273,8 @@ impl TaskStrategist {
         tasks: &[Task],
         authority: &Pubkey,
         uniqueness_nonce: Option<u64>,
-    ) -> usize {
-        let mut instructions = TransactionUtils::tasks_instructions(authority, tasks);
+    ) -> Result<usize, DataLayoutError> {
+        let mut instructions = TransactionUtils::tasks_instructions(authority, tasks)?;
         if let Some(nonce) = uniqueness_nonce {
             instructions.push(TransactionUtils::uniqueness_noop_instruction(nonce));
         }
@@ -280,17 +284,17 @@ impl TaskStrategist {
             keys.insert(instruction.program_id);
             keys.extend(instruction.accounts.into_iter().map(|meta| meta.pubkey));
         }
-        keys.len()
+        Ok(keys.len())
     }
 
     /// Optimizes tasks to fit the v1 wire limit.
-    /// Returns Ok(size of tx after optimizations) else Err(SignerError).
+    /// Returns the optimized size or an instruction/signing error.
     /// Note that the returned size, though possibly optimized one, may still not be under
     /// the v1 wire limit. The caller needs to check and make decision accordingly.
     fn try_optimize_tx_size_if_needed(
         tasks: &mut [Task],
         uniqueness_nonce: Option<u64>,
-    ) -> Result<usize, SignerError> {
+    ) -> TaskStrategistResult<usize> {
         // Get initial transaction size
         let calculate_tx_length = |tasks: &[Task]| {
             // Include the constant-size uniqueness noop so fit decisions
@@ -304,7 +308,7 @@ impl TaskStrategist {
                 Ok(tx) => Ok(serialized_transaction_size(&tx)),
                 Err(TaskStrategistError::FailedToFit) => Ok(usize::MAX),
                 Err(TaskStrategistError::Compile(_)) => Ok(usize::MAX),
-                Err(TaskStrategistError::Signer(err)) => Err(err),
+                Err(err) => Err(err),
             }
         };
 
@@ -316,7 +320,7 @@ impl TaskStrategist {
         }
 
         // Create heap size -> index
-        let ixs = TransactionUtils::tasks_instructions(&Pubkey::new_unique(), tasks);
+        let ixs = TransactionUtils::tasks_instructions(&Pubkey::new_unique(), tasks)?;
         // Possible serialization failures are possible only due to size in our case
         // In that case we set size to max
         let sizes = ixs
@@ -348,6 +352,8 @@ impl TaskStrategist {
 
 #[derive(thiserror::Error, Debug)]
 pub enum TaskStrategistError {
+    #[error("Failed to encode DLP instruction: {0}")]
+    InstructionEncoding(#[from] DataLayoutError),
     #[error("Failed to fit in single TX")]
     FailedToFit,
     #[error("Failed to compile transaction: {0}")]
@@ -364,8 +370,7 @@ mod tests {
     use std::{collections::HashMap, sync::Arc};
 
     use delegation_program_interface::{
-        self as dpi,
-        legacy::{discriminator::DlpDiscriminator, state::UndelegationRequester},
+        self as dpi, UndelegationRequester, legacy::discriminator::DlpDiscriminator,
     };
     use mbv_core::intent::{
         BaseAction, CommitAndUndelegate, CommitType, MagicBaseIntent, ProgramArgs, UndelegateType,
@@ -449,6 +454,7 @@ mod tests {
     // Helper to create an undelegate task
     fn create_test_undelegate_task() -> UndelegateTask {
         UndelegateTask {
+            version: Default::default(),
             delegated_account: Pubkey::new_unique(),
             owner_program: Pubkey::default(),
             rent_reimbursement: Pubkey::new_unique(),
@@ -800,7 +806,7 @@ mod tests {
         let delegated_account = Pubkey::new_unique();
         let intent = create_test_intent_bundle(0, &[], &[delegated_account]).inner;
         let info_provider = Arc::new(MockInfoProvider {
-            delegation_metadata: HashMap::from([(
+            delegation_info: HashMap::from([(
                 delegated_account,
                 (UndelegationRequester::OwnerProgram, delegated_account),
             )]),
@@ -837,7 +843,6 @@ mod tests {
                     let mut base = accounts[0].account.clone();
                     base.data[0] = 0;
                     let info_provider = Arc::new(MockInfoProvider {
-                        default_commit_id: 7,
                         base_accounts: if use_diff {
                             HashMap::from([(pubkey, Some(base))])
                         } else {
@@ -888,9 +893,9 @@ mod tests {
                         matches!(task.delivery, CommitDelivery::DiffInArgs { .. }),
                         use_diff
                     );
-                    let inline_ix = task.instruction(&authority);
+                    let inline_ix = task.instruction(&authority).unwrap();
                     assert!(task.try_use_buffer());
-                    let buffer_ix = task.instruction(&authority);
+                    let buffer_ix = task.instruction(&authority).unwrap();
                     assert!(inline_ix.data.starts_with(&DlpDiscriminator::CommitFinalize.to_vec()));
                     assert!(
                         buffer_ix
