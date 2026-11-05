@@ -10,10 +10,38 @@ runs:
       working-directory: redsuite
       run: |
         echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-        dlp_rev=$(sed -n 's/^magicblock-delegation-program-interface = .*rev = "\([^"]*\)".*/\1/p' ../magicblock-validator/Cargo.toml)
-        test -n "$dlp_rev"
-        test "$dlp_rev" = "$(sed -n 's/^magicblock-delegation-program-interface = .*rev = "\([^"]*\)".*/\1/p' Cargo.toml)"
-        echo "dlp-rev=$dlp_rev" >> "$GITHUB_OUTPUT"
+        python3 - <<'PY' >> "$GITHUB_OUTPUT"
+        import tomllib
+
+        def dlp_source(manifest_path, lock_path):
+            with open(manifest_path, "rb") as manifest_file:
+                manifest = tomllib.load(manifest_file)
+            with open(lock_path, "rb") as lock_file:
+                lock = tomllib.load(lock_file)
+
+            branch = manifest["workspace"]["dependencies"][
+                "magicblock-delegation-program-interface"
+            ]["branch"]
+            package = next(
+                package
+                for package in lock["package"]
+                if package["name"] == "magicblock-delegation-program-interface"
+            )
+            source = package["source"]
+            revision = source.rsplit("#", 1)[1]
+            if f"?branch={branch}#" not in source:
+                raise SystemExit(f"DLP lockfile source does not use branch {branch}: {source}")
+            return branch, revision
+
+        redsuite_branch, redsuite_rev = dlp_source("Cargo.toml", "Cargo.lock")
+        validator_branch, validator_rev = dlp_source(
+            "../magicblock-validator/Cargo.toml",
+            "../magicblock-validator/Cargo.lock",
+        )
+        if (redsuite_branch, redsuite_rev) != (validator_branch, validator_rev):
+            raise SystemExit("Validator and RedSuite must use the same DLP branch and locked revision")
+        print(f"dlp-branch={redsuite_branch}")
+        print(f"dlp-rev={redsuite_rev}")
 
     # Bump artifact versions when build flags or profiles change, not cache plumbing.
     - name: Restore RedSuite CLI
