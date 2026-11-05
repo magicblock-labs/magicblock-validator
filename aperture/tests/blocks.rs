@@ -98,6 +98,7 @@ async fn block_rpc_methods() {
     let parent = env.rpc.get_block(latest - 1).await.unwrap();
     let child = env.rpc.get_block(latest).await.unwrap();
     assert_eq!(child.previous_blockhash, parent.blockhash);
+    env.close().await;
 }
 
 /// Proves pruning advances both boundaries, removes listed slots, and reports cleaned blocks.
@@ -136,4 +137,5 @@ async fn pruned_block_history() {
             other => panic!("unexpected error: {other:?}"),
         }
     }
+    env.close().await;
 }

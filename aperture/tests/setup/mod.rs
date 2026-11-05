@@ -22,7 +22,8 @@ use solana_signature::Signature;
 use solana_signer::Signer;
 use solana_transaction::Transaction;
 use spl_token_2022::state::{Account as TokenAccount, AccountState, Mint};
-use tokio_util::sync::CancellationToken;
+use tokio::task::JoinHandle;
+use tokio_util::sync::{CancellationToken, DropGuard};
 use v42_calculator_interface::builder::Expr;
 
 pub(crate) const TOKEN_PROGRAM_ID: Pubkey =
@@ -47,10 +48,11 @@ pub(crate) fn transfer(from: Pubkey, to: Pubkey, amount: u64) -> Instruction {
 }
 
 pub(crate) struct RpcTestEnv {
+    cancel: DropGuard,
+    server: JoinHandle<()>,
     pub engine: TestEngine,
     pub rpc: RpcClient,
     pub pubsub: PubsubClient,
-    cancel: CancellationToken,
 }
 
 fn shared_ledger() -> Arc<Ledger> {
@@ -94,14 +96,23 @@ impl RpcTestEnv {
         .expect("initialize aperture test server");
         let rpc_url = format!("http://{}", server.http_addr());
         let pubsub_url = format!("ws://{}", server.ws_addr());
-        tokio::spawn(server.run());
+        let server = tokio::spawn(server.run());
 
         Self {
             engine,
             rpc: RpcClient::new(rpc_url),
             pubsub: PubsubClient::new(&pubsub_url).await.expect("connect to aperture pubsub"),
-            cancel,
+            cancel: cancel.drop_guard(),
+            server,
         }
+    }
+
+    /// Stops RPC tasks and Engine before releasing their temporary storage.
+    pub(crate) async fn close(self) {
+        drop(self.cancel);
+        self.pubsub.shutdown().await.expect("close aperture pubsub client");
+        self.server.await.expect("aperture server shuts down");
+        self.engine.close().await;
     }
 
     /// Builds the client-side Solana envelope used at the JSON-RPC boundary.
@@ -199,11 +210,5 @@ impl RpcTestEnv {
             .mode(AccountMode::Magic)
             .build();
         self.engine.accounts().store(&[(key, account)]).expect("store test account");
-    }
-}
-
-impl Drop for RpcTestEnv {
-    fn drop(&mut self) {
-        self.cancel.cancel();
     }
 }
