@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use mbv_core::{
     intent::BaseActionCallback,
@@ -22,14 +22,10 @@ use crate::{
             TransactionPreparator, cleanup_resources::CleanupResources,
             error::TransactionPreparatorError,
         },
-        task_builder::TaskBuilderError,
     },
-    shared::{
-        account_state::{CachedTaskInfoProvider, TaskInfoProvider},
-        tasks::{
-            Task,
-            task_strategist::{TaskStrategist, TransactionStrategy},
-        },
+    shared::tasks::{
+        Task,
+        task_strategist::{TaskStrategist, TransactionStrategy},
     },
 };
 
@@ -187,62 +183,6 @@ pub(in crate::execution) async fn resolve_pending_signature(
     }
 }
 
-/// Handles out of sync commit id error, fixes current strategy
-pub(in crate::execution) async fn handle_commit_id_error(
-    authority: &Pubkey,
-    task_info_provider: &CachedTaskInfoProvider,
-    committed_pubkeys: &[Pubkey],
-    strategy: &mut TransactionStrategy,
-    intent_id: u64,
-) -> Result<(), TaskBuilderError> {
-    let snapshot_slots: HashMap<Pubkey, u64> = strategy
-        .tasks
-        .iter()
-        .filter_map(|task| match task {
-            Task::CommitFinalize(task) => Some((
-                task.committed_account.pubkey,
-                task.committed_account.remote_slot,
-            )),
-            _ => None,
-        })
-        .collect();
-    let min_context_slot = snapshot_slots.values().copied().max().unwrap_or_default();
-    let committed_accounts: Vec<_> = committed_pubkeys
-        .iter()
-        .map(|pubkey| {
-            let slot = snapshot_slots.get(pubkey).copied().unwrap_or(min_context_slot);
-            (*pubkey, slot)
-        })
-        .collect();
-
-    // We reset TaskInfoProvider for all committed accounts
-    // We re-fetch them to fix out of sync tasks
-    task_info_provider.invalidate_nonces(committed_pubkeys);
-    let commit_ids = task_info_provider
-        .fetch_next_commit_nonces(&committed_accounts, min_context_slot)
-        .await
-        .map_err(TaskBuilderError::CommitTasksBuildError)?;
-
-    // Old buffer identities remain in the preparation attempt's cleanup record.
-    for task in &mut strategy.tasks {
-        if let Task::CommitFinalize(task) = task {
-            let Some(commit_id) = commit_ids.get(&task.committed_account.pubkey) else {
-                continue;
-            };
-            task.commit_id = *commit_id;
-        }
-    }
-
-    // Re-fetched nonces land back on 1 after a re-delegation; such a retry is
-    // a first-commit transaction and must carry the uniqueness noop.
-    if requires_uniqueness_nonce(&strategy.tasks) {
-        strategy.uniqueness_nonce = Some(intent_id);
-    }
-
-    strategy.refresh_lookup_table_keys(authority);
-    Ok(())
-}
-
 /// On the first commit of a delegation instance the nonce restarts at 1, so the
 /// transaction can be byte-identical to a prior instance's landed commit and
 /// alias its signature. Such intents must carry a per-intent uniqueness noop.
@@ -348,70 +288,5 @@ pub(in crate::execution) fn handle_actions_result<A>(
     if !callbacks.is_empty() {
         let result = callback_scheduler.schedule(callbacks, signature, result);
         execution_report.add_callback_report(result);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
-
-    use mbv_core::intent::types::CommittedAccount;
-    use solana_account::Account;
-
-    use super::*;
-    use crate::{shared::tasks::utils::create_commit_finalize_task, test_utils::MockInfoProvider};
-
-    #[tokio::test]
-    async fn test_mixed_commit_id_recovery_sets_uniqueness_nonce() {
-        let pubkey = Pubkey::new_unique();
-        let unchanged_pubkey = Pubkey::new_unique();
-        // Stale cache produced commit id 5; on chain the account was
-        // re-delegated, so the correct commit id is 1.
-        let stale_task = create_commit_finalize_task(
-            5,
-            false,
-            CommittedAccount {
-                pubkey,
-                account: Account::default(),
-                remote_slot: Default::default(),
-            },
-            None,
-        );
-        let mut strategy = TransactionStrategy {
-            tasks: vec![
-                stale_task.into(),
-                create_commit_finalize_task(
-                    5,
-                    false,
-                    CommittedAccount {
-                        pubkey: unchanged_pubkey,
-                        account: Account::default(),
-                        remote_slot: Default::default(),
-                    },
-                    None,
-                )
-                .into(),
-            ],
-            lookup_tables_keys: vec![],
-            uniqueness_nonce: None,
-        };
-
-        let provider = CachedTaskInfoProvider::new(MockInfoProvider {
-            commit_ids: HashMap::from([(unchanged_pubkey, 4)]),
-            ..Default::default()
-        });
-        handle_commit_id_error(
-            &Pubkey::new_unique(),
-            &provider,
-            &[pubkey, unchanged_pubkey],
-            &mut strategy,
-            42,
-        )
-        .await
-        .expect("commit id recovery succeeds");
-
-        assert_eq!(strategy.uniqueness_nonce, Some(42));
-        let ids: Vec<_> = recovery_commit_nonces(&strategy.tasks);
-        assert_eq!(ids, vec![(pubkey, 1), (unchanged_pubkey, 5)]);
     }
 }

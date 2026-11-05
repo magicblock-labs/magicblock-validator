@@ -36,7 +36,7 @@ use crate::{
         },
     },
     shared::{
-        account_state::{CachedTaskInfoProvider, RpcTaskInfoProvider},
+        account_state::RpcTaskInfoProvider,
         outbox::OutboxClient,
         tasks::{
             Task, buffer_task::BufferCleanup, task_strategist::TransactionStrategy,
@@ -114,7 +114,6 @@ impl OutboxClient for RecordingOutbox {
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        _: crate::shared::outbox::IntentSentTransaction,
     ) -> Result<(), crate::shared::outbox::outbox_client::InternalOutboxClientError> {
         self.reports.lock().unwrap().push(sent_commit);
         if self.fail_reporting {
@@ -279,7 +278,6 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
         );
     }
     let rpc = MagicblockRpcClient::from(RpcClient::new_mock_with_mocks_map("succeeds", mocks));
-    program::validator::generate_validator_authority_if_needed();
     let transaction_preparator = RecordingPreparator {
         steps: Arc::new(Mutex::new(steps.into())),
         ..Default::default()
@@ -293,7 +291,7 @@ pub(super) fn executor(steps: Vec<Preparation>, error: Option<&str>) -> Executor
         authority: Keypair::new(),
         intent_client: crate::execution::client::IntentExecutionClient::new(rpc.clone(), 0),
         transaction_preparator: Arc::new(transaction_preparator.clone()),
-        task_info_provider: Arc::new(CachedTaskInfoProvider::new(RpcTaskInfoProvider::new(rpc))),
+        task_info_provider: Arc::new(RpcTaskInfoProvider::new(rpc)),
         outbox_client: outbox_client.clone(),
         actions_callback_executor: Arc::new(actions_callback_executor.clone()),
         actions_timeout: std::time::Duration::from_secs(60),

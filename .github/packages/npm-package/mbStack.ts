@@ -16,6 +16,7 @@
 import http from "http";
 import path from "path";
 import { spawn, ChildProcess } from "child_process";
+import { parseStackArgs, vrfServiceConfigs } from "./mbStackConfig";
 
 const HOST = "127.0.0.1";
 
@@ -62,7 +63,7 @@ interface Service {
   script: string;
   args: string[];
   // RPC port to poll for readiness before starting the next service.
-  healthPort: number;
+  healthPort?: number;
   // Validator RPCs must report getHealth=ok before dependents can safely start.
   requireRpcHealth?: boolean;
   // Optional account that must be visible through RPC before dependents start.
@@ -86,6 +87,7 @@ const DIM = "\x1b[2m";
 const GREEN = "\x1b[32m";
 const CYAN = "\x1b[36m";
 const MAGENTA = "\x1b[35m";
+const YELLOW = "\x1b[33m";
 
 function color(text: string, ansi: string): string {
   return useColor ? `${ansi}${text}${RESET}` : text;
@@ -111,14 +113,17 @@ if (WITH_CRANKER && !CRANKER_KEYPAIR) {
   process.exit(1);
 }
 
-// The remaining CLI args passed to `mb-stack` are forwarded to the
-// mb-test-validator (base L1), which appends them to solana-test-validator — the
-// service operators most often need to customize (extra --bpf-program /
-// --account / --clone / --reset). They are appended after mb-stack's own base
-// args, so on last-wins flags the user's value takes priority. (Use
-// MB_STACK_BASE_PORT instead of --rpc-port, which solana-test-validator rejects
-// if given twice.)
-const PASSTHROUGH_ARGS = CLI_ARGS.filter((arg) => arg !== "--cranker");
+// Extra CLI args passed to `mb-stack` are forwarded to the mb-test-validator
+// (base L1), which appends them to solana-test-validator — the service operators
+// most often need to customize (extra --bpf-program / --account / --clone / --reset).
+// They are appended after mb-stack's own base args, so on last-wins flags the
+// user's value takes priority. (Use MB_STACK_BASE_PORT instead of --rpc-port,
+// which solana-test-validator rejects if given twice.)
+const {
+  enableVrf,
+  enableErVrf,
+  passthroughArgs: PASSTHROUGH_ARGS,
+} = parseStackArgs(process.argv.slice(2));
 
 // Ordered: base L1 first, then ER (which clones from base), then the public
 // query-filtering-service front (which forwards to the ER).
@@ -337,6 +342,9 @@ async function pingHealth(
 
 async function waitForHealth(svc: Service, timeoutMs = 120000): Promise<void> {
   const { name, healthPort } = svc;
+  if (healthPort === undefined) {
+    throw new Error(`${name} has no healthPort to poll`);
+  }
   const requireRpcHealth = svc.requireRpcHealth ?? true;
   const waitForReadyOutput = svc.readyOutput !== undefined;
   const endpoints =
@@ -383,6 +391,7 @@ function killGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 function shutdown(code: number): void {
   if (shuttingDown) return;
   shuttingDown = true;
+  process.exitCode = code;
   for (const { child } of children) {
     killGroup(child, "SIGTERM");
   }
@@ -439,17 +448,39 @@ async function main(): Promise<void> {
   process.on("SIGINT", () => shutdown(0));
   process.on("SIGTERM", () => shutdown(0));
 
+  const vrfServices: Service[] = vrfServiceConfigs(
+    enableVrf,
+    enableErVrf,
+    HOST,
+    BASE_PORT,
+    ER_PORT,
+    process.env.MB_STACK_ER_REMOTES,
+  ).map((service) => ({
+    ...service,
+    script: "vrfOracle.js",
+    color: YELLOW,
+  }));
+
   // When the ER points at an external base, the local base validator is unused —
-  // skip it so we don't boot an idle validator. The cranker is opt-in.
-  const services = SERVICES.filter((s) => {
+  // skip it so we don't boot an idle validator.
+  const coreServices = SERVICES.filter((s) => {
     if (s.script === "mbTestValidator.js")
       return !process.env.MB_STACK_ER_REMOTES;
     if (s.script === "hydraCranker.js") return WITH_CRANKER;
     return true;
   });
+  const services = [
+    ...coreServices.slice(0, -1),
+    ...vrfServices,
+    coreServices[coreServices.length - 1],
+  ];
 
   for (const svc of services) {
     startService(svc);
+    if (svc.healthPort === undefined) {
+      console.log(`${color("✔", GREEN)} ${color(svc.name, svc.color)} started`);
+      continue;
+    }
     await waitForHealth(svc);
     if (shuttingDown) return;
   }

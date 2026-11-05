@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use mbv_core::intent::{
     CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee,
-    types::CommittedAccount,
+    outbox::outbox_intent_pda, types::CommittedAccount,
 };
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
@@ -14,15 +14,14 @@ use solana_pubkey::Pubkey;
 use crate::{
     MagicContext,
     magic_scheduled_base_intent::{ScheduledIntentBundle, validate_commit_schedule_permissions},
-    magic_sys::{fetch_current_commit_nonces, validate_intent_size},
     schedule_transactions::{self, check_commit_limits, get_parent_program_id, try_get_fee_vault},
+    schedule_transactions::{reserve_commit_id, validate_intent_size},
     utils::{
         account_actions::{charge_delegated_payer, mark_account_as_undelegated},
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
             get_writable_with_idx,
         },
-        instruction_utils::InstructionUtils,
     },
 };
 
@@ -150,7 +149,8 @@ pub(crate) fn process_schedule_commit(
             )?;
 
             let account = acc.borrow()?;
-            let committed = CommittedAccount::from_account_shared(*acc_pubkey, &account);
+            let mut committed = CommittedAccount::from_account_shared(*acc_pubkey, &account);
+            drop(account);
 
             if &committed.pubkey != acc_pubkey {
                 ic_msg!(
@@ -167,6 +167,7 @@ pub(crate) fn process_schedule_commit(
                 continue;
             }
 
+            committed.commit_id = reserve_commit_id(&acc)?;
             committed_accounts.push(committed);
         }
 
@@ -194,8 +195,7 @@ pub(crate) fn process_schedule_commit(
     }
 
     if let Some(fee_vault) = magic_fee_vault {
-        let nonces = fetch_current_commit_nonces(&committed_accounts)?;
-        let fee = calculate_commit_fee(&committed_accounts, &nonces)?;
+        let fee = calculate_commit_fee(&committed_accounts)?;
         charge_delegated_payer(&payer_account, &fee_vault, fee)?;
     } else if !opts.request_undelegation {
         // We validate commit nonces only for plain commits.
@@ -203,9 +203,6 @@ pub(crate) fn process_schedule_commit(
         check_commit_limits(&committed_accounts, invoke_context)?;
     }
 
-    // NOTE: this is only protected by all the above checks however if the
-    // instruction fails for other reasons detected afterward then the commit
-    // stays scheduled
     let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     let mut context = MagicContext::deserialize(context_acc.borrow()?.data()).map_err(|err| {
         ic_msg!(
@@ -226,8 +223,6 @@ pub(crate) fn process_schedule_commit(
         InstructionError::UnsupportedSysvar
     })?;
     let blockhash = invoke_context.environment_config.blockhash;
-    let sent_transaction = InstructionUtils::scheduled_commit_sent(intent_id, blockhash);
-    let sent_signature = sent_transaction.signatures[0];
 
     let base_intent = if opts.request_undelegation {
         MagicBaseIntent::CommitFinalizeAndUndelegate(CommitAndUndelegate {
@@ -249,7 +244,6 @@ pub(crate) fn process_schedule_commit(
         intent_id,
         slot: clock.slot,
         blockhash,
-        sent_transaction,
         payer: *payer_pubkey,
         intent_bundle: base_intent,
     };
@@ -260,8 +254,8 @@ pub(crate) fn process_schedule_commit(
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent signature: {}",
-        sent_signature,
+        "ScheduledCommitSent outbox: {}",
+        outbox_intent_pda(intent_id),
     );
 
     Ok(())

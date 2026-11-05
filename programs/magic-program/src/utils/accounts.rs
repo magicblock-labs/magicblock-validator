@@ -18,6 +18,10 @@ pub(crate) struct InstructionAccount<'a, 'ix_data> {
 }
 
 impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
+    pub(crate) fn is_writable(&self) -> Result<bool, InstructionError> {
+        get_writable_with_idx(self.transaction_context, self.instruction_idx)
+    }
+
     pub(crate) fn borrow(&self) -> Result<AccountRef<'_>, InstructionError> {
         self.transaction_context
             .accounts()

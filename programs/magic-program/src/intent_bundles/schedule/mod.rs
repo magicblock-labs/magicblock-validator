@@ -12,7 +12,7 @@ use mbv_core::intent::types::CommittedAccount;
 pub(crate) use process_add_action_callback::process_add_action_callback;
 pub(crate) use process_schedule_commit::*;
 pub(crate) use process_schedule_intent_bundle::process_schedule_intent_bundle;
-use solana_account::AccountMode;
+use solana_account::{AccountFieldPatch, AccountMode};
 use solana_clock::Clock;
 use solana_instruction::{AccountMeta, error::InstructionError};
 use solana_log_collector::ic_msg;
@@ -23,13 +23,7 @@ use solana_transaction_context::transaction::TransactionContext;
 pub(crate) use crate::intent_bundles::{
     process_accept_scheduled_commits::*, process_execute_callback::*,
 };
-pub use crate::outbox_intent::process_scheduled_commit_sent::{
-    SentCommit, register_scheduled_commit_sent,
-};
 use crate::{
-    magic_sys::{
-        COMMIT_LIMIT, COMMIT_LIMIT_ERR, MISSING_COMMIT_NONCE_ERR, fetch_current_commit_nonces,
-    },
     utils::accounts::{
         InstructionAccount, get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         get_writable_with_idx,
@@ -84,18 +78,14 @@ pub(crate) fn check_commit_limits(
     commits: &[CommittedAccount],
     invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
-    let mut nonces = fetch_current_commit_nonces(commits)?;
     let mut limit_exceeded = false;
     for account in commits {
-        let nonce = nonces
-            .remove(&account.pubkey)
-            .ok_or(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))?;
-        if nonce >= COMMIT_LIMIT {
+        if account.commit_id > COMMIT_LIMIT {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: current commit nonce {} reached the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
+                "ScheduleCommit ERR: sponsored commit limit exceeded for account {}: reserved commit ID {} exceeds the limit of {}. Undelegate and re-delegate the account or use a delegated account as the payer",
                 account.pubkey,
-                nonce,
+                account.commit_id,
                 COMMIT_LIMIT
             );
             limit_exceeded = true;
@@ -202,4 +192,38 @@ pub(crate) fn validate_callback_accounts(
         }
     }
     Ok(())
+}
+
+/// Sponsored commits are limited separately from the delegated-payer allowance.
+pub const COMMIT_LIMIT: u64 = 10;
+pub const COMMIT_LIMIT_ERR: u32 = 0xA000_0000;
+pub const INTENT_TOO_LARGE_ERR: u32 = 0xA000_0002;
+
+pub(crate) fn validate_intent_size(
+    intent: &mbv_core::intent::MagicIntentBundle,
+) -> Result<(), InstructionError> {
+    if mbv_core::intent::limits::is_intent_within_limits(intent, &authority()) {
+        Ok(())
+    } else {
+        Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))
+    }
+}
+
+/// Called only after scheduling permissions have been checked. The engine
+/// persists this transaction-local patch only if the whole transaction succeeds.
+pub(crate) fn reserve_commit_id(
+    account: &InstructionAccount<'_, '_>,
+) -> Result<u64, InstructionError> {
+    if !account.is_writable()? {
+        return Err(InstructionError::ReadonlyDataModified);
+    }
+    let mut account = account.borrow_mut()?;
+    let commit_seq = account
+        .commit_seq()
+        .checked_add(1)
+        .ok_or(InstructionError::ArithmeticOverflow)?;
+    AccountFieldPatch::CommitSeq(commit_seq)
+        .apply(&mut account)
+        .map_err(|_| InstructionError::InvalidAccountData)?;
+    Ok(u64::from(commit_seq))
 }

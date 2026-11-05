@@ -12,7 +12,6 @@ version.workspace = true
 bincode = { workspace = true }
 byteorder = { workspace = true }
 fs_extra = { workspace = true }
-libc = { workspace = true }
 # Only used for solana_metrics::datapoint_info! macro expansion
 log = { workspace = true }
 num_cpus = { workspace = true }

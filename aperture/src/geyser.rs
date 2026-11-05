@@ -6,7 +6,7 @@ use std::{
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3, ReplicaAccountInfoVersions,
-    ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV2,
+    ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV3,
     ReplicaTransactionInfoVersions, SlotStatus,
 };
 use engine::Engine;
@@ -128,10 +128,12 @@ impl GeyserPluginManager {
             return;
         };
         let signature = &sanitized.signatures()[0];
-        let info = ReplicaTransactionInfoV2 {
+        let versioned = sanitized.to_versioned_transaction();
+        let info = ReplicaTransactionInfoV3 {
+            message_hash: sanitized.message_hash(),
             signature,
             is_vote: sanitized.is_simple_vote_transaction(),
-            transaction: &sanitized,
+            transaction: &versioned,
             transaction_status_meta: &meta,
             // The engine does not currently retain an intra-block index.
             index: 0,
@@ -139,7 +141,7 @@ impl GeyserPluginManager {
         for plugin in &self.plugins {
             if plugin.transaction_notifications_enabled()
                 && let Err(error) =
-                    plugin.notify_transaction(ReplicaTransactionInfoVersions::V0_0_2(&info), slot)
+                    plugin.notify_transaction(ReplicaTransactionInfoVersions::V0_0_3(&info), slot)
             {
                 warn!(
                     plugin = plugin.name(),
@@ -384,8 +386,8 @@ mod tests {
             transaction: ReplicaTransactionInfoVersions<'_>,
             slot: u64,
         ) -> PluginResult<()> {
-            let ReplicaTransactionInfoVersions::V0_0_2(info) = transaction else {
-                panic!("expected transaction info v2")
+            let ReplicaTransactionInfoVersions::V0_0_3(info) = transaction else {
+                panic!("expected transaction info v3")
             };
             let meta = info.transaction_status_meta;
             self.0.lock().transactions.push(TransactionEvent {

@@ -1,105 +1,38 @@
-use std::{num::NonZeroUsize, sync::Arc, time::Duration};
+use std::{num::NonZeroUsize, time::Duration};
 
 use accountsdb::AccountsDBError;
 use async_trait::async_trait;
-use backoff::{ExponentialBackoff, future::retry};
 use engine::{Engine, EngineError, IntoTransactionView};
+use mbv_core::intent::outbox::outbox_intent_pda;
 use program::{
     MAGIC_CONTEXT_PUBKEY, MagicContext, SentCommit, instruction_utils::InstructionUtils,
     magic_scheduled_base_intent::ScheduledIntentBundle, outbox::ExecutionStage,
-    register_scheduled_commit_sent,
 };
-use solana_account::ReadableAccount;
+use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
+use solana_instruction::Instruction;
 use solana_keypair::Address as Pubkey;
-use solana_rpc_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
-use solana_rpc_client_api::{
-    client_error, client_error::ErrorKind as RpcClientErrorKind, request::RpcError,
-};
+use solana_sdk_ids::system_program;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use tokio::time::{Instant, sleep};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::shared::outbox::{
-    IntentSentTransaction, OutboxClient,
-    outbox_intent_bundles_reader::InternalOutboxIntentBundlesReader,
+    OutboxClient,
+    outbox_intent_bundles_reader::{InternalOutboxIntentBundlesReader, fetch_outbox_intent},
 };
 
-const ALREADY_PROCESSED_MESSAGE: &str = "This transaction has already been processed";
 const ALREADY_PROCESSED_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(200);
 const ALREADY_PROCESSED_STATUS_TIMEOUT: Duration = Duration::from_secs(25);
 
-/// Implementation of `OutboxClient` that uses ER internals.
-///
-/// Accept/set-stage go through the RPC client (aperture) with backoff retries;
-/// `notify_commit_sent` submits directly through the engine and closes the intent.
+/// Validator-local outbox bookkeeping submitted directly through Engine.
 pub(crate) struct InternalOutboxClient {
-    /// Engine handle: reads MagicContext, provides blockhash, and submits the
-    /// `ScheduledCommitSent` notification directly.
     engine: Engine,
-    /// RPC client for sending accept/set-stage transactions to the ER
-    rpc_client: Arc<RpcClient>,
 }
 
 impl InternalOutboxClient {
-    pub(crate) fn new(engine: Engine, rpc_client: Arc<RpcClient>) -> Self {
-        Self { engine, rpc_client }
-    }
-
-    async fn send_with_backoff(
-        &self,
-        backoff_config: ExponentialBackoff,
-        tx: &impl SerializableTransaction,
-    ) -> Result<(), client_error::Error> {
-        retry(backoff_config, || async {
-            match self.rpc_client.send_and_confirm_transaction(tx).await {
-                Ok(_) => Ok(()),
-                Err(err) if is_already_processed_rpc_error(&err) => {
-                    self.wait_for_rpc_signature_success(*tx.get_signature()).await
-                }
-                Err(err) => Err(err),
-            }
-            .map_err(|err| match err.kind() {
-                RpcClientErrorKind::TransactionError(_) => backoff::Error::Permanent(err),
-                _ => backoff::Error::transient(err),
-            })
-        })
-        .await?;
-
-        Ok(())
-    }
-
-    async fn wait_for_rpc_signature_success(
-        &self,
-        signature: Signature,
-    ) -> Result<(), client_error::Error> {
-        let start = Instant::now();
-        loop {
-            let status = self
-                .rpc_client
-                .get_signature_statuses(&[signature])
-                .await?
-                .value
-                .into_iter()
-                .next()
-                .flatten();
-
-            if let Some(status) = status {
-                return match status.err {
-                    Some(err) => Err(RpcClientErrorKind::TransactionError(err).into()),
-                    None => Ok(()),
-                };
-            }
-
-            if start.elapsed() >= ALREADY_PROCESSED_STATUS_TIMEOUT {
-                return Err(RpcClientErrorKind::Custom(format!(
-                    "transaction {signature} was already processed but its status did not resolve"
-                ))
-                .into());
-            }
-
-            sleep(ALREADY_PROCESSED_STATUS_POLL_INTERVAL).await;
-        }
+    pub(crate) fn new(engine: Engine) -> Self {
+        Self { engine }
     }
 
     async fn wait_for_engine_signature_success(
@@ -124,13 +57,9 @@ impl InternalOutboxClient {
         }
     }
 
-    /// Submits `transaction` directly through the engine, signed with the
-    /// engine's authority.
-    async fn execute_via_engine<T: IntoTransactionView>(
-        &self,
-        transaction: T,
-    ) -> Result<(), InternalOutboxClientError> {
-        let transaction = transaction.compose(&self.engine)?;
+    /// Submits local bookkeeping instructions signed with Engine's authority.
+    async fn execute(&self, instructions: &[Instruction]) -> Result<(), InternalOutboxClientError> {
+        let transaction = instructions.compose(&self.engine)?;
         let signature = transaction.signatures()[0];
         match self.engine.transaction(transaction)?.execute().await? {
             Ok(()) => Ok(()),
@@ -139,6 +68,48 @@ impl InternalOutboxClient {
             }
             Err(err) => Err(err.into()),
         }
+    }
+
+    // Only a base mirror may be replaced; require its exact image because
+    // ordinary transactions are not serialized by the materialization lease.
+    async fn prepare_outbox(&self, intent_id: u64) -> Result<(), InternalOutboxClientError> {
+        let pubkey = outbox_intent_pda(intent_id);
+        loop {
+            let accessor = self.engine.account(pubkey).await?;
+            if !matches!(accessor.observed(), Some((AccountMode::Mirrored, _))) {
+                return Ok(());
+            }
+            let Some(expected) =
+                self.engine.accounts().loader().read(&pubkey, |account| account.owned())?
+            else {
+                return Ok(());
+            };
+            if !expected.is(AccountMode::Mirrored)
+                || expected.owner() != system_program::ID
+                || !expected.data().is_empty()
+            {
+                return Err(InternalOutboxClientError::InvalidOutboxTarget(pubkey));
+            }
+            let account = AccountBuilder::default().slot(expected.slot()).mode(AccountMode::Magic);
+            match accessor.require(&expected).materialize(account, None).await {
+                Err(EngineError::AccountChanged) => continue,
+                result => return result.map_err(Into::into),
+            }
+        }
+    }
+
+    async fn accept_chunk(
+        &self,
+        intents: &[ScheduledIntentBundle],
+    ) -> Result<(), InternalOutboxClientError> {
+        for intent in intents {
+            self.prepare_outbox(intent.intent_id).await?;
+        }
+        let ix = InstructionUtils::accept_scheduled_commits_instruction(
+            self.engine.authority(),
+            intents.iter().map(|intent| intent.intent_id),
+        );
+        self.execute(&[ix]).await
     }
 
     /// Sends `AcceptScheduledCommits` transactions to the ER, moving scheduled
@@ -151,101 +122,29 @@ impl InternalOutboxClient {
     {
         const CHUNK_SIZE: usize = 50;
 
-        let mut remaining = scheduled_intents;
-        let mut accepted = Vec::with_capacity(remaining.len());
-        while !remaining.is_empty() {
+        let mut accepted = Vec::with_capacity(scheduled_intents.len());
+        let mut remaining = scheduled_intents.into_iter();
+        while !remaining.as_slice().is_empty() {
             let chunk_size = CHUNK_SIZE.min(remaining.len());
-            let tx = InstructionUtils::accept_scheduled_commits(
-                self.engine.blockhash(),
-                remaining[..chunk_size].iter().map(|i| i.intent_id),
-            );
-            let backoff_config = ExponentialBackoff {
-                max_elapsed_time: Some(Duration::from_secs(25)),
-                max_interval: Duration::from_secs(5),
-                ..ExponentialBackoff::default()
-            };
-            match self.send_with_backoff(backoff_config, &tx).await {
-                Ok(_) => accepted.extend(remaining.drain(..chunk_size)),
-                Err(err) => {
-                    error!(
-                        signature = ?tx.get_signature(),
-                        intent_ids = ?remaining[..chunk_size].iter().map(|i| i.intent_id).collect::<Vec<_>>(),
-                        error = ?err,
-                        "Failed to accept scheduled intents"
-                    );
-                    return Err((accepted, err.into()));
-                }
+            let chunk = &remaining.as_slice()[..chunk_size];
+            if let Err(err) = self.accept_chunk(chunk).await {
+                error!(
+                    intent_ids = ?chunk.iter().map(|intent| intent.intent_id).collect::<Vec<_>>(),
+                    error = ?err,
+                    "Failed to accept scheduled intents"
+                );
+                return Err((accepted, err));
             }
+            accepted.extend(remaining.by_ref().take(chunk_size));
         }
 
         Ok(accepted)
     }
 
-    /// Builds and executes a notification using the engine's current blockhash.
-    async fn send_fresh_commit_sent_tx(
-        &self,
-        intent_id: u64,
-    ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::scheduled_commit_sent(intent_id, self.engine.blockhash());
-        self.execute_via_engine(tx).await
-    }
-}
-
-fn is_already_processed_rpc_error(err: &client_error::Error) -> bool {
-    match err.kind() {
-        RpcClientErrorKind::TransactionError(TransactionError::AlreadyProcessed) => true,
-        RpcClientErrorKind::RpcError(RpcError::RpcResponseError { message, .. }) => {
-            message.contains(ALREADY_PROCESSED_MESSAGE)
-        }
-        _ => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use solana_rpc_client_api::request::RpcResponseErrorData;
-
-    use super::*;
-
-    #[test]
-    fn detects_already_processed_transaction_error() {
-        let err: client_error::Error = TransactionError::AlreadyProcessed.into();
-
-        assert!(is_already_processed_rpc_error(&err));
-    }
-
-    #[test]
-    fn detects_already_processed_rpc_response_message() {
-        let err: client_error::Error = RpcError::RpcResponseError {
-            code: -32002,
-            message: format!("transaction verification error: {ALREADY_PROCESSED_MESSAGE}"),
-            data: RpcResponseErrorData::Empty,
-        }
-        .into();
-
-        assert!(is_already_processed_rpc_error(&err));
-    }
-
-    #[test]
-    fn ignores_unrelated_rpc_response_message() {
-        let err: client_error::Error = RpcError::RpcResponseError {
-            code: -32002,
-            message: "transaction verification error: blockhash not found".to_string(),
-            data: RpcResponseErrorData::Empty,
-        }
-        .into();
-
-        assert!(!is_already_processed_rpc_error(&err));
-    }
-}
-
-impl InternalOutboxClient {
     pub(crate) async fn accept_scheduled_intents(
         &self,
     ) -> Result<Vec<ScheduledIntentBundle>, (Vec<ScheduledIntentBundle>, InternalOutboxClientError)>
     {
-        // If accounts were scheduled to be committed, we accept them here
-        // and processs the commits
         let magic_context = self
             .engine
             .accounts()
@@ -274,68 +173,33 @@ impl OutboxClient for InternalOutboxClient {
         stage: ExecutionStage,
         recovery_commit_nonces: Vec<(Pubkey, u64)>,
     ) -> Result<(), InternalOutboxClientError> {
-        let tx = InstructionUtils::set_intent_execution_stage(
-            self.engine.blockhash(),
+        let ix = InstructionUtils::set_intent_execution_stage_instruction(
+            self.engine.authority(),
             intent_id,
             stage,
             recovery_commit_nonces,
         );
-
-        self.send_with_backoff(
-            ExponentialBackoff {
-                max_elapsed_time: Some(Duration::from_secs(25)),
-                max_interval: Duration::from_secs(5),
-                ..ExponentialBackoff::default()
-            },
-            &tx,
-        )
-        .await
-        .inspect_err(|err| {
+        self.execute(&[ix]).await.inspect_err(|err| {
             error!(
                 intent_id,
-                signature = ?tx.get_signature(),
                 error = ?err,
                 "Failed to set intent execution stage"
             )
         })
-        .map_err(Into::into)
     }
 
     async fn notify_commit_sent(
         &self,
         sent_commit: SentCommit,
-        transaction: IntentSentTransaction,
     ) -> Result<(), InternalOutboxClientError> {
-        let intent_id = sent_commit.message_id;
-        // TODO(edwin): is using handle directly here ok? This could require Chainlink mechanics
-        // Register once before submission. Only BlockhashNotFound permits a
-        // fallback because it occurs before the processor can consume this payload.
-        register_scheduled_commit_sent(sent_commit);
-        match transaction {
-            IntentSentTransaction::Known(tx) => {
-                let signature = tx.signatures[0];
-                match self.execute_via_engine(tx).await {
-                    Err(InternalOutboxClientError::TransactionError(
-                        TransactionError::BlockhashNotFound,
-                    )) => {
-                        warn!(
-                            %signature,
-                            intent_id,
-                            "Pre-signed commit notification expired; its logged signature is best-effort"
-                        );
-                        self.send_fresh_commit_sent_tx(intent_id).await
-                    }
-                    result => result,
-                }
-            }
-            IntentSentTransaction::Recovered => {
-                self.send_fresh_commit_sent_tx(intent_id).await
-            }
-        }
-        .inspect(|_| debug!("Sent commit signaled"))
-        .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))?;
-
-        Ok(())
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
+            self.engine.authority(),
+            sent_commit,
+        )?;
+        self.execute(&[ix])
+            .await
+            .inspect(|_| debug!("Sent commit signaled"))
+            .inspect_err(|err| error!(error = ?err, "Failed to signal sent commit"))
     }
 
     async fn fetch_outbox_intent(
@@ -343,22 +207,24 @@ impl OutboxClient for InternalOutboxClient {
         intent_id: u64,
     ) -> Result<Option<program::outbox_intent_bundles::OutboxIntentBundle>, InternalOutboxClientError>
     {
-        self.outbox_reader().fetch_outbox_intent(intent_id).await.map_err(Into::into)
+        fetch_outbox_intent(&self.engine, intent_id).map_err(Into::into)
     }
 }
 
 #[derive(thiserror::Error, Debug)]
 pub enum InternalOutboxClientError {
+    #[error("Outbox target {0} is not an empty system-owned mirror")]
+    InvalidOutboxTarget(Pubkey),
     #[error("MagicContext account is missing from AccountsDb")]
     MagicContextMissing,
     #[error("TransactionError: {0}")]
     TransactionError(#[from] TransactionError),
-    #[error("RpcClientError: {0}")]
-    RpcClientError(#[from] client_error::Error),
     #[error("EngineError: {0}")]
     EngineError(#[from] EngineError),
     #[error("WincodeError: {0}")]
     WincodeError(#[from] wincode::ReadError),
+    #[error("Receipt encoding error: {0}")]
+    ReceiptEncoding(#[from] wincode::WriteError),
     #[error("AccountsDbError: {0}")]
     AccountsDbError(#[from] AccountsDBError),
     #[error(transparent)]
