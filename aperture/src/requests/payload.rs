@@ -142,3 +142,29 @@ impl<'id, T: Serialize> ResponsePayload<'id, T> {
         JsonBody::encode(Self { jsonrpc: "2.0", id, result })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_error(id: Option<&Value>) -> Value {
+        let body = ResponseErrorPayload::encode(id, RpcError::internal("boom"))
+            .expect("error payload should encode");
+        json::from_str(&String::from_utf8(body.0).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn error_response_without_id_serializes_null() {
+        let payload = encode_error(None);
+        // The `id` member must be present and `null`, not omitted.
+        assert_eq!(payload.get("id"), Some(&Value::Null));
+        assert!(payload.get("error").is_some());
+    }
+
+    #[test]
+    fn error_response_keeps_request_id() {
+        let id: Value = json::from_str("7").unwrap();
+        let payload = encode_error(Some(&id));
+        assert_eq!(payload.get("id"), Some(&id));
+    }
+}

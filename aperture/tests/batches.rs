@@ -61,25 +61,6 @@ async fn test_batch_requests() {
 }
 
 #[tokio::test]
-async fn test_parse_error_response_has_null_id() {
-    let env = RpcTestEnv::new().await;
-    let response = reqwest::Client::new()
-        .post(env.rpc.url())
-        .header("content-type", "application/json")
-        .body("{")
-        .send()
-        .await
-        .expect("Failed to send malformed request");
-
-    let body: Value = json::from_str(&response.text().await.unwrap()).unwrap();
-    assert!(
-        body.get("error").is_some(),
-        "Should contain an error object"
-    );
-    assert_eq!(body.get("id"), Some(&Value::Null));
-}
-
-#[tokio::test]
 async fn test_batch_requests_emit_remote_account_claims_header_zero_when_no_fetches_triggered() {
     let env = RpcTestEnv::new().await;
     let client = reqwest::Client::new();
