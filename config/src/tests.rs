@@ -183,6 +183,16 @@ fn invalid_aperture_port_is_rejected() {
 
 #[test]
 #[parallel]
+fn metrics_address_overrides_from_cli() {
+    let config = run_cli(&["--metrics", "127.0.0.1:9100"]);
+    assert_eq!(config.metrics.address.0.to_string(), "127.0.0.1:9100");
+
+    let config = run_cli(&["-m", "127.0.0.1:9101"]);
+    assert_eq!(config.metrics.address.0.to_string(), "127.0.0.1:9101");
+}
+
+#[test]
+#[parallel]
 fn example_configuration_parses() {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../config.validator.example.toml");
 
