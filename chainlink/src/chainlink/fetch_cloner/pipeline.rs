@@ -139,7 +139,12 @@ where
 {
     let record_subs = owned_by_deleg
         .iter()
-        .map(|(pubkey, _, _)| delegation_record_pda_from_delegated_account(pubkey))
+        .flat_map(|(pubkey, _, _)| {
+            [
+                delegation_record_pda_from_delegated_account(pubkey),
+                dpi::delegation_state_pda(pubkey),
+            ]
+        })
         .collect::<Vec<_>>();
     acquire_subs(
         &this.remote_account_provider,
@@ -224,9 +229,25 @@ where
                 // since if something is off we better not run it anyways
                 // However we may consider a different behavior when user is getting
                 // multiple accounts.
-                let (delegation_record, delegation_actions) = match this
-                    .parse_delegation_record(record_data.read().data(), delegation_record_pubkey)
+                let parsed = if record_data.read().owner() == dpi::id()
+                    && record_data.read().data().starts_with(&dpi::DelegationState::DISCRIMINATOR)
                 {
+                    delegation::parse_v2_delegation_record(
+                        this,
+                        pubkey,
+                        delegation_record_pubkey,
+                        &record_data,
+                        fetch_context.clone(),
+                    )
+                    .await
+                    .map(|record| (record, None))
+                } else {
+                    this.parse_delegation_record(
+                        record_data.read().data(),
+                        delegation_record_pubkey,
+                    )
+                };
+                let (delegation_record, delegation_actions) = match parsed {
                     Ok(x) => x,
                     Err(err) => {
                         let releases = owned_by_deleg

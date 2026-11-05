@@ -4025,6 +4025,7 @@ dependencies = [
  "tracing",
  "url",
  "v42-calculator-interface",
+ "wheels",
  "wincode",
 ]
 
@@ -4060,7 +4061,6 @@ version = "2.0.0-rc.1"
 dependencies = [
  "async-trait",
  "futures-util",
- "lru",
  "magicblock-accountsdb",
  "magicblock-chainlink",
  "magicblock-committor-interface",
@@ -4075,6 +4075,7 @@ dependencies = [
  "parking_lot",
  "pin-project",
  "rand 0.9.5",
+ "serde_json",
  "solana-account 4.3.1",
  "solana-account-decoder",
  "solana-commitment-config",
@@ -4162,7 +4163,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program-interface"
 version = "0.1.0"
-source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=356930ea1fe58908057bbe99293a0383b242a40b#356930ea1fe58908057bbe99293a0383b242a40b"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=3fb00596169d5963fbada0bf90e099e731fbacb4#3fb00596169d5963fbada0bf90e099e731fbacb4"
 dependencies = [
  "bincode 1.3.3",
  "borsh",
