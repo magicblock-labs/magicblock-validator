@@ -259,7 +259,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     request: &crate::cloner::AccountCloneRequest,
     fetch_context: metrics::AccountFetchContext,
 ) -> ChainlinkResult<u32> {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account, state::DelegationMetadata,
     };
     let image = request.account.read();
@@ -293,8 +293,8 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
     };
     let record = record.fresh_account().ok_or_else(invalid)?;
     let metadata = metadata.fresh_account().ok_or_else(invalid)?;
-    if record.owner() != &delegation_program_api::id()
-        || metadata.owner() != &delegation_program_api::id()
+    if record.owner() != &delegation_program_interface::id()
+        || metadata.owner() != &delegation_program_interface::id()
     {
         return Err(invalid());
     }

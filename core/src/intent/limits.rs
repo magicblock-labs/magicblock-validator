@@ -3,7 +3,7 @@
 //! coverage. Passing this check does not guarantee successful settlement.
 use std::collections::BTreeSet;
 
-use delegation_program_api::{
+use delegation_program_interface::legacy::{
     args::{CallHandlerArgs, CommitFinalizeArgs},
     instruction_builder as dlp,
 };

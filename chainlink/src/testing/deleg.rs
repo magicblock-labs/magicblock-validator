@@ -132,7 +132,7 @@ pub fn add_delegation_metadata_for(
     pubkey: Pubkey,
     last_commit_id: u64,
 ) {
-    use delegation_program_api::{
+    use delegation_program_interface::legacy::{
         pda::delegation_metadata_pda_from_delegated_account,
         state::{DelegationMetadata, UndelegationRequester},
     };
@@ -147,7 +147,7 @@ pub fn add_delegation_metadata_for(
     rpc_client.add_account(
         delegation_metadata_pda_from_delegated_account(&pubkey),
         Account {
-            owner: delegation_program_api::id(),
+            owner: delegation_program_interface::id(),
             data,
             ..Default::default()
         },
