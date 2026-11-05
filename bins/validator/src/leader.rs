@@ -167,7 +167,7 @@ impl Leader {
     ) -> CommittorService {
         let er_rpc = Arc::new(RpcClient::new(config.aperture.listen.http()));
         let callbacks = Arc::new(ActionsCallbackService::new(
-            er_rpc.clone(),
+            er_rpc,
             config.engine.authority.local.insecure_clone(),
             engine.clone(),
         ));
@@ -184,7 +184,6 @@ impl Leader {
             chain_slot,
             engine.clone(),
             chainlink,
-            er_rpc,
             callbacks,
         )
     }
