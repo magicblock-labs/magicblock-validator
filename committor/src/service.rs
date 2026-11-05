@@ -9,8 +9,8 @@ use mbv_core::traits::ActionsCallbackScheduler;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use parking_lot::Mutex;
 use rpc_client::MagicblockRpcClient;
-use solana_keypair::Keypair;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_signer::Signer;
 use table_mania::{GarbageCollectorConfig, TableMania};
 use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
@@ -44,7 +44,6 @@ pub struct CommittorService {
 
 impl CommittorService {
     pub fn new(
-        authority: Keypair,
         config: CommittorConfig,
         chain_slot: Arc<AtomicU64>,
         engine: Engine,
@@ -59,14 +58,14 @@ impl CommittorService {
             chain_slot,
             config.websocket_uri,
         );
-        let tables = TableMania::new(rpc.clone(), &authority, None);
+        let tables = TableMania::new(rpc.clone(), engine.signer().pubkey());
         let task_info_provider = Arc::new(RpcTaskInfoProvider::new(rpc.clone()));
         let outbox = Arc::new(InternalOutboxClient::new(engine.clone()));
-        let backlog = Arc::new(Mutex::new(AccountsDbIntentBacklog::new(engine)));
+        let backlog = Arc::new(Mutex::new(AccountsDbIntentBacklog::new(engine.clone())));
         let (sender, receiver) = mpsc::channel(1000);
         let tasks = TaskTracker::new();
         let context = Arc::new(ExecutionContext {
-            authority,
+            engine,
             intent_client: IntentExecutionClient::new(
                 rpc.clone(),
                 config.compute_budget_config.compute_unit_price,
@@ -110,11 +109,13 @@ impl CommittorService {
         let stop = shutdown.child();
         let _cancel_on_drop = self.context.cancel.clone().drop_guard();
         let _stop_on_drop = stop.clone().drop_guard();
-        let mut gc =
-            tokio_util::task::AbortOnDropHandle::new(self.tables.spawn_garbage_collector(
-                &self.context.authority,
-                GarbageCollectorConfig::default(),
-            ));
+        let tables = self.tables.clone();
+        let engine = self.context.engine.clone();
+        let mut gc = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+            tables
+                .run_garbage_collector(engine.signer(), GarbageCollectorConfig::default())
+                .await;
+        }));
         let mut workers = JoinSet::new();
         let executor_stop = stop.clone();
         workers.spawn(async move {

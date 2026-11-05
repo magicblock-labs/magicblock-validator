@@ -97,7 +97,7 @@ impl<'a> TransactionExecutor<'a> {
                         && err.is_recoverable_by_splitting() =>
                 {
                     let (current, follow_up) = split_for_follow_up(
-                        &self.ctx.authority.pubkey(),
+                        &self.ctx.signer().pubkey(),
                         mem::take(&mut self.current),
                     );
                     self.current = current;
@@ -211,7 +211,7 @@ impl<'a> TransactionExecutor<'a> {
             let cleanup = self.report.cleanup.push_mut(CleanupResources::default());
             let prepared_transaction = prepare_transaction(
                 &ctx.intent_client,
-                &ctx.authority,
+                ctx.signer(),
                 ctx.transaction_preparator.as_ref(),
                 &self.current,
                 cleanup,
@@ -313,7 +313,7 @@ impl<'a> TransactionExecutor<'a> {
 
     fn execute_callbacks(&mut self, signature: Option<Signature>, result: Result<(), ActionError>) {
         handle_actions_result(
-            &self.ctx.authority.pubkey(),
+            &self.ctx.signer().pubkey(),
             self.ctx.actions_callback_executor.as_ref(),
             self.report,
             &mut self.current,
@@ -322,7 +322,7 @@ impl<'a> TransactionExecutor<'a> {
         );
         if let (Err(_), Some(follow_up)) = (&result, &mut self.follow_up) {
             handle_actions_result(
-                &self.ctx.authority.pubkey(),
+                &self.ctx.signer().pubkey(),
                 self.ctx.actions_callback_executor.as_ref(),
                 self.report,
                 follow_up,

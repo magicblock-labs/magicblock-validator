@@ -11,7 +11,6 @@ use engine::{
 };
 use keeper::testkit::{Dirs, keeper_builder};
 use solana_account::{Account, AccountBuilder, AccountMode, AccountSharedData};
-use solana_keypair::Keypair;
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -102,8 +101,7 @@ impl TestContext {
             Rc::new(TestEngine::new().await)
         };
         let bank = Engine::clone(test_engine.as_ref());
-        let validator_keypair = Keypair::new();
-        let validator_pubkey = validator_keypair.pubkey();
+        let validator_pubkey = bank.signer().pubkey();
         let fetch_cloner = {
             let (tx, rx) = mpsc::channel(100);
             let subscribed_accounts = create_test_subscribed_accounts_with_config(&config);
@@ -120,14 +118,7 @@ impl TestContext {
                 .await
                 .expect("create remote account provider"),
             );
-            FetchCloner::new(
-                &provider,
-                bank.clone(),
-                validator_keypair.insecure_clone(),
-                rx,
-                None,
-                risk_service,
-            )
+            FetchCloner::new(&provider, bank.clone(), rx, None, risk_service)
         };
         let chainlink = InnerChainlink::try_new(bank.clone(), Some(fetch_cloner)).unwrap();
         Self {

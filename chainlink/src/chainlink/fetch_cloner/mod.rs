@@ -32,7 +32,6 @@ use mbv_core::token_programs::{
 use parking_lot::Mutex as PlMutex;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount, StateFlags};
 use solana_account_decoder_client_types::UiAccountEncoding;
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
@@ -103,7 +102,6 @@ where
 
     engine: Engine,
     validator_pubkey: Pubkey,
-    validator_keypair: Arc<Keypair>,
 
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
@@ -282,7 +280,6 @@ where
             processed_updates_count: self.processed_updates_count.clone(),
             engine: self.engine.clone(),
             validator_pubkey: self.validator_pubkey,
-            validator_keypair: Arc::clone(&self.validator_keypair),
             allowed_programs: self.allowed_programs.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
@@ -402,7 +399,6 @@ where
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         engine: Engine,
-        validator_keypair: Keypair,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
@@ -411,7 +407,6 @@ where
         Self::new_with_undelegation_request_sender(
             remote_account_provider,
             engine,
-            validator_keypair,
             subscription_updates_rx,
             allowed_programs,
             risk_service,
@@ -424,20 +419,18 @@ where
     pub fn new_with_undelegation_request_sender(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         engine: Engine,
-        validator_keypair: Keypair,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
         undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
     ) -> Arc<Self> {
-        let validator_pubkey = validator_keypair.pubkey();
+        let validator_pubkey = engine.signer().pubkey();
         let allowed_programs =
             allowed_programs.map(|programs| programs.iter().map(|p| p.id).collect::<HashSet<_>>());
         let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             engine,
             validator_pubkey,
-            validator_keypair: Arc::new(validator_keypair),
             fetch_count: Arc::new(AtomicU64::new(0)),
             processed_updates_count: Arc::new(AtomicU64::new(0)),
             allowed_programs,
@@ -2152,11 +2145,7 @@ where
         data: &[u8],
         delegation_record_pubkey: Pubkey,
     ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
-        delegation::parse_delegation_record(
-            data,
-            delegation_record_pubkey,
-            self.validator_keypair.as_ref(),
-        )
+        delegation::parse_delegation_record(data, delegation_record_pubkey, self.engine.signer())
     }
 
     /// Fetches and parses the delegation record for an account, returning the
