@@ -15,7 +15,10 @@ use wheels::DataLayoutError;
 
 use crate::shared::{
     account_state::DelegationVersion,
-    tasks::{commit_delivery::CommitDelivery, commit_finalize_task::CommitFinalizeTask},
+    tasks::{
+        checked_v2_commit_seq, commit_delivery::CommitDelivery,
+        commit_finalize_task::CommitFinalizeTask,
+    },
     transaction::MAX_WRITE_CHUNK_SIZE,
 };
 
@@ -83,29 +86,31 @@ impl BufferPreparation {
         &self,
         authority: &Pubkey,
         start_offset: usize,
-    ) -> Vec<Instruction> {
-        let instruction = |offset: usize, chunk: &[u8]| match self.version {
-            DelegationVersion::Legacy => create_write_ix(CreateWriteIxArgs {
-                authority: *authority,
-                pubkey: self.pubkey,
-                offset: offset as u32,
-                data_chunk: chunk.to_vec(),
-                commit_id: self.commit_id,
-            }),
-            DelegationVersion::V2 { .. } => dpi::instruction_builder::write_state_buffer(
-                *authority,
-                *authority,
-                self.pubkey,
-                dpi::WriteStateBufferArgs {
-                    commit_id: self.commit_id,
-                    total_len: self.buffer_data.len() as u32,
+    ) -> Result<Vec<Instruction>, DataLayoutError> {
+        let instruction = |offset: usize, chunk: &[u8]| -> Result<Instruction, DataLayoutError> {
+            match self.version {
+                DelegationVersion::Legacy => Ok(create_write_ix(CreateWriteIxArgs {
+                    authority: *authority,
+                    pubkey: self.pubkey,
                     offset: offset as u32,
-                    chunk: chunk.to_vec(),
-                },
-            ),
+                    data_chunk: chunk.to_vec(),
+                    commit_id: self.commit_id,
+                })),
+                DelegationVersion::V2 { .. } => Ok(dpi::instruction_builder::write_state_buffer(
+                    *authority,
+                    *authority,
+                    self.pubkey,
+                    dpi::WriteStateBufferArgs {
+                        commit_seq: checked_v2_commit_seq(self.commit_id)?,
+                        total_len: self.buffer_data.len() as u32,
+                        offset: offset as u32,
+                        chunk: chunk.to_vec(),
+                    },
+                )),
+            }
         };
         if self.buffer_data.is_empty() && matches!(self.version, DelegationVersion::V2 { .. }) {
-            return vec![instruction(0, &[])];
+            return Ok(vec![instruction(0, &[])?]);
         }
         self.buffer_data[start_offset..]
             .chunks(MAX_WRITE_CHUNK_SIZE as usize)
@@ -150,7 +155,7 @@ impl BufferCleanup {
             return dpi::instruction_builder::close_state_buffer(
                 *authority,
                 self.pubkey,
-                self.commit_id,
+                checked_v2_commit_seq(self.commit_id)?,
                 *authority,
             );
         }
@@ -167,16 +172,20 @@ impl BufferCleanup {
     /// Fits legacy, v2, and mixed cleanup batches, including a uniqueness nonce.
     pub(crate) const MAX_PER_TRANSACTION: usize = 8;
 
-    pub(crate) fn buffer_pda(&self, authority: &Pubkey) -> Pubkey {
+    pub(crate) fn buffer_pda(&self, authority: &Pubkey) -> Result<Pubkey, DataLayoutError> {
         if matches!(self.version, DelegationVersion::V2 { .. }) {
-            return dpi::state_buffer_pda(&self.pubkey, self.commit_id, authority);
+            return Ok(dpi::state_buffer_pda(
+                &self.pubkey,
+                checked_v2_commit_seq(self.commit_id)?,
+                authority,
+            ));
         }
-        pdas::buffer_pda(
+        Ok(pdas::buffer_pda(
             authority,
             &self.pubkey,
             self.commit_id.to_le_bytes().as_slice(),
         )
-        .0
+        .0)
     }
 }
 
@@ -219,6 +228,7 @@ mod tests {
             };
             let write_instruction = preparation_task
                 .write_instructions(&authority.pubkey(), 0)
+                .unwrap()
                 .into_iter()
                 .next()
                 .expect("write instruction");

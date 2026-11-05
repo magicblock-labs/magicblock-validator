@@ -19,9 +19,13 @@ pub(super) async fn clean(
     // every ALT reservation, even when separate attempts used identical keys.
     let mut buffers = HashSet::new();
     for resources in &mut resources {
-        resources
-            .buffers
-            .retain(|task| buffers.insert(task.buffer_pda(&authority.pubkey())));
+        let mut retained = Vec::with_capacity(resources.buffers.len());
+        for task in resources.buffers.drain(..) {
+            if buffers.insert(task.buffer_pda(&authority.pubkey())?) {
+                retained.push(task);
+            }
+        }
+        resources.buffers = retained;
     }
     let cleanup_futs = resources.iter().map(|to_cleanup| {
         transaction_preparator.cleanup_resources(authority, to_cleanup, close_buffers)

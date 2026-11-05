@@ -17,7 +17,7 @@ use wheels::DataLayoutError;
 
 use crate::shared::{
     account_state::DelegationVersion,
-    tasks::{Task, commit_delivery::CommitDelivery},
+    tasks::{Task, checked_v2_commit_seq, commit_delivery::CommitDelivery},
 };
 
 /// A task that commits a delegated account's state to the base layer and finalizes it in the same
@@ -51,12 +51,13 @@ impl CommitFinalizeTask {
         };
 
         if let DelegationVersion::V2 { cluster } = self.version {
+            let commit_seq = checked_v2_commit_seq(self.commit_id)?;
             return dpi::instruction_builder::commit_finalize(
                 *validator,
                 cluster,
                 self.committed_account.pubkey,
                 dpi::CommitFinalizeArgs {
-                    commit_id: self.commit_id,
+                    commit_seq,
                     lamports: self.committed_account.account.lamports,
                     owner: self.committed_account.account.owner,
                     allow_undelegation: self.allow_undelegation,
@@ -96,12 +97,13 @@ impl CommitFinalizeTask {
         base_account: Option<&Account>,
     ) -> Result<Instruction, DataLayoutError> {
         if let DelegationVersion::V2 { cluster } = self.version {
+            let commit_seq = checked_v2_commit_seq(self.commit_id)?;
             return dpi::instruction_builder::commit_finalize_from_buffer(
                 *validator,
                 cluster,
                 self.committed_account.pubkey,
                 dpi::CommitFinalizeFromBufferArgs {
-                    commit_id: self.commit_id,
+                    commit_seq,
                     lamports: self.committed_account.account.lamports,
                     owner: self.committed_account.account.owner,
                     allow_undelegation: self.allow_undelegation,

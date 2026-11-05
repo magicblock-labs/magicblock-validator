@@ -370,12 +370,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
         {
             return Err(invalid());
         }
-        return u32::try_from(state_view.last_commit_id()).map_err(|_| {
-            ChainlinkError::InvalidDelegationCommitSequence(
-                state_pubkey,
-                state_view.last_commit_id(),
-            )
-        });
+        return Ok(state_view.last_commit_seq());
     }
     let record = record.fresh_account().ok_or_else(invalid)?;
     let metadata = metadata.fresh_account().ok_or_else(invalid)?;

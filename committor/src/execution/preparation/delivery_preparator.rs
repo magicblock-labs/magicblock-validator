@@ -33,6 +33,7 @@ use crate::{
         tasks::{
             Task,
             buffer_task::{BufferCleanup, BufferPreparation},
+            checked_v2_commit_seq,
             task_strategist::TransactionStrategy,
             utils::TransactionUtils,
         },
@@ -148,8 +149,10 @@ impl Preparator {
             return Err(InternalError::StateBufferTooLarge(task.buffer_data.len()));
         }
         let authority_pubkey = authority.pubkey();
+        let commit_seq =
+            checked_v2_commit_seq(task.commit_id).map_err(BufferExecutionError::from)?;
         let (buffer_pda, bump) =
-            dpi::state_buffer_pda_with_bump(&task.pubkey, task.commit_id, &authority_pubkey);
+            dpi::state_buffer_pda_with_bump(&task.pubkey, commit_seq, &authority_pubkey);
         let mut offset = 0;
         if let Some(account) = self.rpc_client.get_account(&buffer_pda).await?
             && !(account.owner == Pubkey::default()
@@ -167,7 +170,7 @@ impl Preparator {
                 || *buffer.authority() != authority_pubkey
                 || *buffer.rent_payer() != authority_pubkey
                 || *buffer.account_pubkey() != task.pubkey
-                || buffer.commit_id() != task.commit_id
+                || buffer.commit_seq() != commit_seq
                 || buffer.total_len() as usize != task.buffer_data.len()
                 || !task.buffer_data.starts_with(payload.as_slice())
                 || buffer.finalized() != (payload.len() == task.buffer_data.len())
@@ -179,7 +182,10 @@ impl Preparator {
             }
             offset = payload.len();
         }
-        for instruction in task.write_instructions(&authority_pubkey, offset) {
+        let write_instructions = task
+            .write_instructions(&authority_pubkey, offset)
+            .map_err(BufferExecutionError::from)?;
+        for instruction in write_instructions {
             // Includes allocation/growth and hashing the full payload on the last
             // write. The legacy per-chunk copy budget does not cover these costs.
             let mut instructions = vec![
@@ -289,7 +295,9 @@ impl Preparator {
         uniqueness_nonce: Option<u64>,
     ) -> DeliveryPreparatorResult<(), InternalError> {
         let authority_pubkey = authority.pubkey();
-        let write_instructions = preparation_task.write_instructions(&authority_pubkey, 0);
+        let write_instructions = preparation_task
+            .write_instructions(&authority_pubkey, 0)
+            .map_err(BufferExecutionError::from)?;
 
         self.write_missing_chunks(
             authority,
@@ -510,7 +518,7 @@ impl Preparator {
                         let buffer_pdas = cleanup_tasks
                             .iter()
                             .map(|task| task.buffer_pda(&authority.pubkey()))
-                            .collect::<Vec<_>>();
+                            .collect::<Result<Vec<_>, _>>();
                         error!(error = ?err, "Failed to cleanup buffers: {:?}", buffer_pdas);
                     })
             },
@@ -763,7 +771,7 @@ mod tests {
                                 keys[instruction.accounts[1] as usize],
                                 dpi::state_buffer_pda(
                                     &buffer.account_pubkey,
-                                    buffer.commit_id,
+                                    buffer.commit_seq,
                                     &buffer.authority
                                 )
                             );
@@ -830,7 +838,7 @@ mod tests {
                     authority: authority.pubkey(),
                     rent_payer: authority.pubkey(),
                     account_pubkey: pubkey,
-                    commit_id: 1,
+                    commit_seq: 1,
                     data_hash: [0; 32],
                     total_len: data.len() as u32,
                     finalized: false,

@@ -18,6 +18,10 @@ use crate::shared::{
     account_state::DelegationVersion, tasks::commit_finalize_task::CommitFinalizeTask,
 };
 
+pub(crate) fn checked_v2_commit_seq(commit_id: u64) -> Result<u32, DataLayoutError> {
+    u32::try_from(commit_id).map_err(|_| DataLayoutError::InvalidDataLength)
+}
+
 #[derive(Clone, Debug)]
 pub enum Task {
     CommitFinalize(CommitFinalizeTask),
