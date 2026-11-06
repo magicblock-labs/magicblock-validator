@@ -1,7 +1,10 @@
-use crate::account::Accounts;
+use crate::{
+    RpcResult,
+    account::{Accounts, check_base58_size},
+};
 use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
-use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
+use solana_account_decoder::{UiAccount, UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{config::RpcAccountInfoConfig, request::MAX_MULTIPLE_ACCOUNTS};
 
@@ -26,11 +29,14 @@ impl RpcHandlers {
         let pubkeys: Vec<Pubkey> = pubkeys.into_iter().map(Into::into).collect();
 
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
-        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
+        // Agave defaults this method to base64, unlike the single-account reads.
+        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base64);
         let slice = config.data_slice;
         let reader = |pubkey: &Pubkey, account: &AccountSharedData| {
-            Accounts::account_is_visible(account)
-                .then(|| encode_ui_account(pubkey, account, encoding, None, slice))
+            Accounts::account_is_visible(account).then(|| -> RpcResult<UiAccount> {
+                check_base58_size(account, encoding, slice)?;
+                Ok(encode_ui_account(pubkey, account, encoding, None, slice))
+            })
         };
 
         let ensured_accounts = self
@@ -42,7 +48,10 @@ impl RpcHandlers {
                 reader,
             )
             .await;
-        let accounts = ensured_accounts.into_iter().map(Option::flatten).collect::<Vec<_>>();
+        let accounts = ensured_accounts
+            .into_iter()
+            .map(|account| account.flatten().transpose())
+            .collect::<RpcResult<Vec<_>>>()?;
 
         let slot = self.engine.blocks().latest().slot;
         ResponsePayload::encode(&request.id, accounts, slot)

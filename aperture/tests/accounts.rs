@@ -2,9 +2,11 @@
 
 use std::collections::HashSet;
 
+use base64::{Engine as _, prelude::BASE64_STANDARD};
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
-use solana_account::{AccountMode, accounts_equal};
+use solana_account::{AccountMode, ReadableAccount, accounts_equal};
+use solana_account_decoder::MAX_BASE58_BYTES;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
@@ -482,5 +484,74 @@ async fn test_get_token_accounts_by_delegate() {
     assert!(
         nonexistent.is_err(),
         "an unknown token program should be rejected"
+    );
+}
+
+async fn post_rpc(env: &RpcTestEnv, method: &str, params: json::Value) -> json::Value {
+    reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&json::json!({ "jsonrpc": "2.0", "id": 1, "method": method, "params": params }))
+        .send()
+        .await
+        .expect("rpc request should receive a response")
+        .json()
+        .await
+        .expect("response should decode")
+}
+
+/// Base58 account data over 128 bytes is rejected as Agave does, instead of
+/// returning a placeholder string as the account data.
+#[tokio::test]
+async fn test_base58_account_data_size_limit() {
+    let env = RpcTestEnv::new().await;
+    let mint = Pubkey::new_unique();
+    let owner = Pubkey::new_unique();
+    // SPL token accounts are 165 bytes, over the 128-byte base58 limit.
+    let token = env.create_token_account(mint, owner);
+    let data = env.engine.get_account(token).expect("stored token account").data().to_vec();
+    assert!(data.len() > MAX_BASE58_BYTES);
+
+    let token = token.to_string();
+    let base58 = json::json!({ "encoding": "base58" });
+    for (method, params) in [
+        ("getAccountInfo", json::json!([token])),
+        ("getAccountInfo", json::json!([token, base58])),
+        ("getMultipleAccounts", json::json!([[token], base58])),
+        (
+            "getProgramAccounts",
+            json::json!([TOKEN_PROGRAM_ID.to_string(), base58]),
+        ),
+        (
+            "getTokenAccountsByOwner",
+            json::json!([owner.to_string(), { "mint": mint.to_string() }, base58]),
+        ),
+    ] {
+        let body = post_rpc(&env, method, params).await;
+        assert_eq!(
+            body["error"]["code"], -32600,
+            "{method} should reject oversized base58 data: {body}"
+        );
+        assert!(
+            body.get("result").is_none(),
+            "{method} should not return a result"
+        );
+    }
+
+    // A slice within the limit is still encoded.
+    let sliced = json::json!({
+        "encoding": "base58",
+        "dataSlice": { "offset": 0, "length": MAX_BASE58_BYTES },
+    });
+    let body = post_rpc(&env, "getAccountInfo", json::json!([token, sliced])).await;
+    assert_eq!(
+        body["result"]["value"]["data"],
+        json::json!([bs58::encode(&data[..MAX_BASE58_BYTES]).into_string(), "base58"]),
+    );
+
+    // Like Agave, getMultipleAccounts defaults to base64.
+    let body = post_rpc(&env, "getMultipleAccounts", json::json!([[token]])).await;
+    assert_eq!(
+        body["result"]["value"][0]["data"],
+        json::json!([BASE64_STANDARD.encode(&data), "base64"]),
     );
 }
