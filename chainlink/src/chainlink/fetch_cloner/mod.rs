@@ -8,7 +8,7 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use ::metrics::metrics::{
@@ -110,6 +110,11 @@ where
     /// Negative cache for derived eATAs confirmed missing on chain.
     known_empty_eatas: Arc<PlMutex<LruCache<Pubkey, ()>>>,
 
+    /// Remote snapshots taken without cloning into the engine account cache.
+    /// Entries expire so a base-chain permission change is not pinned, and the
+    /// cache is not the accountsdb LRU that eviction subscriptions drain.
+    peek_cache: Arc<PlMutex<LruCache<Pubkey, PeekCacheEntry>>>,
+
     /// Per-program state from the last successful load, so the per-slot
     /// notifications providers emit for heavily-invoked program accounts
     /// resolve without re-pulling full program data. Entries for programs
@@ -140,6 +145,22 @@ const KNOWN_EMPTY_EATAS_CAPACITY: NonZeroUsize = match NonZeroUsize::new(100_000
     Some(n) => n,
     None => panic!("KNOWN_EMPTY_EATAS_CAPACITY must be non-zero"),
 };
+
+/// Bound for remote snapshots that must not occupy the engine account LRU.
+const PEEK_CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(100_000) {
+    Some(n) => n,
+    None => panic!("PEEK_CACHE_CAPACITY must be non-zero"),
+};
+
+/// How long a peeked base image, including a miss, is reused. Short so a
+/// permission created or updated on base is not hidden for long. A hit that
+/// never expires would fail open.
+const PEEK_CACHE_TTL: Duration = Duration::from_secs(3);
+
+struct PeekCacheEntry {
+    account: Option<AccountSharedData>,
+    expires_at: Instant,
+}
 
 /// Capacity of the program verify cache; far above the number of programs
 /// a validator realistically loads, while bounding it across eviction churn.
@@ -282,6 +303,7 @@ where
             validator_pubkey: self.validator_pubkey,
             allowed_programs: self.allowed_programs.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
+            peek_cache: self.peek_cache.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
             programdata_index: self.programdata_index.clone(),
             programdata_sweep_cursor: self.programdata_sweep_cursor.clone(),
@@ -300,7 +322,7 @@ pub(crate) struct ProgramVerifyState {
     /// from the last load; `None` for loaders without programdata.
     pub(crate) programdata_header: Option<Vec<u8>>,
     /// When the program was last loaded or verified against remote state.
-    pub(crate) verified_at: std::time::Instant,
+    pub(crate) verified_at: Instant,
     /// A verification is scheduled for when the throttle window expires,
     /// covering notifications suppressed within the window.
     pub(crate) deferred_verify: bool,
@@ -435,6 +457,7 @@ where
             processed_updates_count: Arc::new(AtomicU64::new(0)),
             allowed_programs,
             known_empty_eatas: Arc::new(PlMutex::new(LruCache::new(KNOWN_EMPTY_EATAS_CAPACITY))),
+            peek_cache: Arc::new(PlMutex::new(LruCache::new(PEEK_CACHE_CAPACITY))),
             program_verify_cache: Arc::new(PlMutex::new(LruCache::new(
                 PROGRAM_VERIFY_CACHE_CAPACITY,
             ))),
@@ -541,6 +564,85 @@ where
             .remote_account_provider
             .try_get_multi(pubkeys, None, fetch_context, None)
             .await?)
+    }
+
+    /// Base images for keys that are not already visible locally.
+    ///
+    /// Uses one subscription-free RPC snapshot per chunk and remembers the
+    /// result, including misses, until [`PEEK_CACHE_TTL`]. Nothing is cloned
+    /// into accountsdb and no account subscription is acquired.
+    pub async fn peek_remote_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        if pubkeys.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let now = Instant::now();
+        let mut results = vec![None; pubkeys.len()];
+        let mut missing = Vec::new();
+        {
+            let mut cache = self.peek_cache.lock();
+            for (index, pubkey) in pubkeys.iter().enumerate() {
+                let fresh = match cache.get(pubkey) {
+                    Some(entry) if entry.expires_at > now => Some(entry.account.clone()),
+                    _ => None,
+                };
+                if let Some(account) = fresh {
+                    results[index] = account;
+                } else {
+                    cache.pop(pubkey);
+                    missing.push((index, *pubkey));
+                }
+            }
+        }
+        if missing.is_empty() {
+            return Ok(results);
+        }
+
+        let keys: Vec<Pubkey> = missing.iter().map(|(_, pubkey)| *pubkey).collect();
+        let fetched = self.fetch_remote_snapshots(&keys).await?;
+        if fetched.len() != keys.len() {
+            return Err(ChainlinkError::UnexpectedAccountCount(format!(
+                "peek expected {} accounts, got {}",
+                keys.len(),
+                fetched.len()
+            )));
+        }
+
+        let expires_at = Instant::now() + PEEK_CACHE_TTL;
+        let mut cache = self.peek_cache.lock();
+        for ((index, pubkey), remote) in missing.into_iter().zip(fetched) {
+            let account = remote.into_fresh_account();
+            cache.put(
+                pubkey,
+                PeekCacheEntry {
+                    account: account.clone(),
+                    expires_at,
+                },
+            );
+            results[index] = account;
+        }
+        Ok(results)
+    }
+
+    async fn fetch_remote_snapshots(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> ChainlinkResult<Vec<RemoteAccount>> {
+        let mut fetched = Vec::with_capacity(pubkeys.len());
+        for chunk in pubkeys.chunks(solana_rpc_client_api::request::MAX_MULTIPLE_ACCOUNTS) {
+            let part = self
+                .remote_account_provider
+                .fetch_accounts_without_subscription(
+                    chunk,
+                    AccountFetchContext::internal(AccountFetchReason::RequestedAccount),
+                )
+                .await?;
+            fetched.extend(part);
+        }
+        Ok(fetched)
     }
 
     pub async fn fetch_undelegation_requests(

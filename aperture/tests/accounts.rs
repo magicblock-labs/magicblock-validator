@@ -212,10 +212,11 @@ async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_
     assert!(body["result"].is_object(), "response should contain result");
 }
 
-/// Rent-funded Magic images are returned in request order. Other local modes,
-/// and keys absent from accountsdb, are null. The route does not claim remote accounts.
+/// Visible local images are returned in request order, including accounts that
+/// are not rent-funded Magic. A key absent from accountsdb stays null and is
+/// not cloned. The route does not claim remote accounts.
 #[tokio::test]
-async fn test_get_multiple_magic_accounts_returns_only_local_rent_funded() {
+async fn test_get_multiple_peek_accounts_returns_local_images_without_cloning() {
     let env = RpcTestEnv::new().await;
     let owner = Pubkey::new_unique();
     let ephemeral_key = Pubkey::new_unique();
@@ -225,10 +226,12 @@ async fn test_get_multiple_magic_accounts_returns_only_local_rent_funded() {
         .mode(AccountMode::Magic)
         .build();
     ephemeral.set_flags(StateFlags::RENT_FUNDED);
+    let placeholder_key = Pubkey::new_unique();
+    let placeholder = AccountBuilder::default().mode(AccountMode::Missing).build();
     env.engine
         .accounts()
-        .store(&[(ephemeral_key, ephemeral)])
-        .expect("store ephemeral account");
+        .store(&[(ephemeral_key, ephemeral), (placeholder_key, placeholder)])
+        .expect("store local accounts");
 
     let magic = store_v42(&env.engine, 1, AccountMode::Magic);
     let delegated = store_v42(&env.engine, 2, AccountMode::Delegated);
@@ -249,42 +252,65 @@ async fn test_get_multiple_magic_accounts_returns_only_local_rent_funded() {
         .json::<json::Value>()
         .await
         .expect("getAccountInfo response should decode");
+    let delegated_info = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [delegated.to_string()],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getAccountInfo HTTP request should succeed")
+        .json::<json::Value>()
+        .await
+        .expect("getAccountInfo response should decode");
 
     let response = client
         .post(env.rpc.url())
         .json(&json::json!({
             "jsonrpc": "2.0",
-            "method": "getMultipleMagicAccounts",
+            "method": "getMultiplePeekAccounts",
             "params": [[
                 ephemeral_key.to_string(),
                 magic.to_string(),
                 delegated.to_string(),
+                placeholder_key.to_string(),
                 missing.to_string(),
             ]],
             "id": 1,
         }))
         .send()
         .await
-        .expect("getMultipleMagicAccounts HTTP request should succeed");
+        .expect("getMultiplePeekAccounts HTTP request should succeed");
 
     assert_eq!(remote_account_claims_header(&response), 0);
     let body: json::Value =
-        response.json().await.expect("getMultipleMagicAccounts response should decode");
+        response.json().await.expect("getMultiplePeekAccounts response should decode");
     let value = body["result"]["value"].as_array().expect("value should be an array");
-    assert_eq!(value.len(), 4);
+    assert_eq!(value.len(), 5);
     assert_eq!(value[0], info["result"]["value"]);
+    assert!(value[1].is_object(), "local magic account is visible");
+    assert_eq!(value[2], delegated_info["result"]["value"]);
     assert!(
-        value[1].is_null(),
-        "magic account without rent funding is not ephemeral"
+        value[3].is_null(),
+        "a missing placeholder is not an account"
     );
-    assert!(value[2].is_null(), "delegated account is not ephemeral");
-    assert!(value[3].is_null(), "absent account must not be fetched");
+    assert!(
+        value[4].is_null(),
+        "an absent key stays null without a base cloner"
+    );
+    assert!(
+        !env.engine.accounts().loader().contains(&missing).expect("contains"),
+        "peek must not clone an absent key"
+    );
 
     let too_many = client
         .post(env.rpc.url())
         .json(&json::json!({
             "jsonrpc": "2.0",
-            "method": "getMultipleMagicAccounts",
+            "method": "getMultiplePeekAccounts",
             "params": [vec![ephemeral_key.to_string(); MAX_MULTIPLE_ACCOUNTS + 1]],
             "id": 1,
         }))

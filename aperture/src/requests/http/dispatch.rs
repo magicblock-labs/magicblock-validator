@@ -37,7 +37,7 @@ impl RpcHandlers {
             GetLargestAccounts => self.mock_empty_context(request),
             GetLatestBlockhash => self.get_latest_blockhash(request),
             GetMultipleAccounts => self.get_multiple_accounts(request, claims).await,
-            GetMultipleMagicAccounts => self.get_multiple_magic_accounts(request),
+            GetMultiplePeekAccounts => self.get_multiple_peek_accounts(request).await,
             GetProgramAccounts => self.get_program_accounts(request),
             GetRecentPerformanceSamples => self.get_recent_performance_samples(request),
             GetSignatureStatuses => self.get_signature_statuses(request).await,

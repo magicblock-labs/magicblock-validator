@@ -48,6 +48,22 @@ impl Accounts {
         self.engine.accounts().loader().read(pubkey, reader).ok().flatten()
     }
 
+    /// Local image when visible, otherwise a base snapshot that is not cloned.
+    pub(crate) async fn peek_many<R>(
+        &self,
+        pubkeys: &[Pubkey],
+        reader: impl Fn(&Pubkey, &AccountSharedData) -> R,
+    ) -> ChainlinkResult<Vec<Option<R>>> {
+        Ok(self
+            .chainlink
+            .peek_accounts(pubkeys)
+            .await?
+            .into_iter()
+            .zip(pubkeys)
+            .map(|(account, pubkey)| account.map(|account| reader(pubkey, &account)))
+            .collect())
+    }
+
     /// Read projections in request order after best-effort synchronization.
     pub(crate) async fn read_many<R>(
         &self,
