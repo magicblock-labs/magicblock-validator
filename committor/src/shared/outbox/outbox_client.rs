@@ -74,24 +74,28 @@ impl InternalOutboxClient {
     // ordinary transactions are not serialized by the materialization lease.
     async fn prepare_outbox(&self, intent_id: u64) -> Result<(), InternalOutboxClientError> {
         let pubkey = outbox_intent_pda(intent_id);
-        let accessor = self.engine.account(pubkey).await?;
-        if !matches!(accessor.observed(), Some((AccountMode::Mirrored, _))) {
-            return Ok(());
+        loop {
+            let accessor = self.engine.account(pubkey).await?;
+            if !matches!(accessor.observed(), Some((AccountMode::Mirrored, _))) {
+                return Ok(());
+            }
+            let Some(expected) =
+                self.engine.accounts().loader().read(&pubkey, |account| account.owned())?
+            else {
+                return Ok(());
+            };
+            if !expected.is(AccountMode::Mirrored)
+                || expected.owner() != system_program::ID
+                || !expected.data().is_empty()
+            {
+                return Err(InternalOutboxClientError::InvalidOutboxTarget(pubkey));
+            }
+            let account = AccountBuilder::default().slot(expected.slot()).mode(AccountMode::Magic);
+            match accessor.require(&expected).materialize(account, None).await {
+                Err(EngineError::AccountChanged) => continue,
+                result => return result.map_err(Into::into),
+            }
         }
-        let Some(expected) =
-            self.engine.accounts().loader().read(&pubkey, |account| account.owned())?
-        else {
-            return Ok(());
-        };
-        if !expected.is(AccountMode::Mirrored)
-            || expected.owner() != system_program::ID
-            || !expected.data().is_empty()
-        {
-            return Err(InternalOutboxClientError::InvalidOutboxTarget(pubkey));
-        }
-        let account = AccountBuilder::default().slot(expected.slot()).mode(AccountMode::Magic);
-        accessor.require(&expected).materialize(account, None).await?;
-        Ok(())
     }
 
     async fn accept_chunk(

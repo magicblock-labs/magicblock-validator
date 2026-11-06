@@ -11,6 +11,7 @@ mod test_utils;
 
 use std::sync::Arc;
 
+use engine::Engine;
 use mbv_core::traits::CallbackScheduleError;
 use metrics::metrics;
 use progress::{ExecutionProgress, TransactionProgress};
@@ -28,7 +29,7 @@ use crate::{
 };
 
 pub(crate) struct ExecutionContext {
-    pub authority: Keypair,
+    pub engine: Engine,
     pub intent_client: IntentExecutionClient,
     pub transaction_preparator: Arc<dyn preparation::TransactionPreparator>,
     pub task_info_provider: Arc<dyn TaskInfoProvider>,
@@ -37,6 +38,12 @@ pub(crate) struct ExecutionContext {
     pub actions_timeout: std::time::Duration,
     pub maintenance: tokio_util::task::TaskTracker,
     pub cancel: tokio_util::sync::CancellationToken,
+}
+
+impl ExecutionContext {
+    pub(crate) fn signer(&self) -> &Keypair {
+        self.engine.signer()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -157,7 +164,7 @@ impl IntentRunner for ExecutionContext {
                 _ = ctx.cancel.cancelled() => {},
                 _ = async {
                     let cleanup = async {
-                        if let Err(err) = cleanup::clean(&ctx.authority, ctx.transaction_preparator.as_ref(), resources, close_buffers).await {
+                        if let Err(err) = cleanup::clean(ctx.signer(), ctx.transaction_preparator.as_ref(), resources, close_buffers).await {
                             tracing::error!(error = ?err, "Failed to clean up intent resources");
                         }
                     };

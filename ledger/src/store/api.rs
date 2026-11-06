@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     fmt, fs,
+    ops::RangeInclusive,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -165,6 +166,31 @@ impl Ledger {
     /// Returns lowest slot in the ledger if there's any
     pub fn get_lowest_slot(&self) -> Result<Option<Slot>, LedgerError> {
         Ok(self.blockhash_cf.iter(IteratorMode::Start)?.next().map(|(slot, _)| slot))
+    }
+
+    /// Lists retained blocks in ascending order without loading their transactions.
+    pub fn get_block_slots(
+        &self,
+        range: RangeInclusive<Slot>,
+        limit: usize,
+    ) -> LedgerResult<Vec<Slot>> {
+        let mut slots = Vec::new();
+        if range.is_empty() || limit == 0 {
+            return Ok(slots);
+        }
+        let blocks = self.blockhash_cf.iter(IteratorMode::From(
+            *range.start(),
+            IteratorDirection::Forward,
+        ))?;
+        for (slot, _) in blocks.take_while(|(slot, _)| range.contains(slot)) {
+            if self.get_block_time(slot)?.is_some() {
+                slots.push(slot);
+                if slots.len() == limit {
+                    break;
+                }
+            }
+        }
+        Ok(slots)
     }
 
     /// Initializes lowest slot to cleanup from
@@ -984,5 +1010,36 @@ impl Ledger {
 
     pub fn read_slot_signature(&self, index: (Slot, u32)) -> LedgerResult<Option<Signature>> {
         self.slot_signatures_cf.get(index)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Proves legacy slot discovery includes empty blocks, skips incomplete records, and honors bounds.
+    #[test]
+    fn retained_block_slots() {
+        let directory = tempfile::tempdir().unwrap();
+        let ledger = Ledger::open(directory.path()).unwrap();
+        assert!(ledger.get_block_slots(0..=Slot::MAX, 1).unwrap().is_empty());
+        for slot in [2, 4, 8] {
+            ledger.blockhash_cf.put(slot, &Hash::new_from_array([1; HASH_BYTES])).unwrap();
+        }
+        for slot in [2, 8] {
+            ledger.blocktime_cf.put(slot, &(slot as i64)).unwrap();
+        }
+        assert_eq!(
+            ledger.get_block_slots(0..=Slot::MAX, 10).unwrap(),
+            vec![2, 8]
+        );
+        assert_eq!(ledger.get_block_slots(3..=Slot::MAX, 1).unwrap(), vec![8]);
+        assert!(ledger.get_block_slots(0..=1, 10).unwrap().is_empty());
+        assert!(ledger.get_block_slots(0..=8, 0).unwrap().is_empty());
+        assert!(ledger.get_block_slots(8..=2, 10).unwrap().is_empty());
+        assert!(
+            ledger.get_block(2).unwrap().is_some(),
+            "empty legacy blocks remain readable"
+        );
     }
 }
