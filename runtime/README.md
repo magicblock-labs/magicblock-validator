@@ -10,7 +10,9 @@ This crate does not start application services or manage process shutdown.
 
 Provide matching program IDs and executable files on the leader and verifier.
 Sharing a builder does not make separately deployed artifacts identical.
-Configured files must be available at startup.
+Configured files must be available at startup. Engine inserts missing program
+accounts, including into existing databases, and preserves existing images.
+Changing a configured file does not replace stored program bytes.
 
 See [configuration](../config/README.md) for inputs and the
 [leader](../bins/validator/README.md) and

@@ -13,14 +13,9 @@ config = { workspace = true }
 magic-program-api = { workspace = true }
 program = { workspace = true }
 solana-account = { workspace = true }
-solana-native-token = { workspace = true }
-solana-program-option = { workspace = true }
-solana-program-pack = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-rent = { workspace = true }
-solana-sdk-ids = { workspace = true }
-spl-token = { workspace = true }
 thiserror = { workspace = true }
 v42-calculator-interface = { workspace = true }
 
