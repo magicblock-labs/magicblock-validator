@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
-use solana_account::{AccountMode, accounts_equal};
+use solana_account::{AccountBuilder, AccountMode, AccountSharedData, StateFlags, accounts_equal};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
@@ -210,6 +210,118 @@ async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_
     )
     .expect("getMultipleAccounts response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
+}
+
+/// Visible local images are returned in request order, including accounts that
+/// are not rent-funded Magic. A key absent from accountsdb stays null and is
+/// not cloned. The route does not claim remote accounts.
+#[tokio::test]
+async fn test_get_multiple_peek_accounts_returns_local_images_without_cloning() {
+    let env = RpcTestEnv::new().await;
+    let owner = Pubkey::new_unique();
+    let ephemeral_key = Pubkey::new_unique();
+    let mut ephemeral: AccountSharedData = AccountBuilder::default()
+        .owner(owner)
+        .data(vec![1, 2, 3])
+        .mode(AccountMode::Magic)
+        .build();
+    ephemeral.set_flags(StateFlags::RENT_FUNDED);
+    let placeholder_key = Pubkey::new_unique();
+    let placeholder = AccountBuilder::default().mode(AccountMode::Missing).build();
+    env.engine
+        .accounts()
+        .store(&[(ephemeral_key, ephemeral), (placeholder_key, placeholder)])
+        .expect("store local accounts");
+
+    let magic = store_v42(&env.engine, 1, AccountMode::Magic);
+    let delegated = store_v42(&env.engine, 2, AccountMode::Delegated);
+    let missing = Pubkey::new_unique();
+
+    let client = reqwest::Client::new();
+    let info = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [ephemeral_key.to_string()],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getAccountInfo HTTP request should succeed")
+        .json::<json::Value>()
+        .await
+        .expect("getAccountInfo response should decode");
+    let delegated_info = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [delegated.to_string()],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getAccountInfo HTTP request should succeed")
+        .json::<json::Value>()
+        .await
+        .expect("getAccountInfo response should decode");
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getMultiplePeekAccounts",
+            "params": [[
+                ephemeral_key.to_string(),
+                magic.to_string(),
+                delegated.to_string(),
+                placeholder_key.to_string(),
+                missing.to_string(),
+            ]],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getMultiplePeekAccounts HTTP request should succeed");
+
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value =
+        response.json().await.expect("getMultiplePeekAccounts response should decode");
+    let value = body["result"]["value"].as_array().expect("value should be an array");
+    assert_eq!(value.len(), 5);
+    assert_eq!(value[0], info["result"]["value"]);
+    assert!(value[1].is_object(), "local magic account is visible");
+    assert_eq!(value[2], delegated_info["result"]["value"]);
+    assert!(
+        value[3].is_null(),
+        "a missing placeholder is not an account"
+    );
+    assert!(
+        value[4].is_null(),
+        "an absent key stays null without a base cloner"
+    );
+    assert!(
+        !env.engine.accounts().loader().contains(&missing).expect("contains"),
+        "peek must not clone an absent key"
+    );
+
+    let too_many = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getMultiplePeekAccounts",
+            "params": [vec![ephemeral_key.to_string(); MAX_MULTIPLE_ACCOUNTS + 1]],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("oversized query should receive a response")
+        .json::<json::Value>()
+        .await
+        .expect("oversized query response should decode");
+    assert_eq!(too_many["error"]["code"], -32602);
+    assert!(too_many.get("result").is_none());
 }
 
 /// Verifies `getBalance` for both existing and non-existent accounts.

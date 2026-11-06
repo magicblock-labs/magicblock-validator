@@ -438,6 +438,53 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> InnerChainlink<T, U> {
         }
     }
 
+    /// Returns a visible local image when one exists. Otherwise reads a base
+    /// snapshot without cloning it into accountsdb or subscribing to the key.
+    ///
+    /// `AccountMode::Missing` placeholders are not visible, so a previous
+    /// `ensure_accounts` miss does not hide a permission that now exists on
+    /// base. With no fetch cloner the missing keys stay null.
+    pub async fn peek_accounts(
+        &self,
+        pubkeys: &[Pubkey],
+    ) -> ChainlinkResult<Vec<Option<AccountSharedData>>> {
+        let mut accounts = Vec::with_capacity(pubkeys.len());
+        let mut missing = Vec::new();
+        {
+            let accessor = self.engine.accounts();
+            let loader = accessor.loader();
+            for (index, pubkey) in pubkeys.iter().enumerate() {
+                let visible = loader
+                    .read(pubkey, |account| {
+                        (!account.is(AccountMode::Missing))
+                            .then(|| AccountSharedData::from(account.owned()))
+                    })
+                    .map_err(KeeperError::from)?;
+                match visible.flatten() {
+                    Some(account) => accounts.push(Some(account)),
+                    None => {
+                        accounts.push(None);
+                        missing.push(index);
+                    }
+                }
+            }
+        }
+
+        let Some(fetch_cloner) = self.fetch_cloner() else {
+            return Ok(accounts);
+        };
+        if missing.is_empty() {
+            return Ok(accounts);
+        }
+
+        let keys: Vec<Pubkey> = missing.iter().map(|&index| pubkeys[index]).collect();
+        let remote = fetch_cloner.peek_remote_accounts(&keys).await?;
+        for (index, account) in missing.into_iter().zip(remote) {
+            accounts[index] = account;
+        }
+        Ok(accounts)
+    }
+
     /// Fetches the accounts from the bank if we're offline and not syncing accounts.
     /// Otherwise materializes requested accounts locally, using placeholders
     /// for accounts missing on chain, and returns their state from the bank.

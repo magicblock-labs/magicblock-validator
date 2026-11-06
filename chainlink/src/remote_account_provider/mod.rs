@@ -1816,6 +1816,15 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
+    /// One base `getMultipleAccounts` snapshot. Does not subscribe or clone.
+    pub(crate) async fn fetch_accounts_without_subscription(
+        &self,
+        pubkeys: &[Pubkey],
+        fetch_context: AccountFetchContext,
+    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        self.fetch_multi_rpc_only(pubkeys, self.chain_slot(), fetch_context).await
+    }
+
     /// Reads a single RPC snapshot without acquiring account subscriptions.
     pub(crate) async fn fetch_snapshot_until_slot(
         &self,

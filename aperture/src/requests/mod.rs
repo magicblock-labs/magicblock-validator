@@ -67,6 +67,8 @@ pub(crate) enum JsonRpcHttpMethod {
     GetLargestAccounts,
     GetLatestBlockhash,
     GetMultipleAccounts,
+    /// Visible local account, otherwise a base snapshot that is not cloned.
+    GetMultiplePeekAccounts,
     GetProgramAccounts,
     GetRecentPerformanceSamples,
     GetSignatureStatuses,
@@ -143,6 +145,7 @@ impl JsonRpcHttpMethod {
             Self::GetLargestAccounts => "getLargestAccounts",
             Self::GetLatestBlockhash => "getLatestBlockhash",
             Self::GetMultipleAccounts => "getMultipleAccounts",
+            Self::GetMultiplePeekAccounts => "getMultiplePeekAccounts",
             Self::GetProgramAccounts => "getProgramAccounts",
             Self::GetRecentPerformanceSamples => "getRecentPerformanceSamples",
             Self::GetSignatureStatuses => "getSignatureStatuses",
