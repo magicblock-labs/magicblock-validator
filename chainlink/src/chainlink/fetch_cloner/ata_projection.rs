@@ -187,7 +187,7 @@ where
     )
     .await?;
 
-    if base_ata.read().mode().requires_persistence() && !base_ata.read().is(AccountMode::Magic) {
+    if base_ata.read().mode().is_er_owned() && !base_ata.read().is(AccountMode::Magic) {
         return None;
     }
     let source_slots =
