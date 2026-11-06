@@ -38,7 +38,7 @@ pub(crate) fn seeds(programs: &HashMap<Pubkey, Vec<u8>>) -> HashMap<Pubkey, Acco
     ]);
 
     if !programs.contains_key(&v42_calculator_interface::ID) {
-        let sentinel = AccountBuilder::default().mode(AccountMode::BuiltIn);
+        let sentinel = AccountBuilder::default().mode(AccountMode::Runtime);
         accounts.insert(v42_calculator_interface::ID, sentinel.build());
     }
 
