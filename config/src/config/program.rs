@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::SerdePubkey;
 
-/// Describes an external program to seed at genesis.
+/// Describes an external program to seed at startup if absent.
 #[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(rename_all = "kebab-case")]
 pub struct LoadableProgram {
