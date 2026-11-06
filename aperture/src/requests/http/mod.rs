@@ -18,6 +18,7 @@ pub(crate) mod get_fee_for_message;
 pub(crate) mod get_identity;
 pub(crate) mod get_latest_blockhash;
 pub(crate) mod get_multiple_accounts;
+pub(crate) mod get_multiple_magic_accounts;
 pub(crate) mod get_program_accounts;
 pub(crate) mod get_recent_performance_samples;
 pub(crate) mod get_signature_statuses;

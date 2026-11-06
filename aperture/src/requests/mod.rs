@@ -67,6 +67,8 @@ pub(crate) enum JsonRpcHttpMethod {
     GetLargestAccounts,
     GetLatestBlockhash,
     GetMultipleAccounts,
+    /// Rent-funded Magic accounts already in accountsdb. Never fetches from base.
+    GetMultipleMagicAccounts,
     GetProgramAccounts,
     GetRecentPerformanceSamples,
     GetSignatureStatuses,
@@ -143,6 +145,7 @@ impl JsonRpcHttpMethod {
             Self::GetLargestAccounts => "getLargestAccounts",
             Self::GetLatestBlockhash => "getLatestBlockhash",
             Self::GetMultipleAccounts => "getMultipleAccounts",
+            Self::GetMultipleMagicAccounts => "getMultipleMagicAccounts",
             Self::GetProgramAccounts => "getProgramAccounts",
             Self::GetRecentPerformanceSamples => "getRecentPerformanceSamples",
             Self::GetSignatureStatuses => "getSignatureStatuses",

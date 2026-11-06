@@ -4,7 +4,7 @@ use std::collections::HashSet;
 
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
-use solana_account::{AccountMode, accounts_equal};
+use solana_account::{AccountBuilder, AccountMode, AccountSharedData, StateFlags, accounts_equal};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
@@ -210,6 +210,92 @@ async fn test_get_multiple_accounts_emits_remote_account_claims_header_zero_for_
     )
     .expect("getMultipleAccounts response body should be valid JSON");
     assert!(body["result"].is_object(), "response should contain result");
+}
+
+/// Rent-funded Magic images are returned in request order. Other local modes,
+/// and keys absent from accountsdb, are null. The route does not claim remote accounts.
+#[tokio::test]
+async fn test_get_multiple_magic_accounts_returns_only_local_rent_funded() {
+    let env = RpcTestEnv::new().await;
+    let owner = Pubkey::new_unique();
+    let ephemeral_key = Pubkey::new_unique();
+    let mut ephemeral: AccountSharedData = AccountBuilder::default()
+        .owner(owner)
+        .data(vec![1, 2, 3])
+        .mode(AccountMode::Magic)
+        .build();
+    ephemeral.set_flags(StateFlags::RENT_FUNDED);
+    env.engine
+        .accounts()
+        .store(&[(ephemeral_key, ephemeral)])
+        .expect("store ephemeral account");
+
+    let magic = store_v42(&env.engine, 1, AccountMode::Magic);
+    let delegated = store_v42(&env.engine, 2, AccountMode::Delegated);
+    let missing = Pubkey::new_unique();
+
+    let client = reqwest::Client::new();
+    let info = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getAccountInfo",
+            "params": [ephemeral_key.to_string()],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getAccountInfo HTTP request should succeed")
+        .json::<json::Value>()
+        .await
+        .expect("getAccountInfo response should decode");
+
+    let response = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getMultipleMagicAccounts",
+            "params": [[
+                ephemeral_key.to_string(),
+                magic.to_string(),
+                delegated.to_string(),
+                missing.to_string(),
+            ]],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("getMultipleMagicAccounts HTTP request should succeed");
+
+    assert_eq!(remote_account_claims_header(&response), 0);
+    let body: json::Value =
+        response.json().await.expect("getMultipleMagicAccounts response should decode");
+    let value = body["result"]["value"].as_array().expect("value should be an array");
+    assert_eq!(value.len(), 4);
+    assert_eq!(value[0], info["result"]["value"]);
+    assert!(
+        value[1].is_null(),
+        "magic account without rent funding is not ephemeral"
+    );
+    assert!(value[2].is_null(), "delegated account is not ephemeral");
+    assert!(value[3].is_null(), "absent account must not be fetched");
+
+    let too_many = client
+        .post(env.rpc.url())
+        .json(&json::json!({
+            "jsonrpc": "2.0",
+            "method": "getMultipleMagicAccounts",
+            "params": [vec![ephemeral_key.to_string(); MAX_MULTIPLE_ACCOUNTS + 1]],
+            "id": 1,
+        }))
+        .send()
+        .await
+        .expect("oversized query should receive a response")
+        .json::<json::Value>()
+        .await
+        .expect("oversized query response should decode");
+    assert_eq!(too_many["error"]["code"], -32602);
+    assert!(too_many.get("result").is_none());
 }
 
 /// Verifies `getBalance` for both existing and non-existent accounts.
