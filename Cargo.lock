@@ -3839,7 +3839,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "anyhow",
  "clap",
@@ -3896,7 +3896,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3910,7 +3910,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "agave-geyser-plugin-interface",
  "agave-transaction-view",
@@ -3966,7 +3966,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -4030,7 +4030,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-interface"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "borsh",
  "paste",
@@ -4044,7 +4044,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "borsh",
  "magicblock-committor-interface",
@@ -4056,7 +4056,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4106,7 +4106,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "clap",
  "derive_more",
@@ -4126,7 +4126,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "agave-feature-set",
  "console-subscriber",
@@ -4321,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger-deprecated"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "bincode 1.3.3",
  "byteorder",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-magic-program-api"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "bincode 1.3.3",
  "const-crypto",
@@ -4363,7 +4363,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -4411,7 +4411,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "assert_matches",
  "lazy_static",
@@ -4480,7 +4480,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4508,7 +4508,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-runtime"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "magicblock-config",
  "magicblock-keeper",
@@ -4524,7 +4524,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "futures-util",
  "magicblock-chainlink",
@@ -4554,7 +4554,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "magicblock-metrics",
  "magicblock-rpc-client",
@@ -4580,7 +4580,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "hydra-api",
  "magic-root-interface",
@@ -4608,7 +4608,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "anyhow",
  "bincode 1.3.3",
@@ -4649,7 +4649,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-tui"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "chrono",
  "clap",
@@ -4669,7 +4669,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-verifier"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "anyhow",
  "magicblock-config",
@@ -8946,7 +8946,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "bincode 1.3.3",
  "bs58",
