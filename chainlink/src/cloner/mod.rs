@@ -1,13 +1,14 @@
 use std::iter;
 
 use engine::{AccountAccessor, Engine, EngineError, PostFinalize};
-use errors::ClonerResult;
+use errors::{ClonerError, ClonerResult};
 use keeper::error::KeeperError;
 use magic_program_api::{
     MAGIC_CONTEXT_PUBKEY,
     args::{CommitAndUndelegateArgs, CommitTypeArgs, MagicIntentBundleArgs, UndelegateTypeArgs},
     instruction::MagicBlockInstruction,
 };
+use mbv_core::token_programs::{is_ata, try_get_magic_ata_info};
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, Instruction};
 use solana_loader_v4_interface::state::LoaderV4Status;
@@ -20,6 +21,7 @@ use crate::remote_account_provider::program_account::{
     LOADER_V1, LOADER_V4, LoadedProgram, RemoteProgramLoader,
 };
 
+mod ata;
 pub mod errors;
 
 /// Non-empty post-delegation actions paired with their slot-matched owner.
@@ -117,6 +119,12 @@ pub struct AccountCloneRequest {
 }
 
 impl AccountCloneRequest {
+    pub(crate) fn is_ata_projection(&self) -> bool {
+        let account = self.account.read();
+        account.is(AccountMode::Delegated)
+            && is_ata(&self.pubkey, account.owner(), account.data()).is_some()
+    }
+
     pub(crate) fn source_slots(&self) -> CloneSourceSlots {
         self.source_slots
             .unwrap_or_else(|| CloneSourceSlots::single(self.account.read().slot()))
@@ -142,17 +150,30 @@ impl CloneSourceSlots {
     }
 }
 
-/// Claims a remote image unless local Magic state owns the key.
-/// The lease serializes account maintenance, not ordinary transaction execution.
-pub(crate) async fn claim_materialization<'a>(
-    engine: &'a Engine,
+/// Claims a remote image, protecting Magic state except validated ATA projections.
+/// The lease serializes maintenance, not ordinary transaction execution.
+pub(crate) async fn claim_materialization(
+    engine: &Engine,
     pubkey: Pubkey,
-) -> ClonerResult<Option<AccountAccessor<'a>>> {
+    ata_projection: bool,
+) -> ClonerResult<Option<AccountAccessor<'_>>> {
     let accessor = engine.account(pubkey).await?;
-    if matches!(accessor.observed(), Some((AccountMode::Magic, _))) {
+    if !matches!(accessor.observed(), Some((AccountMode::Magic, _))) {
+        return Ok(Some(accessor));
+    }
+    if !ata_projection {
         return Ok(None);
     }
-    Ok(Some(accessor))
+    let is_magic_ata = engine
+        .accounts()
+        .loader()
+        .read(&pubkey, |account| {
+            try_get_magic_ata_info(&pubkey, account).is_some()
+        })
+        .map_err(KeeperError::from)
+        .map_err(EngineError::from)?
+        .unwrap_or(false);
+    Ok(is_magic_ata.then_some(accessor))
 }
 
 fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
@@ -205,6 +226,7 @@ pub(crate) async fn clone_account(
             "Cloning account delegated to another validator"
         );
     }
+    let ata_projection = request.is_ata_projection();
     let actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
         ClonePostDelegationMode::ExecuteActions(actions) => Some(actions.into_post_finalize()),
@@ -215,28 +237,34 @@ pub(crate) async fn clone_account(
     };
     let account = request.account;
     let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
-    let error = match accessor.materialize(account, actions).await {
+    let result = if ata_projection
+        && accessor.skipped(account.read().mode(), account.read().slot()).is_none()
+    {
+        ata::materialize(engine, accessor, account, actions).await
+    } else {
+        accessor.materialize(account, actions).await.map_err(Into::into)
+    };
+    let error = match result {
         Ok(()) => return Ok(()),
         Err(error) => error,
     };
     // A queued local creation can win after the original lease observed
     // absence. Reacquire before accepting its protected image as sufficient.
+    const LIFECYCLE_CONFLICT: TransactionError =
+        TransactionError::InstructionError(1, InstructionError::InvalidArgument);
     let lifecycle_conflict = matches!(
         error,
-        EngineError::TransactionExecution(TransactionError::InstructionError(
-            1,
-            InstructionError::InvalidArgument
-        ))
+        ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
     );
     if empty_placeholder && lifecycle_conflict {
-        let locally_created = claim_materialization(engine, request.pubkey).await?.is_none();
+        let locally_created = claim_materialization(engine, request.pubkey, false).await?.is_none();
         if locally_created {
             return Ok(());
         }
     }
-    Err(errors::ClonerError::FailedToCloneRegularAccount(
+    Err(ClonerError::FailedToCloneRegularAccount(
         request.pubkey,
-        Box::new(error.into()),
+        Box::new(error),
     ))
 }
 
@@ -276,7 +304,7 @@ pub(crate) async fn clone_program(
     accessor
         .materialize(request.account, None)
         .await
-        .map_err(|err| errors::ClonerError::FailedToCloneProgram(program_id, Box::new(err.into())))
+        .map_err(|err| ClonerError::FailedToCloneProgram(program_id, Box::new(err.into())))
 }
 
 pub(crate) async fn evict_account(engine: &Engine, pubkey: Pubkey) -> ClonerResult<()> {
@@ -293,7 +321,7 @@ pub(crate) async fn delete_claimed_account(
     accessor
         .delete()
         .await
-        .map_err(|err| errors::ClonerError::FailedToEvictAccount(pubkey, Box::new(err.into())))
+        .map_err(|err| ClonerError::FailedToEvictAccount(pubkey, Box::new(err.into())))
 }
 
 /// Claims an account displaced from Engine recency, unless a later completion

@@ -2,7 +2,7 @@
 
 mod accounts;
 
-use std::{collections::HashMap, fs, path::PathBuf};
+use std::{collections::HashMap, fs, io, path::PathBuf};
 
 use config::config::{EngineConfig, LoadableProgram};
 use keeper::builder::KeeperBuilder;
@@ -27,7 +27,7 @@ pub fn keeper_builder<R>(
         ledger: engine.ledger.clone(),
         blockstore: engine.blockstore,
         builtins: builtins(),
-        accounts: accounts::initial_accounts(&programs),
+        possibly_missing_accounts: accounts::seeds(&programs),
         programs,
         rent: Rent::default(),
     })
@@ -77,6 +77,6 @@ pub enum Error {
         id: Pubkey,
         path: PathBuf,
         #[source]
-        source: std::io::Error,
+        source: io::Error,
     },
 }

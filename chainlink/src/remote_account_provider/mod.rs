@@ -1816,6 +1816,53 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         }
     }
 
+    /// Reads a single RPC snapshot without acquiring account subscriptions.
+    pub(crate) async fn fetch_snapshot_until_slot(
+        &self,
+        pubkeys: &[Pubkey],
+        min_context_slot: u64,
+        fetch_context: AccountFetchContext,
+        companion_fetch_kind: ChainlinkCompanionFetchKind,
+    ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
+        let started_at = Instant::now();
+        let config = MatchSlotsRetryConfig::default();
+        let mut retries = 0;
+        let mut attempts = 0;
+        loop {
+            attempts += 1;
+            match self
+                .fetch_multi_rpc_only(pubkeys, min_context_slot, fetch_context.clone())
+                .await
+            {
+                Ok(accounts) => {
+                    observe_companion_fetch_if_configured(
+                        fetch_context,
+                        Some(companion_fetch_kind),
+                        ChainlinkCompanionFetchOutcome::Succeeded,
+                        attempts,
+                        started_at,
+                    );
+                    return Ok(accounts);
+                }
+                Err(err) => {
+                    match next_match_slots_rpc_error_retry(&mut retries, started_at, &config) {
+                        Ok(delay) => time::sleep(delay).await,
+                        Err(_) => {
+                            observe_companion_fetch_if_configured(
+                                fetch_context,
+                                Some(companion_fetch_kind),
+                                ChainlinkCompanionFetchOutcome::FailedRpc,
+                                attempts,
+                                started_at,
+                            );
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     async fn fetch_multi_rpc_only(
         &self,
         pubkeys: &[Pubkey],

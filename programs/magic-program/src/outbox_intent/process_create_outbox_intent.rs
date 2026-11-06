@@ -7,7 +7,6 @@ use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::system_program;
-use solana_transaction_context::transaction::TransactionContext;
 
 use crate::{
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
@@ -22,16 +21,32 @@ const SPONSOR_IDX: u16 = 0;
 const PDA_IDX: u16 = 1;
 
 /// Creates and populates the outbox intent PDA. CPI-only, called by the
-/// magic program's `AcceptScheduleCommits`. Claims ownership of the fresh,
-/// system-owned, zero-lamport PDA directly - no ephemeral system program CPI
-/// is needed since no lamports are transferred.
+/// magic program's `AcceptScheduleCommits`. Initializes independent local state,
+/// using a zero-balance target prepared locally before acceptance.
 pub(crate) fn process_create_outbox_intent(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext<'_, '_>,
     data: Vec<u8>,
 ) -> Result<(), InstructionError> {
     validate(&signers, invoke_context, &data)?;
-    create_ephemeral_outbox_account(invoke_context, PDA_IDX, data)
+
+    let pda = get_instruction_account_with_idx(invoke_context.transaction_context, PDA_IDX)?;
+    let mut acc = pda.borrow_mut()?;
+    if !acc.is_any([AccountMode::Missing, AccountMode::Magic])
+        || acc.lamports() != 0
+        || *acc.owner() != system_program::ID
+        || !acc.data().is_empty()
+    {
+        return Err(InstructionError::InvalidAccountData);
+    }
+
+    acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);
+    acc.resize(data.len(), 0);
+    acc.data_as_mut_slice().copy_from_slice(&data);
+    if !acc.is(AccountMode::Magic) {
+        set_account_mode(invoke_context, &mut acc, AccountMode::Magic)?;
+    }
+    Ok(())
 }
 
 fn validate(
@@ -69,34 +84,5 @@ fn validate(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    validate_new_pda(transaction_context, PDA_IDX)
-}
-
-/// Validates that the account at `idx` is an empty system-owned account
-/// (0 lamports, system program owner), ready to be claimed as the outbox PDA.
-fn validate_new_pda(
-    transaction_context: &TransactionContext<'_>,
-    idx: u16,
-) -> Result<(), InstructionError> {
-    let pda_acc = get_instruction_account_with_idx(transaction_context, idx)?;
-    let acc = pda_acc.borrow()?;
-    if acc.lamports() != 0 || *acc.owner() != system_program::ID {
-        return Err(InstructionError::InvalidAccountData);
-    }
     Ok(())
-}
-
-fn create_ephemeral_outbox_account(
-    invoke_context: &InvokeContext<'_, '_>,
-    pda_idx: u16,
-    data: Vec<u8>,
-) -> Result<(), InstructionError> {
-    let transaction_context = &*invoke_context.transaction_context;
-    let pda_acc = get_instruction_account_with_idx(transaction_context, pda_idx)?;
-
-    let mut acc = pda_acc.borrow_mut()?;
-    acc.set_owner(OUTBOX_INTENT_PROGRAM_ID);
-    acc.resize(data.len(), 0);
-    acc.data_as_mut_slice().copy_from_slice(&data);
-    set_account_mode(invoke_context, &mut acc, AccountMode::Magic)
 }

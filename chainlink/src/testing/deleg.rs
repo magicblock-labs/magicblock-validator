@@ -40,6 +40,7 @@ pub fn add_delegation_record_with_slot_for(
     owner: Pubkey,
     delegation_slot: u64,
 ) -> Pubkey {
+    add_delegation_metadata_for(rpc_client, pubkey, 0);
     let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
@@ -67,6 +68,7 @@ pub fn add_delegation_record_with_actions_for(
     owner: Pubkey,
     program_id: Pubkey,
 ) -> Pubkey {
+    add_delegation_metadata_for(rpc_client, pubkey, 0);
     let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
     let deleg_record = DelegationRecord {
         authority,
@@ -119,4 +121,32 @@ pub fn add_invalid_delegation_record_for(
         },
     );
     deleg_record_pubkey
+}
+
+#[cfg(any(test, feature = "dev-context"))]
+pub fn add_delegation_metadata_for(
+    rpc_client: &ChainRpcClientMock,
+    pubkey: Pubkey,
+    last_commit_id: u64,
+) {
+    use delegation_program_api::{
+        pda::delegation_metadata_pda_from_delegated_account,
+        state::{DelegationMetadata, UndelegationRequester},
+    };
+    let metadata = DelegationMetadata {
+        last_commit_id,
+        undelegation_requester: UndelegationRequester::None,
+        seeds: vec![],
+        rent_payer: Pubkey::default(),
+    };
+    let mut data = Vec::new();
+    metadata.to_bytes_with_discriminator(&mut data).unwrap();
+    rpc_client.add_account(
+        delegation_metadata_pda_from_delegated_account(&pubkey),
+        Account {
+            owner: delegation_program_api::id(),
+            data,
+            ..Default::default()
+        },
+    );
 }

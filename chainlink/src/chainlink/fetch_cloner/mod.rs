@@ -26,13 +26,12 @@ use engine::{AccountAccessor, Engine};
 use keeper::error::KeeperError;
 use lru::LruCache;
 use mbv_core::token_programs::{
-    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, is_ata,
+    ASSOCIATED_TOKEN_PROGRAM_ID, EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID,
     normalize_native_token_account_for_local_clone,
 };
 use parking_lot::Mutex as PlMutex;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount, StateFlags};
 use solana_account_decoder_client_types::UiAccountEncoding;
-use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcProgramAccountsConfig},
@@ -103,7 +102,6 @@ where
 
     engine: Engine,
     validator_pubkey: Pubkey,
-    validator_keypair: Arc<Keypair>,
 
     /// If specified, only these programs will be cloned. If None or empty,
     /// all programs are allowed.
@@ -282,7 +280,6 @@ where
             processed_updates_count: self.processed_updates_count.clone(),
             engine: self.engine.clone(),
             validator_pubkey: self.validator_pubkey,
-            validator_keypair: Arc::clone(&self.validator_keypair),
             allowed_programs: self.allowed_programs.clone(),
             known_empty_eatas: self.known_empty_eatas.clone(),
             program_verify_cache: self.program_verify_cache.clone(),
@@ -402,7 +399,6 @@ where
     pub fn new(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         engine: Engine,
-        validator_keypair: Keypair,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
@@ -411,7 +407,6 @@ where
         Self::new_with_undelegation_request_sender(
             remote_account_provider,
             engine,
-            validator_keypair,
             subscription_updates_rx,
             allowed_programs,
             risk_service,
@@ -424,20 +419,18 @@ where
     pub fn new_with_undelegation_request_sender(
         remote_account_provider: &Arc<RemoteAccountProvider<T, U>>,
         engine: Engine,
-        validator_keypair: Keypair,
         subscription_updates_rx: mpsc::Receiver<ForwardedSubscriptionUpdate>,
         allowed_programs: Option<Vec<AllowedProgram>>,
         risk_service: Option<Arc<RiskService>>,
         undelegation_request_sender: broadcast::Sender<ObservedUndelegationRequest>,
     ) -> Arc<Self> {
-        let validator_pubkey = validator_keypair.pubkey();
+        let validator_pubkey = engine.signer().pubkey();
         let allowed_programs =
             allowed_programs.map(|programs| programs.iter().map(|p| p.id).collect::<HashSet<_>>());
         let me = Arc::new(Self {
             remote_account_provider: remote_account_provider.clone(),
             engine,
             validator_pubkey,
-            validator_keypair: Arc::new(validator_keypair),
             fetch_count: Arc::new(AtomicU64::new(0)),
             processed_updates_count: Arc::new(AtomicU64::new(0)),
             allowed_programs,
@@ -932,7 +925,8 @@ where
                 Ok(ProgramDataWatch::Installed)
             );
 
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) =
+            cloner::claim_materialization(&self.engine, request.pubkey, false).await?
         else {
             metrics::inc_chainlink_clone_accounts_total_with_context(
                 fetch_context,
@@ -985,14 +979,7 @@ where
         mut request: AccountCloneRequest,
         fetch_context: AccountFetchContext,
     ) -> ChainlinkResult<()> {
-        if request.account.read().is(AccountMode::Delegated)
-            && is_ata(
-                &request.pubkey,
-                request.account.read().owner(),
-                request.account.read().data(),
-            )
-            .is_some()
-        {
+        if request.is_ata_projection() {
             request.account = normalize_native_token_account_for_local_clone(request.account)
                 .ok_or_else(|| {
                     ChainlinkError::InvalidTokenAccount(
@@ -1028,10 +1015,24 @@ where
             None
         };
 
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) = cloner::claim_materialization(
+            &self.engine,
+            request.pubkey,
+            request.is_ata_projection(),
+        )
+        .await?
         else {
             return Ok(());
         };
+        if request.account.read().is(AccountMode::Delegated)
+            && accessor
+                .skipped(AccountMode::Delegated, request.account.read().slot())
+                .is_none()
+        {
+            let commit_seq =
+                delegation::initial_commit_id(self, &request, fetch_context.clone()).await?;
+            request.account = request.account.commit_seq(commit_seq);
+        }
         let Some((source_program, dependencies)) = activation else {
             return self.submit_account(accessor, request, fetch_context).await.map_err(Into::into);
         };
@@ -1059,7 +1060,12 @@ where
         // cancellation does not authorize another mutation. Reacquire and
         // reclassify before fallback so a concurrent materialization
         // cannot be overwritten or have its actions replayed.
-        let Some(accessor) = cloner::claim_materialization(&self.engine, request.pubkey).await?
+        let Some(accessor) = cloner::claim_materialization(
+            &self.engine,
+            request.pubkey,
+            request.is_ata_projection(),
+        )
+        .await?
         else {
             return Ok(());
         };
@@ -1642,6 +1648,17 @@ where
             return;
         }
 
+        // A delegated clone carries the delegation slot rather than a fetch
+        // slot, so compare against the record instead of the candidate slot.
+        let is_settled_delegation = |account: &AccountSharedData| {
+            account.is(AccountMode::Delegated) && account.slot() >= deleg_record.delegation_slot
+        };
+        let already_delegated =
+            self.read_account(&candidate.pubkey, is_settled_delegation).unwrap_or(false);
+        if already_delegated {
+            return;
+        }
+
         const MAX_RELEASE_CLONE_ATTEMPTS: usize = 3;
         for _ in 0..MAX_RELEASE_CLONE_ATTEMPTS {
             // The candidate may have been parked before local undelegation
@@ -1692,7 +1709,8 @@ where
             }
             let reader = |account: &AccountSharedData| {
                 let settled = account.slot() > candidate.slot
-                    || (account.slot() == candidate.slot && account.is(AccountMode::Delegated));
+                    || (account.slot() == candidate.slot && account.is(AccountMode::Delegated))
+                    || is_settled_delegation(account);
                 let stale_transient = account.is(AccountMode::Undelegating)
                     && deleg_record.delegation_slot <= account.slot();
                 (settled, stale_transient)
@@ -2127,11 +2145,7 @@ where
         data: &[u8],
         delegation_record_pubkey: Pubkey,
     ) -> ChainlinkResult<(DelegationRecord, Option<DelegationActions>)> {
-        delegation::parse_delegation_record(
-            data,
-            delegation_record_pubkey,
-            self.validator_keypair.as_ref(),
-        )
+        delegation::parse_delegation_record(data, delegation_record_pubkey, self.engine.signer())
     }
 
     /// Fetches and parses the delegation record for an account, returning the

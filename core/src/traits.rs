@@ -1,31 +1,12 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
-use solana_program::instruction::InstructionError;
-use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 
-use crate::intent::{BaseActionCallback, MagicIntentBundle, types::CommittedAccount};
-
-/// Trait that provides access to system calls implemented outside of SVM,
-/// accessible in magic-program.
-pub trait MagicSys: Sync + Send + 'static {
-    fn fetch_current_commit_nonces(
-        &self,
-        commits: &[CommittedAccount],
-    ) -> Result<HashMap<Pubkey, u64>, InstructionError>;
-
-    /// Returns `Ok(())` if `intent` could ever fit on the base layer, even
-    /// under the smallest possible task representation (buffer-mode commits,
-    /// address lookup tables, 2-stage execution). If it can never fit no
-    /// matter how it gets optimized at execution time, returns `Err` so the
-    /// intent can be refused up front instead of failing later during
-    /// commit/finalize.
-    fn validate_intent_size(&self, intent: &MagicIntentBundle) -> Result<(), InstructionError>;
-}
+use crate::intent::BaseActionCallback;
 
 /// Interface for service handling callback execution/scheduling
-pub trait ActionsCallbackScheduler: Send + Sync + Clone + 'static {
+pub trait ActionsCallbackScheduler: Send + Sync + 'static {
     /// Schedules callback txs.
     /// Returns signature or construction error per callback.
     fn schedule(

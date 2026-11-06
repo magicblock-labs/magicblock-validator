@@ -26,6 +26,11 @@ pub enum ChainlinkError {
     #[error("Delegation record could not be decoded: {0} ({1:?})")]
     InvalidDelegationRecord(Pubkey, ProgramError),
 
+    #[error(
+        "Delegation commit ID {1} for metadata account {0} exceeds the supported sequence range"
+    )]
+    InvalidDelegationCommitSequence(Pubkey, u64),
+
     #[error("Delegation actions could not be decoded: {0} ({1})")]
     InvalidDelegationActions(Pubkey, String),
 

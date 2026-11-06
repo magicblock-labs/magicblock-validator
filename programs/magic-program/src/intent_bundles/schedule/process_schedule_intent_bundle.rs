@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use magic_program_api::args::MagicIntentBundleArgs;
+use mbv_core::intent::outbox::outbox_intent_pda;
 use solana_account::{ReadableAccount, WritableAccount};
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -12,7 +13,6 @@ use crate::{
     magic_scheduled_base_intent::{
         ConstructionContext, ScheduledIntentBundle, extract_commit_accounts,
     },
-    magic_sys::fetch_current_commit_nonces,
     schedule_transactions::{
         MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits, check_magic_context_id, get_clock,
         get_parent_program_id, try_get_fee_vault,
@@ -128,15 +128,21 @@ pub(crate) fn process_schedule_intent_bundle(
     )?
     .0;
     if let Some(magic_fee_vault) = magic_fee_vault {
-        let chargable_accounts = scheduled_intent.get_all_committed_accounts();
-        let nonces = fetch_current_commit_nonces(&chargable_accounts)?;
-        let fee = scheduled_intent.calculate_fee(&nonces)?;
+        let fee = scheduled_intent.calculate_fee()?;
         charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
-    } else if let Some(commit_accounts) = scheduled_intent.get_commit_intent_accounts() {
-        check_commit_limits(commit_accounts, invoke_context)?;
+    } else {
+        // Both commit variants use the sponsored allowance. Undelegation remains
+        // available after the allowance is exhausted.
+        for commit_accounts in [
+            scheduled_intent.get_commit_intent_accounts(),
+            scheduled_intent.get_commit_finalize_intent_accounts(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            check_commit_limits(commit_accounts, invoke_context)?;
+        }
     }
-
-    let sent_signature = scheduled_intent.sent_transaction.signatures[0];
 
     context.add_scheduled_action(scheduled_intent);
     let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
@@ -145,8 +151,8 @@ pub(crate) fn process_schedule_intent_bundle(
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent signature: {}",
-        sent_signature,
+        "ScheduledCommitSent outbox: {}",
+        outbox_intent_pda(intent_id),
     );
 
     Ok(())

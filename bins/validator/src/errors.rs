@@ -2,7 +2,6 @@ use std::io;
 
 use aperture::ApertureError;
 use chainlink::errors::ChainlinkError;
-use committor::error::CommittorServiceError;
 use engine::EngineError;
 use ledger_deprecated::errors::LedgerError;
 use replicator::ReplicationError;
@@ -56,9 +55,6 @@ pub(crate) enum ApiError {
     #[error("On-chain setup transaction for validator '{0}' was rejected: {1}")]
     OnchainSetupTransactionRejected(Pubkey, #[source] TransactionError),
 
-    #[error("CommittorServiceError")]
-    CommittorServiceError(Box<CommittorServiceError>),
-
     #[error("Unable to clean ledger directory at '{0}'")]
     UnableToCleanLedgerDirectory(String),
 
@@ -84,12 +80,6 @@ impl From<LedgerError> for ApiError {
 impl From<ChainlinkError> for ApiError {
     fn from(e: ChainlinkError) -> Self {
         Self::ChainlinkError(Box::new(e))
-    }
-}
-
-impl From<CommittorServiceError> for ApiError {
-    fn from(e: CommittorServiceError) -> Self {
-        Self::CommittorServiceError(Box::new(e))
     }
 }
 

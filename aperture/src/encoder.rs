@@ -1,6 +1,6 @@
 use hyper::body::Bytes;
-use json::Serialize;
 use mbv_core::Slot;
+use serde::Serialize;
 use solana_account::{AccountSharedData, ReadableAccount};
 use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
 use solana_pubkey::Pubkey;

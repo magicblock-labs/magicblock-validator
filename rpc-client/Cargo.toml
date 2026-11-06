@@ -13,7 +13,7 @@ doctest = false
 [dependencies]
 futures-util = { workspace = true }
 metrics = { workspace = true }
-serde_json = { workspace = true }
+json = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }
 solana-address-lookup-table-interface = { workspace = true, features = ["bytemuck", "wincode"] }

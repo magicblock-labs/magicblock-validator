@@ -3,11 +3,12 @@ use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use solana_rpc_client_api::{config::RpcAccountInfoConfig, request::MAX_MULTIPLE_ACCOUNTS};
 
 use super::{HandlerResult, RpcHandlers};
-use crate::requests::{
-    JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload,
+use crate::{
+    error::RpcError,
+    requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
 };
 
 impl RpcHandlers {
@@ -17,6 +18,11 @@ impl RpcHandlers {
         claims: &mut u64,
     ) -> HandlerResult {
         let pubkeys = request.required::<Vec<Serde32Bytes>>(0)?;
+        if pubkeys.len() > MAX_MULTIPLE_ACCOUNTS {
+            return Err(RpcError::invalid_params(format!(
+                "Too many accounts provided; max {MAX_MULTIPLE_ACCOUNTS}"
+            )));
+        }
         let pubkeys: Vec<Pubkey> = pubkeys.into_iter().map(Into::into).collect();
 
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();

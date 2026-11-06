@@ -100,29 +100,27 @@ enum ExtendTableErrorAction {
 }
 
 impl TableMania {
-    pub fn new(
-        rpc_client: MagicblockRpcClient,
-        authority: &Keypair,
-        garbage_collector_config: Option<GarbageCollectorConfig>,
-    ) -> Self {
-        let me = Self {
+    pub fn new(rpc_client: MagicblockRpcClient, authority_pubkey: Pubkey) -> Self {
+        Self {
             active_tables: Arc::<RwLock<Vec<LookupTableRc>>>::default(),
             released_tables: Arc::<Mutex<Vec<LookupTableRc>>>::default(),
-            authority_pubkey: authority.pubkey(),
+            authority_pubkey,
             rpc_client,
             compute_budgets: TableManiaComputeBudgets::default(),
-        };
-        if let Some(config) = garbage_collector_config {
-            Self::launch_garbage_collector(
-                &me.rpc_client,
-                authority,
-                me.released_tables.clone(),
-                config,
-                me.compute_budgets.deactivate.clone(),
-                me.compute_budgets.close.clone(),
-            );
         }
-        me
+    }
+
+    /// Runs the collector until its owner cancels the task.
+    pub async fn run_garbage_collector(&self, authority: &Keypair, config: GarbageCollectorConfig) {
+        Self::garbage_collector_loop(
+            &self.rpc_client,
+            authority,
+            &self.released_tables,
+            config,
+            &self.compute_budgets.deactivate,
+            &self.compute_budgets.close,
+        )
+        .await;
     }
 
     /// Returns the number of currently active tables
@@ -181,22 +179,34 @@ impl TableMania {
     // -----------------
     // Reserve
     // -----------------
+    /// Records each acquired reservation before another await can fail or be
+    /// cancelled. The caller must release the recorded keys, including on error.
+    /// Pass a separate empty set for each reservation attempt.
     pub async fn reserve_pubkeys(
         &self,
         authority: &Keypair,
         pubkeys: &HashSet<Pubkey>,
+        reserved: &mut HashSet<Pubkey>,
     ) -> TableManiaResult<()> {
+        debug_assert!(reserved.is_empty());
         let mut remaining = HashSet::new();
         // 1. Add reservations for pubkeys that are already in one of the tables
         for pubkey in pubkeys {
-            if !self.reserve_pubkey(pubkey).await {
+            if self.reserve_pubkey(pubkey).await {
+                reserved.insert(*pubkey);
+            } else {
                 remaining.insert(*pubkey);
             }
         }
 
         // 2. Add new reservations for pubkeys that are not in any table
-        self.reserve_new_pubkeys(authority, &remaining, ExistingPubkeyAction::Reserve)
-            .await
+        self.reserve_new_pubkeys(
+            authority,
+            &remaining,
+            ExistingPubkeyAction::Reserve,
+            Some(reserved),
+        )
+        .await
     }
 
     /// Ensures that pubkeys exist in any active table without increasing reference counts.
@@ -234,8 +244,13 @@ impl TableMania {
 
         // 2. If any pubkeys dont exist, create tables for them
         if !remaining.is_empty() {
-            self.reserve_new_pubkeys(authority, &remaining, ExistingPubkeyAction::LeaveUnreserved)
-                .await?;
+            self.reserve_new_pubkeys(
+                authority,
+                &remaining,
+                ExistingPubkeyAction::LeaveUnreserved,
+                None,
+            )
+            .await?;
         }
 
         Ok(())
@@ -259,7 +274,7 @@ impl TableMania {
     /// Thus this is considered the first reservation for these pubkeys and thus includes
     /// initializing/extending actual lookup tables on chain.
     #[instrument(
-        skip(self, authority, pubkeys),
+        skip(self, authority, pubkeys, reserved),
         fields(pubkey_count = pubkeys.len())
     )]
     async fn reserve_new_pubkeys(
@@ -267,6 +282,7 @@ impl TableMania {
         authority: &Keypair,
         pubkeys: &HashSet<Pubkey>,
         existing_pubkey_action: ExistingPubkeyAction,
+        mut reserved: Option<&mut HashSet<Pubkey>>,
     ) -> TableManiaResult<()> {
         self.check_authority(authority)?;
 
@@ -296,6 +312,7 @@ impl TableMania {
                             &mut remaining,
                             &mut tables_used,
                             existing_pubkey_action,
+                            reserved.as_deref_mut(),
                         )
                         .await
                     {
@@ -353,6 +370,11 @@ impl TableMania {
                     .create_new_table_and_extend(authority, &mut remaining, initial_pubkey_limit)
                     .await?;
 
+                if let Some(reserved) = reserved.as_deref_mut()
+                    && let Some(keys) = table.pubkeys()
+                {
+                    reserved.extend(keys.keys().copied());
+                }
                 tables_used.insert(*table.table_address());
                 active_tables_write_lock.push(table);
             }
@@ -386,9 +408,19 @@ impl TableMania {
         table: &LookupTableRc,
         remaining: &mut Vec<Pubkey>,
         existing_pubkey_action: ExistingPubkeyAction,
+        mut reserved: Option<&mut HashSet<Pubkey>>,
     ) {
         remaining.retain(|pk| match existing_pubkey_action {
-            ExistingPubkeyAction::Reserve => !table.reserve_pubkey(pk),
+            ExistingPubkeyAction::Reserve => {
+                if table.reserve_pubkey(pk) {
+                    if let Some(reserved) = reserved.as_deref_mut() {
+                        reserved.insert(*pk);
+                    }
+                    false
+                } else {
+                    true
+                }
+            }
             ExistingPubkeyAction::LeaveUnreserved => !table.contains_key(pk),
         });
     }
@@ -398,7 +430,7 @@ impl TableMania {
     /// If successful the table addres is added to the `tables_used` set.
     /// Returns `true` if the table is full after adding the pubkeys
     #[instrument(
-        skip(self, table, authority, remaining, tables_used),
+        skip(self, table, authority, remaining, tables_used, reserved),
         fields(
             table_address = %table.table_address(),
             remaining_count = remaining.len(),
@@ -412,6 +444,7 @@ impl TableMania {
         remaining: &mut Vec<Pubkey>,
         tables_used: &mut HashSet<Pubkey>,
         existing_pubkey_action: ExistingPubkeyAction,
+        mut reserved: Option<&mut HashSet<Pubkey>>,
     ) -> TableManiaResult<()> {
         let remaining_len = remaining.len();
         let storing_len = remaining_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
@@ -439,11 +472,19 @@ impl TableMania {
                 // outer iteration sees accurate fullness, and reserve any of
                 // `storing` that turned out to already be on chain.
                 if table.reconcile_with_chain(&self.rpc_client).await.is_ok() {
-                    Self::filter_pubkeys_present_in_table(table, remaining, existing_pubkey_action);
+                    Self::filter_pubkeys_present_in_table(
+                        table,
+                        remaining,
+                        existing_pubkey_action,
+                        reserved,
+                    );
                 }
                 return Err(err);
             }
         };
+        if let Some(reserved) = reserved.as_deref_mut() {
+            reserved.extend(stored.iter().copied());
+        }
         let stored_len = stored.len();
         Span::current().record("stored_count", stored_len);
         trace!("Pubkeys stored");
@@ -754,53 +795,43 @@ impl TableMania {
     // The next cycle will try the operation again so in case chain was congested
     // the problem should resolve itself.
     // Otherwise we can run a tool later to manually deactivate + close tables.
-    fn launch_garbage_collector(
+    async fn garbage_collector_loop(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
-        released_tables: Arc<Mutex<Vec<LookupTableRc>>>,
+        released_tables: &Mutex<Vec<LookupTableRc>>,
         config: GarbageCollectorConfig,
-        deactivate_compute_budget: TableManiaComputeBudget,
-        close_compute_budget: TableManiaComputeBudget,
-    ) -> tokio::task::JoinHandle<()> {
-        let rpc_client = rpc_client.clone();
-        let authority = authority.insecure_clone();
-
-        tokio::spawn(async move {
-            let mut last_deactivate = tokio::time::Instant::now();
-            let mut last_close = tokio::time::Instant::now();
-            let mut sleep_ms = config.deactivate_interval_ms.min(config.close_interval_ms);
-            loop {
-                let now = tokio::time::Instant::now();
-                if now.duration_since(last_deactivate).as_millis().try_into().unwrap_or(u64::MAX)
-                    >= config.deactivate_interval_ms
-                {
-                    Self::deactivate_tables(
-                        &rpc_client,
-                        &authority,
-                        &released_tables,
-                        &deactivate_compute_budget,
-                    )
-                    .await;
-                    last_deactivate = now;
-                    sleep_ms = sleep_ms.min(config.deactivate_interval_ms);
-                }
-                if now.duration_since(last_close).as_millis().try_into().unwrap_or(u64::MAX)
-                    >= config.close_interval_ms
-                {
-                    Self::close_tables(
-                        &rpc_client,
-                        &authority,
-                        &released_tables,
-                        &close_compute_budget,
-                    )
-                    .await;
-                    last_close = now;
-                    sleep_ms = sleep_ms.min(config.close_interval_ms);
-                }
-
-                sleep(Duration::from_millis(sleep_ms)).await;
+        deactivate_compute_budget: &TableManiaComputeBudget,
+        close_compute_budget: &TableManiaComputeBudget,
+    ) {
+        let mut last_deactivate = tokio::time::Instant::now();
+        let mut last_close = tokio::time::Instant::now();
+        let mut sleep_ms = config.deactivate_interval_ms.min(config.close_interval_ms);
+        loop {
+            let now = tokio::time::Instant::now();
+            if now.duration_since(last_deactivate).as_millis().try_into().unwrap_or(u64::MAX)
+                >= config.deactivate_interval_ms
+            {
+                Self::deactivate_tables(
+                    rpc_client,
+                    authority,
+                    released_tables,
+                    deactivate_compute_budget,
+                )
+                .await;
+                last_deactivate = now;
+                sleep_ms = sleep_ms.min(config.deactivate_interval_ms);
             }
-        })
+            if now.duration_since(last_close).as_millis().try_into().unwrap_or(u64::MAX)
+                >= config.close_interval_ms
+            {
+                Self::close_tables(rpc_client, authority, released_tables, close_compute_budget)
+                    .await;
+                last_close = now;
+                sleep_ms = sleep_ms.min(config.close_interval_ms);
+            }
+
+            sleep(Duration::from_millis(sleep_ms)).await;
+        }
     }
 
     /// Deactivates tables that were previously released

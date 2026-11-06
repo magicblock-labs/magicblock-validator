@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use magic_program_api::args::{ActionArgs, ShortAccountMeta};
 use serde::{Deserialize, Serialize};
 use solana_program::instruction::InstructionError;
@@ -7,14 +5,17 @@ use solana_pubkey::Pubkey;
 pub use types::CommittedAccount;
 use wincode::{SchemaRead, SchemaWrite};
 
+pub mod limits;
 pub mod outbox;
 pub mod types;
 
 /// Commits that are covered by User's dlp PDAs
+///
+/// NOTE: Higher DLP fees may exhaust the deposit earlier; retain the existing
+/// allowance until a separate pricing change is agreed and communicated.
 pub const ACTUAL_COMMIT_LIMIT: u64 = 25;
-/// Fixed fee per commit.
-/// https://github.com/magicblock-labs/delegation-program/blob/main/src/consts.rs#L11
-pub const COMMIT_FEE_LAMPORTS: u64 = 100_000;
+/// Matches DLP v2 pricing; the pinned API v3.1.0 still has the old fee.
+pub const COMMIT_FEE_LAMPORTS: u64 = 1_000_000;
 /// Price per compute unit for a BaseAction executed on Solana base chain,
 /// denominated in micro-lamports per CU (mirrors Solana's priority fee model).
 pub const COMPUTE_UNIT_PRICE_MICRO_LAMPORTS: u64 = 50_000;
@@ -59,22 +60,19 @@ impl From<MagicBaseIntent> for MagicIntentBundle {
 }
 
 impl MagicIntentBundle {
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
+    pub fn calculate_fee(&self) -> Result<u64, InstructionError> {
         let mut fee = 0;
         if let Some(ref commit) = self.commit {
-            fee += commit.calculate_fee(commit_nonces)?;
+            fee += commit.calculate_fee()?;
         }
         if let Some(ref cau) = self.commit_and_undelegate {
-            fee += cau.calculate_fee(commit_nonces)?;
+            fee += cau.calculate_fee()?;
         }
         if let Some(ref commit_finalize) = self.commit_finalize {
-            fee += commit_finalize.calculate_fee(commit_nonces)?;
+            fee += commit_finalize.calculate_fee()?;
         }
         if let Some(ref cfau) = self.commit_finalize_and_undelegate {
-            fee += cfau.calculate_fee(commit_nonces)?;
+            fee += cfau.calculate_fee()?;
         }
         fee += calculate_actions_fee(&self.standalone_actions);
         Ok(fee)
@@ -318,13 +316,10 @@ pub struct CommitAndUndelegate {
 }
 
 impl CommitAndUndelegate {
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
+    pub fn calculate_fee(&self) -> Result<u64, InstructionError> {
         let mut fee = 0;
-        fee += self.commit_action.calculate_fee(commit_nonces)?;
-        fee += self.undelegate_action.calculate_fee(commit_nonces)?;
+        fee += self.commit_action.calculate_fee()?;
+        fee += self.undelegate_action.calculate_fee()?;
         Ok(fee)
     }
 
@@ -437,17 +432,14 @@ pub enum CommitType {
 
 impl CommitType {
     /// Calculate fee commits
-    pub fn calculate_fee(
-        &self,
-        commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
+    pub fn calculate_fee(&self) -> Result<u64, InstructionError> {
         let mut fee = 0;
         match self {
             CommitType::Standalone(committed_accounts) => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_commit_fee(committed_accounts)?;
             }
             CommitType::WithBaseActions { committed_accounts, base_actions } => {
-                fee += calculate_commit_fee(committed_accounts, commit_nonces)?;
+                fee += calculate_commit_fee(committed_accounts)?;
                 fee += calculate_actions_fee(base_actions);
             }
         }
@@ -517,10 +509,7 @@ impl UndelegateType {
         }
     }
 
-    pub fn calculate_fee(
-        &self,
-        _commit_nonces: &HashMap<Pubkey, u64>,
-    ) -> Result<u64, InstructionError> {
+    pub fn calculate_fee(&self) -> Result<u64, InstructionError> {
         match self {
             UndelegateType::Standalone => Ok(0),
             UndelegateType::WithBaseActions(actions) => Ok(calculate_actions_fee(actions)),
@@ -528,20 +517,12 @@ impl UndelegateType {
     }
 }
 
-pub fn calculate_commit_fee(
-    accounts: &[CommittedAccount],
-    commit_nonces: &HashMap<Pubkey, u64>,
-) -> Result<u64, InstructionError> {
+pub fn calculate_commit_fee(accounts: &[CommittedAccount]) -> Result<u64, InstructionError> {
     accounts.iter().try_fold(0u64, |fee, account| {
-        if let Some(nonce) = commit_nonces.get(&account.pubkey) {
-            if nonce >= &ACTUAL_COMMIT_LIMIT {
-                Ok(fee + COMMIT_FEE_LAMPORTS)
-            } else {
-                Ok(fee)
-            }
-        } else {
-            Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR))
+        if account.commit_id == 0 {
+            return Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
         }
+        Ok(fee + if account.commit_id > ACTUAL_COMMIT_LIMIT { COMMIT_FEE_LAMPORTS } else { 0 })
     })
 }
 
@@ -555,8 +536,6 @@ fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use solana_program::instruction::InstructionError;
     use solana_pubkey::Pubkey;
 
@@ -566,8 +545,9 @@ mod tests {
         UndelegateType, calculate_actions_fee, calculate_commit_fee, types::CommittedAccount,
     };
 
-    fn make_committed_account(pubkey: Pubkey) -> CommittedAccount {
+    fn make_committed_account(pubkey: Pubkey, commit_id: u64) -> CommittedAccount {
         CommittedAccount {
+            commit_id,
             pubkey,
             account: solana_account::Account::default(),
             remote_slot: 0,
@@ -590,50 +570,28 @@ mod tests {
     // ---- calculate_commit_fee ----
 
     #[test]
-    fn test_commit_fee_at_limit_is_zero() {
-        let pk = Pubkey::new_unique();
-        // nonce is commits done so far; nonce+1 is the next commit number.
-        // ACTUAL_COMMIT_LIMIT - 1 means the next commit is exactly at the limit → free.
-        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT - 1)]);
-        let fee = calculate_commit_fee(&[make_committed_account(pk)], &nonces).unwrap();
-        assert_eq!(fee, 0);
-    }
-
-    #[test]
-    fn test_commit_fee_above_limit_charges_per_account() {
-        let pk1 = Pubkey::new_unique();
-        let pk2 = Pubkey::new_unique();
-        let nonces =
-            HashMap::from([(pk1, ACTUAL_COMMIT_LIMIT + 1), (pk2, ACTUAL_COMMIT_LIMIT + 1)]);
-        let fee = calculate_commit_fee(
-            &[make_committed_account(pk1), make_committed_account(pk2)],
-            &nonces,
-        )
-        .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS * 2);
-    }
-
-    #[test]
-    fn test_commit_fee_mixed_accounts() {
-        let pk_below = Pubkey::new_unique();
-        let pk_above = Pubkey::new_unique();
-        let nonces = HashMap::from([
-            (pk_below, ACTUAL_COMMIT_LIMIT - 1), // next commit is exactly at limit → free
-            (pk_above, ACTUAL_COMMIT_LIMIT),     // next commit exceeds limit → charged
-        ]);
-        let fee = calculate_commit_fee(
-            &[make_committed_account(pk_below), make_committed_account(pk_above)],
-            &nonces,
-        )
-        .unwrap();
-        assert_eq!(fee, COMMIT_FEE_LAMPORTS);
-    }
-
-    #[test]
-    fn test_commit_fee_missing_nonce_errors() {
-        let pk = Pubkey::new_unique();
-        let err = calculate_commit_fee(&[make_committed_account(pk)], &HashMap::new()).unwrap_err();
-        assert_eq!(err, InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
+    fn test_commit_fee_reserved_ids() {
+        for (ids, expected) in [
+            (vec![ACTUAL_COMMIT_LIMIT], Ok(0)),
+            (
+                vec![ACTUAL_COMMIT_LIMIT + 1, ACTUAL_COMMIT_LIMIT + 2],
+                Ok(COMMIT_FEE_LAMPORTS * 2),
+            ),
+            (
+                vec![ACTUAL_COMMIT_LIMIT, ACTUAL_COMMIT_LIMIT + 1],
+                Ok(COMMIT_FEE_LAMPORTS),
+            ),
+            (
+                vec![0],
+                Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR)),
+            ),
+        ] {
+            let accounts = ids
+                .into_iter()
+                .map(|id| make_committed_account(Pubkey::new_unique(), id))
+                .collect::<Vec<_>>();
+            assert_eq!(calculate_commit_fee(&accounts), expected);
+        }
     }
 
     /// two actions of 200_000 CUs each → 20_000 lamports
@@ -651,30 +609,29 @@ mod tests {
     #[test]
     fn test_calculate_fee_includes_commit_finalize_variants() {
         let pk = Pubkey::new_unique();
-        let nonces = HashMap::from([(pk, ACTUAL_COMMIT_LIMIT)]); // over limit -> charged
         let expected = COMMIT_FEE_LAMPORTS + 10_000; // + one 200_000 CU action
 
         let commit_finalize_bundle = MagicIntentBundle {
             commit_finalize: Some(CommitType::WithBaseActions {
-                committed_accounts: vec![make_committed_account(pk)],
+                committed_accounts: vec![make_committed_account(pk, ACTUAL_COMMIT_LIMIT + 1)],
                 base_actions: vec![make_base_action(200_000)],
             }),
             ..Default::default()
         };
-        assert_eq!(
-            commit_finalize_bundle.calculate_fee(&nonces).unwrap(),
-            expected
-        );
+        assert_eq!(commit_finalize_bundle.calculate_fee().unwrap(), expected);
 
         let commit_finalize_and_undelegate_bundle = MagicIntentBundle {
             commit_finalize_and_undelegate: Some(CommitAndUndelegate {
-                commit_action: CommitType::Standalone(vec![make_committed_account(pk)]),
+                commit_action: CommitType::Standalone(vec![make_committed_account(
+                    pk,
+                    ACTUAL_COMMIT_LIMIT + 1,
+                )]),
                 undelegate_action: UndelegateType::WithBaseActions(vec![make_base_action(200_000)]),
             }),
             ..Default::default()
         };
         assert_eq!(
-            commit_finalize_and_undelegate_bundle.calculate_fee(&nonces).unwrap(),
+            commit_finalize_and_undelegate_bundle.calculate_fee().unwrap(),
             expected
         );
     }

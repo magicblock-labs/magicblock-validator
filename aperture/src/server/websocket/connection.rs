@@ -1,11 +1,13 @@
 use engine::Engine;
+use json::Value;
 use std::time::Duration;
 use tracing::{debug, warn};
 
-use fastwebsockets::{CloseCode, Frame, OpCode, WebSocket, WebSocketError};
+use fastwebsockets::{CloseCode, Frame, OpCode, WebSocket, WebSocketError, WebSocketWrite};
 use hyper::{body::Bytes, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 use tokio::{
+    io::AsyncWrite,
     sync::mpsc::{self, Receiver},
     time::{self, Instant},
 };
@@ -27,10 +29,8 @@ type WebsocketStream = WebSocket<TokioIo<Upgraded>>;
 /// - Dispatching requests to the `WsDispatcher` for processing.
 /// - Receiving subscription notifications from various events and pushing them to the client.
 /// - Handling keep-alive pings and detecting inactive connections.
-/// - Observing the server's shutdown token between connection events.
+/// - Observing connection cancellation and server shutdown between events.
 pub(super) struct ConnectionHandler {
-    /// The server's global cancellation token.
-    cancel: CancellationToken,
     /// The underlying WebSocket stream for reading and writing frames.
     ws: WebsocketStream,
     /// The request dispatcher for this specific connection. It manages all active
@@ -48,13 +48,8 @@ impl ConnectionHandler {
         let (tx, updates_rx) = mpsc::channel(4096);
 
         // The dispatcher is tied to this specific connection via its channel.
-        let dispatcher = WsDispatcher::new(engine, tx);
-        Self {
-            dispatcher,
-            cancel,
-            ws,
-            updates_rx,
-        }
+        let dispatcher = WsDispatcher::new(engine, tx, cancel.child_token());
+        Self { dispatcher, ws, updates_rx }
     }
 
     /// The main event loop for the WebSocket connection.
@@ -64,22 +59,22 @@ impl ConnectionHandler {
     /// - **Incoming client messages**: Parses and dispatches RPC requests.
     /// - **Outgoing subscription notifications**: Pushes updates from the server to the client.
     /// - **Keep-alive**: Sends periodic pings and closes the connection if it becomes inactive.
-    /// - **Shutdown**: Listens for the global server shutdown signal.
+    /// - **Cancellation**: Listens for subscription closure or server shutdown.
     ///
-    /// The loop terminates upon any I/O error, an inactivity timeout, or a shutdown signal.
+    /// The loop terminates on I/O failure, timeout, or cancellation.
     pub(super) async fn run(self) {
         const MAX_INACTIVE_INTERVAL: Duration = Duration::from_secs(60);
         const PING_PERIOD: Duration = Duration::from_secs(30);
         let Self {
-            cancel,
             ws,
             mut dispatcher,
             mut updates_rx,
         } = self;
         let (mut reader, mut writer) = ws.split(tokio::io::split);
+        let cancel = dispatcher.cancel.clone();
         reader.set_auto_pong(false);
         let mut last_activity = Instant::now();
-        let mut last_request = json::Value::default();
+        let mut last_request = Value::Null;
         let mut replies = 0_u64;
         let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
         tokio::pin!(next_ping);
@@ -99,7 +94,7 @@ impl ConnectionHandler {
                 tokio::pin!(read);
                 loop {
                     tokio::select! {
-                        // Prioritize shutdown even while a frame is incomplete.
+                        // Prioritize cancellation even while a frame is incomplete.
                         biased;
                         _ = cancel.cancelled() => break 'connection,
                         result = &mut read => break result,
@@ -109,30 +104,30 @@ impl ConnectionHandler {
                                     CloseCode::Policy.into(),
                                     b"connection inactive for too long"
                                 );
-                                let _ = writer.write_frame(frame).await;
-                                break 'connection;
+                                let _ = write_frame(&mut writer, frame).await;
+                                return;
                             }
                             let frame = Frame::new(true, OpCode::Ping, None, b"".as_ref().into());
-                            if let Err(error) = writer.write_frame(frame).await {
+                            if let Err(error) = write_frame(&mut writer, frame).await {
                                 warn!(?error, %last_request, replies, "WebSocket ping failed");
-                                break 'connection;
+                                return;
                             };
                             next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                         }
 
                         Some(update) = updates_rx.recv() => {
-                            if let Err(error) = writer.write_frame(Frame::text(update.as_ref().into())).await {
+                            if let Err(error) = write_frame(&mut writer, Frame::text(update.as_ref().into())).await {
                                 warn!(?error, %last_request, replies, "WebSocket notification failed");
-                                break 'connection;
+                                return;
                             }
                         }
                     }
                 }
             };
             if let Some(reply) = close_reply
-                && writer.write_frame(reply).await.is_err()
+                && write_frame(&mut writer, reply).await.is_err()
             {
-                break;
+                return;
             }
             let frame = match result {
                 Ok(frame) => frame,
@@ -150,8 +145,8 @@ impl ConnectionHandler {
             match frame.opcode {
                 OpCode::Close => return,
                 OpCode::Ping => {
-                    if writer.write_frame(Frame::pong(frame.payload)).await.is_err() {
-                        break;
+                    if write_frame(&mut writer, Frame::pong(frame.payload)).await.is_err() {
+                        return;
                     }
                     continue;
                 }
@@ -178,14 +173,29 @@ impl ConnectionHandler {
                     break;
                 }
             };
-            if let Err(error) = writer.write_frame(Frame::text(payload.0.into())).await {
+            if let Err(error) = write_frame(&mut writer, Frame::text(payload.0.into())).await {
                 warn!(?error, %last_request, replies, "WebSocket reply failed");
-                break;
+                return;
             }
             replies += 1;
         }
-        // send a close frame (best effort) to the client
-        let frame = Frame::close(CloseCode::Away.into(), b"server is shutting down");
-        let _ = writer.write_frame(frame).await;
+        drop(dispatcher);
+        let close = Frame::close(
+            CloseCode::Away.into(),
+            b"connection closing; reconnect and refetch",
+        );
+        let _ = write_frame(&mut writer, close).await;
     }
+}
+
+/// Bounds backpressure on every frame, including the best-effort close handshake.
+/// After any failure the caller must drop the socket: a frame may be partially written.
+async fn write_frame(
+    writer: &mut WebSocketWrite<impl AsyncWrite + Unpin>,
+    frame: Frame<'_>,
+) -> Result<(), WebSocketError> {
+    const WRITE_TIMEOUT: Duration = Duration::from_secs(3);
+    time::timeout(WRITE_TIMEOUT, writer.write_frame(frame)).await.map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::TimedOut, "WebSocket write timed out")
+    })?
 }

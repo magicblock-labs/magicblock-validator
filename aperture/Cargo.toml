@@ -61,6 +61,8 @@ tracing = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
+program = { workspace = true, features = ["dev-context-only-utils"] }
+solana-program-runtime = { workspace = true }
 # Enable the engine's black-box test harness (`engine::testkit::TestEngine`)
 # only for aperture's own tests; downstream lib builds never see this feature.
 engine = { workspace = true, features = ["testkit"] }

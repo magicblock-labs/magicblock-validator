@@ -648,7 +648,7 @@ struct BlockTransactionMessage {
 
 #[derive(Debug, Deserialize)]
 struct BlockTransactionMeta {
-    err: Option<serde_json::Value>,
+    err: Option<json::Value>,
     #[serde(rename = "loadedAddresses")]
     loaded_addresses: Option<LoadedAddresses>,
 }
@@ -670,7 +670,7 @@ struct CompiledInstruction {
 #[derive(Debug, Deserialize, Clone)]
 struct TransactionMeta {
     fee: u64,
-    err: Option<serde_json::Value>,
+    err: Option<json::Value>,
     #[serde(rename = "logMessages")]
     log_messages: Option<Vec<String>>,
     #[serde(rename = "computeUnitsConsumed")]
@@ -764,7 +764,7 @@ async fn initialize_transaction_backfill(
 }
 
 async fn get_identity(client: &reqwest::Client, rpc_url: &str) -> Result<String, String> {
-    let request_body = serde_json::json!({
+    let request_body = json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getIdentity",
@@ -793,7 +793,7 @@ async fn get_identity(client: &reqwest::Client, rpc_url: &str) -> Result<String,
 }
 
 async fn get_server_version(client: &reqwest::Client, rpc_url: &str) -> Result<String, String> {
-    let request_body = serde_json::json!({
+    let request_body = json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getVersion",
@@ -825,7 +825,7 @@ async fn get_epoch_info(
     client: &reqwest::Client,
     rpc_url: &str,
 ) -> Result<EpochInfoResponse, String> {
-    let request_body = serde_json::json!({
+    let request_body = json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getEpochInfo",
@@ -851,7 +851,7 @@ async fn get_epoch_info(
 }
 
 async fn get_confirmed_slot(client: &reqwest::Client, rpc_url: &str) -> Result<u64, String> {
-    let request_body = serde_json::json!({
+    let request_body = json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getSlot",
@@ -926,8 +926,8 @@ async fn fetch_transaction_detail(
     })
 }
 
-fn build_transaction_detail_request(signature: &str) -> serde_json::Value {
-    serde_json::json!({
+fn build_transaction_detail_request(signature: &str) -> json::Value {
+    json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getTransaction",
@@ -1000,7 +1000,7 @@ async fn fetch_block_transactions(
     slot: u64,
     exclude_vote_transactions: bool,
 ) -> Result<(BlockFetchOutcome, Vec<TransactionEntry>), String> {
-    let request_body = serde_json::json!({
+    let request_body = json::json!({
         "jsonrpc": "2.0",
         "id": 1,
         "method": "getBlock",

@@ -1,8 +1,8 @@
 //! Failure-only diagnostics for the operator monitor, without replay or delivery guarantees.
 
 use base64::{Engine as _, prelude::BASE64_STANDARD};
-use json::Serialize;
 use nucleus::runtime::FullTransaction;
+use serde::Serialize;
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
 use solana_transaction_error::TransactionError;
 
@@ -74,7 +74,7 @@ impl<'a> Failure<'a> {
 
 impl WsDispatcher {
     /// Opens Engine's bounded failure stream without taking the exclusive processed stream.
-    /// Slow receivers can close silently; unsubscribe and connection teardown stop forwarding.
+    /// Stream closure closes the connection so clients can recover.
     pub(crate) fn transaction_failure_subscribe(&mut self) -> RpcResult<SubResult> {
         let id = next_subid();
         let rx = self.engine.transactions().subscribe_failures();

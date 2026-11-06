@@ -16,7 +16,6 @@ use mbv_core::{
     traits::{ActionResult, ActionsCallbackScheduler, CallbackScheduleError},
 };
 use solana_instruction::{AccountMeta, Instruction};
-use solana_keypair::Keypair;
 use solana_message::{Message, VersionedMessage};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::{nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction};
@@ -27,23 +26,12 @@ use tracing::info;
 
 pub struct ActionsCallbackService {
     rpc_client: Arc<RpcClient>,
-    authority: Keypair,
     engine: Engine,
 }
 
-impl Clone for ActionsCallbackService {
-    fn clone(&self) -> Self {
-        Self {
-            rpc_client: self.rpc_client.clone(),
-            authority: self.authority.insecure_clone(),
-            engine: self.engine.clone(),
-        }
-    }
-}
-
 impl ActionsCallbackService {
-    pub fn new(rpc_client: Arc<RpcClient>, authority: Keypair, engine: Engine) -> Self {
-        Self { rpc_client, authority, engine }
+    pub fn new(rpc_client: Arc<RpcClient>, engine: Engine) -> Self {
+        Self { rpc_client, engine }
     }
 
     fn build_transactions(
@@ -55,7 +43,7 @@ impl ActionsCallbackService {
         /// Counter used to make each callback transaction unique
         static TX_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-        let authority_pubkey = self.authority.pubkey();
+        let authority_pubkey = self.engine.signer().pubkey();
         let blockhash = self.engine.blockhash();
         let result: Result<(), String> = result.map_err(|e| e.to_string());
 
@@ -81,8 +69,11 @@ impl ActionsCallbackService {
                     Some(&authority_pubkey),
                     &blockhash,
                 );
-                VersionedTransaction::try_new(VersionedMessage::Legacy(message), &[&self.authority])
-                    .map_err(|e| CallbackScheduleError::SigningError(e.to_string()))
+                VersionedTransaction::try_new(
+                    VersionedMessage::Legacy(message),
+                    &[self.engine.signer()],
+                )
+                .map_err(|e| CallbackScheduleError::SigningError(e.to_string()))
             })
             .collect()
     }

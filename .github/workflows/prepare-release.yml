@@ -4,12 +4,12 @@ name: Prepare release
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (for example 0.13.11); defaults to the next patch version"
+        description: "Release version (for example 2.0.0 or 2.0.0-rc.1); defaults to RC promotion or the next patch"
         required: false
         type: string
 
 concurrency:
-  group: prepare-release
+  group: prepare-release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -22,11 +22,10 @@ jobs:
     runs-on: blacksmith-32vcpu-ubuntu-2404
     env:
       HOST_CARGO_JOBS: "8"
-      # Releases are always cut from master, regardless of the default branch.
-      RELEASE_BASE_BRANCH: master
+      RELEASE_BASE_BRANCH: ${{ github.ref_name }}
     steps:
       - name: Require release base branch
-        if: github.ref_name != env.RELEASE_BASE_BRANCH
+        if: github.ref_name != 'master' && github.ref_name != 'V1'
         shell: bash
         run: |
           echo "::error::Releases are cut from ${RELEASE_BASE_BRANCH}; run this workflow on ${RELEASE_BASE_BRANCH}."
@@ -39,18 +38,6 @@ jobs:
           path: magicblock-validator
           fetch-depth: 0
           persist-credentials: false
-
-      - name: Require identical release workflows on dev
-        working-directory: magicblock-validator
-        shell: bash
-        run: |
-          if ! git diff --exit-code origin/dev HEAD -- \
-            .github/workflows/prepare-release.yml \
-            .github/workflows/release-tag.yml \
-            .github/scripts/workspace-version.sh; then
-            echo "::error::Release workflows differ between dev and ${RELEASE_BASE_BRANCH}; land the same change on both branches."
-            exit 1
-          fi
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         id: build-env
@@ -67,7 +54,7 @@ jobs:
 
           current_version="$(.github/scripts/workspace-version.sh)"
 
-          if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+          if [[ ! "$current_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([1-9][0-9]*))?$ ]]; then
             echo "Invalid current workspace version: $current_version" >&2
             exit 1
           fi
@@ -75,29 +62,51 @@ jobs:
           current_major=$((10#${BASH_REMATCH[1]}))
           current_minor=$((10#${BASH_REMATCH[2]}))
           current_patch=$((10#${BASH_REMATCH[3]}))
+          current_rc=${BASH_REMATCH[5]:-}
 
           if [[ -z "$INPUT_VERSION" ]]; then
-            version="${current_major}.${current_minor}.$((current_patch + 1))"
+            if [[ -n "$current_rc" ]]; then
+              version="${current_major}.${current_minor}.${current_patch}"
+            else
+              version="${current_major}.${current_minor}.$((current_patch + 1))"
+            fi
           else
             requested_version="${INPUT_VERSION#v}"
-            if [[ ! "$requested_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo "Version must have the form X.Y.Z or vX.Y.Z" >&2
+            if [[ ! "$requested_version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-rc\.([1-9][0-9]*))?$ ]]; then
+              echo "Version must have the form X.Y.Z or X.Y.Z-rc.N, optionally prefixed with v" >&2
               exit 1
             fi
 
             new_major=$((10#${BASH_REMATCH[1]}))
             new_minor=$((10#${BASH_REMATCH[2]}))
             new_patch=$((10#${BASH_REMATCH[3]}))
+            new_rc=${BASH_REMATCH[5]:-}
 
-            if (( new_major < current_major ||
-                  (new_major == current_major && new_minor < current_minor) ||
-                  (new_major == current_major && new_minor == current_minor && new_patch <= current_patch) )); then
+            newer=false
+            if (( new_major > current_major ||
+                  (new_major == current_major && new_minor > current_minor) ||
+                  (new_major == current_major && new_minor == current_minor && new_patch > current_patch) )); then
+              newer=true
+            elif (( new_major == current_major && new_minor == current_minor && new_patch == current_patch )) && [[ -n "$current_rc" ]]; then
+              if [[ -z "$new_rc" ]] || (( new_rc > current_rc )); then
+                newer=true
+              fi
+            fi
+            if [[ "$newer" != true ]]; then
               echo "Version must be newer than $current_version" >&2
               exit 1
             fi
 
             version="${new_major}.${new_minor}.${new_patch}"
+            if [[ -n "$new_rc" ]]; then
+              version+="-rc.${new_rc}"
+            fi
           fi
+
+          case "$RELEASE_BASE_BRANCH:$version" in
+            V1:1.*|master:2.*) ;;
+            *) echo "::error::V1 requires 1.x; master requires 2.x (specify 2.0.0 for its first release)."; exit 1 ;;
+          esac
 
           release_branch="release/v${version}"
           remote_branch="$(git ls-remote --heads origin "refs/heads/${release_branch}")"

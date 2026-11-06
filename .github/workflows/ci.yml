@@ -5,12 +5,9 @@ on:
     types: [published]
   workflow_dispatch:
   push:
-    branches: [master, dev]
-    paths: ['**/*.rs', '**/*.toml']
+    branches: [V1, master]
   pull_request:
     types: [opened, reopened, synchronize]
-    paths: ['**/*.rs', '**/*.toml']
-
 permissions:
   contents: read
 

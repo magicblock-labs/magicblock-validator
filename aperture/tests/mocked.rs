@@ -27,19 +27,6 @@ async fn test_get_slot_leaders() {
     );
 }
 
-/// Verifies the mocked `getFirstAvailableBlock` RPC method.
-#[tokio::test]
-async fn test_get_first_available_block() {
-    let env = RpcTestEnv::new().await;
-    let block = env
-        .rpc
-        .get_first_available_block()
-        .await
-        .expect("get_first_available_block request failed");
-
-    assert_eq!(block, 0, "first available block should be 0");
-}
-
 /// Verifies the mocked `getLargestAccounts` RPC method.
 #[tokio::test]
 async fn test_get_largest_accounts() {
@@ -157,7 +144,7 @@ async fn test_get_epoch_info() {
         let mut builder = keeper_builder(&dirs);
         builder.blockstore.superblock = superblock;
         let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
-        let mut env = RpcTestEnv::with_engine(engine).await;
+        let env = RpcTestEnv::with_engine(engine).await;
         let schedule = env.rpc.get_epoch_schedule().await.unwrap();
         assert_eq!(schedule, *env.engine.epoch_schedule());
         assert_eq!(schedule.slots_per_epoch, slots);
@@ -191,7 +178,7 @@ async fn test_get_epoch_info() {
             let after = env.rpc.get_epoch_info().await.unwrap();
             assert_eq!(after, before, "sealing must not advance epoch progress");
         }
-        env.engine.shutdown().terminate().await;
+        env.close().await;
     }
 }
 
