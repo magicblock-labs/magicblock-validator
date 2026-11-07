@@ -139,3 +139,31 @@ async fn pruned_block_history() {
     }
     env.close().await;
 }
+
+/// The second getBlocks parameter is an end slot or a config object, as with Agave's
+/// `RpcBlocksConfigWrapper`. `get_blocks_with_commitment(start, None, ..)` and web3.js
+/// `getBlocks(start)` on a Connection created with a commitment send `[start, {commitment}]`.
+#[tokio::test]
+async fn get_blocks_accepts_a_config_in_place_of_the_end_slot() {
+    let mut env = RpcTestEnv::new().await;
+    env.engine.advance(6).await;
+    env.engine.sync().await;
+    let latest = env.rpc.get_slot().await.expect("get slot");
+    let start = latest - 3;
+    let expected = (start..=latest).collect::<Vec<_>>();
+
+    let slots = env
+        .rpc
+        .get_blocks_with_commitment(start, None, Default::default())
+        .await
+        .expect("getBlocks with a config object should succeed");
+    assert_eq!(slots, expected);
+
+    let slots = env
+        .rpc
+        .get_blocks(start, Some(latest))
+        .await
+        .expect("getBlocks with an end slot should succeed");
+    assert_eq!(slots, expected);
+    env.close().await;
+}
