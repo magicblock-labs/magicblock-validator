@@ -5,12 +5,13 @@ use std::{collections::HashMap, sync::Arc};
 use ::metrics::metrics::AccountFetchEntrypoint;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
+use solana_message::AccountKeys;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcSimulateTransactionConfig, response::RpcSimulateTransactionResult,
 };
 use solana_svm::transaction_processing_result::TransactionProcessingResultExtensions;
-use solana_transaction_status::UiTransactionEncoding;
+use solana_transaction_status::{UiTransactionEncoding, parse_ui_inner_instructions};
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{
@@ -70,6 +71,8 @@ impl RpcHandlers {
             }
             Err(_) => (None, 0, None, None, Vec::new()),
         };
+        // Loaded accounts follow message key order, so CPI account indices resolve against them.
+        let account_keys = post_accounts.iter().map(|(pubkey, _)| *pubkey).collect::<Vec<_>>();
 
         let accounts = if let Some(config_accounts) = config.accounts {
             let accounts_encoding = config_accounts.encoding.unwrap_or(UiAccountEncoding::Base64);
@@ -123,10 +126,12 @@ impl RpcHandlers {
             None
         };
 
+        // Like Solana, report CPIs with resolved program and account addresses.
         let inner_instructions = config.inner_instructions.then(|| {
+            let account_keys = AccountKeys::new(&account_keys, None);
             live_inner_instructions(recorded_inner.unwrap_or_default())
                 .into_iter()
-                .map(Into::into)
+                .map(|group| parse_ui_inner_instructions(group, &account_keys))
                 .collect()
         });
 
