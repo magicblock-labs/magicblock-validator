@@ -12,6 +12,7 @@ use solana_rpc_client_api::config::{
 use solana_signature::Signature;
 use solana_transaction_error::TransactionError;
 use solana_transaction_status::UiTransactionEncoding;
+use v42_calculator_interface::builder::Expr;
 
 mod setup;
 
@@ -717,4 +718,59 @@ async fn test_get_transaction() {
         .await
         .expect("getTransaction request failed");
     assert!(transaction.transaction.meta.unwrap().err.is_some());
+}
+
+/// With `innerInstructions: true`, CPIs are reported like Agave reports them: with the
+/// program and account addresses resolved (`programId`, `accounts`), not in the compiled
+/// form (`programIdIndex`, account indices) that @solana/web3.js rejects.
+#[tokio::test]
+async fn test_simulate_transaction_inner_instructions_resolve_addresses() {
+    let env = RpcTestEnv::new().await;
+    let output = store_v42(&env.engine, 0, solana_account::AccountMode::Magic);
+    // The v42 program invokes itself once.
+    let transaction = env.rpc_transaction(&[Expr::lit(7).cpi().compose(output, &[])]);
+    let encoded =
+        bs58::encode(wincode::serialize(&transaction).expect("transaction should serialize"))
+            .into_string();
+    let request = json::json!({
+        "jsonrpc": "2.0",
+        "method": "simulateTransaction",
+        "params": [encoded, { "innerInstructions": true }],
+        "id": 1,
+    });
+
+    let response = reqwest::Client::new()
+        .post(env.rpc.url())
+        .json(&request)
+        .send()
+        .await
+        .expect("simulateTransaction HTTP request should succeed");
+    let body: json::Value = json::from_str(
+        &response.text().await.expect("simulateTransaction response body should decode"),
+    )
+    .expect("simulateTransaction response body should be valid JSON");
+
+    let value = &body["result"]["value"];
+    assert!(
+        value["err"].is_null(),
+        "the CPI simulation should succeed: {body}"
+    );
+    let instruction = value["innerInstructions"]
+        .as_array()
+        .expect("innerInstructions should be an array")
+        .iter()
+        .flat_map(|group| group["instructions"].as_array().cloned().unwrap_or_default())
+        .next()
+        .expect("the CPI should be recorded");
+    assert_eq!(
+        instruction["programId"],
+        json::json!(PROGRAM_ID.to_string()),
+        "the inner instruction should name its program: {instruction}"
+    );
+    assert!(
+        instruction["accounts"]
+            .as_array()
+            .is_some_and(|accounts| accounts.contains(&json::json!(output.to_string()))),
+        "the inner instruction should list account addresses: {instruction}"
+    );
 }
