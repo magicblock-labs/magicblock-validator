@@ -231,6 +231,8 @@ impl TaskStrategist {
         ) {
             Ok(strategy) => strategy,
             Err(TaskStrategistError::FailedToFitError) => {
+                // Splitting did not produce a valid plan. The combined plan already
+                // passed the transaction size and account checks, so keep it.
                 return Ok(single_stage_strategy);
             }
             Err(err) => return Err(err),

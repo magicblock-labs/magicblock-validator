@@ -9,7 +9,6 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicBlockSendTransactionOutcome, MagicblockRpcClient,
 };
-use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 use solana_rpc_client_api::config::RpcTransactionConfig;
@@ -110,15 +109,6 @@ impl IntentExecutionClient {
 
         const RETRY_FOR: Duration = Duration::from_secs(2 * 60);
         const MIN_ATTEMPTS: usize = 3;
-
-        let estimated_cu = TransactionUtils::tasks_compute_units(tasks);
-        if estimated_cu > MAX_COMPUTE_UNIT_LIMIT {
-            warn!(
-                estimated_cu,
-                capped_cu = MAX_COMPUTE_UNIT_LIMIT,
-                "Intent transaction compute budget capped after strategy optimization"
-            );
-        }
 
         // Send with retries
         let send_error_mapper = IntentErrorMapper {
