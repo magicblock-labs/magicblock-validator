@@ -1,6 +1,7 @@
 use std::collections::BinaryHeap;
 
 use magicblock_core::intent::BaseActionCallback;
+use solana_compute_budget::compute_budget_limits::MAX_COMPUTE_UNIT_LIMIT;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::{Signer, SignerError};
@@ -109,6 +110,20 @@ pub enum StrategyExecutionMode {
 }
 
 impl StrategyExecutionMode {
+    fn needs_compute_cap(&self) -> bool {
+        let exceeds_limit = |strategy: &TransactionStrategy| {
+            TransactionUtils::tasks_compute_units(&strategy.optimized_tasks)
+                > MAX_COMPUTE_UNIT_LIMIT
+        };
+        match self {
+            Self::SingleStage(strategy) => exceeds_limit(strategy),
+            Self::TwoStage {
+                commit_stage,
+                finalize_stage,
+            } => exceeds_limit(commit_stage) || exceeds_limit(finalize_stage),
+        }
+    }
+
     pub fn uses_alts(&self) -> bool {
         match self {
             Self::SingleStage(value) => value.uses_alts(),
@@ -197,21 +212,39 @@ impl TaskStrategist {
             }
         };
 
-        // If ALTs aren't used then we sure this will be optimal - return
-        if !single_stage_strategy.uses_alts() {
+        // Try separate stages before accepting a capped combined transaction.
+        if !single_stage_strategy.uses_alts()
+            && !single_stage_strategy.needs_compute_cap()
+        {
             return Ok(single_stage_strategy);
         }
 
         // As ALTs take a very long time to activate
         // it is actually faster to execute in TwoStage mode
         // unless TwoStage also uses ALTs
-        let two_stage = Self::build_two_stage(
+        let two_stage = match Self::build_two_stage(
             commit_tasks,
             finalize_tasks,
             authority,
             persister,
             uniqueness_nonce,
-        )?;
+        ) {
+            Ok(strategy) => strategy,
+            Err(TaskStrategistError::FailedToFitError) => {
+                return Ok(single_stage_strategy);
+            }
+            Err(err) => return Err(err),
+        };
+        // Avoid capping when either execution mode fits the estimated budget.
+        if single_stage_strategy.needs_compute_cap()
+            != two_stage.needs_compute_cap()
+        {
+            return Ok(if single_stage_strategy.needs_compute_cap() {
+                two_stage
+            } else {
+                single_stage_strategy
+            });
+        }
         if two_stage.uses_alts() {
             Ok(single_stage_strategy)
         } else {
@@ -255,6 +288,9 @@ impl TaskStrategist {
     /// - V0 with ALTs, without buffer-accounts.
     /// - V0 with ALTs, with buffer-accounts.
     ///
+    /// Prefer a plan within the estimated compute budget. If none fits, retry
+    /// these choices with the requested CU capped at the runtime limit.
+    ///
     /// The task preparator follows this choice: no ALTs means v1;
     /// ALTs means v0. Buffer preparation and cleanup are separate
     /// paths that use v0 without ALTs.
@@ -266,10 +302,6 @@ impl TaskStrategist {
         persistor: &Option<P>,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
-        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
-            return Err(TaskStrategistError::FailedToFitError);
-        }
-
         let mut optimized_tasks = tasks.clone();
         let tx_size = Self::try_optimize_tx_size_if_needed(
             &mut optimized_tasks,
@@ -280,7 +312,7 @@ impl TaskStrategist {
         // Switching to buffered diffs can increase the compute budget.
         if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE
             && TransactionUtils::tasks_compute_units(&optimized_tasks)
-                <= 1_400_000
+                <= MAX_COMPUTE_UNIT_LIMIT
         {
             return Ok(Self::build_transaction_strategy(
                 optimized_tasks,
@@ -294,7 +326,12 @@ impl TaskStrategist {
         // V1 can miss on structural limits such as the 64 static account-key
         // cap, not only on byte size. Give the original tasks the old v0+ALT
         // path before introducing buffer preparation and cleanup work.
-        if Self::attempt_lookup_tables(&tasks, uniqueness_nonce) {
+        let original_alts_fit =
+            Self::attempt_lookup_tables(&tasks, uniqueness_nonce);
+        if original_alts_fit
+            && TransactionUtils::tasks_compute_units(&tasks)
+                <= MAX_COMPUTE_UNIT_LIMIT
+        {
             return Ok(Self::build_transaction_strategy(
                 tasks,
                 validator,
@@ -306,7 +343,12 @@ impl TaskStrategist {
 
         // If the original tasks still do not fit v0+ALT, use the
         // buffer-optimized V1 probe result as the final payload-size fallback.
-        if Self::attempt_lookup_tables(&optimized_tasks, uniqueness_nonce) {
+        let optimized_alts_fit =
+            Self::attempt_lookup_tables(&optimized_tasks, uniqueness_nonce);
+        if optimized_alts_fit
+            && TransactionUtils::tasks_compute_units(&optimized_tasks)
+                <= MAX_COMPUTE_UNIT_LIMIT
+        {
             return Ok(Self::build_transaction_strategy(
                 optimized_tasks,
                 validator,
@@ -316,7 +358,25 @@ impl TaskStrategist {
             ));
         }
 
-        Err(TaskStrategistError::FailedToFitError)
+        // No uncapped plan fits. Preserve size/key limits and let execution
+        // determine whether the runtime's CU allowance is sufficient.
+        let (tasks, uses_lookup_tables) =
+            if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE {
+                (optimized_tasks, false)
+            } else if original_alts_fit {
+                (tasks, true)
+            } else if optimized_alts_fit {
+                (optimized_tasks, true)
+            } else {
+                return Err(TaskStrategistError::FailedToFitError);
+            };
+        Ok(Self::build_transaction_strategy(
+            tasks,
+            validator,
+            persistor,
+            uniqueness_nonce,
+            uses_lookup_tables,
+        ))
     }
 
     fn build_transaction_strategy<P: IntentPersister>(
@@ -350,10 +410,6 @@ impl TaskStrategist {
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
     ) -> bool {
-        if TransactionUtils::tasks_compute_units(tasks) > 1_400_000 {
-            return false;
-        }
-
         let placeholder = Keypair::new();
         let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
             &Self::collect_lookup_table_keys(
@@ -848,27 +904,19 @@ mod tests {
             let tasks = (0..count)
                 .map(|i| create_test_commit_task(i, 10_240, 5000).into())
                 .collect();
-            let result = TaskStrategist::build_strategy(
+            let strategy = TaskStrategist::build_strategy(
                 tasks,
                 &validator,
                 &None::<IntentPersisterImpl>,
                 None,
-            );
-            if count == 5 {
-                // Five buffered diffs exceed the 1.4M-CU transaction limit.
-                assert!(matches!(
-                    result,
-                    Err(TaskStrategistError::FailedToFitError)
-                ));
-                continue;
-            }
-            let strategy = result.expect("Two buffered diffs should fit");
+            )
+            .expect("Buffered diffs should fit, capping CU when necessary");
             assert_eq!(strategy.optimized_tasks.len(), count as usize);
             assert_eq!(
                 TransactionUtils::tasks_compute_units(
                     &strategy.optimized_tasks
                 ),
-                600_000
+                count as u32 * 300_000
             );
             for task in &strategy.optimized_tasks {
                 assert!(matches!(
@@ -1006,7 +1054,7 @@ mod tests {
                     data: vec![],
                     escrow_index: 0,
                 },
-                compute_units: 30_000,
+                compute_units: 1_500_000,
                 callback: None,
             },
         }
@@ -1018,7 +1066,7 @@ mod tests {
             &None::<IntentPersisterImpl>,
             None,
         )
-        .expect("should fall back to v0 + ALTs");
+        .expect("should fall back to v0 + ALTs with capped CU");
 
         assert!(!strategy.lookup_tables_keys.is_empty());
         assert!(matches!(
