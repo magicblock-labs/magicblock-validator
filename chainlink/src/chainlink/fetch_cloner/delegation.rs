@@ -119,9 +119,12 @@ pub(super) fn apply_record(
     if is_confined {
         account.lamports(0)
     } else if mode == AccountMode::Delegated {
+        // Base-layer credits after delegation are not part of the ER balance.
         // Repeated observations carry the same delegation stamp. RPC fetch
         // freshness is retained separately on the clone request.
-        account.slot(delegation_record.delegation_slot)
+        account
+            .lamports(delegation_record.lamports)
+            .slot(delegation_record.delegation_slot)
     } else {
         account
     }
