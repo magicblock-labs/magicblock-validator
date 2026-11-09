@@ -158,9 +158,9 @@ impl BaseTask for CommitFinalizeTask {
 
     fn compute_units(&self) -> u32 {
         match &self.delivery {
-            // Applying diffs has consumed over 185,000 CU per commit on devnet.
-            CommitDelivery::DiffInArgs { .. }
-            | CommitDelivery::DiffInBuffer { .. } => 300_000,
+            // Buffered diffs have consumed over 185,000 CU per commit on devnet.
+            // Inline diffs are bounded by the transaction size.
+            CommitDelivery::DiffInBuffer { .. } => 300_000,
             _ => 120_000,
         }
     }
