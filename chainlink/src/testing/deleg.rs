@@ -29,13 +29,14 @@ pub fn add_delegation_record_for(
     authority: Pubkey,
     owner: Pubkey,
 ) -> Pubkey {
+    let lamports = rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports;
     add_delegation_record_with_slot_for(
         rpc_client,
         pubkey,
         authority,
         owner,
         rpc_client.get_slot(),
-        1_000,
+        lamports,
     )
 }
 
@@ -82,7 +83,7 @@ pub fn add_delegation_record_with_actions_for(
         authority,
         owner,
         delegation_slot: rpc_client.get_slot(),
-        lamports: 1_000,
+        lamports: rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = delegation_record_to_vec(&deleg_record);
