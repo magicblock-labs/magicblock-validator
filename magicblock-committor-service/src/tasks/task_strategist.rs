@@ -277,7 +277,11 @@ impl TaskStrategist {
             MAX_TRANSACTION_V1_WIRE_SIZE,
         )?;
 
-        if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE {
+        // Switching to buffered diffs can increase the compute budget.
+        if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE
+            && TransactionUtils::tasks_compute_units(&optimized_tasks)
+                <= 1_400_000
+        {
             return Ok(Self::build_transaction_strategy(
                 optimized_tasks,
                 validator,
@@ -788,9 +792,12 @@ mod tests {
     fn test_build_strategy_does_not_optimize_large_account_but_small_diff() {
         let validator = Pubkey::new_unique();
 
-        let task =
-            create_test_commit_task(1, 10_240, COMMIT_STATE_SIZE_THRESHOLD); // large account but small diff
-        let tasks = vec![task.into()];
+        let tasks = (0..8)
+            .map(|i| {
+                create_test_commit_task(i, 10_240, COMMIT_STATE_SIZE_THRESHOLD)
+                    .into()
+            })
+            .collect();
 
         let strategy = TaskStrategist::build_strategy(
             tasks,
@@ -798,13 +805,15 @@ mod tests {
             &None::<IntentPersisterImpl>,
             None,
         )
-        .expect("Should build strategy with buffer optimization");
+        .expect("Eight small inline diffs should fit");
 
-        assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
-            CommitDelivery::DiffInArgs { .. }
-        ));
+        assert_eq!(strategy.optimized_tasks.len(), 8);
+        for task in &strategy.optimized_tasks {
+            assert!(matches!(
+                commit_delivery(task),
+                CommitDelivery::DiffInArgs { .. }
+            ));
+        }
     }
 
     #[test]
@@ -835,22 +844,39 @@ mod tests {
     fn test_build_strategy_does_optimize_large_account_and_large_diff() {
         let validator = Pubkey::new_unique();
 
-        let task = create_test_commit_task(1, 10_240, 5000);
-        let tasks = vec![task.into()];
-
-        let strategy = TaskStrategist::build_strategy(
-            tasks,
-            &validator,
-            &None::<IntentPersisterImpl>,
-            None,
-        )
-        .expect("Should build strategy with buffer optimization");
-
-        assert_eq!(strategy.optimized_tasks.len(), 1);
-        assert!(matches!(
-            commit_delivery(&strategy.optimized_tasks[0]),
-            CommitDelivery::DiffInBuffer { .. }
-        ));
+        for count in [2, 5] {
+            let tasks = (0..count)
+                .map(|i| create_test_commit_task(i, 10_240, 5000).into())
+                .collect();
+            let result = TaskStrategist::build_strategy(
+                tasks,
+                &validator,
+                &None::<IntentPersisterImpl>,
+                None,
+            );
+            if count == 5 {
+                // Five buffered diffs exceed the 1.4M-CU transaction limit.
+                assert!(matches!(
+                    result,
+                    Err(TaskStrategistError::FailedToFitError)
+                ));
+                continue;
+            }
+            let strategy = result.expect("Two buffered diffs should fit");
+            assert_eq!(strategy.optimized_tasks.len(), count as usize);
+            assert_eq!(
+                TransactionUtils::tasks_compute_units(
+                    &strategy.optimized_tasks
+                ),
+                600_000
+            );
+            for task in &strategy.optimized_tasks {
+                assert!(matches!(
+                    commit_delivery(task),
+                    CommitDelivery::DiffInBuffer { .. }
+                ));
+            }
+        }
     }
 
     #[test]
