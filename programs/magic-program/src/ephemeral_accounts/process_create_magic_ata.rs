@@ -105,6 +105,9 @@ pub(crate) fn process_create_magic_ata(
     // Preserve cloned rent so overlay creation stays lamport-balanced.
     acc.set_owner(token_program);
     acc.resize(token_account_shape.len, 0);
+    // An overlaid mirror still holds the base ATA's initialized token data,
+    // which Token-2022's `unpack_uninitialized` rejects.
+    acc.data_as_mut_slice().fill(0);
     initialize_token_data(
         acc.data_as_mut_slice(),
         &token_program,
@@ -306,7 +309,7 @@ fn matches_existing_ata(
 mod tests {
     use magic_program_api::instruction::MagicBlockInstruction;
     use mbv_core::token_programs::TOKEN_2022_PROGRAM_ID;
-    use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
+    use solana_account::{AccountBuilder, AccountSharedData, ReadableAccount, WritableAccount};
     use solana_instruction::{AccountMeta, Instruction};
     use solana_sdk_ids::{native_loader, system_program};
     use spl_token_2022::extension::{
@@ -618,5 +621,80 @@ mod tests {
             StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
         assert_eq!(token_account.base.state, AccountState::Frozen);
         assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
+    }
+
+    #[test]
+    fn create_magic_token_2022_ata_overlays_base_ata_mirror() {
+        let payer = Pubkey::new_unique();
+        let wallet_owner = Pubkey::new_unique();
+        let mint = Pubkey::new_unique();
+        let ata = derive_ata_with_token_program(&wallet_owner, &mint, &TOKEN_2022_PROGRAM_ID);
+
+        // Base ATA as the ATA program creates it, cloned as a plain mirror.
+        let len = ExtensionType::try_calculate_account_len::<Token2022Account>(&[
+            ExtensionType::ImmutableOwner,
+        ])
+        .unwrap();
+        let mut base_ata = AccountSharedData::new(2_039_280, len, &TOKEN_2022_PROGRAM_ID);
+        {
+            let mut state = StateWithExtensionsMut::<Token2022Account>::unpack_uninitialized(
+                base_ata.data_as_mut_slice(),
+            )
+            .unwrap();
+            state.init_extension::<ImmutableOwner>(true).unwrap();
+            state.base = Token2022Account {
+                mint,
+                owner: wallet_owner,
+                amount: 42,
+                delegate: COption::None,
+                state: AccountState::Initialized,
+                is_native: COption::None,
+                delegated_amount: 0,
+                close_authority: COption::None,
+            };
+            state.pack_base();
+            state.init_account_type().unwrap();
+        }
+        let base_ata = AccountBuilder::from(base_ata).mode(AccountMode::Mirrored).build();
+
+        let ix = Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::CreateMagicAta { wallet_owner },
+            vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new(ata, false),
+                AccountMeta::new_readonly(mint, false),
+                AccountMeta::new_readonly(TOKEN_2022_PROGRAM_ID, false),
+            ],
+        );
+        let accounts = process_instruction(
+            &ix.data,
+            vec![
+                (
+                    payer,
+                    AccountSharedData::new(1_000_000, 0, &system_program::id()),
+                ),
+                (ata, base_ata),
+                (mint, token_2022_mint_account(&[])),
+                (
+                    TOKEN_2022_PROGRAM_ID,
+                    AccountSharedData::new(1, 0, &native_loader::id()),
+                ),
+            ],
+            ix.accounts,
+            Ok(()),
+        );
+
+        let ata_after = &accounts[1];
+        assert!(ata_after.is(AccountMode::Magic));
+        assert_eq!(ata_after.lamports(), 2_039_280);
+        let token_account =
+            StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
+        assert_eq!(token_account.base.owner, wallet_owner);
+        assert_eq!(token_account.base.amount, 0);
+        assert_eq!(
+            token_account.base.close_authority,
+            COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
+        );
     }
 }
