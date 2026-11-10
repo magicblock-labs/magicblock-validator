@@ -1672,7 +1672,7 @@ mod tests {
                             );
                         account_data.get_mut(&payer.pubkey()).unwrap().set_lamports(3_000_000);
                         let fee_vault = magic_fee_vault_pubkey();
-                        let ix = Instruction::new_with_wincode(
+                        let mut ix = Instruction::new_with_wincode(
                             crate::id(),
                             &instruction,
                             vec![
@@ -1683,6 +1683,13 @@ mod tests {
                                 AccountMeta::new(fee_vault, true),
                             ],
                         );
+                        if matches!(
+                            instruction,
+                            MagicBlockInstruction::ScheduleCommitAndUndelegate
+                        ) {
+                            // Standalone undelegation processes repeated accounts only once.
+                            ix.accounts.push(AccountMeta::new(committee, true));
+                        }
                         extend_transaction_accounts_from_ix(
                             &ix,
                             &mut account_data,
@@ -1704,7 +1711,10 @@ mod tests {
                                 .unwrap();
                         let committed =
                             context.scheduled_base_intents[0].get_all_committed_accounts();
-                        assert_eq!(committed.len(), 2);
+                        assert_eq!(
+                            committed.iter().map(|snapshot| snapshot.pubkey).collect::<Vec<_>>(),
+                            [committee, fee_vault]
+                        );
                         for snapshot in &committed {
                             assert_eq!(
                                 snapshot.account.lamports,

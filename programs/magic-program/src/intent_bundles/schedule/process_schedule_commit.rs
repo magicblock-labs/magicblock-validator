@@ -173,10 +173,12 @@ pub(crate) fn process_schedule_commit(
         }
     }
 
+    // reserve_commit_id also increments account's commit_seq
     let commit_ids = accounts_to_commit
         .iter()
         .map(|(_, account)| reserve_commit_id(account))
         .collect::<Result<Vec<_>, _>>()?;
+
     if let Some(ref fee_vault) = magic_fee_vault {
         let fee = calculate_commit_fee_for_ids(commit_ids)?;
         charge_delegated_payer(&payer_account, fee_vault, fee)?;
