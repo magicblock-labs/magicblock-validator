@@ -9,8 +9,7 @@ use crate::Pubkey;
 
 /// Settlement result carried by the authority-signed completion transaction.
 /// It remains available in the outbox address's transaction history after closure.
-#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct SentCommit {
     pub message_id: u64,
     pub slot: u64,
@@ -30,22 +29,19 @@ pub struct SentCommit {
 /// blockhash it was built with. The blockhash is needed on recovery to
 /// tell apart "may still land" (blockhash still valid) from "guaranteed
 /// dead" (blockhash expired) when the signature isn't found on-chain.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct PendingTransaction {
     pub signature: Signature,
     pub blockhash: Hash,
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum ExecutionStage {
     SingleStage(PendingTransaction),
     TwoStage(TwoStageProgress),
 }
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum TwoStageProgress {
     Committing(PendingTransaction),
     Finalizing { commit: Signature, finalize: PendingTransaction },
