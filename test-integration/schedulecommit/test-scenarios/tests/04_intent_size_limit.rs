@@ -1,7 +1,6 @@
 #![allow(clippy::result_large_err)]
 
 use integration_test_tools::run_test;
-use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
 use program_schedulecommit::{
     api::{schedule_commit_cpi_instruction, UserSeeds},
     ScheduleCommitType,
@@ -9,23 +8,18 @@ use program_schedulecommit::{
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{
-    instruction::InstructionError, signature::Signer, transaction::Transaction,
-};
+use solana_sdk::{signature::Signer, transaction::Transaction};
 use test_kit::init_logger;
 use tracing::*;
-use utils::{
-    assert_is_instruction_error, extract_transaction_error,
-    get_context_with_delegated_committees,
-};
+use utils::get_context_with_delegated_committees;
 
 mod utils;
 
 /// Small enough that the commit and finalize transactions fit even without
 /// any size optimization.
 const FEW_ACCOUNTS: usize = 3;
-/// CommitAndUndelegate won't with more than 11 accs
-const TOO_MANY_ACCOUNTS: usize = 12;
+/// Twelve commits exceed the estimated CU limit, but can still be scheduled.
+const OVER_ESTIMATED_COMPUTE_ACCOUNTS: usize = 12;
 
 fn schedule_commit_ix(
     payer: &solana_sdk::signature::Keypair,
@@ -95,10 +89,10 @@ fn test_schedule_commit_with_few_accounts_fits() {
 }
 
 #[test]
-fn test_schedule_commit_with_too_many_accounts_is_refused() {
+fn test_schedule_commit_with_overestimated_compute_is_accepted() {
     run_test!({
         let ctx = get_context_with_delegated_committees(
-            TOO_MANY_ACCOUNTS,
+            OVER_ESTIMATED_COMPUTE_ACCOUNTS,
             UserSeeds::MagicScheduleCommit,
         );
 
@@ -129,11 +123,10 @@ fn test_schedule_commit_with_too_many_accounts_is_refused() {
                 },
             );
 
-        let (tx_result_err, tx_err) = extract_transaction_error(res);
-        assert_is_instruction_error(
-            tx_err.unwrap(),
-            &tx_result_err,
-            InstructionError::Custom(INTENT_TOO_LARGE_ERR),
+        assert!(
+            res.is_ok(),
+            "Expected schedule commit to succeed despite its CU estimate: {:?}",
+            res
         );
     });
 }
