@@ -518,18 +518,29 @@ impl UndelegateType {
 }
 
 pub fn calculate_commit_fee(accounts: &[CommittedAccount]) -> Result<u64, InstructionError> {
-    accounts.iter().try_fold(0u64, |fee, account| {
-        if account.commit_id == 0 {
+    calculate_commit_fee_for_ids(accounts.iter().map(|account| account.commit_id))
+}
+
+/// Calculate the fee before copying the accounts into settlement snapshots.
+pub fn calculate_commit_fee_for_ids(
+    commit_ids: impl IntoIterator<Item = u64>,
+) -> Result<u64, InstructionError> {
+    commit_ids.into_iter().try_fold(0u64, |fee, commit_id| {
+        if commit_id == 0 {
             return Err(InstructionError::Custom(MISSING_COMMIT_NONCE_ERR));
         }
-        Ok(fee + if account.commit_id > ACTUAL_COMMIT_LIMIT { COMMIT_FEE_LAMPORTS } else { 0 })
+        Ok(fee + if commit_id > ACTUAL_COMMIT_LIMIT { COMMIT_FEE_LAMPORTS } else { 0 })
     })
 }
 
 fn calculate_actions_fee(actions: &[BaseAction]) -> u64 {
+    calculate_actions_fee_for_units(actions.iter().map(|action| action.compute_units))
+}
+
+pub fn calculate_actions_fee_for_units(compute_units: impl IntoIterator<Item = u32>) -> u64 {
     const MICRO_LAMPORTS_PER_LAMPORT: u64 = 1_000_000;
-    let micro_lamports = actions.iter().fold(0u64, |acc, action| {
-        acc.saturating_add(action.compute_units as u64 * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS)
+    let micro_lamports = compute_units.into_iter().fold(0u64, |acc, units| {
+        acc.saturating_add(units as u64 * COMPUTE_UNIT_PRICE_MICRO_LAMPORTS)
     });
     micro_lamports.div_ceil(MICRO_LAMPORTS_PER_LAMPORT)
 }

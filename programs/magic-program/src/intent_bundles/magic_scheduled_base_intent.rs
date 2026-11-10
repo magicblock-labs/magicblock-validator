@@ -7,12 +7,15 @@ use magic_program_api::args::{
 pub use mbv_core::intent::{
     ACTUAL_COMMIT_LIMIT, BaseAction, COMMIT_FEE_LAMPORTS, COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
     CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle, ProgramArgs,
-    UndelegateType, calculate_commit_fee,
+    UndelegateType, calculate_actions_fee_for_units, calculate_commit_fee,
+    calculate_commit_fee_for_ids,
 };
 use mbv_core::{
     Slot,
     intent::types::CommittedAccount,
-    token_programs::{EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID},
+    token_programs::{
+        EATA_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, try_remap_ata_to_eata,
+    },
 };
 use serde::{Deserialize, Serialize};
 use solana_account::{AccountMode, ReadableAccount};
@@ -79,6 +82,91 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
 
 type CommitAccountRef<'a, 'ix_data> = (Pubkey, InstructionAccount<'a, 'ix_data>);
 
+/// Validate and reserve IDs without copying account state. The caller charges
+/// this fee before constructing the bundle's settlement snapshots.
+pub(crate) fn prepare_intent_bundle(
+    args: &MagicIntentBundleArgs,
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<u64, InstructionError> {
+    validate_magic_intent_bundle_args(args, context)?;
+    let mut accounts_to_commit = Vec::new();
+    let mut seen = HashSet::new();
+    let mut fee = 0;
+
+    for (commit, undelegate) in [
+        args.commit.as_ref().map(|commit| (commit, false)),
+        args.commit_and_undelegate.as_ref().map(|intent| (&intent.commit_type, true)),
+        args.commit_finalize.as_ref().map(|commit| (commit, false)),
+        args.commit_finalize_and_undelegate
+            .as_ref()
+            .map(|intent| (&intent.commit_type, true)),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let indices = commit.committed_accounts_indices();
+        if undelegate {
+            validate_commit_and_undelegate_accounts(indices, context)?;
+        }
+        let accounts = extract_commit_accounts(indices, context.transaction_context())?;
+        validate_commit_type_accounts(&accounts, context)?;
+        for (pubkey, account) in &accounts {
+            let account = account.borrow()?;
+            let restored_pubkey =
+                try_remap_ata_to_eata(pubkey, &account).map_or(*pubkey, |(pubkey, _)| pubkey);
+            if !seen.insert(restored_pubkey) {
+                ic_msg!(
+                    context.invoke_context,
+                    "ScheduleCommit ERR: duplicate committed account pubkey across bundle: {}",
+                    restored_pubkey
+                );
+                return Err(InstructionError::InvalidInstructionData);
+            }
+        }
+        accounts_to_commit.extend(accounts);
+        if let CommitTypeArgs::WithBaseActions { base_actions, .. } = commit {
+            fee += validate_actions_and_calculate_fee(base_actions, context)?;
+        }
+    }
+    for intent in [
+        args.commit_and_undelegate.as_ref(),
+        args.commit_finalize_and_undelegate.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let UndelegateTypeArgs::WithBaseActions { base_actions } = &intent.undelegate_type {
+            fee += validate_actions_and_calculate_fee(base_actions, context)?;
+        }
+    }
+    fee += validate_actions_and_calculate_fee(&args.standalone_actions, context)?;
+    if accounts_to_commit.is_empty() && args.standalone_actions.is_empty() {
+        ic_msg!(
+            context.invoke_context,
+            "ScheduleCommit ERR: intent bundle must not be empty."
+        );
+        return Err(InstructionError::InvalidInstructionData);
+    }
+
+    let commit_ids = accounts_to_commit
+        .iter()
+        .map(|(_, account)| reserve_commit_id(account))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(fee + calculate_commit_fee_for_ids(commit_ids)?)
+}
+
+fn validate_actions_and_calculate_fee(
+    actions: &[BaseActionArgs],
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<u64, InstructionError> {
+    for action in actions {
+        validate_base_action_args(action, context)?;
+    }
+    Ok(calculate_actions_fee_for_units(
+        actions.iter().map(|action| action.compute_units),
+    ))
+}
+
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct ScheduledIntentBundle {
@@ -93,6 +181,8 @@ pub struct ScheduledIntentBundle {
 }
 
 impl ScheduledIntentBundle {
+    /// Capture settlement state after `prepare_intent_bundle` reserves the IDs
+    /// and the scheduling handler charges the fee, before changing ownership.
     pub fn try_new(
         args: MagicIntentBundleArgs,
         intent_id: u64,
@@ -427,43 +517,7 @@ impl TryFromArgs<BaseActionArgs> for BaseAction {
         args: BaseActionArgs,
         context: &mut ConstructionContext<'_, '_, '_>,
     ) -> Result<BaseAction, InstructionError> {
-        // Since action on Base layer performed on behalf of some escrow
-        // We need to ensure that action was authorized by legit owner
-        let authority_pubkey = *get_instruction_pubkey_with_idx(
-            context.transaction_context(),
-            args.escrow_authority as u16,
-        )?;
-        if !context.signers.contains(&authority_pubkey) {
-            ic_msg!(
-                context.invoke_context,
-                &format!(
-                    "BaseAction: authority pubkey must sign transaction: {}",
-                    authority_pubkey
-                )
-            );
-
-            return Err(InstructionError::MissingRequiredSignature);
-        }
-
-        let Some(parent_program_id) = context.parent_program_id else {
-            ic_msg!(
-                context.invoke_context,
-                "BaseAction: actions can only be scheduled via CPI",
-            );
-            return Err(InstructionError::UnsupportedProgramId);
-        };
-
-        let source_program = if context.secure {
-            Some(parent_program_id)
-        } else if args.destination_program == parent_program_id {
-            None
-        } else {
-            ic_msg!(
-                context.invoke_context,
-                "BaseAction: v1 can act only within same program",
-            );
-            return Err(InstructionError::UnsupportedProgramId);
-        };
+        let (authority_pubkey, source_program) = validate_base_action_args(&args, context)?;
 
         Ok(BaseAction {
             id: context.next_action_id(),
@@ -476,6 +530,51 @@ impl TryFromArgs<BaseActionArgs> for BaseAction {
             callback: None,
         })
     }
+}
+
+fn validate_base_action_args(
+    args: &BaseActionArgs,
+    context: &ConstructionContext<'_, '_, '_>,
+) -> Result<(Pubkey, Option<Pubkey>), InstructionError> {
+    // Since action on Base layer performed on behalf of some escrow
+    // We need to ensure that action was authorized by legit owner
+    let authority_pubkey = *get_instruction_pubkey_with_idx(
+        context.transaction_context(),
+        args.escrow_authority as u16,
+    )?;
+    if !context.signers.contains(&authority_pubkey) {
+        ic_msg!(
+            context.invoke_context,
+            &format!(
+                "BaseAction: authority pubkey must sign transaction: {}",
+                authority_pubkey
+            )
+        );
+
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    let Some(parent_program_id) = context.parent_program_id else {
+        ic_msg!(
+            context.invoke_context,
+            "BaseAction: actions can only be scheduled via CPI",
+        );
+        return Err(InstructionError::UnsupportedProgramId);
+    };
+
+    let source_program = if context.secure {
+        Some(parent_program_id)
+    } else if args.destination_program == parent_program_id {
+        None
+    } else {
+        ic_msg!(
+            context.invoke_context,
+            "BaseAction: v1 can act only within same program",
+        );
+        return Err(InstructionError::UnsupportedProgramId);
+    };
+
+    Ok((authority_pubkey, source_program))
 }
 
 fn validate_commit_type_accounts(
@@ -560,7 +659,6 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        reserve_commit_id(&account)?;
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(pubkey, &account))
                     })
@@ -576,7 +674,6 @@ impl TryFromArgs<CommitTypeArgs> for CommitType {
                 let committed_accounts = committed_accounts_ref
                     .into_iter()
                     .map(|(pubkey, account)| {
-                        reserve_commit_id(&account)?;
                         let account = account.borrow()?;
                         Ok(CommittedAccount::from_account_shared(pubkey, &account))
                     })

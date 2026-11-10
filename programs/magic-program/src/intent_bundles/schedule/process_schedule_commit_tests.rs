@@ -204,17 +204,53 @@ mod callback_source_tests {
     #[test]
     #[serial_test::serial]
     fn test_callback_destination_bound_to_recorded_source() {
+        use magic_program_api::args::{
+            CommitAndUndelegateArgs, CommitTypeArgs, UndelegateTypeArgs,
+        };
+
         let source = Pubkey::new_unique();
         let other = Pubkey::new_unique();
         for destination in [source, other] {
             let payer = Keypair::new();
             let (mut accounts, mut transaction_accounts, fee_vault) =
                 prepare_schedule_accounts(&payer, true, false, Some(true));
-            let schedule = schedule_action_only_bundle_instruction(
-                &payer.pubkey(),
-                Pubkey::new_unique(),
-                other,
-                fee_vault,
+            let payer_account = accounts.remove(&payer.pubkey()).unwrap();
+            accounts.insert(
+                payer.pubkey(),
+                AccountBuilder::from(payer_account)
+                    .lamports(3_000_000)
+                    .commit_seq(ACTUAL_COMMIT_LIMIT as u32)
+                    .build(),
+            );
+            let committee = Pubkey::new_unique();
+            accounts.insert(
+                committee,
+                AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &source))
+                    .mode(AccountMode::Delegated)
+                    .build(),
+            );
+            let mut args = action_only_bundle_args(Pubkey::new_unique(), other);
+            let mut small_action = args.standalone_actions[0].clone();
+            small_action.compute_units = 1;
+            args.commit_finalize = Some(CommitTypeArgs::WithBaseActions {
+                committed_accounts: vec![0],
+                base_actions: vec![small_action.clone(), small_action.clone()],
+            });
+            args.commit_and_undelegate = Some(CommitAndUndelegateArgs {
+                commit_type: CommitTypeArgs::Standalone(vec![3]),
+                undelegate_type: UndelegateTypeArgs::WithBaseActions {
+                    base_actions: vec![small_action],
+                },
+            });
+            let schedule = Instruction::new_with_wincode(
+                crate::id(),
+                &MagicBlockInstruction::ScheduleIntentBundle(args),
+                vec![
+                    AccountMeta::new(payer.pubkey(), true),
+                    AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                    AccountMeta::new(fee_vault.unwrap(), false),
+                    AccountMeta::new(committee, false),
+                ],
             );
             let callback = add_action_callback_instruction(&payer.pubkey(), fee_vault, destination);
             let mut outer_accounts = schedule.accounts.clone();
@@ -248,6 +284,17 @@ mod callback_source_tests {
             );
             let account = find_magic_context_account(&result).unwrap();
             let mut context = MagicContext::deserialize(account.data()).unwrap();
+            let scheduled = &context.scheduled_base_intents[0];
+            // The 100k-CU action costs 5,000; each group of tiny actions rounds
+            // up to one lamport. The snapshot includes all scheduling fees.
+            let expected_fee = COMMIT_FEE_LAMPORTS + 5_000 + 2;
+            assert_eq!(scheduled.calculate_fee().unwrap(), expected_fee);
+            let payer_snapshot = scheduled
+                .get_all_committed_accounts()
+                .into_iter()
+                .find(|account| account.pubkey == payer.pubkey())
+                .unwrap();
+            assert_eq!(payer_snapshot.account.lamports, 3_000_000 - expected_fee);
             let action = context.scheduled_base_intents[0].intent_bundle.get_action_mut(0).unwrap();
             assert_eq!(action.source_program, Some(source));
             assert_eq!(action.destination_program, other);
@@ -1576,45 +1623,111 @@ mod tests {
 
     #[test]
     #[serial]
-    fn test_schedule_commit_delegated_payer_charges_fee_vault() {
-        let payer = Keypair::from_seed(b"delegated_payer_charges_fee_vault").unwrap();
-        let program = Pubkey::new_unique();
-        let committee = Pubkey::new_unique();
+    fn scheduling_captures_post_fee_balances() {
+        use magic_program_api::args::{
+            CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs, UndelegateTypeArgs,
+        };
 
-        let nonce = ACTUAL_COMMIT_LIMIT;
-        let (mut account_data, mut transaction_accounts) = prepare_delegated_payer_transaction(
-            &payer,
-            program,
-            &[committee],
-            StubNonces::Global(nonce),
-        );
-
-        let ix = InstructionUtils::schedule_commit_with_delegated_payer_instruction(
-            &payer.pubkey(),
-            vec![committee],
-        );
-        extend_transaction_accounts_from_ix(&ix, &mut account_data, &mut transaction_accounts);
-
-        let accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        // Fee vault must have received exactly COMMIT_FEE_LAMPORTS
-        accounts
-            .iter()
-            .find(|a| a.lamports() == COMMIT_FEE_LAMPORTS)
-            .expect("fee vault should have COMMIT_FEE_LAMPORTS");
-
-        // Payer must have been debited
-        accounts
-            .iter()
-            .find(|a| {
-                a.lamports() == 1_000_000 - COMMIT_FEE_LAMPORTS && a.is(AccountMode::Delegated)
-            })
-            .expect("payer should have been debited");
+        let payer = Keypair::new();
+        let other = Pubkey::new_unique();
+        for undelegate in [false, true] {
+            let commit = CommitTypeArgs::Standalone(vec![3, 4]);
+            let intents = if undelegate {
+                let commit = CommitAndUndelegateArgs {
+                    commit_type: commit,
+                    undelegate_type: UndelegateTypeArgs::Standalone,
+                };
+                [
+                    MagicBaseIntentArgs::CommitAndUndelegate(commit.clone()),
+                    MagicBaseIntentArgs::CommitFinalizeAndUndelegate(commit),
+                ]
+            } else {
+                [
+                    MagicBaseIntentArgs::Commit(commit.clone()),
+                    MagicBaseIntentArgs::CommitFinalize(commit),
+                ]
+            };
+            let instructions = [
+                if undelegate {
+                    MagicBlockInstruction::ScheduleCommitAndUndelegate
+                } else {
+                    MagicBlockInstruction::ScheduleCommit
+                },
+                MagicBlockInstruction::ScheduleBaseIntent(intents[0].clone()),
+                MagicBlockInstruction::ScheduleBaseIntent(intents[1].clone()),
+                MagicBlockInstruction::ScheduleIntentBundle(intents[0].clone().into()),
+                MagicBlockInstruction::ScheduleIntentBundle(intents[1].clone().into()),
+            ];
+            for instruction in instructions {
+                for committee in [payer.pubkey(), other] {
+                    for nonce in [ACTUAL_COMMIT_LIMIT - 1, ACTUAL_COMMIT_LIMIT] {
+                        let fee =
+                            if nonce == ACTUAL_COMMIT_LIMIT { COMMIT_FEE_LAMPORTS } else { 0 };
+                        let (mut account_data, mut transaction_accounts) =
+                            prepare_delegated_payer_transaction(
+                                &payer,
+                                system_program::id(),
+                                &[committee],
+                                StubNonces::PerAccount(HashMap::from([(committee, nonce)])),
+                            );
+                        account_data.get_mut(&payer.pubkey()).unwrap().set_lamports(3_000_000);
+                        let fee_vault = magic_fee_vault_pubkey();
+                        let ix = Instruction::new_with_wincode(
+                            crate::id(),
+                            &instruction,
+                            vec![
+                                AccountMeta::new(payer.pubkey(), true),
+                                AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                                AccountMeta::new(fee_vault, false),
+                                AccountMeta::new(committee, true),
+                                AccountMeta::new(fee_vault, true),
+                            ],
+                        );
+                        extend_transaction_accounts_from_ix(
+                            &ix,
+                            &mut account_data,
+                            &mut transaction_accounts,
+                        );
+                        let keys: Vec<_> =
+                            transaction_accounts.iter().map(|(key, _)| *key).collect();
+                        let accounts = process_instruction(
+                            &ix.data,
+                            transaction_accounts,
+                            ix.accounts,
+                            Ok(()),
+                        );
+                        let account = |key| &accounts[keys.iter().position(|k| *k == key).unwrap()];
+                        assert_eq!(account(payer.pubkey()).lamports(), 3_000_000 - fee);
+                        assert_eq!(account(fee_vault).lamports(), fee);
+                        let context =
+                            MagicContext::deserialize(account(MAGIC_CONTEXT_PUBKEY).data())
+                                .unwrap();
+                        let committed =
+                            context.scheduled_base_intents[0].get_all_committed_accounts();
+                        assert_eq!(committed.len(), 2);
+                        for snapshot in &committed {
+                            assert_eq!(
+                                snapshot.account.lamports,
+                                account(snapshot.pubkey).lamports()
+                            );
+                            assert_eq!(snapshot.account.owner, system_program::id());
+                            let expected_id =
+                                if snapshot.pubkey == committee { nonce + 1 } else { 1 };
+                            assert_eq!(snapshot.commit_id, expected_id);
+                            assert_eq!(
+                                u64::from(account(snapshot.pubkey).commit_seq()),
+                                expected_id
+                            );
+                            assert!(account(snapshot.pubkey).is(if undelegate {
+                                AccountMode::Undelegating
+                            } else {
+                                AccountMode::Delegated
+                            }));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     #[test]
@@ -1758,8 +1871,9 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     use crate::{magicblock_processor::Entrypoint, utils::instruction_utils::InstructionUtils};
     use engine::testkit::{Pacing, TestEngine};
     use keeper::testkit::{Dirs, keeper_builder};
-    use magic_program_api::args::CommitTypeArgs;
+    use magic_program_api::args::{CommitAndUndelegateArgs, CommitTypeArgs, UndelegateTypeArgs};
     use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
+    use solana_transaction::Transaction;
 
     let dirs = Dirs::default();
     let mut builder = keeper_builder(&dirs);
@@ -1784,6 +1898,26 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
             .commit_seq(u32::MAX)
             .build(),
     );
+    let payer = Keypair::new();
+    let poor_payer = Keypair::new();
+    let fee_vault = Pubkey::find_program_address(
+        &[b"magic-fee-vault", builder.authority.pubkey().as_ref()],
+        &DELEGATION_PROGRAM_ID,
+    )
+    .0;
+    for (key, lamports, commit_seq) in [
+        (payer.pubkey(), 3_000_000, ACTUAL_COMMIT_LIMIT as u32),
+        (poor_payer.pubkey(), 900_000, ACTUAL_COMMIT_LIMIT as u32),
+        (fee_vault, 1_000_000, 0),
+    ] {
+        builder.possibly_missing_accounts.insert(
+            key,
+            AccountBuilder::from(AccountSharedData::new(lamports, 0, &system_program::id()))
+                .mode(AccountMode::Delegated)
+                .commit_seq(commit_seq)
+                .build(),
+        );
+    }
     let engine = TestEngine::from_builder(dirs, builder, Pacing::External).await;
     let mut schedule = InstructionUtils::schedule_commit_instruction(
         &engine.authority(),
@@ -1806,6 +1940,76 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
         data: vec![255],
     };
     let initial_context = engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data().to_vec();
+    for payer in [&payer, &poor_payer] {
+        let initial_payer = engine.get_account(payer.pubkey()).unwrap();
+        for undelegate in [false, true] {
+            let commit = CommitTypeArgs::Standalone(vec![0]);
+            let args = if undelegate {
+                MagicIntentBundleArgs {
+                    commit_finalize_and_undelegate: Some(CommitAndUndelegateArgs {
+                        commit_type: commit,
+                        undelegate_type: UndelegateTypeArgs::Standalone,
+                    }),
+                    ..Default::default()
+                }
+            } else {
+                MagicIntentBundleArgs {
+                    commit_finalize: Some(commit),
+                    ..Default::default()
+                }
+            };
+            for instruction in [
+                if undelegate {
+                    MagicBlockInstruction::ScheduleCommitAndUndelegate
+                } else {
+                    MagicBlockInstruction::ScheduleCommit
+                },
+                MagicBlockInstruction::ScheduleIntentBundle(args),
+            ] {
+                let ix = Instruction::new_with_wincode(
+                    crate::id(),
+                    &instruction,
+                    vec![
+                        AccountMeta::new(payer.pubkey(), true),
+                        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                        AccountMeta::new(fee_vault, false),
+                        AccountMeta::new(payer.pubkey(), true),
+                    ],
+                );
+                let transaction = Transaction::new_signed_with_payer(
+                    &[ix, fail.clone()],
+                    Some(&engine.authority()),
+                    &[engine.signer(), payer],
+                    engine.blockhash(),
+                );
+                let result = engine.execute(transaction).await;
+                if payer.pubkey() == poor_payer.pubkey() {
+                    assert_matches!(
+                        result,
+                        Err(solana_transaction::TransactionError::InstructionError(
+                            0,
+                            InstructionError::InsufficientFunds
+                        ))
+                    );
+                } else {
+                    assert_matches!(
+                        result,
+                        Err(solana_transaction::TransactionError::InstructionError(1, _))
+                    );
+                }
+                let account = engine.get_account(payer.pubkey()).unwrap();
+                assert_eq!(account.lamports(), initial_payer.lamports());
+                assert_eq!(account.commit_seq(), initial_payer.commit_seq());
+                assert_eq!(account.owner(), initial_payer.owner());
+                assert!(account.is(AccountMode::Delegated));
+                assert_eq!(engine.get_account(fee_vault).unwrap().lamports(), 1_000_000);
+                assert_eq!(
+                    engine.get_account(MAGIC_CONTEXT_PUBKEY).unwrap().data(),
+                    initial_context
+                );
+            }
+        }
+    }
     assert!(engine.execute(&[schedule.clone(), bundle.clone(), fail]).await.is_err());
     assert_eq!(engine.get_account(committee).unwrap().commit_seq(), 3);
     assert_eq!(
