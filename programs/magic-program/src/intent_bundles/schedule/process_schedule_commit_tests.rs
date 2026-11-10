@@ -1968,13 +1968,29 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
                     ..Default::default()
                 }
             };
-            for instruction in [
-                if undelegate {
-                    MagicBlockInstruction::ScheduleCommitAndUndelegate
-                } else {
-                    MagicBlockInstruction::ScheduleCommit
-                },
-                MagicBlockInstruction::ScheduleIntentBundle(args),
+            // Duplicate accounts are rejected during construction, after charging
+            // the fee. The transaction must roll back both fees and reserved IDs.
+            let mut duplicate_args = args.clone();
+            let duplicate_commit = if undelegate {
+                &mut duplicate_args.commit_finalize_and_undelegate.as_mut().unwrap().commit_type
+            } else {
+                duplicate_args.commit_finalize.as_mut().unwrap()
+            };
+            *duplicate_commit = CommitTypeArgs::Standalone(vec![0, 0]);
+            for (instruction, duplicate) in [
+                (
+                    if undelegate {
+                        MagicBlockInstruction::ScheduleCommitAndUndelegate
+                    } else {
+                        MagicBlockInstruction::ScheduleCommit
+                    },
+                    false,
+                ),
+                (MagicBlockInstruction::ScheduleIntentBundle(args), false),
+                (
+                    MagicBlockInstruction::ScheduleIntentBundle(duplicate_args),
+                    true,
+                ),
             ] {
                 let ix = Instruction::new_with_wincode(
                     crate::id(),
@@ -1999,6 +2015,14 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
                         Err(solana_transaction::TransactionError::InstructionError(
                             0,
                             InstructionError::InsufficientFunds
+                        ))
+                    );
+                } else if duplicate {
+                    assert_matches!(
+                        result,
+                        Err(solana_transaction::TransactionError::InstructionError(
+                            0,
+                            InstructionError::InvalidInstructionData
                         ))
                     );
                 } else {

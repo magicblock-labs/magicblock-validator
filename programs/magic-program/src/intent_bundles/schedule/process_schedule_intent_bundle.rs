@@ -11,7 +11,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     MagicContext,
     magic_scheduled_base_intent::{
-        ConstructionContext, ScheduledIntentBundle, extract_commit_accounts, prepare_intent_bundle,
+        ConstructionContext, ScheduledIntentBundle, calculate_intent_bundle_fee,
+        extract_commit_accounts,
     },
     schedule_transactions::{
         MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits, check_magic_context_id, get_clock,
@@ -88,7 +89,7 @@ pub(crate) fn process_schedule_intent_bundle(
                 MAGIC_CONTEXT_IDX + 1,
             )?
             .0;
-            let fee = prepare_intent_bundle(&args, &construction_context)?;
+            let fee = calculate_intent_bundle_fee(&args, transaction_context)?;
             if let Some(ref fee_vault) = magic_fee_vault {
                 let payer = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
                 charge_delegated_payer(&payer, fee_vault, fee)?;
@@ -107,7 +108,8 @@ pub(crate) fn process_schedule_intent_bundle(
         .copied()
         .collect();
 
-        // Recreate intent
+        // Validate and capture post-fee snapshots. Any error rolls back the fee
+        // transfer and commit-ID reservations with the transaction.
         let scheduled_intent = ScheduledIntentBundle::try_new(
             args,
             intent_id,
