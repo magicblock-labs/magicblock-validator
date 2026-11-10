@@ -89,10 +89,19 @@ pub(crate) fn process_schedule_intent_bundle(
                 MAGIC_CONTEXT_IDX + 1,
             )?
             .0;
-            let fee = calculate_intent_bundle_fee(&args, transaction_context)?;
+            let (commit_fee, action_fee) = calculate_intent_bundle_fee(&args, transaction_context)?;
+            // Sponsored commits and undelegation do not cover action fees. Reject
+            // unpaid actions before reserving IDs or changing any account state.
+            if action_fee > 0 && magic_fee_vault.is_none() {
+                ic_msg!(
+                    construction_context.invoke_context,
+                    "ScheduleCommit ERR: fee-bearing base actions require a delegated payer and fee vault"
+                );
+                return Err(InstructionError::IllegalOwner);
+            }
             if let Some(ref fee_vault) = magic_fee_vault {
                 let payer = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-                charge_delegated_payer(&payer, fee_vault, fee)?;
+                charge_delegated_payer(&payer, fee_vault, commit_fee + action_fee)?;
             }
             magic_fee_vault.is_some()
         };
