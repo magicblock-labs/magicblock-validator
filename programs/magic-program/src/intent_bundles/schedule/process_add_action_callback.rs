@@ -76,9 +76,6 @@ pub(crate) fn process_add_action_callback(
         );
     })?;
 
-    // Charge User for callback
-    charge_delegated_payer(&payer_acc, &magic_fee_vault, CALLBACK_FEE_LAMPORTS)?;
-
     let mut context = MagicContext::deserialize(context_acc.borrow()?.data()).map_err(|err| {
         ic_msg!(
             invoke_context,
@@ -186,7 +183,21 @@ pub(crate) fn process_add_action_callback(
         account_metas_per_program: args.accounts,
     });
 
-    context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
+    if !context_acc.is_writable()? {
+        return Err(InstructionError::ReadonlyDataModified);
+    }
+    let mut context_account = context_acc.borrow_mut()?;
+    let serialized = context.serialize_for_capacity(context_account.data().len())?;
+    let (destination, padding) = context_account
+        .data_as_mut_slice()
+        .split_at_mut_checked(serialized.len())
+        .ok_or(InstructionError::AccountDataTooSmall)?;
+
+    // A native caller may catch our error, so finish all fallible preparation
+    // before charging. Publishing the prepared context cannot fail afterward.
+    charge_delegated_payer(&payer_acc, &magic_fee_vault, CALLBACK_FEE_LAMPORTS)?;
+    destination.copy_from_slice(&serialized);
+    padding.fill(0);
 
     ic_msg!(
         invoke_context,

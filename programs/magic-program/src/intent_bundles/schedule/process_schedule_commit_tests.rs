@@ -199,6 +199,182 @@ mod scheduling_cpi_tests {
         Ok(())
     });
 
+    // Deliberately return success after failed CPIs: whole-transaction rollback
+    // must not hide a partial fee transfer or context update in the callee.
+    declare_process_instruction!(CatchingCallbackProgram, 0, |invoke_context| {
+        let calls: Vec<(Instruction, Result<(), InstructionError>)> = {
+            let context = invoke_context.transaction_context.get_current_instruction_context()?;
+            wincode::deserialize(context.get_instruction_data())
+                .map_err(|_| InstructionError::InvalidInstructionData)?
+        };
+        for (instruction, expected) in calls {
+            assert_eq!(
+                invoke_context.native_invoke_signed(instruction, &[]),
+                expected
+            );
+        }
+        Ok(())
+    });
+
+    #[test]
+    #[serial_test::serial]
+    fn callback_attachment_is_atomic() {
+        use mbv_core::intent::{BaseAction, MagicIntentBundle};
+
+        for (case, expected) in [
+            ("missing intent", Err(InstructionError::InvalidAccountData)),
+            (
+                "wrong destination",
+                Err(InstructionError::InvalidInstructionData),
+            ),
+            ("context full", Err(InstructionError::AccountDataTooSmall)),
+            (
+                "insufficient funds",
+                Err(InstructionError::InsufficientFunds),
+            ),
+            ("vault overflow", Err(InstructionError::ArithmeticOverflow)),
+            (
+                "readonly payer",
+                Err(InstructionError::ReadonlyLamportChange),
+            ),
+            (
+                "readonly context",
+                Err(InstructionError::ReadonlyDataModified),
+            ),
+            ("readonly vault", Err(InstructionError::IllegalOwner)),
+            ("success", Ok(())),
+            ("self transfer", Ok(())),
+        ] {
+            let source = Pubkey::new_unique();
+            let payer = Keypair::new();
+            let (mut accounts, mut transaction_accounts, vault) =
+                prepare_schedule_accounts(&payer, true, false, Some(true));
+            let vault = vault.unwrap();
+            let payer = if case == "self transfer" { vault } else { payer.pubkey() };
+            if case == "insufficient funds" {
+                accounts.get_mut(&payer).unwrap().set_lamports(4_999);
+            }
+            if case == "vault overflow" {
+                accounts.get_mut(&vault).unwrap().set_lamports(u64::MAX);
+            } else if case == "self transfer" {
+                accounts.get_mut(&vault).unwrap().set_lamports(10_000);
+            }
+            let mut context = MagicContext {
+                intent_id: 1,
+                scheduled_base_intents: vec![ScheduledIntentBundle {
+                    intent_id: 0,
+                    slot: get_clock().slot,
+                    blockhash: Default::default(),
+                    payer,
+                    intent_bundle: MagicIntentBundle {
+                        standalone_actions: vec![BaseAction {
+                            id: 0,
+                            compute_units: 0,
+                            destination_program: source,
+                            source_program: Some(source),
+                            escrow_authority: payer,
+                            data_per_program: ActionArgs::new(vec![]).into(),
+                            account_metas_per_program: vec![],
+                            callback: None,
+                        }],
+                        ..Default::default()
+                    },
+                }],
+            };
+            if case == "missing intent" {
+                context.scheduled_base_intents.clear();
+            }
+            let capacity = if case == "context full" {
+                wincode::serialized_size(&context).unwrap() as usize
+            } else {
+                MagicContext::SIZE
+            };
+            let mut context_account = AccountSharedData::new(1_000_000, capacity, &crate::id());
+            context.write_to(context_account.data_as_mut_slice()).unwrap();
+            accounts.insert(MAGIC_CONTEXT_PUBKEY, context_account);
+
+            let destination =
+                if case == "wrong destination" { Pubkey::new_unique() } else { source };
+            let mut callback = add_action_callback_instruction(&payer, Some(vault), destination);
+            for (index, name) in
+                [(0, "readonly payer"), (1, "readonly context"), (2, "readonly vault")]
+            {
+                if case == name {
+                    callback.accounts[index].is_writable = false;
+                }
+            }
+            let mut metas = callback.accounts.clone();
+            metas.push(AccountMeta::new_readonly(crate::id(), false));
+            accounts.insert(
+                crate::id(),
+                AccountSharedData::new(0, 0, &solana_sdk_ids::native_loader::id()),
+            );
+            for meta in &metas {
+                if let Some(account) = accounts.remove(&meta.pubkey) {
+                    transaction_accounts.push((meta.pubkey, account));
+                }
+            }
+            let before = transaction_accounts.clone();
+            let repeat_result = if expected.is_ok() {
+                Err(InstructionError::InvalidAccountData)
+            } else {
+                expected.clone()
+            };
+            let calls = vec![(callback.clone(), expected.clone()), (callback, repeat_result)];
+            let result = mock_process_instruction(
+                &source,
+                None,
+                &wincode::serialize(&calls).unwrap(),
+                transaction_accounts,
+                metas,
+                Ok(()),
+                (
+                    CatchingCallbackProgram::vm,
+                    CatchingCallbackProgram::codegen,
+                ),
+                |context| {
+                    context.program_cache_for_tx_batch.replenish(
+                        crate::id(),
+                        Arc::new(ProgramCacheEntry::new_builtin((
+                            Entrypoint::vm,
+                            Entrypoint::codegen,
+                        ))),
+                    );
+                },
+                |_| {},
+            );
+            let account = |key| {
+                let index = before.iter().position(|(pubkey, _)| *pubkey == key).unwrap();
+                (&before[index].1, &result[index])
+            };
+            let (before_payer, after_payer) = account(payer);
+            let (before_vault, after_vault) = account(vault);
+            let fee = if expected.is_ok() && payer != vault { 5_000 } else { 0 };
+            assert_eq!(
+                after_payer.lamports(),
+                before_payer.lamports() - fee,
+                "{case}"
+            );
+            assert_eq!(
+                after_vault.lamports(),
+                before_vault.lamports() + fee,
+                "{case}"
+            );
+            let (before_context, after_context) = account(MAGIC_CONTEXT_PUBKEY);
+            if expected.is_err() {
+                assert_eq!(after_context.data(), before_context.data(), "{case}");
+            } else {
+                let mut context = MagicContext::deserialize(after_context.data()).unwrap();
+                let action =
+                    context.scheduled_base_intents[0].intent_bundle.get_action_mut(0).unwrap();
+                assert_eq!(
+                    action.callback.as_ref().unwrap().destination_program,
+                    source
+                );
+            }
+        }
+    }
+
     #[test]
     #[serial_test::serial]
     fn fee_bearing_actions_require_payment() {

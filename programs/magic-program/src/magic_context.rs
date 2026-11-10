@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use solana_instruction::error::InstructionError;
 use wincode::{
     SchemaRead, SchemaWrite,
-    config::{Configuration, deserialize, serialize_into, serialized_size},
+    config::{Configuration, deserialize, serialize, serialize_into, serialized_size},
 };
 
 use crate::magic_scheduled_base_intent::ScheduledIntentBundle;
@@ -39,6 +39,19 @@ impl MagicContext {
         data.fill(0);
         serialize_into(&mut &mut data[..], self, magic_context_config())
             .map_err(|_| InstructionError::GenericError)
+    }
+
+    /// Prepare an update before changing account state, bounded by its capacity.
+    pub(crate) fn serialize_for_capacity(
+        &self,
+        capacity: usize,
+    ) -> Result<Vec<u8>, InstructionError> {
+        let size = serialized_size(self, magic_context_config())
+            .map_err(|_| InstructionError::GenericError)?;
+        if size > capacity as u64 {
+            return Err(InstructionError::AccountDataTooSmall);
+        }
+        serialize(self, magic_context_config()).map_err(|_| InstructionError::GenericError)
     }
 
     pub(crate) fn next_intent_id(&mut self) -> u64 {
