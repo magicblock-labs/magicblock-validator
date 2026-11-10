@@ -84,6 +84,13 @@ async fn block_rpc_methods() {
         env.rpc.get_blocks(start, Some(latest)).await.unwrap(),
         (start..=latest).collect::<Vec<_>>()
     );
+    assert_eq!(
+        env.rpc
+            .get_blocks_with_commitment(start, None, Default::default())
+            .await
+            .unwrap(),
+        (start..=latest).collect::<Vec<_>>()
+    );
     assert!(env.rpc.get_blocks(latest + 1, None).await.unwrap().is_empty());
 
     let start = latest - 7;
