@@ -23,6 +23,7 @@ fn add_record(
     pubkey: Pubkey,
     owner: Pubkey,
     slot: u64,
+    lamports: u64,
     actions: Option<PostDelegationActions>,
 ) -> Pubkey {
     magicblock_chainlink::testing::deleg::add_delegation_metadata_for(&ctx.rpc_client, pubkey, 0);
@@ -30,7 +31,7 @@ fn add_record(
         authority: ctx.validator_pubkey,
         owner,
         delegation_slot: slot,
-        lamports: 1_000,
+        lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = delegation_record_to_vec(&record);
@@ -78,7 +79,7 @@ async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
         ..Default::default()
     };
     ctx.rpc_client.add_account(pubkey, remote.clone());
-    let record = add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
+    let record = add_record(&ctx, pubkey, owner, INITIAL_SLOT, remote.lamports, None);
     magicblock_chainlink::testing::deleg::add_delegation_metadata_for(&ctx.rpc_client, pubkey, 3);
     ctx.ensure_account(&pubkey).await.unwrap();
     assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 3);
@@ -102,8 +103,8 @@ async fn undelegating_account() -> (TestContext, Pubkey, Pubkey, Account) {
 async fn redelegation_without_readonly_notification() {
     let (ctx, pubkey, owner, mut remote) = undelegating_account().await;
     let slot = ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
-    let record = add_record(&ctx, pubkey, owner, slot, None);
     remote.lamports += 123;
+    let record = add_record(&ctx, pubkey, owner, slot, remote.lamports, None);
     remote.data = vec![2, 3, 4];
     assert!(ctx.send_and_receive_account_update(pubkey, remote.clone(), Some(8_000)).await);
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
@@ -125,7 +126,7 @@ async fn redelegation_without_readonly_notification() {
 async fn old_delegation_keeps_recovery_subscription() {
     let (ctx, pubkey, owner, remote) = undelegating_account().await;
     ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
-    add_record(&ctx, pubkey, owner, INITIAL_SLOT, None);
+    add_record(&ctx, pubkey, owner, INITIAL_SLOT, remote.lamports, None);
     assert!(ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
     assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 7);
@@ -138,14 +139,21 @@ async fn old_delegation_keeps_recovery_subscription() {
 async fn failed_redelegation_can_recover() {
     let (ctx, pubkey, owner, remote) = undelegating_account().await;
     let slot = ctx.rpc_client.set_slot(INITIAL_SLOT + 1);
-    let record = add_record(&ctx, pubkey, owner, slot, Some(failing_action()));
+    let record = add_record(
+        &ctx,
+        pubkey,
+        owner,
+        slot,
+        remote.lamports,
+        Some(failing_action()),
+    );
     assert!(ctx.send_and_receive_account_update(pubkey, remote.clone(), Some(8_000)).await);
     assert_remain_undelegating!(ctx.bank, &[pubkey], INITIAL_SLOT);
     assert_eq!(ctx.test_engine.get_account(pubkey).unwrap().commit_seq(), 7);
     assert_subscribed_without_delegation_record!(ctx.chainlink, &[&pubkey]);
 
     let slot = ctx.rpc_client.set_slot(slot + 1);
-    add_record(&ctx, pubkey, owner, slot, None);
+    add_record(&ctx, pubkey, owner, slot, remote.lamports, None);
     assert!(ctx.send_and_receive_account_update(pubkey, remote, Some(8_000)).await);
     assert_cloned_as_delegated!(ctx.bank, &[pubkey], slot, owner);
     assert_not_subscribed!(ctx.chainlink, &[&pubkey, &record]);

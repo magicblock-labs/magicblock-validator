@@ -29,7 +29,15 @@ pub fn add_delegation_record_for(
     authority: Pubkey,
     owner: Pubkey,
 ) -> Pubkey {
-    add_delegation_record_with_slot_for(rpc_client, pubkey, authority, owner, rpc_client.get_slot())
+    let lamports = rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports;
+    add_delegation_record_with_slot_for(
+        rpc_client,
+        pubkey,
+        authority,
+        owner,
+        rpc_client.get_slot(),
+        lamports,
+    )
 }
 
 #[cfg(any(test, feature = "dev-context"))]
@@ -39,6 +47,7 @@ pub fn add_delegation_record_with_slot_for(
     authority: Pubkey,
     owner: Pubkey,
     delegation_slot: u64,
+    lamports: u64,
 ) -> Pubkey {
     add_delegation_metadata_for(rpc_client, pubkey, 0);
     let deleg_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
@@ -46,7 +55,7 @@ pub fn add_delegation_record_with_slot_for(
         authority,
         owner,
         delegation_slot,
-        lamports: 1_000,
+        lamports,
         commit_frequency_ms: 2_000,
     };
     rpc_client.add_account(
@@ -74,7 +83,7 @@ pub fn add_delegation_record_with_actions_for(
         authority,
         owner,
         delegation_slot: rpc_client.get_slot(),
-        lamports: 1_000,
+        lamports: rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = delegation_record_to_vec(&deleg_record);
