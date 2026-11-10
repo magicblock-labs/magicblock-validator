@@ -6,7 +6,6 @@ use std::{
     },
 };
 
-use dlp_api::pda::ephemeral_balance_pda_from_payer;
 use errors::{ChainlinkError, ChainlinkResult};
 use fetch_cloner::{DelegationDeduplicator, FetchCloner};
 use magicblock_accounts_db::{traits::AccountsBank, AccountsDb};
@@ -618,29 +617,12 @@ impl<T: ChainRpcClient, U: ChainPubsubClient, V: AccountsBank, C: Cloner>
 
         let fetch_context = fetch_context.into();
 
-        let mut pubkeys = tx
+        let pubkeys = tx
             .message()
             .account_keys()
             .iter()
             .copied()
             .collect::<Vec<_>>();
-        let feepayer = tx.message().fee_payer();
-
-        let balance_pda = ephemeral_balance_pda_from_payer(feepayer, 0);
-
-        // Determine if we need to clone the escrow account for the feepayer
-        let clone_escrow =
-            self.accounts_bank.get_account(&balance_pda).is_none();
-
-        // If cloning escrow, add the balance PDA
-        if clone_escrow {
-            trace!(
-                balance_pda = %balance_pda,
-                feepayer = %feepayer,
-                "Adding balance PDA for feepayer"
-            );
-            pubkeys.push(balance_pda);
-        }
 
         // Mark *all* pubkeys as empty-if-not-found
         let mark_empty_if_not_found = Some(pubkeys.as_slice());
