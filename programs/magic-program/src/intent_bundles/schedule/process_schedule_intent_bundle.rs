@@ -11,7 +11,8 @@ use solana_pubkey::Pubkey;
 use crate::{
     MagicContext,
     magic_scheduled_base_intent::{
-        ConstructionContext, ScheduledIntentBundle, extract_commit_accounts,
+        ConstructionContext, ScheduledIntentBundle, calculate_intent_bundle_fee,
+        extract_commit_accounts,
     },
     schedule_transactions::{
         MAGIC_CONTEXT_IDX, PAYER_IDX, check_commit_limits, check_magic_context_id, get_clock,
@@ -77,6 +78,25 @@ pub(crate) fn process_schedule_intent_bundle(
         let mut construction_context =
             ConstructionContext::new(parent_program_id, &signers, invoke_context, secure);
 
+        // Determine and charge the fee while the payer is still delegated.
+        // Snapshots below must include the payer debit and fee-vault credit.
+        let has_fee_vault = {
+            let transaction_context = construction_context.transaction_context();
+            let magic_fee_vault = try_get_fee_vault(
+                transaction_context,
+                construction_context.invoke_context,
+                PAYER_IDX,
+                MAGIC_CONTEXT_IDX + 1,
+            )?
+            .0;
+            let fee = calculate_intent_bundle_fee(&args, transaction_context)?;
+            if let Some(ref fee_vault) = magic_fee_vault {
+                let payer = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
+                charge_delegated_payer(&payer, fee_vault, fee)?;
+            }
+            magic_fee_vault.is_some()
+        };
+
         // Collect all undelegated account indices.
         let undelegated_account_indices: Vec<u8> = [
             args.commit_and_undelegate.as_ref(),
@@ -88,7 +108,8 @@ pub(crate) fn process_schedule_intent_bundle(
         .copied()
         .collect();
 
-        // Recreate intent
+        // Validate and capture post-fee snapshots. Any error rolls back the fee
+        // transfer and commit-ID reservations with the transaction.
         let scheduled_intent = ScheduledIntentBundle::try_new(
             args,
             intent_id,
@@ -96,6 +117,20 @@ pub(crate) fn process_schedule_intent_bundle(
             &payer_pubkey,
             &mut construction_context,
         )?;
+
+        if !has_fee_vault {
+            // Both commit variants use the sponsored allowance. Undelegation remains
+            // available after the allowance is exhausted.
+            for commit_accounts in [
+                scheduled_intent.get_commit_intent_accounts(),
+                scheduled_intent.get_commit_finalize_intent_accounts(),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                check_commit_limits(commit_accounts, construction_context.invoke_context)?;
+            }
+        }
 
         // Change owner to dlp and set undelegating flag.
         // Once account is undelegated we need to make it immutable in our validator.
@@ -119,31 +154,6 @@ pub(crate) fn process_schedule_intent_bundle(
     }
 
     let transaction_context = &*invoke_context.transaction_context;
-    let payer_account = get_instruction_account_with_idx(transaction_context, PAYER_IDX)?;
-    let magic_fee_vault = try_get_fee_vault(
-        transaction_context,
-        invoke_context,
-        PAYER_IDX,
-        MAGIC_CONTEXT_IDX + 1,
-    )?
-    .0;
-    if let Some(magic_fee_vault) = magic_fee_vault {
-        let fee = scheduled_intent.calculate_fee()?;
-        charge_delegated_payer(&payer_account, &magic_fee_vault, fee)?;
-    } else {
-        // Both commit variants use the sponsored allowance. Undelegation remains
-        // available after the allowance is exhausted.
-        for commit_accounts in [
-            scheduled_intent.get_commit_intent_accounts(),
-            scheduled_intent.get_commit_finalize_intent_accounts(),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            check_commit_limits(commit_accounts, invoke_context)?;
-        }
-    }
-
     context.add_scheduled_action(scheduled_intent);
     let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;

@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use mbv_core::intent::{
-    CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee,
+    CommitAndUndelegate, CommitType, MagicBaseIntent, UndelegateType, calculate_commit_fee_for_ids,
     outbox::outbox_intent_pda, types::CommittedAccount,
 };
+use mbv_core::token_programs::try_remap_ata_to_eata;
 use solana_account::{AccountMode, ReadableAccount, WritableAccount};
 use solana_account_info::MAX_PERMITTED_DATA_INCREASE;
 use solana_instruction::error::InstructionError;
@@ -89,7 +90,7 @@ pub(crate) fn process_schedule_commit(
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us directly via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut committed_accounts: Vec<CommittedAccount> = Vec::new();
+    let mut accounts_to_commit = Vec::new();
     let mut seen_committed_pubkeys: HashSet<Pubkey> = HashSet::new();
     for idx in committees_start..ix_accs_len {
         let acc_pubkey = get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -149,55 +150,50 @@ pub(crate) fn process_schedule_commit(
             )?;
 
             let account = acc.borrow()?;
-            let mut committed = CommittedAccount::from_account_shared(*acc_pubkey, &account);
+            let committed_pubkey = try_remap_ata_to_eata(acc_pubkey, &account)
+                .map_or(*acc_pubkey, |(pubkey, _)| pubkey);
             drop(account);
 
-            if &committed.pubkey != acc_pubkey {
+            if &committed_pubkey != acc_pubkey {
                 ic_msg!(
                     invoke_context,
                     "ScheduleCommit: remapping ATA {} -> eATA {}",
                     acc_pubkey,
-                    committed.pubkey
+                    committed_pubkey
                 );
             }
 
             // Backwards-compat: merge duplicate accounts (by final restored pubkey).
             // Keep the first occurrence and ignore subsequent duplicates.
-            if !(seen_committed_pubkeys.insert(committed.pubkey)) {
+            if !seen_committed_pubkeys.insert(committed_pubkey) {
                 continue;
             }
 
-            committed.commit_id = reserve_commit_id(&acc)?;
-            committed_accounts.push(committed);
-        }
-
-        if opts.request_undelegation {
-            // If the account is scheduled to be undelegated then we need to lock it
-            // immediately in order to prevent the following actions:
-            // - writes to the account
-            // - scheduling further commits for this account
-            //
-            // Setting the owner will prevent both, since in both cases the _actual_
-            // owner program needs to sign for the account which is not possible at
-            // that point
-            // NOTE: this owner change only takes effect if the transaction which
-            // includes this instruction succeeds.
-            //
-            // We also set the undelegating flag on the account in order to detect
-            // undelegations for which we miss updates
-            mark_account_as_undelegated(invoke_context, &acc)?;
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit: Marking account {} as undelegating",
-                acc_pubkey
-            );
+            accounts_to_commit.push((*acc_pubkey, acc));
         }
     }
 
-    if let Some(fee_vault) = magic_fee_vault {
-        let fee = calculate_commit_fee(&committed_accounts)?;
-        charge_delegated_payer(&payer_account, &fee_vault, fee)?;
-    } else if !opts.request_undelegation {
+    // reserve_commit_id also increments account's commit_seq
+    let commit_ids = accounts_to_commit
+        .iter()
+        .map(|(_, account)| reserve_commit_id(account))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if let Some(ref fee_vault) = magic_fee_vault {
+        let fee = calculate_commit_fee_for_ids(commit_ids)?;
+        charge_delegated_payer(&payer_account, fee_vault, fee)?;
+    }
+
+    // The payer or fee vault may also be committed. Copy their post-fee state,
+    // before undelegation changes their owner and account mode.
+    let committed_accounts = accounts_to_commit
+        .iter()
+        .map(|(pubkey, account)| {
+            let account = account.borrow()?;
+            Ok(CommittedAccount::from_account_shared(*pubkey, &account))
+        })
+        .collect::<Result<Vec<_>, InstructionError>>()?;
+    if magic_fee_vault.is_none() && !opts.request_undelegation {
         // We validate commit nonces only for plain commits.
         // If accounts are undelegated we don't want to fail.
         check_commit_limits(&committed_accounts, invoke_context)?;
@@ -239,6 +235,19 @@ pub(crate) fn process_schedule_commit(
             "ScheduleCommit ERR: intent is too large to ever fit into transaction",
         );
     })?;
+
+    if opts.request_undelegation {
+        for (pubkey, account) in &accounts_to_commit {
+            // Lock the local account only after capturing its original owner.
+            // The transaction rolls this back if a later instruction fails.
+            mark_account_as_undelegated(invoke_context, account)?;
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit: Marking account {} as undelegating",
+                pubkey
+            );
+        }
+    }
 
     let scheduled_base_intent = ScheduledIntentBundle {
         intent_id,

@@ -7,7 +7,8 @@ use magic_program_api::args::{
 pub use mbv_core::intent::{
     ACTUAL_COMMIT_LIMIT, BaseAction, COMMIT_FEE_LAMPORTS, COMPUTE_UNIT_PRICE_MICRO_LAMPORTS,
     CommitAndUndelegate, CommitType, MagicBaseIntent, MagicIntentBundle, ProgramArgs,
-    UndelegateType, calculate_commit_fee,
+    UndelegateType, calculate_actions_fee_for_units, calculate_commit_fee,
+    calculate_commit_fee_for_ids,
 };
 use mbv_core::{
     Slot,
@@ -79,6 +80,51 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
 
 type CommitAccountRef<'a, 'ix_data> = (Pubkey, InstructionAccount<'a, 'ix_data>);
 
+/// Calculate the fee using the IDs that construction will reserve, without
+/// changing account state. The caller charges it before capturing snapshots.
+pub(crate) fn calculate_intent_bundle_fee(
+    args: &MagicIntentBundleArgs,
+    transaction_context: &TransactionContext<'_>,
+) -> Result<u64, InstructionError> {
+    let mut commit_ids = Vec::new();
+    let mut fee = 0;
+    let actions_fee = |actions: &[BaseActionArgs]| {
+        calculate_actions_fee_for_units(actions.iter().map(|action| action.compute_units))
+    };
+
+    for commit in [
+        args.commit.as_ref(),
+        args.commit_and_undelegate.as_ref().map(|intent| &intent.commit_type),
+        args.commit_finalize.as_ref(),
+        args.commit_finalize_and_undelegate.as_ref().map(|intent| &intent.commit_type),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        for index in commit.committed_accounts_indices() {
+            let account = get_instruction_account_with_idx(transaction_context, *index as u16)?;
+            commit_ids.push(u64::from(account.borrow()?.commit_seq()) + 1);
+        }
+        if let CommitTypeArgs::WithBaseActions { base_actions, .. } = commit {
+            fee += actions_fee(base_actions);
+        }
+    }
+    for intent in [
+        args.commit_and_undelegate.as_ref(),
+        args.commit_finalize_and_undelegate.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if let UndelegateTypeArgs::WithBaseActions { base_actions } = &intent.undelegate_type {
+            fee += actions_fee(base_actions);
+        }
+    }
+    fee += actions_fee(&args.standalone_actions);
+
+    Ok(fee + calculate_commit_fee_for_ids(commit_ids)?)
+}
+
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct ScheduledIntentBundle {
@@ -93,6 +139,8 @@ pub struct ScheduledIntentBundle {
 }
 
 impl ScheduledIntentBundle {
+    /// Validate, reserve IDs, and capture settlement state after the scheduling
+    /// handler charges the fee, before changing ownership.
     pub fn try_new(
         args: MagicIntentBundleArgs,
         intent_id: u64,
