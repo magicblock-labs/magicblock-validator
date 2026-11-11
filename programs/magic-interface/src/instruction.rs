@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-#[cfg(not(feature = "backward-compat"))]
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
@@ -11,8 +10,7 @@ use crate::{
     outbox::{ExecutionStage, SentCommit},
 };
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
@@ -395,19 +393,12 @@ pub enum MagicBlockInstruction {
 }
 
 impl MagicBlockInstruction {
-    #[cfg(not(feature = "backward-compat"))]
     pub fn try_to_vec(&self) -> Result<Vec<u8>, wincode::WriteError> {
         wincode::serialize(self)
     }
-
-    #[cfg(feature = "backward-compat")]
-    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
-    }
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct AccountModification {
     pub pubkey: Pubkey,
     pub owner: Option<Pubkey>,
@@ -415,8 +406,7 @@ pub struct AccountModification {
     pub confined: Option<bool>,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
@@ -424,8 +414,9 @@ pub struct AccountModificationForInstruction {
 }
 
 /// Common fields for cloning an account.
-#[derive(Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(
+    Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite,
+)]
 pub struct AccountCloneFields {
     pub lamports: u64,
     pub owner: Pubkey,
@@ -436,8 +427,7 @@ pub struct AccountCloneFields {
 }
 
 /// Instruction(s) for Callback Executor builtin-program
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum CallbackInstruction {
     /// Executes a callback
     ///
@@ -452,8 +442,7 @@ pub enum CallbackInstruction {
 
 /// Instruction(s) for the ephemeral system builtin-program: creates,
 /// resizes, and closes ephemeral accounts.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum EphemeralSystemInstruction {
     /// # Account references
     /// | Index | Account | Access |
@@ -483,8 +472,7 @@ pub enum EphemeralSystemInstruction {
 /// Instruction(s) for the outbox intent builtin-program: stores accepted
 /// intents in per-intent PDA accounts and tracks their execution stage
 /// until they are sent to Base.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum OutboxIntentInstruction {
     /// Creates and populates an outbox intent PDA account. CPI-only, called
     /// by the magic program from `MagicBlockInstruction::AcceptScheduleCommits`
