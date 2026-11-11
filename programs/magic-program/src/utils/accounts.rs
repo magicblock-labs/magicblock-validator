@@ -18,6 +18,11 @@ pub(crate) struct InstructionAccount<'a, 'ix_data> {
 }
 
 impl<'a, 'ix_data> InstructionAccount<'a, 'ix_data> {
+    pub(crate) fn is_same_account(&self, other: &Self) -> bool {
+        std::ptr::eq(self.transaction_context, other.transaction_context)
+            && self.tx_idx == other.tx_idx
+    }
+
     pub(crate) fn is_writable(&self) -> Result<bool, InstructionError> {
         get_writable_with_idx(self.transaction_context, self.instruction_idx)
     }

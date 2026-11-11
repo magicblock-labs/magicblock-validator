@@ -29,7 +29,8 @@ pub(crate) fn mark_account_as_undelegated(
 }
 
 /// Transfers `fee` lamports from `payer` to `fee_vault`.
-/// Both accounts must be delegated; writability is enforced by the SVM.
+/// Both accounts must be delegated; nonzero transfers require writability.
+/// Errors leave balances unchanged.
 pub(crate) fn charge_delegated_payer(
     payer: &InstructionAccount<'_, '_>,
     fee_vault: &InstructionAccount<'_, '_>,
@@ -44,20 +45,28 @@ pub(crate) fn charge_delegated_payer(
     if fee == 0 {
         return Ok(());
     }
+    if !payer.is_writable()? || !fee_vault.is_writable()? {
+        return Err(InstructionError::ReadonlyLamportChange);
+    }
 
-    let new_payer_lamports = payer
-        .borrow()?
+    let mut payer_account = payer.borrow_mut()?;
+    let new_payer_lamports = payer_account
         .lamports()
         .checked_sub(fee)
         .ok_or(InstructionError::InsufficientFunds)?;
-    payer.borrow_mut()?.set_lamports(new_payer_lamports);
+    // A transfer back to the payer has no net effect and needs only one borrow.
+    if payer.is_same_account(fee_vault) {
+        return Ok(());
+    }
 
-    let new_vault_lamports = fee_vault
-        .borrow()?
+    let mut vault_account = fee_vault.borrow_mut()?;
+    let new_vault_lamports = vault_account
         .lamports()
         .checked_add(fee)
         .ok_or(InstructionError::ArithmeticOverflow)?;
-    fee_vault.borrow_mut()?.set_lamports(new_vault_lamports);
+
+    payer_account.set_lamports(new_payer_lamports);
+    vault_account.set_lamports(new_vault_lamports);
 
     Ok(())
 }
