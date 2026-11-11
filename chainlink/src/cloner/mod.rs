@@ -225,6 +225,7 @@ pub(crate) async fn clone_account<'a>(
     let empty_placeholder = incoming.is(AccountMode::Missing) && actions.is_none();
     const LIFECYCLE_CONFLICT: TransactionError =
         TransactionError::InstructionError(1, InstructionError::InvalidArgument);
+    let mut retries = 3;
     loop {
         // Recheck each lease: completing undelegation must advance the current
         // delegation stamp, which Delegated -> Undelegating preserves.
@@ -252,7 +253,7 @@ pub(crate) async fn clone_account<'a>(
             error,
             ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
         );
-        if !empty_placeholder || !lifecycle_conflict {
+        if !empty_placeholder || !lifecycle_conflict || retries == 0 {
             return Err(ClonerError::FailedToCloneRegularAccount(
                 request.pubkey,
                 Box::new(error),
@@ -263,6 +264,7 @@ pub(crate) async fn clone_account<'a>(
         let Some(fresh) = claim_materialization(engine, request.pubkey, false).await? else {
             return Ok(());
         };
+        retries -= 1;
         accessor = fresh;
         actions = None;
     }
