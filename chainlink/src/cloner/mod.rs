@@ -356,9 +356,80 @@ pub(crate) async fn claim_account_eviction(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use engine::testkit::TestEngine;
+    use magic_root_interface::MagicRootInstruction;
+    use tokio::time;
 
     use super::*;
+
+    /// Proves stale absence recovery preserves a competing local creation and
+    /// still succeeds if that account closes after rejection but before recovery.
+    #[tokio::test]
+    async fn absence_clone_recovers_after_local_create_and_close() {
+        let engine = TestEngine::new().await;
+        for close_before_recovery in [false, true] {
+            let pubkey = Pubkey::new_unique();
+            let accessor = claim_materialization(&engine, pubkey, false).await.unwrap().unwrap();
+            assert_eq!(accessor.observed(), None);
+
+            let account = AccountBuilder::default()
+                .lamports(1_000_000)
+                .data(vec![42])
+                .mode(AccountMode::Magic)
+                .build();
+            let create = MagicRootInstruction::compose_account(pubkey, account).unwrap();
+            engine.execute(create.as_slice()).await.unwrap();
+            let created = engine.get_account(pubkey).unwrap();
+
+            let mut failures = engine.transactions().subscribe_failures();
+            let request = AccountCloneRequest {
+                pubkey,
+                account: AccountBuilder::default().slot(11),
+                post_delegation_mode: ClonePostDelegationMode::None,
+                delegated_to_other: None,
+                source_slots: None,
+            };
+            let clone = clone_account(&engine, accessor, request);
+            tokio::pin!(clone);
+            // Submit once, then keep recovery suspended until the local close.
+            assert!(futures_util::poll!(&mut clone).is_pending());
+            let failure = time::timeout(Duration::from_secs(5), failures.recv())
+                .await
+                .expect("stale clone reaches execution")
+                .expect("failure subscription remains open");
+            assert_eq!(
+                failure.execution.result.as_ref().unwrap().execution_details.status,
+                Err(TransactionError::InstructionError(
+                    1,
+                    InstructionError::InvalidArgument,
+                )),
+            );
+            assert_eq!(
+                engine.get_account(pubkey).unwrap(),
+                created,
+                "rejected placeholder rolls back without changing the local creation",
+            );
+
+            if close_before_recovery {
+                let delete = MagicRootInstruction::Delete.compose(pubkey).unwrap();
+                engine.execute(&[delete]).await.unwrap();
+                assert!(engine.get_account(pubkey).is_none());
+            }
+            time::timeout(Duration::from_secs(5), clone)
+                .await
+                .expect("clone recovery completes")
+                .expect("fresh local state satisfies absence recovery");
+            if close_before_recovery {
+                let accessor = engine.account(pubkey).await.unwrap();
+                assert_eq!(accessor.observed(), Some((AccountMode::Missing, 11)));
+            } else {
+                assert_eq!(engine.get_account(pubkey).unwrap(), created);
+            }
+        }
+        engine.close().await;
+    }
 
     /// Proves a queued cache eviction cannot claim an account after a later
     /// materialization retained it in recency or made it authoritative.
