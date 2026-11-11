@@ -196,6 +196,8 @@ impl TaskStrategist {
         let mut optimized_tasks = tasks.clone();
         if Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?
             <= MAX_TRANSACTION_V1_WIRE_SIZE
+            && TransactionUtils::tasks_compute_units(&optimized_tasks, uniqueness_nonce)
+                <= 1_400_000
         {
             return Ok(TransactionStrategy {
                 tasks: optimized_tasks,
@@ -495,6 +497,7 @@ mod tests {
             commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInArgs { .. }
         ));
+        assert_eq!(strategy.tasks[0].compute_units(), 120_000);
     }
 
     #[test]
@@ -529,6 +532,36 @@ mod tests {
             commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInBuffer { .. }
         ));
+        assert_eq!(strategy.tasks[0].compute_units(), 300_000);
+    }
+
+    #[test]
+    fn test_build_strategy_accounts_for_buffered_diff_compute_units() {
+        let validator = Pubkey::new_unique();
+
+        for count in [2, 5] {
+            let tasks =
+                (0..count).map(|i| create_test_commit_task(i, 10_240, 5000).into()).collect();
+            let result = TaskStrategist::build_strategy(tasks, &validator, None);
+
+            if count == 5 {
+                assert!(matches!(result, Err(TaskStrategistError::FailedToFit)));
+                continue;
+            }
+
+            let strategy = result.expect("Two buffered diffs should fit");
+            assert_eq!(strategy.tasks.len(), 2);
+            assert_eq!(
+                TransactionUtils::tasks_compute_units(&strategy.tasks, None),
+                600_000
+            );
+            assert!(
+                strategy.tasks.iter().all(|task| matches!(
+                    commit_delivery(task),
+                    CommitDelivery::DiffInBuffer { .. }
+                ))
+            );
+        }
     }
 
     #[test]
