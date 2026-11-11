@@ -80,14 +80,14 @@ impl<'a, 'ic, 'ix_data> ConstructionContext<'a, 'ic, 'ix_data> {
 
 type CommitAccountRef<'a, 'ix_data> = (Pubkey, InstructionAccount<'a, 'ix_data>);
 
-/// Calculate the fee using the IDs that construction will reserve, without
-/// changing account state. The caller charges it before capturing snapshots.
+/// Calculate commit and action fees using the IDs that construction will reserve,
+/// without changing account state. The caller charges them before capturing snapshots.
 pub(crate) fn calculate_intent_bundle_fee(
     args: &MagicIntentBundleArgs,
     transaction_context: &TransactionContext<'_>,
-) -> Result<u64, InstructionError> {
+) -> Result<(u64, u64), InstructionError> {
     let mut commit_ids = Vec::new();
-    let mut fee = 0;
+    let mut action_fee = 0;
     let actions_fee = |actions: &[BaseActionArgs]| {
         calculate_actions_fee_for_units(actions.iter().map(|action| action.compute_units))
     };
@@ -106,7 +106,7 @@ pub(crate) fn calculate_intent_bundle_fee(
             commit_ids.push(u64::from(account.borrow()?.commit_seq()) + 1);
         }
         if let CommitTypeArgs::WithBaseActions { base_actions, .. } = commit {
-            fee += actions_fee(base_actions);
+            action_fee += actions_fee(base_actions);
         }
     }
     for intent in [
@@ -117,12 +117,12 @@ pub(crate) fn calculate_intent_bundle_fee(
     .flatten()
     {
         if let UndelegateTypeArgs::WithBaseActions { base_actions } = &intent.undelegate_type {
-            fee += actions_fee(base_actions);
+            action_fee += actions_fee(base_actions);
         }
     }
-    fee += actions_fee(&args.standalone_actions);
+    action_fee += actions_fee(&args.standalone_actions);
 
-    Ok(fee + calculate_commit_fee_for_ids(commit_ids)?)
+    Ok((calculate_commit_fee_for_ids(commit_ids)?, action_fee))
 }
 
 /// Scheduled action to be executed on base layer

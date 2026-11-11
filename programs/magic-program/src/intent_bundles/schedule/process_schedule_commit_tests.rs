@@ -176,7 +176,7 @@ fn add_action_callback_instruction(
 }
 
 #[cfg(test)]
-mod callback_source_tests {
+mod scheduling_cpi_tests {
     use std::sync::Arc;
 
     use solana_program_runtime::{
@@ -198,6 +198,185 @@ mod callback_source_tests {
         }
         Ok(())
     });
+
+    #[test]
+    #[serial_test::serial]
+    fn fee_bearing_actions_require_payment() {
+        use magic_program_api::args::{
+            CommitAndUndelegateArgs, CommitTypeArgs, MagicBaseIntentArgs, UndelegateTypeArgs,
+        };
+
+        let source = Pubkey::new_unique();
+        let payer = Keypair::new();
+        let committee = Pubkey::new_unique();
+        // None means no actions; Some(0) keeps zero-fee actions distinct.
+        for (mode, with_vault, units) in [
+            (AccountMode::Mirrored, false, Some(100_000)),
+            (AccountMode::Mirrored, true, Some(100_000)),
+            (AccountMode::Magic, false, Some(100_000)),
+            (AccountMode::Magic, true, Some(100_000)),
+            (AccountMode::Delegated, true, Some(100_000)),
+            (AccountMode::Delegated, false, Some(100_000)),
+            (AccountMode::Mirrored, false, Some(1)),
+            (AccountMode::Mirrored, false, Some(0)),
+            (AccountMode::Mirrored, false, None),
+        ] {
+            let delegated = mode == AccountMode::Delegated;
+            let committee_index = if with_vault { 3 } else { 2 };
+            let mut actions = action_only_bundle_args(committee, source).standalone_actions;
+            if let Some(units) = units {
+                actions[0].compute_units = units;
+            } else {
+                actions.clear();
+            }
+            let commit = if actions.is_empty() {
+                CommitTypeArgs::Standalone(vec![committee_index])
+            } else {
+                CommitTypeArgs::WithBaseActions {
+                    committed_accounts: vec![committee_index],
+                    base_actions: actions.clone(),
+                }
+            };
+            let undelegate = CommitAndUndelegateArgs {
+                commit_type: commit.clone(),
+                undelegate_type: UndelegateTypeArgs::Standalone,
+            };
+            let mut intents = vec![
+                MagicBaseIntentArgs::Commit(commit.clone()),
+                MagicBaseIntentArgs::CommitFinalize(commit),
+                MagicBaseIntentArgs::CommitAndUndelegate(undelegate.clone()),
+                MagicBaseIntentArgs::CommitFinalizeAndUndelegate(undelegate),
+            ];
+            if !actions.is_empty() {
+                let undelegate = CommitAndUndelegateArgs {
+                    commit_type: CommitTypeArgs::Standalone(vec![committee_index]),
+                    undelegate_type: UndelegateTypeArgs::WithBaseActions {
+                        base_actions: actions.clone(),
+                    },
+                };
+                intents.extend([
+                    MagicBaseIntentArgs::BaseActions(actions),
+                    MagicBaseIntentArgs::CommitAndUndelegate(undelegate.clone()),
+                    MagicBaseIntentArgs::CommitFinalizeAndUndelegate(undelegate),
+                ]);
+            }
+            for intent in intents {
+                let has_commit = !matches!(intent, MagicBaseIntentArgs::BaseActions(_));
+                let undelegate = matches!(
+                    intent,
+                    MagicBaseIntentArgs::CommitAndUndelegate(_)
+                        | MagicBaseIntentArgs::CommitFinalizeAndUndelegate(_)
+                );
+                // Paid commits cross the fee threshold. Unpaid, action-free
+                // undelegation must remain available past the sponsored limit.
+                let nonce = if delegated || (units.is_none() && undelegate) {
+                    ACTUAL_COMMIT_LIMIT
+                } else {
+                    0
+                };
+                for secure in [false, true] {
+                    let (mut accounts, mut transaction_accounts, vault) = prepare_schedule_accounts(
+                        &payer,
+                        delegated,
+                        mode == AccountMode::Magic,
+                        with_vault.then_some(true),
+                    );
+                    accounts.get_mut(&payer.pubkey()).unwrap().set_lamports(3_000_000);
+                    accounts.insert(
+                        committee,
+                        AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &source))
+                            .mode(AccountMode::Delegated)
+                            .commit_seq(nonce as u32)
+                            .build(),
+                    );
+                    let mut metas = vec![
+                        AccountMeta::new(payer.pubkey(), true),
+                        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+                    ];
+                    if let Some(vault) = vault {
+                        metas.push(AccountMeta::new(vault, false));
+                    }
+                    metas.push(AccountMeta::new(committee, false));
+                    let instruction = if secure {
+                        MagicBlockInstruction::ScheduleIntentBundle(intent.clone().into())
+                    } else {
+                        MagicBlockInstruction::ScheduleBaseIntent(intent.clone())
+                    };
+                    let instruction =
+                        Instruction::new_with_wincode(crate::id(), &instruction, metas.clone());
+                    metas.push(AccountMeta::new_readonly(crate::id(), false));
+                    accounts.insert(
+                        crate::id(),
+                        AccountSharedData::new(0, 0, &solana_sdk_ids::native_loader::id()),
+                    );
+                    for meta in &metas {
+                        transaction_accounts
+                            .push((meta.pubkey, accounts.remove(&meta.pubkey).unwrap()));
+                    }
+                    let before = transaction_accounts.clone();
+                    let expected = if delegated && !with_vault {
+                        Err(InstructionError::MissingAccount)
+                    } else if units.is_some_and(|units| units > 0) && !delegated {
+                        Err(InstructionError::IllegalOwner)
+                    } else {
+                        Ok(())
+                    };
+                    let result = mock_process_instruction(
+                        &source,
+                        None,
+                        &wincode::serialize(&vec![instruction]).unwrap(),
+                        transaction_accounts,
+                        metas,
+                        expected.clone(),
+                        (SchedulingProgram::vm, SchedulingProgram::codegen),
+                        |context| {
+                            context.program_cache_for_tx_batch.replenish(
+                                crate::id(),
+                                Arc::new(ProgramCacheEntry::new_builtin((
+                                    Entrypoint::vm,
+                                    Entrypoint::codegen,
+                                ))),
+                            );
+                        },
+                        |_| {},
+                    );
+                    if expected.is_err() {
+                        for (index, (_, account)) in before.iter().enumerate() {
+                            assert_eq!(
+                                &result[index], account,
+                                "rejected {intent:?}, payer {mode:?}, vault {with_vault}, secure {secure}"
+                            );
+                        }
+                        continue;
+                    }
+                    let account = |key| {
+                        &result[before.iter().position(|(pubkey, _)| *pubkey == key).unwrap()]
+                    };
+                    let fee = if delegated {
+                        5_000 + if has_commit { COMMIT_FEE_LAMPORTS } else { 0 }
+                    } else {
+                        0
+                    };
+                    assert_eq!(account(payer.pubkey()).lamports(), 3_000_000 - fee);
+                    if let Some(vault) = vault {
+                        assert_eq!(account(vault).lamports(), fee);
+                    }
+                    let context =
+                        MagicContext::deserialize(account(MAGIC_CONTEXT_PUBKEY).data()).unwrap();
+                    assert_eq!(context.scheduled_base_intents.len(), 1);
+                    assert_eq!(
+                        u64::from(account(committee).commit_seq()),
+                        nonce + u64::from(has_commit)
+                    );
+                    assert!(account(committee).is(if undelegate {
+                        AccountMode::Undelegating
+                    } else {
+                        AccountMode::Delegated
+                    }));
+                }
+            }
+        }
+    }
 
     /// Real CPI provenance permits A-to-A registration but rejects A-to-B,
     /// while the original base action remains free to target B.
