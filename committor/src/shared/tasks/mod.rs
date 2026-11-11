@@ -40,6 +40,13 @@ impl Task {
         }
     }
 
+    pub fn try_use_full_state_buffer(&mut self) -> bool {
+        match self {
+            Self::CommitFinalize(value) => value.try_use_full_state_buffer(),
+            _ => false,
+        }
+    }
+
     pub fn compute_units(&self) -> u32 {
         match self {
             Self::CommitFinalize(value) => value.compute_units(),

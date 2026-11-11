@@ -126,6 +126,16 @@ impl CommitFinalizeTask {
         }
     }
 
+    /// Switches a buffered diff to full-state delivery to reduce finalize compute cost.
+    pub fn try_use_full_state_buffer(&mut self) -> bool {
+        if matches!(&self.delivery, CommitDelivery::DiffInBuffer { .. }) {
+            self.delivery = CommitDelivery::StateInBuffer;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn compute_units(&self) -> u32 {
         match &self.delivery {
             // Buffered diffs have consumed over 185,000 CU per commit on devnet.
