@@ -623,6 +623,11 @@ mod tests {
         assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
     }
 
+    /// An initialized Token-2022 base ATA mirror (with its cloned lamports and
+    /// a non-zero balance) can be overlaid with a zero-balance Magic ATA. The
+    /// whole buffer is rebuilt, so the account stays owned by Token-2022,
+    /// keeps its mint and the `ImmutableOwner` extension, and is recognized
+    /// as a usable Magic ATA.
     #[test]
     fn create_magic_token_2022_ata_overlays_base_ata_mirror() {
         let payer = Pubkey::new_unique();
@@ -688,13 +693,17 @@ mod tests {
         let ata_after = &accounts[1];
         assert!(ata_after.is(AccountMode::Magic));
         assert_eq!(ata_after.lamports(), 2_039_280);
+        assert_eq!(ata_after.owner(), &TOKEN_2022_PROGRAM_ID);
         let token_account =
             StateWithExtensions::<Token2022Account>::unpack(ata_after.data()).unwrap();
+        assert_eq!(token_account.base.mint, mint);
         assert_eq!(token_account.base.owner, wallet_owner);
         assert_eq!(token_account.base.amount, 0);
         assert_eq!(
             token_account.base.close_authority,
             COption::Some(MAGIC_ATA_CLOSE_AUTHORITY)
         );
+        assert!(token_account.get_extension::<ImmutableOwner>().is_ok());
+        assert!(try_get_magic_ata_info(&ata, ata_after).is_some());
     }
 }
