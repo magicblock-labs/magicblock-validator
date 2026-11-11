@@ -16,7 +16,6 @@ pub(super) async fn materialize<'a>(
     actions: Option<PostFinalize>,
 ) -> ClonerResult<()> {
     let pubkey = accessor.pubkey();
-    let mut retries = 2;
     loop {
         let expected = engine
             .accounts()
@@ -32,8 +31,7 @@ pub(super) async fn materialize<'a>(
             projection.clone()
         };
         match accessor.require(&expected).materialize(account, actions.clone()).await {
-            Err(EngineError::AccountChanged) if retries > 0 => {
-                retries -= 1;
+            Err(EngineError::AccountChanged) => {
                 accessor = engine.account(pubkey).await?;
             }
             result => return result.map_err(Into::into),

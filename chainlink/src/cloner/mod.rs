@@ -199,26 +199,11 @@ fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
     )
 }
 
-pub(crate) async fn clone_account(
-    engine: &Engine,
-    accessor: AccountAccessor<'_>,
+pub(crate) async fn clone_account<'a>(
+    engine: &'a Engine,
+    mut accessor: AccountAccessor<'a>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
-    // Delegation was confirmed before ER execution could request undelegation.
-    // Its completion must therefore advance that base-chain delegation slot.
-    // Recheck under the lease in case another delegation won while we waited.
-    // A queued transaction can still move Delegated to Undelegating afterward,
-    // but that transition preserves the same delegation stamp.
-    if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
-        accessor.observed()
-    {
-        let incoming = request.account.read();
-        let completes_undelegation = incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
-        let advances_delegation = incoming.slot() > delegation_slot;
-        if completes_undelegation && !advances_delegation {
-            return Ok(());
-        }
-    }
     if let Some(authority) = request.delegated_to_other {
         warn!(
             pubkey = %request.pubkey,
@@ -227,7 +212,7 @@ pub(crate) async fn clone_account(
         );
     }
     let ata_projection = request.is_ata_projection();
-    let actions = match request.post_delegation_mode {
+    let mut actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
         ClonePostDelegationMode::ExecuteActions(actions) => Some(actions.into_post_finalize()),
         ClonePostDelegationMode::RescueUndelegate(source_program) => Some(PostFinalize {
@@ -236,36 +221,51 @@ pub(crate) async fn clone_account(
         }),
     };
     let account = request.account;
-    let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
-    let result = if ata_projection
-        && accessor.skipped(account.read().mode(), account.read().slot()).is_none()
-    {
-        ata::materialize(engine, accessor, account, actions).await
-    } else {
-        accessor.materialize(account, actions).await.map_err(Into::into)
-    };
-    let error = match result {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
-    // A queued local creation can win after the original lease observed
-    // absence. Reacquire before accepting its protected image as sufficient.
+    let incoming = account.read();
+    let empty_placeholder = incoming.is(AccountMode::Missing) && actions.is_none();
     const LIFECYCLE_CONFLICT: TransactionError =
         TransactionError::InstructionError(1, InstructionError::InvalidArgument);
-    let lifecycle_conflict = matches!(
-        error,
-        ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
-    );
-    if empty_placeholder && lifecycle_conflict {
-        let locally_created = claim_materialization(engine, request.pubkey, false).await?.is_none();
-        if locally_created {
-            return Ok(());
+    loop {
+        // Recheck each lease: completing undelegation must advance the current
+        // delegation stamp, which Delegated -> Undelegating preserves.
+        if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
+            accessor.observed()
+        {
+            let completes_undelegation =
+                incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
+            let advances_delegation = incoming.slot() > delegation_slot;
+            if completes_undelegation && !advances_delegation {
+                return Ok(());
+            }
         }
+        let result =
+            if ata_projection && accessor.skipped(incoming.mode(), incoming.slot()).is_none() {
+                ata::materialize(engine, accessor, account.clone(), actions).await
+            } else {
+                accessor.materialize(account.clone(), actions).await.map_err(Into::into)
+            };
+        let error = match result {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        let lifecycle_conflict = matches!(
+            error,
+            ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
+        );
+        if !empty_placeholder || !lifecycle_conflict {
+            return Err(ClonerError::FailedToCloneRegularAccount(
+                request.pubkey,
+                Box::new(error),
+            ));
+        }
+        // A queued creation can reject the placeholder, then close before recovery.
+        // Preserve a live Magic image; otherwise reconcile using a fresh lease.
+        let Some(fresh) = claim_materialization(engine, request.pubkey, false).await? else {
+            return Ok(());
+        };
+        accessor = fresh;
+        actions = None;
     }
-    Err(ClonerError::FailedToCloneRegularAccount(
-        request.pubkey,
-        Box::new(error),
-    ))
 }
 
 pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequest> {
