@@ -946,20 +946,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
+    async fn test_build_plan_caps_combined_compute_budget() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
         let info_provider = Arc::new(MockInfoProvider { ..Default::default() });
         let commit_tasks = TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
         let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 
-        // Six commits and six undelegations need 1.44M CU together;
-        // each group fits separately with 720K CU.
+        // Six commits and six undelegations estimate to 1.44M CU together.
         let plan =
             TaskStrategist::build_plan(commit_tasks, follow_up_tasks, &Pubkey::new_unique(), None)
-                .expect("Both transactions fit separately");
+                .expect("The combined transaction should use the capped CU limit");
 
-        assert_eq!(plan.current.tasks.len(), 6);
-        assert_eq!(plan.follow_up.unwrap().tasks.len(), 6);
+        assert_eq!(plan.current.tasks.len(), 12);
+        assert!(plan.follow_up.is_none());
+        assert_eq!(
+            TransactionUtils::tasks_compute_units(&plan.current.tasks, None),
+            TransactionUtils::MAX_COMPUTE_UNIT_LIMIT
+        );
     }
 }
