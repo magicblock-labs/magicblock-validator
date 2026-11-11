@@ -1,7 +1,7 @@
 # magicblock-program
 
 Native validator programs for settlement requests, recurring tasks, callbacks,
-and sponsored ephemeral accounts. These run inside Engine and are separate from
+and sponsored Magic accounts. These run inside Engine and are separate from
 the base-chain Delegation Program.
 
 ## Working with the programs
@@ -12,8 +12,8 @@ instruction builders, IDs, and response types. The
 leader services handle settlement and
 [scheduled tasks](../../task-scheduler/README.md).
 
-Callbacks run separately from the base-chain actions they report. Ephemeral-account
-operations manage local account creation, resizing, closing, and sponsorship;
+Callbacks run separately from the base-chain actions they report. Operations for
+Magic accounts manage local account creation, resizing, closing, and sponsorship;
 their signer and accounting checks are enforced during execution.
 
 Scheduling commits requires writable committed accounts, including during CPI.

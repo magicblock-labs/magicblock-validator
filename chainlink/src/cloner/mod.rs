@@ -472,7 +472,7 @@ mod tests {
                 None,
             )
             .await
-            .expect("ephemeral account is materialized");
+            .expect("Magic-mode account is materialized");
         assert!(
             claim_cached_account_eviction(&engine, authoritative, |_| ())
                 .await

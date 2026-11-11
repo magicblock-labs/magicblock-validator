@@ -108,7 +108,7 @@ fn validate(
     Ok(())
 }
 
-fn close_outbox_ephemeral_account(
+fn close_outbox_intent_account(
     invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;

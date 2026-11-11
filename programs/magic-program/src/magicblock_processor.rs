@@ -1,5 +1,6 @@
 use magic_program_api::instruction::{
-    CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction, OutboxIntentInstruction,
+    CallbackInstruction, MagicAccountSystemInstruction, MagicBlockInstruction,
+    OutboxIntentInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -7,11 +8,11 @@ use solana_program_runtime::{declare_process_instruction, invoke_context::Invoke
 use wincode::{SchemaRead, config::DefaultConfig};
 
 use crate::{
-    ephemeral_accounts::{
-        process_close_ephemeral_account, process_close_magic_ata, process_create_ephemeral_account,
-        process_create_magic_ata, process_resize_ephemeral_account,
-    },
     errors::MagicBlockProgramError,
+    magic_accounts::{
+        process_close_magic_account, process_close_magic_ata, process_create_magic_account,
+        process_create_magic_ata, process_resize_magic_account,
+    },
     outbox_intent::{
         process_close_outbox_intent::process_close_outbox_intent,
         process_create_outbox_intent::process_create_outbox_intent,
@@ -116,15 +117,13 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
         CancelTask { task_id } => process_cancel_task(signers, invoke_context, task_id),
         DisableExecutableCheck => Ok(()),
         EnableExecutableCheck => Ok(()),
-        CreateEphemeralAccount { data_len } => {
-            process_create_ephemeral_account(invoke_context, transaction_context, data_len)
+        CreateMagicAccount { data_len } => {
+            process_create_magic_account(invoke_context, transaction_context, data_len)
         }
-        ResizeEphemeralAccount { new_data_len } => {
-            process_resize_ephemeral_account(invoke_context, transaction_context, new_data_len)
+        ResizeMagicAccount { new_data_len } => {
+            process_resize_magic_account(invoke_context, transaction_context, new_data_len)
         }
-        CloseEphemeralAccount => {
-            process_close_ephemeral_account(invoke_context, transaction_context)
-        }
+        CloseMagicAccount => process_close_magic_account(invoke_context, transaction_context),
         AddActionCallback(args) => process_add_action_callback(signers, invoke_context, args),
         EvictAccount { .. } => composition_removed(invoke_context, "EvictAccount"),
         _ExecuteCrank => {
@@ -167,21 +166,21 @@ declare_process_instruction!(
 );
 
 declare_process_instruction!(
-    EphemeralSystemEntrypoint,
+    MagicAccountSystemEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
-        let instruction: EphemeralSystemInstruction = deserialize_instruction(invoke_context)?;
+        let instruction: MagicAccountSystemInstruction = deserialize_instruction(invoke_context)?;
         let transaction_context = &invoke_context.transaction_context;
 
         match instruction {
-            EphemeralSystemInstruction::CreateEphemeralAccount { data_len } => {
-                process_create_ephemeral_account(invoke_context, transaction_context, data_len)
+            MagicAccountSystemInstruction::CreateMagicAccount { data_len } => {
+                process_create_magic_account(invoke_context, transaction_context, data_len)
             }
-            EphemeralSystemInstruction::ResizeEphemeralAccount { new_data_len } => {
-                process_resize_ephemeral_account(invoke_context, transaction_context, new_data_len)
+            MagicAccountSystemInstruction::ResizeMagicAccount { new_data_len } => {
+                process_resize_magic_account(invoke_context, transaction_context, new_data_len)
             }
-            EphemeralSystemInstruction::CloseEphemeralAccount => {
-                process_close_ephemeral_account(invoke_context, transaction_context)
+            MagicAccountSystemInstruction::CloseMagicAccount => {
+                process_close_magic_account(invoke_context, transaction_context)
             }
         }
     }

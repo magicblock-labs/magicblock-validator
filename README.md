@@ -35,7 +35,7 @@ and settlement.
 
 ### Build with both delegated and rollup-local state
 
-Bring existing Solana accounts into the rollup, or create **sponsored ephemeral
+Bring existing Solana accounts into the rollup, or create **sponsored Magic
 accounts** for state your application needs locally. Programs can create, resize,
 and explicitly close these accounts, with a sponsor funding their backing.
 That gives applications room for session state and intermediate results without
