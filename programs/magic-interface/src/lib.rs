@@ -16,7 +16,7 @@ pub const CRANK_PROGRAM_ID: Pubkey = pubkey!("Crank11111111111111111111111111111
 
 pub const CALLBACK_PROGRAM_ID: Pubkey = pubkey!("CaLLback11111111111111111111111111111111111");
 
-/// Program ID for the Magic account system builtin-program.
+/// Program ID for the Magic account builtin program.
 pub const MAGIC_ACCOUNT_PROGRAM_ID: Pubkey = pubkey!("EphSystem1111111111111111111111111111111111");
 
 /// Program ID for the outbox intent builtin-program.

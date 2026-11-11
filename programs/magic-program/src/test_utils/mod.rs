@@ -13,9 +13,7 @@ use solana_program_runtime::{
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{native_loader, system_program};
 
-use self::magicblock_processor::{
-    Entrypoint, MagicAccountSystemEntrypoint, OutboxIntentEntrypoint,
-};
+use self::magicblock_processor::{Entrypoint, MagicAccountEntrypoint, OutboxIntentEntrypoint};
 use super::*;
 use crate::validator;
 
@@ -33,8 +31,8 @@ fn register_sibling_builtins(invoke_context: &mut InvokeContext<'_, '_>) {
     invoke_context.program_cache_for_tx_batch.replenish(
         MAGIC_ACCOUNT_PROGRAM_ID,
         Arc::new(ProgramCacheEntry::new_builtin((
-            MagicAccountSystemEntrypoint::vm,
-            MagicAccountSystemEntrypoint::codegen,
+            MagicAccountEntrypoint::vm,
+            MagicAccountEntrypoint::codegen,
         ))),
     );
 }

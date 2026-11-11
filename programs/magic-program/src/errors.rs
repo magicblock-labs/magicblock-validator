@@ -43,6 +43,11 @@ pub enum MagicBlockProgramError {
     #[error("The account is delegated and not currently undelegating")]
     AccountIsDelegated,
 
+    /// Keep this placeholder in place so later program error codes remain stable.
+    /// Replace it in this position when assigning a defined error to this slot.
+    #[error("unused program error code")]
+    Unused,
+
     #[error("Updates cannot be older than the current remote slot")]
     OutOfOrderUpdate,
 
@@ -72,4 +77,25 @@ pub enum MagicBlockProgramError {
 
     #[error("Account modification instructions are no longer supported")]
     AccountCompositionRemoved,
+}
+
+#[cfg(test)]
+mod tests {
+    use solana_instruction::error::InstructionError;
+
+    use super::MagicBlockProgramError;
+
+    #[test]
+    fn account_composition_removed_keeps_custom_error_code() {
+        let error: InstructionError = MagicBlockProgramError::AccountCompositionRemoved.into();
+
+        assert_eq!(error, InstructionError::Custom(20));
+    }
+
+    #[test]
+    fn unused_error_slot_stays_at_code_ten() {
+        let error: InstructionError = MagicBlockProgramError::Unused.into();
+
+        assert_eq!(error, InstructionError::Custom(10));
+    }
 }

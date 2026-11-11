@@ -1,6 +1,5 @@
 use magic_program_api::instruction::{
-    CallbackInstruction, MagicAccountSystemInstruction, MagicBlockInstruction,
-    OutboxIntentInstruction,
+    CallbackInstruction, MagicAccountInstruction, MagicBlockInstruction, OutboxIntentInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -166,20 +165,20 @@ declare_process_instruction!(
 );
 
 declare_process_instruction!(
-    MagicAccountSystemEntrypoint,
+    MagicAccountEntrypoint,
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
-        let instruction: MagicAccountSystemInstruction = deserialize_instruction(invoke_context)?;
+        let instruction: MagicAccountInstruction = deserialize_instruction(invoke_context)?;
         let transaction_context = &invoke_context.transaction_context;
 
         match instruction {
-            MagicAccountSystemInstruction::CreateMagicAccount { data_len } => {
+            MagicAccountInstruction::CreateMagicAccount { data_len } => {
                 process_create_magic_account(invoke_context, transaction_context, data_len)
             }
-            MagicAccountSystemInstruction::ResizeMagicAccount { new_data_len } => {
+            MagicAccountInstruction::ResizeMagicAccount { new_data_len } => {
                 process_resize_magic_account(invoke_context, transaction_context, new_data_len)
             }
-            MagicAccountSystemInstruction::CloseMagicAccount => {
+            MagicAccountInstruction::CloseMagicAccount => {
                 process_close_magic_account(invoke_context, transaction_context)
             }
         }

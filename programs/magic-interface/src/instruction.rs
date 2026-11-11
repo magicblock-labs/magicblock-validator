@@ -450,11 +450,11 @@ pub enum CallbackInstruction {
     ExecuteCallback { instruction: Instruction },
 }
 
-/// Instruction(s) for the Magic account system builtin-program: creates,
+/// Instructions for the Magic account builtin program: creates,
 /// resizes, and closes Magic accounts.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
-pub enum MagicAccountSystemInstruction {
+pub enum MagicAccountInstruction {
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
@@ -491,7 +491,7 @@ pub enum OutboxIntentInstruction {
     /// after popping the intent off `MagicContext`. `data` is the already
     /// serialized `OutboxIntentBundle` bytes. Claims ownership of the PDA
     /// directly (it arrives as a fresh, system-owned, zero-lamport account),
-    /// so no rent-paying vault or Magic account system program CPI is needed.
+    /// so no rent-paying vault or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - 0. [SIGNER] Sponsor (validator authority)
@@ -500,7 +500,7 @@ pub enum OutboxIntentInstruction {
 
     /// Closes the outbox intent PDA on successful execution of the intent.
     /// The PDA never held lamports, so this just zeroes and marks it closed
-    /// directly - no rent refund or Magic account system program CPI is needed.
+    /// directly - no rent refund or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - **0.** `[SIGNER]` Validator Authority
