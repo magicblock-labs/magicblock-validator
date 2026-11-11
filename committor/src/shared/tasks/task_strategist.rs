@@ -190,27 +190,10 @@ impl TaskStrategist {
         validator: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
-        if TransactionUtils::tasks_compute_units(&tasks, uniqueness_nonce) > 1_400_000 {
-            return Err(TaskStrategistError::FailedToFit);
-        }
         let mut optimized_tasks = tasks.clone();
-        let tx_size = Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?;
-        let mut compute_units =
-            TransactionUtils::tasks_compute_units(&optimized_tasks, uniqueness_nonce);
-        if compute_units > 1_400_000 {
-            // Full-state buffered commits avoid the segment-proportional cost of applying diffs.
-            for index in 0..optimized_tasks.len() {
-                if optimized_tasks[index].try_use_full_state_buffer() {
-                    compute_units =
-                        TransactionUtils::tasks_compute_units(&optimized_tasks, uniqueness_nonce);
-                    if compute_units <= 1_400_000 {
-                        break;
-                    }
-                }
-            }
-        }
-
-        if tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE && compute_units <= 1_400_000 {
+        if Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?
+            <= MAX_TRANSACTION_V1_WIRE_SIZE
+        {
             return Ok(TransactionStrategy {
                 tasks: optimized_tasks,
                 lookup_tables_keys: vec![],
@@ -237,9 +220,6 @@ impl TaskStrategist {
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub(crate) fn attempt_lookup_tables(tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
-        if TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce) > 1_400_000 {
-            return false;
-        }
         let placeholder = Keypair::new();
         let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
             &Self::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce),
@@ -548,7 +528,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_falls_back_to_full_state_for_over_budget_buffered_diffs() {
+    fn test_build_strategy_caps_over_budget_buffered_diff_limit() {
         let validator = Pubkey::new_unique();
 
         for count in [2, 5, 8] {
@@ -556,25 +536,18 @@ mod tests {
                 (0..count).map(|i| create_test_commit_task(i, 10_240, 5000).into()).collect();
             let result = TaskStrategist::build_strategy(tasks, &validator, None);
 
-            let strategy = result.expect("Full-state fallback should keep the bundle under budget");
+            let strategy = result.expect("Compute-unit limit should be capped at the runtime max");
             assert_eq!(strategy.tasks.len(), count as usize);
             assert_eq!(
                 TransactionUtils::tasks_compute_units(&strategy.tasks, None),
-                if count == 2 { 600_000 } else { 1_320_000 }
+                if count == 2 { 600_000 } else { TransactionUtils::MAX_COMPUTE_UNIT_LIMIT }
             );
-            assert!(strategy.tasks.iter().all(|task| match count {
-                2 => matches!(commit_delivery(task), CommitDelivery::DiffInBuffer { .. }),
-                _ => matches!(
+            assert!(
+                strategy.tasks.iter().all(|task| matches!(
                     commit_delivery(task),
-                    CommitDelivery::DiffInBuffer { .. } | CommitDelivery::StateInBuffer
-                ),
-            }));
-            if count > 2 {
-                assert!(matches!(
-                    commit_delivery(&strategy.tasks[0]),
-                    CommitDelivery::StateInBuffer
-                ));
-            }
+                    CommitDelivery::DiffInBuffer { .. }
+                ))
+            );
         }
     }
 
