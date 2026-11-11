@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use magic_program_api::{
-    MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID, MAGIC_ACCOUNT_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
+    MAGIC_ACCOUNT_PROGRAM_ID, MAGIC_ACCOUNT_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, error::InstructionError};
@@ -31,7 +31,7 @@ fn register_sibling_builtins(invoke_context: &mut InvokeContext<'_, '_>) {
         ))),
     );
     invoke_context.program_cache_for_tx_batch.replenish(
-        MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID,
+        MAGIC_ACCOUNT_PROGRAM_ID,
         Arc::new(ProgramCacheEntry::new_builtin((
             MagicAccountSystemEntrypoint::vm,
             MagicAccountSystemEntrypoint::codegen,
@@ -72,7 +72,7 @@ pub fn ensure_started_validator(
     // Ensure the sibling builtin programs CPI'd into from the main
     // entrypoint are resolvable as accounts (mock_process_instruction only
     // auto-injects the entrypoint under test, not its CPI targets)
-    map.entry(MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID)
+    map.entry(MAGIC_ACCOUNT_PROGRAM_ID)
         .or_insert_with(|| AccountSharedData::new(0, 0, &native_loader::id()));
     map.entry(OUTBOX_INTENT_PROGRAM_ID)
         .or_insert_with(|| AccountSharedData::new(0, 0, &native_loader::id()));

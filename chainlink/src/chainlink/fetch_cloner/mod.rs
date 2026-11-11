@@ -360,7 +360,7 @@ const RISK_RELEVANT_PROGRAMS: [Pubkey; 6] = [
     EATA_PROGRAM_ID,
     magic_program_api::ID,
     solana_sdk_ids::system_program::ID,
-    magic_program_api::MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID,
+    magic_program_api::MAGIC_ACCOUNT_PROGRAM_ID,
 ];
 
 /// Decides whether the configured [`AmlCheckStrategy`] requires risk checking

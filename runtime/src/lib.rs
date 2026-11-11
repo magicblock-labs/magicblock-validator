@@ -56,7 +56,7 @@ fn builtins() -> HashMap<Pubkey, BuiltinFunctionWithContext> {
         (CallbackEntrypoint::vm, CallbackEntrypoint::codegen),
     );
     builtins.insert(
-        program::MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID,
+        program::MAGIC_ACCOUNT_PROGRAM_ID,
         (
             MagicAccountSystemEntrypoint::vm,
             MagicAccountSystemEntrypoint::codegen,

@@ -274,7 +274,7 @@ mod aml_check_strategy {
             EATA_PROGRAM_ID,
             magic_program_api::ID,
             system_program::ID,
-            magic_program_api::MAGIC_ACCOUNT_SYSTEM_PROGRAM_ID,
+            magic_program_api::MAGIC_ACCOUNT_PROGRAM_ID,
         ] {
             let actions = vec![action_for_program(program)];
             assert!(
