@@ -43,9 +43,6 @@ pub enum MagicBlockProgramError {
     #[error("The account is delegated and not currently undelegating")]
     AccountIsDelegated,
 
-    #[error("The account is ephemeral and cannot be mutated")]
-    AccountIsEphemeral,
-
     #[error("Updates cannot be older than the current remote slot")]
     OutOfOrderUpdate,
 
