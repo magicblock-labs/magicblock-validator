@@ -257,6 +257,68 @@ jobs:
             npm publish --access public --tag "$NPM_CHANNEL"
           fi
 
+  publish-v42:
+    name: Publish v42 calculator
+    needs: publish-binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout validator release
+        uses: actions/checkout@v5
+        with:
+          path: magicblock-validator
+          persist-credentials: false
+
+      - name: Resolve locked Engine revision
+        id: engine
+        working-directory: magicblock-validator
+        shell: bash
+        run: |
+          revision=$(python3 - <<'PY'
+          import tomllib
+
+          with open("Cargo.lock", "rb") as lockfile:
+              packages = tomllib.load(lockfile)["package"]
+          source = next(p["source"] for p in packages if p["name"] == "v42-calculator-interface")
+          print(source.rsplit("#", 1)[1])
+          PY
+          )
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Engine
+        uses: actions/checkout@v5
+        with:
+          repository: magicblock-labs/magicblock-engine
+          ref: ${{ steps.engine.outputs.revision }}
+          path: magicblock-engine
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        working-directory: magicblock-engine
+        shell: bash
+        run: rustup toolchain install
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Build v42 calculator
+        working-directory: magicblock-engine
+        shell: bash
+        run: |
+          env -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER cargo build-sbf \
+            --manifest-path programs/v42-calculator-program/Cargo.toml \
+            --arch v3 --sbf-out-dir target/deploy -- --locked
+
+      - name: Publish v42 calculator to GitHub release
+        if: env.DRY_RUN == 'false'
+        working-directory: magicblock-engine
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release upload "$RELEASE_VERSION" target/deploy/v42_calculator_program.so --clobber
+
   publish-wrapper-npm-package:
     name: Publish wrapper NPM packages
     if: github.event_name != 'push'

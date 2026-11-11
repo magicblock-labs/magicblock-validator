@@ -199,26 +199,11 @@ fn undelegation_action(engine: &Engine, pubkey: Pubkey) -> Instruction {
     )
 }
 
-pub(crate) async fn clone_account(
-    engine: &Engine,
-    accessor: AccountAccessor<'_>,
+pub(crate) async fn clone_account<'a>(
+    engine: &'a Engine,
+    mut accessor: AccountAccessor<'a>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
-    // Delegation was confirmed before ER execution could request undelegation.
-    // Its completion must therefore advance that base-chain delegation slot.
-    // Recheck under the lease in case another delegation won while we waited.
-    // A queued transaction can still move Delegated to Undelegating afterward,
-    // but that transition preserves the same delegation stamp.
-    if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
-        accessor.observed()
-    {
-        let incoming = request.account.read();
-        let completes_undelegation = incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
-        let advances_delegation = incoming.slot() > delegation_slot;
-        if completes_undelegation && !advances_delegation {
-            return Ok(());
-        }
-    }
     if let Some(authority) = request.delegated_to_other {
         warn!(
             pubkey = %request.pubkey,
@@ -227,7 +212,7 @@ pub(crate) async fn clone_account(
         );
     }
     let ata_projection = request.is_ata_projection();
-    let actions = match request.post_delegation_mode {
+    let mut actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
         ClonePostDelegationMode::ExecuteActions(actions) => Some(actions.into_post_finalize()),
         ClonePostDelegationMode::RescueUndelegate(source_program) => Some(PostFinalize {
@@ -236,36 +221,53 @@ pub(crate) async fn clone_account(
         }),
     };
     let account = request.account;
-    let empty_placeholder = account.read().is(AccountMode::Missing) && actions.is_none();
-    let result = if ata_projection
-        && accessor.skipped(account.read().mode(), account.read().slot()).is_none()
-    {
-        ata::materialize(engine, accessor, account, actions).await
-    } else {
-        accessor.materialize(account, actions).await.map_err(Into::into)
-    };
-    let error = match result {
-        Ok(()) => return Ok(()),
-        Err(error) => error,
-    };
-    // A queued local creation can win after the original lease observed
-    // absence. Reacquire before accepting its protected image as sufficient.
+    let incoming = account.read();
+    let empty_placeholder = incoming.is(AccountMode::Missing) && actions.is_none();
     const LIFECYCLE_CONFLICT: TransactionError =
         TransactionError::InstructionError(1, InstructionError::InvalidArgument);
-    let lifecycle_conflict = matches!(
-        error,
-        ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
-    );
-    if empty_placeholder && lifecycle_conflict {
-        let locally_created = claim_materialization(engine, request.pubkey, false).await?.is_none();
-        if locally_created {
-            return Ok(());
+    let mut retries = 3;
+    loop {
+        // Recheck each lease: completing undelegation must advance the current
+        // delegation stamp, which Delegated -> Undelegating preserves.
+        if let Some((AccountMode::Delegated | AccountMode::Undelegating, delegation_slot)) =
+            accessor.observed()
+        {
+            let completes_undelegation =
+                incoming.is_any([AccountMode::Missing, AccountMode::Mirrored]);
+            let advances_delegation = incoming.slot() > delegation_slot;
+            if completes_undelegation && !advances_delegation {
+                return Ok(());
+            }
         }
+        let result =
+            if ata_projection && accessor.skipped(incoming.mode(), incoming.slot()).is_none() {
+                ata::materialize(engine, accessor, account.clone(), actions).await
+            } else {
+                accessor.materialize(account.clone(), actions).await.map_err(Into::into)
+            };
+        let error = match result {
+            Ok(()) => return Ok(()),
+            Err(error) => error,
+        };
+        let lifecycle_conflict = matches!(
+            error,
+            ClonerError::Engine(EngineError::TransactionExecution(LIFECYCLE_CONFLICT))
+        );
+        if !empty_placeholder || !lifecycle_conflict || retries == 0 {
+            return Err(ClonerError::FailedToCloneRegularAccount(
+                request.pubkey,
+                Box::new(error),
+            ));
+        }
+        // A queued creation can reject the placeholder, then close before recovery.
+        // Preserve a live Magic image; otherwise reconcile using a fresh lease.
+        let Some(fresh) = claim_materialization(engine, request.pubkey, false).await? else {
+            return Ok(());
+        };
+        retries -= 1;
+        accessor = fresh;
+        actions = None;
     }
-    Err(ClonerError::FailedToCloneRegularAccount(
-        request.pubkey,
-        Box::new(error),
-    ))
 }
 
 pub(crate) fn resolve_program(program: LoadedProgram) -> Option<AccountCloneRequest> {
@@ -356,9 +358,80 @@ pub(crate) async fn claim_account_eviction(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use engine::testkit::TestEngine;
+    use magic_root_interface::MagicRootInstruction;
+    use tokio::time;
 
     use super::*;
+
+    /// Proves stale absence recovery preserves a competing local creation and
+    /// still succeeds if that account closes after rejection but before recovery.
+    #[tokio::test]
+    async fn absence_clone_recovers_after_local_create_and_close() {
+        let engine = TestEngine::new().await;
+        for close_before_recovery in [false, true] {
+            let pubkey = Pubkey::new_unique();
+            let accessor = claim_materialization(&engine, pubkey, false).await.unwrap().unwrap();
+            assert_eq!(accessor.observed(), None);
+
+            let account = AccountBuilder::default()
+                .lamports(1_000_000)
+                .data(vec![42])
+                .mode(AccountMode::Magic)
+                .build();
+            let create = MagicRootInstruction::compose_account(pubkey, account).unwrap();
+            engine.execute(create.as_slice()).await.unwrap();
+            let created = engine.get_account(pubkey).unwrap();
+
+            let mut failures = engine.transactions().subscribe_failures();
+            let request = AccountCloneRequest {
+                pubkey,
+                account: AccountBuilder::default().slot(11),
+                post_delegation_mode: ClonePostDelegationMode::None,
+                delegated_to_other: None,
+                source_slots: None,
+            };
+            let clone = clone_account(&engine, accessor, request);
+            tokio::pin!(clone);
+            // Submit once, then keep recovery suspended until the local close.
+            assert!(futures_util::poll!(&mut clone).is_pending());
+            let failure = time::timeout(Duration::from_secs(5), failures.recv())
+                .await
+                .expect("stale clone reaches execution")
+                .expect("failure subscription remains open");
+            assert_eq!(
+                failure.execution.result.as_ref().unwrap().execution_details.status,
+                Err(TransactionError::InstructionError(
+                    1,
+                    InstructionError::InvalidArgument,
+                )),
+            );
+            assert_eq!(
+                engine.get_account(pubkey).unwrap(),
+                created,
+                "rejected placeholder rolls back without changing the local creation",
+            );
+
+            if close_before_recovery {
+                let delete = MagicRootInstruction::Delete.compose(pubkey).unwrap();
+                engine.execute(&[delete]).await.unwrap();
+                assert!(engine.get_account(pubkey).is_none());
+            }
+            time::timeout(Duration::from_secs(5), clone)
+                .await
+                .expect("clone recovery completes")
+                .expect("fresh local state satisfies absence recovery");
+            if close_before_recovery {
+                let accessor = engine.account(pubkey).await.unwrap();
+                assert_eq!(accessor.observed(), Some((AccountMode::Missing, 11)));
+            } else {
+                assert_eq!(engine.get_account(pubkey).unwrap(), created);
+            }
+        }
+        engine.close().await;
+    }
 
     /// Proves a queued cache eviction cannot claim an account after a later
     /// materialization retained it in recency or made it authoritative.

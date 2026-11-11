@@ -36,7 +36,7 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
         authority: ctx.validator_pubkey,
         owner: V42_ID,
         delegation_slot: ctx.rpc_client.get_slot(),
-        lamports: 1_000,
+        lamports: ctx.rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = delegation_record_to_vec(&record);

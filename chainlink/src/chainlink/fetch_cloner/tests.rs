@@ -354,6 +354,7 @@ async fn released_collision_candidate_does_not_retry_settled_delegation() {
         fetch.validator_pubkey,
         owner,
         DELEGATION_SLOT,
+        1_000_000,
     );
 
     let local = AccountBuilder::from(Account {
@@ -416,6 +417,7 @@ async fn released_collision_candidate_settles_after_successful_clone() {
         fetch.validator_pubkey,
         owner,
         DELEGATION_SLOT,
+        1_000_000,
     );
 
     let before = fetch.fetch_count();
