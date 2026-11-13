@@ -3,8 +3,10 @@ use chainlink::{ProdChainlink, errors::ChainlinkResult};
 use engine::Engine;
 use nucleus::runtime::TransactionView;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
-use solana_account::{AccountMode, AccountSharedData};
-use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
+use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
+use solana_account_decoder::{
+    MAX_BASE58_BYTES, UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
+};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
@@ -137,6 +139,46 @@ impl AccountWithPubkey {
             account: encode_ui_account(&pubkey, account, encoding, None, slice),
         }
     }
+
+    /// HTTP reads reject oversized base58 data; subscriptions keep the
+    /// decoder's placeholder string, matching Agave's pubsub.
+    pub(crate) fn checked(
+        pubkey: Pubkey,
+        account: &AccountSharedData,
+        encoding: UiAccountEncoding,
+        slice: Option<UiDataSliceConfig>,
+    ) -> RpcResult<Self> {
+        check_base58_size(account, encoding, slice)?;
+        Ok(Self::new(pubkey, account, encoding, slice))
+    }
+}
+
+/// Reject base58 account data over `MAX_BASE58_BYTES`, as Agave's RPC does.
+///
+/// The decoder would otherwise return a successful response whose data is the
+/// placeholder string "error: data too large for bs58 encoding".
+pub(crate) fn check_base58_size(
+    account: &AccountSharedData,
+    encoding: UiAccountEncoding,
+    slice: Option<UiDataSliceConfig>,
+) -> RpcResult<()> {
+    if !matches!(
+        encoding,
+        UiAccountEncoding::Binary | UiAccountEncoding::Base58
+    ) {
+        return Ok(());
+    }
+    let len = account.data().len();
+    let len = slice.map_or(len, |slice| {
+        slice.length.min(len.saturating_sub(slice.offset))
+    });
+    if len > MAX_BASE58_BYTES {
+        return Err(RpcError::invalid_request(format!(
+            "Encoded binary (base 58) data should be less than {MAX_BASE58_BYTES} bytes, please \
+             use Base64 encoding."
+        )));
+    }
+    Ok(())
 }
 
 /// Match validated filters without decoding their bytes for each account.
