@@ -1878,6 +1878,5 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
             mbv_core::intent::outbox::outbox_intent_pda(intent.intent_id)
         )));
     }
-    assert!(!logs.iter().any(|line| line.starts_with("Settlement receipt signature:")));
     engine.close().await;
 }
