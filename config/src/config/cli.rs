@@ -30,14 +30,22 @@ pub struct CliParams {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remotes: Option<Vec<Remote>>,
 
-    /// Listen address for the metrics endpoint.
-    #[arg(long, short)]
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metrics: Option<BindAddress>,
+    /// Metrics-specific arguments
+    #[command(flatten)]
+    pub metrics: CliMetricsConfig,
 
     /// Aperture-specific arguments
     #[command(flatten)]
     pub aperture: CliApertureConfig,
+}
+
+/// CLI analog of [`crate::config::metrics::MetricsConfig`]
+#[derive(Args, Serialize, Debug)]
+pub struct CliMetricsConfig {
+    /// Listen address for the metrics endpoint.
+    #[arg(long = "metrics", short = 'm')]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub address: Option<BindAddress>,
 }
 
 /// CLI analog of configuration for Aperture functionality: RPC, Websocket, Geyser
