@@ -1,4 +1,5 @@
 use mbv_core::Slot;
+use solana_rpc_client_api::config::RpcBlocksConfigWrapper;
 
 use super::{HandlerResult, RpcHandlers};
 use crate::requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload};
@@ -26,11 +27,12 @@ impl RpcHandlers {
         let latest = self.engine.blocks().latest().slot;
         let (end, limit) = match range {
             BlockRange::EndSlot => {
-                let end = request
-                    .optional::<Slot>(1)?
-                    .unwrap_or(latest)
-                    .min(latest)
-                    .min(start.saturating_add(MAX_BLOCKS));
+                // Like Agave, the second parameter is an end slot or a context config.
+                let (end, _) = request
+                    .optional::<RpcBlocksConfigWrapper>(1)?
+                    .map(|wrapper| wrapper.unzip())
+                    .unwrap_or_default();
+                let end = end.unwrap_or(latest).min(latest).min(start.saturating_add(MAX_BLOCKS));
                 // An empty range, like Agave, rather than an error past the tip.
                 (end, MAX_BLOCKS as usize + 1)
             }
