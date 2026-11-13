@@ -12,7 +12,7 @@ use crate::Pubkey;
 #[derive(Default, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub struct SentCommit {
-    pub message_id: u64,
+    pub intent_id: u64,
     pub slot: u64,
     pub blockhash: Hash,
     pub payer: Pubkey,

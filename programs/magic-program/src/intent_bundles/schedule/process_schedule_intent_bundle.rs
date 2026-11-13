@@ -148,10 +148,10 @@ pub(crate) fn process_schedule_intent_bundle(
     let context_acc = get_instruction_account_with_idx(transaction_context, MAGIC_CONTEXT_IDX)?;
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
+    ic_msg!(invoke_context, "Scheduled intent id: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent outbox: {}",
+        "Outbox for scheduled intent: {}",
         outbox_intent_pda(intent_id),
     );
 

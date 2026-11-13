@@ -1872,11 +1872,12 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     assert_eq!(ids, vec![4, 5]);
     let logs = first.execution_details.log_messages.unwrap();
     for intent in &context.scheduled_base_intents {
+        assert!(logs.contains(&format!("Scheduled intent id: {}", intent.intent_id)));
         assert!(logs.contains(&format!(
-            "ScheduledCommitSent outbox: {}",
+            "Outbox for scheduled intent: {}",
             mbv_core::intent::outbox::outbox_intent_pda(intent.intent_id)
         )));
     }
-    assert!(!logs.iter().any(|line| line.starts_with("ScheduledCommitSent signature:")));
+    assert!(!logs.iter().any(|line| line.starts_with("Settlement receipt signature:")));
     engine.close().await;
 }

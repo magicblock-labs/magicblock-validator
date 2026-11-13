@@ -26,7 +26,7 @@ pub(crate) fn process_scheduled_commit_sent(
     invoke_context: &mut InvokeContext<'_, '_>,
     commit: SentCommit,
 ) -> Result<(), InstructionError> {
-    validate(&signers, invoke_context, commit.message_id)?;
+    validate(&signers, invoke_context, commit.intent_id)?;
     close_outbox_ephemeral_account(invoke_context)?;
     log_sent_commit(invoke_context, &commit);
     Ok(())
@@ -126,19 +126,15 @@ fn close_outbox_ephemeral_account(
 fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) {
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent id: {}, slot: {}, blockhash: {}",
-        commit.message_id,
+        "Settlement receipt intent id: {}, slot: {}, blockhash: {}",
+        commit.intent_id,
         commit.slot,
         commit.blockhash,
     );
+    ic_msg!(invoke_context, "Settlement receipt payer: {}", commit.payer);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent payer: {}",
-        commit.payer
-    );
-    ic_msg!(
-        invoke_context,
-        "ScheduledCommitSent included: [{}]",
+        "Settlement receipt included: [{}]",
         commit
             .included_pubkeys
             .iter()
@@ -148,7 +144,7 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) 
     );
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent excluded: [{}]",
+        "Settlement receipt excluded: [{}]",
         commit
             .excluded_pubkeys
             .iter()
@@ -159,18 +155,18 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) 
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
             invoke_context,
-            "ScheduledCommitSent signature[{}]: {}",
+            "Settlement receipt signature[{}]: {}",
             idx,
             sig
         );
     }
     if commit.requested_undelegation {
-        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation");
+        ic_msg!(invoke_context, "Settlement receipt requested undelegation");
     }
     for (idx, error) in commit.patched_errors.iter().enumerate() {
         ic_msg!(
             invoke_context,
-            "ScheduledCommitSent patched error[{}]: {}",
+            "Settlement receipt patched error[{}]: {}",
             idx,
             error
         );
@@ -178,7 +174,7 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) 
     for (idx, report) in commit.callbacks_scheduling_results.iter().enumerate() {
         ic_msg!(
             invoke_context,
-            "ScheduledCommitSent callback[{}]: {}",
+            "Settlement receipt callback[{}]: {}",
             idx,
             report
         );
@@ -186,7 +182,7 @@ fn log_sent_commit(invoke_context: &InvokeContext<'_, '_>, commit: &SentCommit) 
     if let Some(error_message) = &commit.error_message {
         ic_msg!(
             invoke_context,
-            "ScheduledCommitSent error message: {}",
+            "Settlement receipt error message: {}",
             error_message
         );
     }
@@ -211,7 +207,7 @@ mod tests {
 
     fn fixture() -> (SentCommit, Instruction, Vec<(Pubkey, AccountSharedData)>) {
         let commit = SentCommit {
-            message_id: 42,
+            intent_id: 42,
             slot: 10,
             blockhash: Hash::default(),
             payer: Pubkey::new_unique(),
@@ -222,10 +218,10 @@ mod tests {
             callbacks_scheduling_results: vec!["OK: callback signature".into()],
             ..Default::default()
         };
-        let (pda, bump) = outbox_intent_pda_with_bump(commit.message_id);
+        let (pda, bump) = outbox_intent_pda_with_bump(commit.intent_id);
         let bundle = OutboxIntentBundle::accepted(
             ScheduledIntentBundle {
-                intent_id: commit.message_id,
+                intent_id: commit.intent_id,
                 slot: commit.slot,
                 blockhash: commit.blockhash,
                 payer: commit.payer,
@@ -276,24 +272,28 @@ mod tests {
                 &system_program::id()
             );
             assert!(logs.contains(&format!(
-                "ScheduledCommitSent signature[0]: {}",
+                "Settlement receipt intent id: {}, slot: {}, blockhash: {}",
+                commit.intent_id, commit.slot, commit.blockhash
+            )));
+            assert!(logs.contains(&format!(
+                "Settlement receipt signature[0]: {}",
                 commit.chain_signatures[0]
             )));
             assert!(logs.contains(&format!(
-                "ScheduledCommitSent included: [{}]",
+                "Settlement receipt included: [{}]",
                 commit.included_pubkeys[0]
             )));
-            assert!(logs.contains(&"ScheduledCommitSent requested undelegation".to_string()));
+            assert!(logs.contains(&"Settlement receipt requested undelegation".to_string()));
             assert!(logs.contains(
-                &"ScheduledCommitSent patched error[0]: recovered action error".to_string()
+                &"Settlement receipt patched error[0]: recovered action error".to_string()
             ));
             assert!(
                 logs.contains(
-                    &"ScheduledCommitSent callback[0]: OK: callback signature".to_string()
+                    &"Settlement receipt callback[0]: OK: callback signature".to_string()
                 )
             );
             assert_eq!(
-                logs.iter().any(|line| line.starts_with("ScheduledCommitSent error message:")),
+                logs.iter().any(|line| line.starts_with("Settlement receipt error message:")),
                 commit.error_message.is_some()
             );
         }
@@ -359,7 +359,7 @@ mod tests {
                 Err(expected),
             );
             assert_eq!(updated[1], initial);
-            assert!(!logs.iter().any(|line| line.starts_with("ScheduledCommitSent id:")));
+            assert!(!logs.iter().any(|line| line.starts_with("Settlement receipt intent id:")));
         }
     }
 }
