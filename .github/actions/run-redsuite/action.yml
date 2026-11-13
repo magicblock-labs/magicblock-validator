@@ -42,6 +42,62 @@ runs:
 
     - uses: ./magicblock-validator/.github/actions/build-er
 
+    # snapshot_bootstrap loads this program from the Engine source tree; it is
+    # not one of RedSuite's own fixture programs.
+    - name: Resolve Engine revision for calculator fixture
+      if: inputs.family == 'redshift'
+      id: engine
+      shell: bash
+      working-directory: magicblock-validator
+      run: |
+        revision=$(python3 - <<'PY'
+        import tomllib
+
+        with open("Cargo.lock", "rb") as lockfile:
+            packages = tomllib.load(lockfile)["package"]
+        source = next(p["source"] for p in packages if p["name"] == "v42-calculator-interface")
+        print(source.rsplit("#", 1)[1])
+        PY
+        )
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+    - name: Checkout Engine for calculator fixture
+      if: inputs.family == 'redshift'
+      uses: actions/checkout@v5
+      with:
+        repository: magicblock-labs/magicblock-engine
+        ref: ${{ steps.engine.outputs.revision }}
+        path: magicblock-engine
+        persist-credentials: false
+
+    - name: Install Engine Rust toolchain
+      if: inputs.family == 'redshift'
+      shell: bash
+      working-directory: magicblock-engine
+      run: rustup toolchain install
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      if: inputs.family == 'redshift'
+      with:
+        sbf_tools: "true"
+
+    - name: Build v42 calculator fixture
+      if: inputs.family == 'redshift'
+      shell: bash
+      working-directory: magicblock-engine
+      run: |
+        env -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER cargo build-sbf \
+          --manifest-path programs/v42-calculator-program/Cargo.toml \
+          --arch v3 --sbf-out-dir target/deploy -- --locked
+
+    - name: Stage v42 calculator beside validator binary
+      if: inputs.family == 'redshift'
+      shell: bash
+      run: |
+        mkdir -p magicblock-validator/target/deploy
+        cp magicblock-engine/target/deploy/v42_calculator_program.so \
+          magicblock-validator/target/deploy/
+
     - name: Cache Yellowstone plugin
       uses: actions/cache@v6
       with:
