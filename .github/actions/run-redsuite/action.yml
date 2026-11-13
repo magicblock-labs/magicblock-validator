@@ -60,8 +60,20 @@ runs:
         )
         echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
-    - name: Checkout Engine for calculator fixture
+    # Bump the cache version when the SBF build flags or artifact format change.
+    - name: Restore v42 calculator fixture
       if: inputs.family == 'redshift'
+      id: calculator
+      uses: actions/cache/restore@v6
+      with:
+        path: calculator-dist/v42_calculator_program.so
+        key: >-
+          calculator-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.engine.outputs.revision }}-${{
+            hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
+          }}
+
+    - name: Checkout Engine for calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/magicblock-engine
@@ -70,18 +82,18 @@ runs:
         persist-credentials: false
 
     - name: Install Engine Rust toolchain
-      if: inputs.family == 'redshift'
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
       shell: bash
       working-directory: magicblock-engine
       run: rustup toolchain install
 
     - uses: ./magicblock-validator/.github/actions/setup-solana
-      if: inputs.family == 'redshift'
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
       with:
         sbf_tools: "true"
 
     - name: Build v42 calculator fixture
-      if: inputs.family == 'redshift'
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
       shell: bash
       working-directory: magicblock-engine
       run: |
@@ -89,12 +101,26 @@ runs:
           --manifest-path programs/v42-calculator-program/Cargo.toml \
           --arch v3 --sbf-out-dir target/deploy -- --locked
 
+    - name: Save v42 calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p calculator-dist
+        cp magicblock-engine/target/deploy/v42_calculator_program.so calculator-dist/
+
+    - name: Cache v42 calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: calculator-dist/v42_calculator_program.so
+        key: ${{ steps.calculator.outputs.cache-primary-key }}
+
     - name: Stage v42 calculator beside validator binary
       if: inputs.family == 'redshift'
       shell: bash
       run: |
         mkdir -p magicblock-validator/target/deploy
-        cp magicblock-engine/target/deploy/v42_calculator_program.so \
+        cp calculator-dist/v42_calculator_program.so \
           magicblock-validator/target/deploy/
 
     - name: Cache Yellowstone plugin
