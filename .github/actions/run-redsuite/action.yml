@@ -33,8 +33,8 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        # Temporary pin to the parser update in RedSuite PR #346.
-        ref: 14b9fcc756e8982044a109ef938b0a372c01ae6a
+        # Temporary pin to the settlement receipt parser in RedSuite PR #348.
+        ref: 7267ffc08cee52e10c713a17c4252d65e5ad36a2
         path: redsuite
         persist-credentials: false
 
