@@ -1,5 +1,9 @@
-use magic_program_api::instruction::{
-    CallbackInstruction, MagicAccountInstruction, MagicBlockInstruction, OutboxIntentInstruction,
+use magic_program_api::{
+    MAGIC_ACCOUNT_PROGRAM_ID, OUTBOX_INTENT_PROGRAM_ID,
+    instruction::{
+        CallbackInstruction, MagicAccountInstruction, MagicBlockInstruction,
+        OutboxIntentInstruction,
+    },
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -88,21 +92,24 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
         ScheduledCommitSent(_) => {
             ic_msg!(
                 invoke_context,
-                "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                "Deprecated MagicBlockInstruction::ScheduledCommitSent; migrate to OutboxIntentInstruction::ScheduledCommitSent via program {}",
+                OUTBOX_INTENT_PROGRAM_ID
             );
             Err(InstructionError::InvalidInstructionData)
         }
         SetIntentExecutionStage { .. } => {
             ic_msg!(
                 invoke_context,
-                "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                "Deprecated MagicBlockInstruction::SetIntentExecutionStage; migrate to OutboxIntentInstruction::SetIntentExecutionStage via program {}",
+                OUTBOX_INTENT_PROGRAM_ID
             );
             Err(InstructionError::InvalidInstructionData)
         }
         CloseOutboxIntent(_) => {
             ic_msg!(
                 invoke_context,
-                "MagicBlockInstruction ERR: deprecated, moved into the outbox intent program"
+                "Deprecated MagicBlockInstruction::CloseOutboxIntent; migrate to OutboxIntentInstruction::CloseOutboxIntent via program {}",
+                OUTBOX_INTENT_PROGRAM_ID
             );
             Err(InstructionError::InvalidInstructionData)
         }
@@ -117,12 +124,29 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
         DisableExecutableCheck => Ok(()),
         EnableExecutableCheck => Ok(()),
         CreateMagicAccount { data_len } => {
+            ic_msg!(
+                invoke_context,
+                "Deprecated MagicBlockInstruction::CreateMagicAccount; migrate to MagicAccountInstruction::CreateMagicAccount via program {}",
+                MAGIC_ACCOUNT_PROGRAM_ID
+            );
             process_create_magic_account(invoke_context, transaction_context, data_len)
         }
         ResizeMagicAccount { new_data_len } => {
+            ic_msg!(
+                invoke_context,
+                "Deprecated MagicBlockInstruction::ResizeMagicAccount; migrate to MagicAccountInstruction::ResizeMagicAccount via program {}",
+                MAGIC_ACCOUNT_PROGRAM_ID
+            );
             process_resize_magic_account(invoke_context, transaction_context, new_data_len)
         }
-        CloseMagicAccount => process_close_magic_account(invoke_context, transaction_context),
+        CloseMagicAccount => {
+            ic_msg!(
+                invoke_context,
+                "Deprecated MagicBlockInstruction::CloseMagicAccount; migrate to MagicAccountInstruction::CloseMagicAccount via program {}",
+                MAGIC_ACCOUNT_PROGRAM_ID
+            );
+            process_close_magic_account(invoke_context, transaction_context)
+        }
         AddActionCallback(args) => process_add_action_callback(signers, invoke_context, args),
         EvictAccount { .. } => composition_removed(invoke_context, "EvictAccount"),
         _ExecuteCrank => {
