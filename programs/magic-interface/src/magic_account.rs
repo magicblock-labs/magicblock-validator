@@ -1,13 +1,13 @@
 use solana_instruction::error::InstructionError;
 
-use crate::{EPHEMERAL_ACCOUNT_STATIC_SIZE, EPHEMERAL_RENT_PER_BYTE};
+use crate::{MAGIC_ACCOUNT_RENT_PER_BYTE, MAGIC_ACCOUNT_STATIC_SIZE};
 
-/// Calculates rent for an ephemeral account based on its data length.
+/// Calculates rent for a Magic account based on its data length.
 pub fn rent_for(data_len: u32) -> Result<u64, InstructionError> {
     let total_size = u64::from(data_len)
-        .checked_add(EPHEMERAL_ACCOUNT_STATIC_SIZE)
+        .checked_add(MAGIC_ACCOUNT_STATIC_SIZE)
         .ok_or(InstructionError::ArithmeticOverflow)?;
     total_size
-        .checked_mul(EPHEMERAL_RENT_PER_BYTE)
+        .checked_mul(MAGIC_ACCOUNT_RENT_PER_BYTE)
         .ok_or(InstructionError::ArithmeticOverflow)
 }

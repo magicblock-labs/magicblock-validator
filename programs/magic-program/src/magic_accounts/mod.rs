@@ -1,6 +1,6 @@
-//! Ephemeral account instruction processors
+//! Magic account instruction processors
 //!
-//! Ephemeral accounts are zero-balance accounts with rent paid by a sponsor.
+//! Magic accounts are zero-balance accounts with rent paid by a sponsor.
 //! Rent is charged at 32 lamports/byte (109x cheaper than Solana base rent).
 //! Creation marks the full data length as rent-funded. Resize and close require
 //! that mark; Magic mode alone does not establish a deposit in the shared vault.
@@ -12,11 +12,11 @@ mod process_create_magic_ata;
 mod process_resize;
 mod validation;
 
-pub(crate) use process_close::process_close_ephemeral_account;
+pub(crate) use process_close::process_close_magic_account;
 pub(crate) use process_close_magic_ata::process_close_magic_ata;
-pub(crate) use process_create::process_create_ephemeral_account;
+pub(crate) use process_create::process_create_magic_account;
 pub(crate) use process_create_magic_ata::process_create_magic_ata;
-pub(crate) use process_resize::process_resize_ephemeral_account;
+pub(crate) use process_resize::process_resize_magic_account;
 use solana_account::ReadableAccount;
 use solana_instruction::error::InstructionError;
 use solana_transaction_context::transaction::TransactionContext;
@@ -27,19 +27,21 @@ use crate::utils::accounts::{self, InstructionAccount};
 
 /// Instruction account index for the sponsor (rent payer).
 const SPONSOR_IDX: u16 = 0;
-/// Instruction account index for the ephemeral account.
-const EPHEMERAL_IDX: u16 = 1;
+/// Instruction account index for the Magic account.
+const MAGIC_ACCOUNT_IDX: u16 = 1;
 /// Instruction account index for the vault.
 const VAULT_IDX: u16 = 2;
 
 // ----- Shared helpers -----
 
-/// Maximum allowed data length for ephemeral accounts (10 MB, matching Solana's limit)
-const MAX_DATA_LEN: u32 = 10 * 1024 * 1024;
+/// Maximum allowed data length for Magic accounts (10 MB, matching Solana's limit)
+const MAX_MAGIC_ACCOUNT_DATA_LEN: u32 = 10 * 1024 * 1024;
 
-/// Returns the data length of an ephemeral account as a `u32`.
-fn get_ephemeral_data_len(ephemeral: &InstructionAccount<'_, '_>) -> Result<u32, InstructionError> {
-    ephemeral
+/// Returns the data length of a Magic account as a `u32`.
+fn get_magic_account_data_len(
+    magic_account: &InstructionAccount<'_, '_>,
+) -> Result<u32, InstructionError> {
+    magic_account
         .borrow()?
         .data()
         .len()

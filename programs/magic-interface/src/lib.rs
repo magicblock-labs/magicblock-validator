@@ -2,8 +2,8 @@
 
 pub mod args;
 pub mod compat;
-pub mod ephemeral;
 pub mod instruction;
+pub mod magic_account;
 pub mod outbox;
 pub mod pda;
 pub mod response;
@@ -16,17 +16,17 @@ pub const CRANK_PROGRAM_ID: Pubkey = pubkey!("Crank11111111111111111111111111111
 
 pub const CALLBACK_PROGRAM_ID: Pubkey = pubkey!("CaLLback11111111111111111111111111111111111");
 
-/// Program ID for the ephemeral system builtin-program.
-pub const EPHEMERAL_SYSTEM_PROGRAM_ID: Pubkey =
-    pubkey!("EphSystem1111111111111111111111111111111111");
+/// Program ID for the Magic account builtin program.
+pub const MAGIC_ACCOUNT_PROGRAM_ID: Pubkey = pubkey!("EphSystem1111111111111111111111111111111111");
 
 /// Program ID for the outbox intent builtin-program.
 pub const OUTBOX_INTENT_PROGRAM_ID: Pubkey = pubkey!("outboxintent1111111111111111111111111111111");
 
 pub const MAGIC_CONTEXT_PUBKEY: Pubkey = pubkey!("MagicContext1111111111111111111111111111111");
 
-/// Vault account that collects rent for ephemeral accounts.
-pub const EPHEMERAL_VAULT_PUBKEY: Pubkey = pubkey!("MagicVau1t999999999999999999999999999999999");
+/// Vault account that collects rent for Magic accounts.
+pub const MAGIC_ACCOUNT_VAULT_PUBKEY: Pubkey =
+    pubkey!("MagicVau1t999999999999999999999999999999999");
 
 /// We believe 5MB should be enough to store all scheduled commits within a
 /// slot. Once we store more data in the magic context we need to reconsicer
@@ -35,9 +35,9 @@ pub const EPHEMERAL_VAULT_PUBKEY: Pubkey = pubkey!("MagicVau1t999999999999999999
 /// See: MAX_LOADED_ACCOUNTS_DATA_SIZE_BYTES inside program-runtime/src/compute_budget_processor.rs
 pub const MAGIC_CONTEXT_SIZE: usize = 1024 * 1024 * 5; // 5 MB
 
-/// Rent rate for ephemeral accounts: 32 lamports per byte.
+/// Rent rate for Magic accounts: 32 lamports per byte.
 /// This is ~109x cheaper than Solana's base rent (3,480 lamports/byte).
-pub const EPHEMERAL_RENT_PER_BYTE: u64 = 32;
+pub const MAGIC_ACCOUNT_RENT_PER_BYTE: u64 = 32;
 
 /// Fixed per-account storage overhead charged as rent on top of the data.
 ///
@@ -45,4 +45,4 @@ pub const EPHEMERAL_RENT_PER_BYTE: u64 = 32;
 /// the value is pinned here: lamports (8) + owner (32) + slot (8) + flags (4) +
 /// data capacity (4) + data length (4). It previously came from the account
 /// crate, which no longer publishes its static size.
-pub const EPHEMERAL_ACCOUNT_STATIC_SIZE: u64 = 60;
+pub const MAGIC_ACCOUNT_STATIC_SIZE: u64 = 60;

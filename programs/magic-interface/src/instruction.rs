@@ -178,42 +178,42 @@ pub enum MagicBlockInstruction {
     /// indices in the accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
 
-    /// Creates a new ephemeral account with rent paid by a sponsor.
+    /// Creates a new Magic account with rent paid by a sponsor.
     /// The account is automatically owned by the calling program (CPI caller).
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Pays rent; can be PDA or oncurve. | WRITE |
-    /// | `1` | Ephemeral account. Account to create; must have 0 lamports. | WRITE |
+    /// | `1` | Magic account. Account to create; must have 0 lamports. | WRITE |
     /// | `2` | Vault. Receives rent payment. | WRITE |
-    CreateEphemeralAccount {
+    CreateMagicAccount {
         /// Initial data length in bytes
         data_len: u32,
     },
 
-    /// Resizes an existing ephemeral account, adjusting rent accordingly.
+    /// Resizes an existing Magic account, adjusting rent accordingly.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Pays or receives the rent difference. | WRITE |
-    /// | `1` | Ephemeral account. Account to resize. | WRITE |
+    /// | `1` | Magic account. Account to resize. | WRITE |
     /// | `2` | Vault. Holds lamports for rent transfer. | WRITE |
-    ResizeEphemeralAccount {
+    ResizeMagicAccount {
         /// New data length in bytes
         new_data_len: u32,
     },
 
-    /// Closes an ephemeral account, refunding rent to the sponsor.
+    /// Closes a Magic account, refunding rent to the sponsor.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Receives rent refund. | WRITE |
-    /// | `1` | Ephemeral account. Account to close. | WRITE |
+    /// | `1` | Magic account. Account to close. | WRITE |
     /// | `2` | Vault. Source of rent refund. | WRITE |
-    CloseEphemeralAccount,
+    CloseMagicAccount,
 
     /// Creates or verifies a local Magic ATA.
     ///
@@ -450,34 +450,34 @@ pub enum CallbackInstruction {
     ExecuteCallback { instruction: Instruction },
 }
 
-/// Instruction(s) for the ephemeral system builtin-program: creates,
-/// resizes, and closes ephemeral accounts.
+/// Instructions for the Magic account builtin program: creates,
+/// resizes, and closes Magic accounts.
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
-pub enum EphemeralSystemInstruction {
+pub enum MagicAccountInstruction {
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (pays rent, can be PDA or oncurve) | WRITE |
-    /// | `1` | Ephemeral account to create (must have 0 lamports) | WRITE |
+    /// | `1` | Magic account to create (must have 0 lamports) | WRITE |
     /// | `2` | Vault account (receives rent payment) | WRITE |
-    CreateEphemeralAccount { data_len: u32 },
+    CreateMagicAccount { data_len: u32 },
 
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (pays/receives rent difference) | WRITE |
-    /// | `1` | Ephemeral account to resize | WRITE |
+    /// | `1` | Magic account to resize | WRITE |
     /// | `2` | Vault account (holds/receives lamports for rent transfer) | WRITE |
-    ResizeEphemeralAccount { new_data_len: u32 },
+    ResizeMagicAccount { new_data_len: u32 },
 
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (receives rent refund) | WRITE |
-    /// | `1` | Ephemeral account to close | WRITE |
+    /// | `1` | Magic account to close | WRITE |
     /// | `2` | Vault account (source of rent refund) | WRITE |
-    CloseEphemeralAccount,
+    CloseMagicAccount,
 }
 
 /// Instruction(s) for the outbox intent builtin-program: stores accepted
@@ -491,7 +491,7 @@ pub enum OutboxIntentInstruction {
     /// after popping the intent off `MagicContext`. `data` is the already
     /// serialized `OutboxIntentBundle` bytes. Claims ownership of the PDA
     /// directly (it arrives as a fresh, system-owned, zero-lamport account),
-    /// so no rent-paying vault or ephemeral system program CPI is needed.
+    /// so no rent-paying vault or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - 0. [SIGNER] Sponsor (validator authority)
@@ -500,7 +500,7 @@ pub enum OutboxIntentInstruction {
 
     /// Closes the outbox intent PDA on successful execution of the intent.
     /// The PDA never held lamports, so this just zeroes and marks it closed
-    /// directly - no rent refund or ephemeral system program CPI is needed.
+    /// directly - no rent refund or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - **0.** `[SIGNER]` Validator Authority

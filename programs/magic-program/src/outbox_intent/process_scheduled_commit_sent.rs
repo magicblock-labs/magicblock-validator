@@ -27,7 +27,7 @@ pub(crate) fn process_scheduled_commit_sent(
     commit: SentCommit,
 ) -> Result<(), InstructionError> {
     validate(&signers, invoke_context, commit.intent_id)?;
-    close_outbox_ephemeral_account(invoke_context)?;
+    close_outbox_intent_account(invoke_context)?;
     log_sent_commit(invoke_context, &commit);
     Ok(())
 }
@@ -108,7 +108,7 @@ fn validate(
     Ok(())
 }
 
-fn close_outbox_ephemeral_account(
+fn close_outbox_intent_account(
     invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;

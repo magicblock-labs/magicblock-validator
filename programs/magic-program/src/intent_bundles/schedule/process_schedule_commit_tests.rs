@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     #[serial]
-    /// An ephemeral payer cannot charge the vault even when it is supplied.
+    /// A confined payer cannot charge the vault even when it is supplied.
     fn test_add_action_callback_confined_payer_cannot_charge_fee_vault() {
         let payer = Keypair::from_seed(&[35u8; 32]).unwrap();
         let (mut accounts_data, mut transaction_accounts, fee_vault) =
