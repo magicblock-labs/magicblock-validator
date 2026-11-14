@@ -512,7 +512,7 @@ pub enum OutboxIntentInstruction {
     ///
     /// # Account references
     /// - 0. [SIGNER] Validator Authority
-    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", message_id.to_le_bytes()]`
+    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     ScheduledCommitSent(SentCommit),
 
     /// Sets or advances the execution stage of an outbox intent.

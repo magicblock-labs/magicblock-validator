@@ -126,7 +126,7 @@ impl InstructionUtils {
         validator: Pubkey,
         receipt: SentCommit,
     ) -> Result<Instruction, wincode::WriteError> {
-        let intent_id = receipt.message_id;
+        let intent_id = receipt.intent_id;
         let data = wincode::serialize(&OutboxIntentInstruction::ScheduledCommitSent(receipt))?;
         // Solana's signing path unwraps message serialization. Reject data that
         // cannot fit its u16 instruction length before handing it to Engine.

@@ -539,17 +539,17 @@ async fn settlement_receipt_history_survives_outbox_closure() {
     use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
 
     let receipt = SentCommit {
-        message_id: 42,
+        intent_id: 42,
         payer: Pubkey::new_unique(),
         chain_signatures: vec![Signature::new_unique()],
         // Larger than the old, fixed-size notification.
         patched_errors: vec!["diagnostic ".repeat(200)],
         ..Default::default()
     };
-    let (outbox, bump) = outbox_intent_pda_with_bump(receipt.message_id);
+    let (outbox, bump) = outbox_intent_pda_with_bump(receipt.intent_id);
     let bundle = OutboxIntentBundle::accepted(
         ScheduledIntentBundle {
-            intent_id: receipt.message_id,
+            intent_id: receipt.intent_id,
             slot: receipt.slot,
             blockhash: receipt.blockhash,
             payer: receipt.payer,
@@ -637,7 +637,7 @@ async fn settlement_receipt_history_survives_outbox_closure() {
     assert!(meta.err.is_none());
     let logs = meta.log_messages.unwrap();
     assert!(logs.contains(&format!(
-        "ScheduledCommitSent signature[0]: {}",
+        "Settlement receipt signature[0]: {}",
         receipt.chain_signatures[0]
     )));
     let recorded = completed.transaction.transaction.decode().unwrap();

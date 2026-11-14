@@ -47,7 +47,7 @@ pub(crate) fn build_sent_commit(
         .collect();
 
     SentCommit {
-        message_id: meta.id,
+        intent_id: meta.id,
         slot: meta.slot,
         blockhash: meta.blockhash,
         payer: meta.payer,

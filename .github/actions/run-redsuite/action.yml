@@ -33,13 +33,95 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: 3.5.8
+        ref: 3.6.0
         path: redsuite
         persist-credentials: false
 
     - uses: ./magicblock-validator/.github/actions/build-redsuite
 
     - uses: ./magicblock-validator/.github/actions/build-er
+
+    # snapshot_bootstrap loads this program from the Engine source tree; it is
+    # not one of RedSuite's own fixture programs.
+    - name: Resolve Engine revision for calculator fixture
+      if: inputs.family == 'redshift'
+      id: engine
+      shell: bash
+      working-directory: magicblock-validator
+      run: |
+        revision=$(python3 - <<'PY'
+        import tomllib
+
+        with open("Cargo.lock", "rb") as lockfile:
+            packages = tomllib.load(lockfile)["package"]
+        source = next(p["source"] for p in packages if p["name"] == "v42-calculator-interface")
+        print(source.rsplit("#", 1)[1])
+        PY
+        )
+        echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+    # Bump the cache version when the SBF build flags or artifact format change.
+    - name: Restore v42 calculator fixture
+      if: inputs.family == 'redshift'
+      id: calculator
+      uses: actions/cache/restore@v6
+      with:
+        path: calculator-dist/v42_calculator_program.so
+        key: >-
+          calculator-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.engine.outputs.revision }}-${{
+            hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
+          }}
+
+    - name: Checkout Engine for calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      uses: actions/checkout@v5
+      with:
+        repository: magicblock-labs/magicblock-engine
+        ref: ${{ steps.engine.outputs.revision }}
+        path: magicblock-engine
+        persist-credentials: false
+
+    - name: Install Engine Rust toolchain
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: magicblock-engine
+      run: rustup toolchain install
+
+    - uses: ./magicblock-validator/.github/actions/setup-solana
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      with:
+        sbf_tools: "true"
+
+    - name: Build v42 calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      shell: bash
+      working-directory: magicblock-engine
+      run: |
+        env -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER cargo build-sbf \
+          --manifest-path programs/v42-calculator-program/Cargo.toml \
+          --arch v3 --sbf-out-dir target/deploy -- --locked
+
+    - name: Save v42 calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        mkdir -p calculator-dist
+        cp magicblock-engine/target/deploy/v42_calculator_program.so calculator-dist/
+
+    - name: Cache v42 calculator fixture
+      if: inputs.family == 'redshift' && steps.calculator.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: calculator-dist/v42_calculator_program.so
+        key: ${{ steps.calculator.outputs.cache-primary-key }}
+
+    - name: Stage v42 calculator beside validator binary
+      if: inputs.family == 'redshift'
+      shell: bash
+      run: |
+        mkdir -p magicblock-validator/target/deploy
+        cp calculator-dist/v42_calculator_program.so \
+          magicblock-validator/target/deploy/
 
     - name: Cache Yellowstone plugin
       uses: actions/cache@v6
