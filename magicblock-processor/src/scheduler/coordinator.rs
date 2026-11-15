@@ -299,6 +299,10 @@ impl ExecutionCoordinator {
         coordination_mode::switch_to_replica_mode();
     }
 
+    pub(super) fn is_starting_up(&self) -> bool {
+        matches!(self.mode, CoordinationMode::StartingUp(_))
+    }
+
     /// Checks if a transaction mode is compatible with the current coordination mode.
     ///
     /// - StartingUp mode: rejects Execution transactions (same as Replica)

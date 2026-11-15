@@ -131,11 +131,6 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
     skip_keypair_match_check: bool,
     loaded_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accountsdb_config = AccountsDbConfig {
-        reset: reset_ledger,
-        ..Default::default()
-    };
-
     let programs = resolve_programs(programs);
 
     let config = ValidatorParams {
@@ -144,7 +139,11 @@ pub fn setup_validator_with_local_remote_and_resume_strategy(
             verify_keypair: !skip_keypair_match_check,
             ..Default::default()
         },
-        accountsdb: accountsdb_config.clone(),
+        accountsdb: AccountsDbConfig {
+            reset: reset_ledger,
+            defragment_on_startup: true,
+            ..Default::default()
+        },
         programs,
         task_scheduler: TaskSchedulerConfig {
             reset: reset_ledger,
