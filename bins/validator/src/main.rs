@@ -4,7 +4,7 @@ mod errors;
 mod leader;
 mod ledger;
 
-use std::process::ExitCode;
+use std::{alloc::System, process::ExitCode};
 
 use anyhow::{Context, Result};
 use config::{ConfigError, LeaderParams};
@@ -15,8 +15,9 @@ use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tracing::{error, info, instrument};
 
+// Geyser plugins must use System too: their allocations are freed by the validator.
 #[global_allocator]
-static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static ALLOCATOR: System = System;
 
 fn init_logger() {
     use mbv_core::logger::{LogStyle, LoggingConfig, init_with_config};

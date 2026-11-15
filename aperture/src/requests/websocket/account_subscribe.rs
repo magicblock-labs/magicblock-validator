@@ -6,7 +6,10 @@ use super::prelude::*;
 use crate::encoder::AccountEncoder;
 
 impl WsDispatcher {
-    pub(crate) fn account_subscribe(&mut self, request: &JsonRequest) -> RpcResult<SubResult> {
+    pub(crate) async fn account_subscribe(
+        &mut self,
+        request: &JsonRequest,
+    ) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
@@ -16,7 +19,7 @@ impl WsDispatcher {
         };
 
         let id = next_subid();
-        let rx = self.engine.accounts().subscribe(pubkey);
+        let rx = self.engine.accounts().subscribe(pubkey).await;
         let engine = self.engine.clone();
         self.forward(id, rx, move |account: AccountSharedData| {
             encoder.encode(context_slot(&engine), &pubkey, &account, id).map(Some)

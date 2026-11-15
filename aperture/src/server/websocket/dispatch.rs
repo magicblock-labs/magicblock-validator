@@ -54,12 +54,12 @@ impl WsDispatcher {
         use JsonRpcWsMethod::*;
         RPC_REQUESTS_COUNT.with_label_values(&[request.method.as_str()]).inc();
         match request.method {
-            AccountSubscribe => self.account_subscribe(request),
-            ProgramSubscribe => self.program_subscribe(request),
+            AccountSubscribe => self.account_subscribe(request).await,
+            ProgramSubscribe => self.program_subscribe(request).await,
             SignatureSubscribe => self.signature_subscribe(request).await,
-            SlotSubscribe => self.slot_subscribe(),
+            SlotSubscribe => self.slot_subscribe().await,
             LogsSubscribe => self.logs_subscribe(request).await,
-            TransactionFailureSubscribe => self.transaction_failure_subscribe(),
+            TransactionFailureSubscribe => self.transaction_failure_subscribe().await,
             AccountUnsubscribe
             | ProgramUnsubscribe
             | LogsUnsubscribe

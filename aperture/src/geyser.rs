@@ -11,6 +11,7 @@ use agave_geyser_plugin_interface::geyser_plugin_interface::{
 };
 use engine::Engine;
 use json::Value;
+use keeper::error::KeeperError;
 use ledger::schema::Block;
 use libloading::{Library, Symbol};
 use nucleus::runtime::FullTransaction;
@@ -19,7 +20,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{ApertureResult, transaction::processed_transaction};
+use crate::transaction::processed_transaction;
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -45,7 +46,7 @@ enum GeyserEvent {
 impl GeyserPluginManager {
     /// Loads every valid plugin, logging individual failures so a plugin cannot
     /// prevent RPC startup or disable other plugins.
-    fn load(configs: &[PathBuf]) -> Self {
+    pub(crate) fn load(configs: &[PathBuf]) -> Self {
         let mut manager = Self {
             plugins: Vec::with_capacity(configs.len()),
             write_version: 0,
@@ -65,6 +66,18 @@ impl GeyserPluginManager {
             }
         }
         manager
+    }
+
+    /// Opens Engine streams only for loaded plugins, without starting delivery.
+    pub(crate) async fn prepare(self, engine: &Engine) -> Result<Option<Delivery>, KeeperError> {
+        if self.plugins.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Delivery {
+            manager: self,
+            transactions: engine.transactions().subscribe_processed()?,
+            blocks: engine.blocks().subscribe().await,
+        }))
     }
 
     /// Loads one operator-configured dynamic library and adopts its plugin.
@@ -270,26 +283,6 @@ pub(crate) struct Delivery {
     blocks: mpsc::Receiver<Block>,
 }
 
-/// Loads plugins and opens subscriptions without spawning tasks; empty managers do no work.
-pub(crate) fn prepare(configs: &[PathBuf], engine: Engine) -> ApertureResult<Option<Delivery>> {
-    Ok(prepare_manager(GeyserPluginManager::load(configs), engine)?)
-}
-
-/// Acquires Engine streams only when there are loaded plugins to receive them.
-fn prepare_manager(
-    manager: GeyserPluginManager,
-    engine: Engine,
-) -> Result<Option<Delivery>, keeper::error::KeeperError> {
-    if manager.plugins.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Delivery {
-        manager,
-        transactions: engine.transactions().subscribe_processed()?,
-        blocks: engine.blocks().subscribe(),
-    }))
-}
-
 impl Delivery {
     /// Serial callbacks preserve feeder order, not cross-stream Engine ordering.
     pub(crate) fn spawn(self, tasks: &mut JoinSet<()>, cancel: CancellationToken) {
@@ -348,7 +341,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
     use v42_calculator_interface::builder::Expr as E;
 
-    use super::{GeyserPluginManager, prepare_manager};
+    use super::GeyserPluginManager;
     use tokio::task::JoinSet;
 
     #[derive(Debug)]
@@ -452,10 +445,7 @@ mod tests {
         ]);
         let cancel = CancellationToken::new();
         let mut tasks = JoinSet::new();
-        prepare_manager(manager, (*te).clone())
-            .unwrap()
-            .unwrap()
-            .spawn(&mut tasks, cancel.clone());
+        manager.prepare(&te).await.unwrap().unwrap().spawn(&mut tasks, cancel.clone());
 
         te.execute(&[E::lit(7).cpi().compose(output, &[])])
             .await

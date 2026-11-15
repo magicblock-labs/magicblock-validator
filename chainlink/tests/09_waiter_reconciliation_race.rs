@@ -116,7 +116,7 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     let remote_account = remote_account();
     rpc_client.add_account(account_pubkey, remote_account.clone());
     let deleg_record_pubkey = add_increment_action(&ctx, account_pubkey, output);
-    let mut updates = bank.accounts().subscribe(account_pubkey);
+    let mut updates = bank.accounts().subscribe(account_pubkey).await;
     let blocker = bank.account(account_pubkey).await.unwrap();
 
     let requested = [account_pubkey];
