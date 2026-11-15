@@ -5,7 +5,10 @@ use super::prelude::*;
 use crate::encoder::{AccountEncoder, ProgramAccountEncoder};
 
 impl WsDispatcher {
-    pub(crate) fn program_subscribe(&mut self, request: &JsonRequest) -> RpcResult<SubResult> {
+    pub(crate) async fn program_subscribe(
+        &mut self,
+        request: &JsonRequest,
+    ) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
         let ProgramConfig { config, filters } =
             request.optional::<ProgramConfig>(1)?.unwrap_or_default();
@@ -20,7 +23,7 @@ impl WsDispatcher {
         let encoder = ProgramAccountEncoder { encoder, filters };
 
         let id = next_subid();
-        let rx = self.engine.accounts().subscribe_program(pubkey);
+        let rx = self.engine.accounts().subscribe_program(pubkey).await;
         let engine = self.engine.clone();
         self.forward(id, rx, move |(pubkey, account)| {
             encoder.encode(context_slot(&engine), &pubkey, &account, id)

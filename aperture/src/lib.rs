@@ -12,6 +12,7 @@ use tokio::task::JoinSet;
 use config::config::aperture::ApertureConfig;
 pub use error::ApertureError;
 use error::RpcError;
+use geyser::GeyserPluginManager;
 use server::{http::HttpServer, websocket::WebsocketServer};
 use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
@@ -74,7 +75,7 @@ impl Aperture {
         let history = History::new(engine.clone(), legacy);
         let handlers = RpcHandlers::new(engine.clone(), accounts, history, blocktime);
         let http = HttpServer::new(http, handlers.clone(), cancel.clone());
-        let geyser = geyser::prepare(&config.geyser_plugins, engine)?;
+        let geyser = GeyserPluginManager::load(&config.geyser_plugins).prepare(&engine).await?;
         Ok(Self {
             http,
             websocket,

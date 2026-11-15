@@ -385,7 +385,7 @@ mod tests {
             engine.execute(create.as_slice()).await.unwrap();
             let created = engine.get_account(pubkey).unwrap();
 
-            let mut failures = engine.transactions().subscribe_failures();
+            let mut failures = engine.transactions().subscribe_failures().await;
             let request = AccountCloneRequest {
                 pubkey,
                 account: AccountBuilder::default().slot(11),

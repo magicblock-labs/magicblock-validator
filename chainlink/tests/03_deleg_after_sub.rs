@@ -77,7 +77,7 @@ async fn test_deleg_after_subscribe_case2() {
         let expected = AccountBuilder::from(AccountSharedData::from(acc.owned()))
             .mode(AccountMode::Mirrored)
             .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey);
+        let mut local_updates = bank.accounts().subscribe(pubkey).await;
         assert!(ctx.send_and_receive_account_update(pubkey, acc, Some(8_000)).await);
         TestContext::wait_for_local_account(&bank, &pubkey, &mut local_updates, &expected).await;
         assert_cloned_as_undelegated!(bank, &[pubkey], slot, program_pubkey);
@@ -98,7 +98,7 @@ async fn test_deleg_after_subscribe_case2() {
             .owner(program_pubkey)
             .mode(AccountMode::Delegated)
             .build();
-        let mut local_updates = bank.accounts().subscribe(pubkey);
+        let mut local_updates = bank.accounts().subscribe(pubkey).await;
         // Materialization precedes subscription cleanup; wait for both before
         // asserting that delegation released the subscription.
         assert!(ctx.send_and_receive_account_update(pubkey, acc, Some(8_000)).await);

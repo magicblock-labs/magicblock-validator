@@ -75,9 +75,9 @@ impl<'a> Failure<'a> {
 impl WsDispatcher {
     /// Opens Engine's bounded failure stream without taking the exclusive processed stream.
     /// Stream closure closes the connection so clients can recover.
-    pub(crate) fn transaction_failure_subscribe(&mut self) -> RpcResult<SubResult> {
+    pub(crate) async fn transaction_failure_subscribe(&mut self) -> RpcResult<SubResult> {
         let id = next_subid();
-        let rx = self.engine.transactions().subscribe_failures();
+        let rx = self.engine.transactions().subscribe_failures().await;
         self.forward(id, rx, move |transaction| {
             let Some(failure) = Failure::new(&transaction) else { return Ok(None) };
             NotificationPayload::encode_no_context(failure, "transactionFailureNotification", id)
