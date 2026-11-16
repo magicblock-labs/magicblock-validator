@@ -29,15 +29,14 @@ npm dependencies.
    RCs skip artifact/package publication jobs. Wait for applicable checks to pass.
 2. Merge the release PR into its release line. The [tag workflow](../.github/workflows/release-tag.yml)
    creates an annotated tag at the commit that introduced the version and opens
-   a draft GitHub Release. Do not create release tags manually.
+   a draft GitHub Release. Do not create validator `v*` release tags manually.
 3. Review the draft's tag target and release notes. Publish the stable release
    to trigger actual distribution. Keep testing-only RCs as draft prereleases;
-   RC/prerelease builds do not publish binaries, npm packages, or the crate.
+   RC/prerelease builds do not publish binaries or npm packages.
 4. Verify successful jobs and expected versions in each destination: GitHub
    binaries for the validator, verifier, operator CLI, and TUI, plus the
    platform-independent `v42_calculator_program.so`; platform and wrapper npm
-   packages; and the `magicblock-magic-program-api` crate. A GitHub
-   Release alone does not prove that every output published.
+   packages. A GitHub Release alone does not prove that every output published.
 
 The publishing workflow builds v42 once from the Engine revision in the validator's
 `Cargo.lock`. Deployment hosts download the ELF from the same release as the native
@@ -49,6 +48,18 @@ not replace the latest GitHub Release. The publishing workflow owns this policy.
 
 Pushes to `release/v*` only run version-alignment validation; they do not run the
 package dry run or publish artifacts.
+
+## Magic program API releases
+
+`magicblock-magic-program-api` has an independent version and is not published
+by validator releases on master. Merge the crate's version and lockfile changes
+into master, then push an annotated `magic-program-api-vX.Y.Z` tag at the release
+commit. The tag must match the stable version in the crate manifest.
+
+The [API publishing workflow](../.github/workflows/publish-magic-program-api.yml)
+checks the tag and master ancestry, checks the crate, and publishes it to crates.io.
+Verify that workflow and the crates.io version separately from validator outputs.
+No GitHub Release is required.
 
 ## Manual version alignment
 

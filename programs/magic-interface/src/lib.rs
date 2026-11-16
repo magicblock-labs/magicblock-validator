@@ -1,14 +1,13 @@
 #![doc = include_str!("../README.md")]
 
 pub mod args;
-pub mod compat;
 pub mod instruction;
 pub mod magic_account;
 pub mod outbox;
 pub mod pda;
 pub mod response;
 
-pub use compat::{Pubkey, declare_id, pubkey};
+pub use solana_address::{Address as Pubkey, address as pubkey, declare_id};
 
 declare_id!("Magic11111111111111111111111111111111111111");
 
