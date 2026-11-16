@@ -11,15 +11,15 @@ version = "2.0.0"
 [dependencies]
 const-crypto = "0.3.0"
 serde = { version = "^1.0.228", features = ["derive"] }
-# These releases share wincode 0.5 schemas. Bound solana-address directly
+# Keep public types on wincode 0.5 schemas. Bound solana-address directly
 # because solana-program's transitive range also permits wincode 0.6 types.
-solana-address = "=2.6.1"
-solana-hash = { version = "=4.4.0", features = ["serde", "wincode"] }
-solana-program = "=4.0.0"
-solana-signature = { version = "=3.4.1", features = ["serde", "wincode"] }
+solana-address = "~2.6"
+solana-hash = { version = ">=4.3, <4.6", features = ["serde", "wincode"] }
+solana-program = "~4.0"
+solana-signature = { version = "~3.4", features = ["serde", "wincode"] }
 # Task requests cross into the engine through its wincode-encoded service
 # message queue, so the types they are built from need a wincode schema.
-solana-instruction = { version = "=3.4.0", features = ["wincode"] }
+solana-instruction = { version = "~3.4", features = ["wincode"] }
 wincode = { workspace = true }
 
 [lints]
