@@ -293,6 +293,9 @@ impl TransactionScheduler {
                 Some(mode) = self.mode_rx.recv() => {
                     match mode {
                         SchedulerMode::Primary => {
+                            if self.coordinator.is_starting_up() {
+                                self.resync_from_ledger();
+                            }
                             self.coordinator.switch_to_primary_mode_globally();
                         }
                         SchedulerMode::Replica => {
@@ -642,8 +645,9 @@ impl TransactionScheduler {
         }
     }
 
-    /// Reseeds the accumulator and slot from persisted state on entering replica
-    /// mode. Both can be wrong by then, and neither self-corrects:
+    /// Reseeds the accumulator and slot from persisted state after startup replay
+    /// or on entering replica mode. Both can be wrong by then, and neither
+    /// self-corrects:
     ///
     /// - Both are captured in `new()`, before ledger replay, which advances
     ///   `latest_block` without touching `accountsdb.slot()`.

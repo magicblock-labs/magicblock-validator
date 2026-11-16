@@ -69,14 +69,12 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
         kp.pubkey()
     );
 
-    // Wait for the next snapshot
-    // We wait for one slot after the snapshot but the restarting validator will be at the previous slot
-    let slot = wait_for_next_slot_after_account_snapshot(
+    // Leave an older snapshot behind so recovery must replay newer transactions.
+    wait_for_next_slot_after_account_snapshot(
         &ctx,
         &mut validator,
         SNAPSHOT_FREQUENCY,
-    ) - 1;
-    debug!("✅ Waited for snapshot at slot {}", slot);
+    );
 
     // Create another delegated account to transfer to
     let mut transfer_to_keypairs =
@@ -113,7 +111,7 @@ pub fn write(ledger_path: &Path, kp: &mut Keypair) -> (Child, u64, Signature) {
     );
 
     // Wait more to be sure the ledger is persisted
-    wait_for_ledger_persist(&ctx, &mut validator);
+    let slot = wait_for_ledger_persist(&ctx, &mut validator);
     debug!("✅ Ledger persisted");
 
     (validator, slot, signature)
@@ -140,19 +138,19 @@ pub fn read(
     let validator_slot = expect!(ctx.get_slot_ephem(), validator);
     debug!("✅ Validator restarted at slot {}", validator_slot);
 
-    // For Resume strategy, verify we're at or beyond the saved slot
+    // Resumed production must be above the pre-shutdown tip, not just the snapshot.
     // For Reset strategy, we just continue from where we were
     let target_slot = if !reset { slot } else { 0 };
     assert!(
-        validator_slot >= target_slot,
+        validator_slot > target_slot,
         cleanup(&mut validator),
-        "reset={}: {} < {}",
+        "reset={}: {} <= {}",
         reset,
         validator_slot,
         target_slot
     );
     debug!(
-        "✅ Verified slot {} >= target slot {}",
+        "✅ Verified slot {} > target slot {}",
         validator_slot, target_slot
     );
 

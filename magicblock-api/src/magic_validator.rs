@@ -235,6 +235,13 @@ impl MagicValidator {
         } else {
             None
         };
+        if config.accountsdb.defragment_on_startup {
+            let step_start = Instant::now();
+            // SAFETY: opening and snapshot restoration have finished. The DB is
+            // still locally owned, with no borrowed accounts or service users.
+            unsafe { accountsdb.defragment()? };
+            log_timing("startup", "accountsdb_defragment", step_start);
+        }
         let accountsdb = Arc::new(accountsdb);
         let (mut dispatch, validator_channels) = link(!is_standalone);
         let shared_chain_slot =
@@ -1294,15 +1301,6 @@ impl MagicValidator {
             )
             .await?;
             log_timing("startup", "sync_rent_from_base_chain", step_start);
-        }
-
-        if self.config.accountsdb.defragment_on_startup {
-            let step_start = Instant::now();
-            // SAFETY: ledger replay has completed, and normal startup has not
-            // yet enabled bank cleanup, scheduler modes, replication, slot
-            // ticks, or task recovery.
-            unsafe { self.accountsdb.defragment()? };
-            log_timing("startup", "accountsdb_defragment", step_start);
         }
 
         // Ledger replay has completed; primary and standalone nodes can clean
