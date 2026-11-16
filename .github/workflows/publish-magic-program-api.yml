@@ -1,0 +1,44 @@
+name: Publish Magic program API
+
+on:
+  push:
+    tags:
+      - 'magic-program-api-v*'
+
+concurrency:
+  group: publish-magic-program-api
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate release tag
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor HEAD origin/master
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq -er '.packages[] | select(.name == "magicblock-magic-program-api") | .version')"
+          number='(0|[1-9][0-9]*)'
+          if [[ ! "$version" =~ ^${number}\.${number}\.${number}$ || "$TAG" != "magic-program-api-v${version}" ]]; then
+            echo "::error::Expected magic-program-api-vX.Y.Z matching the stable crate version; got ${TAG} for ${version}."
+            exit 1
+          fi
+
+      - name: Check API
+        run: cargo check --locked -p magicblock-magic-program-api --tests
+
+      - name: Publish crate
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_TOKEN }}
+        run: cargo publish --locked -p magicblock-magic-program-api

@@ -348,14 +348,3 @@ jobs:
           else
             npm publish --access public --tag "$NPM_CHANNEL"
           fi
-
-      - name: cargo publish
-        working-directory: programs/magic-interface/
-        run: |
-          options=()
-          if [ "$DRY_RUN" = true ]; then
-            options=(--dry-run --no-verify)
-          fi
-          cargo publish "${options[@]}" --manifest-path=./Cargo.toml --token "$CRATES_TOKEN"
-        env:
-          CRATES_TOKEN: ${{ secrets.CRATES_TOKEN }}
