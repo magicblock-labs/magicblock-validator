@@ -260,6 +260,7 @@ jobs:
   publish-v42:
     name: Publish v42 calculator
     needs: publish-binaries
+    if: ${{ !cancelled() && needs.publish-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -321,7 +322,7 @@ jobs:
 
   publish-wrapper-npm-package:
     name: Publish wrapper NPM packages
-    if: github.event_name != 'push'
+    if: ${{ !cancelled() && github.event_name != 'push' && needs.publish-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     needs: publish-binaries
     steps:
