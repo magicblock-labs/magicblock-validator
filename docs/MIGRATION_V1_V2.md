@@ -11,7 +11,7 @@
 ## Prepare
 
 Stage **v2.0.0** binaries (`magicblock-validator`, `magicblock-verifier`, and
-`magicblock`) and [adb-migrator 1.4.0](https://github.com/magicblock-labs/adb-migrator/blob/1.4.0/README.md).
+`magicblock`) and [adb-migrator 1.5.0](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md).
 Before stopping V1, save a few account samples and transaction signatures for
 the post-migration checks.
 
@@ -62,7 +62,7 @@ reflink support with `cp --reflink=always` on a nonempty temporary file.
 **Size ledger retention around the existing disk usage.** Engine's `size-limit`
 measures total used bytes on the ledger filesystem, including legacy RocksDB and
 any other files on that filesystem. A symlink to another filesystem doesn't count
-the target's usage against this limit. See [retention accounting](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.1/ledger/README.md#retention).
+the target's usage against this limit. See [retention accounting](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/ledger/README.md#retention).
 
 If the legacy ledger already occupies 60–70% of the filesystem, provision enough
 capacity for several days of coexistence. Set `size-limit` above the existing
@@ -76,7 +76,7 @@ allows roughly 200 GiB for V2 growth and leaves 124 GiB below filesystem capacit
 
 ### Programs and healthchecks
 
-Download [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.2/programs/v42-calculator-program/README.md)
+Download [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/programs/v42-calculator-program/README.md)
 from the same release as the validator for the operator healthcheck:
 
 ```sh
@@ -186,7 +186,7 @@ at the next slot divisible by `superblock`, plus archive time.
 persisted-state divergence between seals; followers use the upstream records.
 Checksumming pauses execution, so adjust the example cadence for your state size.
 Checkpoints don't create snapshots or recovery points.
-See [checkpoint validation](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.1/replicator/README.md#stream-processing).
+See [checkpoint validation](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md#stream-processing).
 
 ### Service environment and command line
 
@@ -268,7 +268,7 @@ from the same stop.
 Substitute deployment paths and the base-chain RPC URL:
 
 ```sh
-MIGRATOR=/opt/adb-migrator/1.4.0/adb-migrator
+MIGRATOR=/opt/adb-migrator/1.5.0/adb-migrator
 SOURCE=/home/magicblock/ledger
 DESTINATION=/srv/magicblock-v2/accountsdb/migrated
 BASE_RPC_URL=https://your-base-chain-rpc.example
@@ -314,7 +314,7 @@ recoverable committor work. No separate SQLite task migration is needed. Recover
 - Future task delays are preserved, with at least two destination slots before
   execution and no offline catch-up.
 
-See the [migrator's recovery rules](https://github.com/magicblock-labs/adb-migrator/blob/1.4.0/README.md#recovery-behavior)
+See the [migrator's recovery rules](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md#recovery-behavior)
 for reconciliation and sequence handling.
 
 ### 3. Link the legacy ledger and start V2
@@ -413,7 +413,7 @@ Wait for a **completed leader snapshot**: a finished `accountsdb.tar.zst` in the
 Engine ledger's superblock directories, not a `.tmp` file. Use the filesystem
 archive as the completion signal, not `getHighestSnapshotSlot`. The snapshot
 contains the migrated state needed to bootstrap the verifier.
-See [follower recovery](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.1/replicator/README.md#follower-recovery).
+See [follower recovery](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md#follower-recovery).
 
 Start each verifier:
 
@@ -451,11 +451,11 @@ will no longer be available through V2.
 
 ## References
 
-- [adb-migrator 1.4.0](https://github.com/magicblock-labs/adb-migrator/blob/1.4.0/README.md)
+- [adb-migrator 1.5.0](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md)
 - [Hydra cranker deployment](https://github.com/magicblock-labs/magicblock-validator/issues/1815)
 - [Yellowstone MBV 2.0 branch](https://github.com/magicblock-labs/yellowstone-grpc/tree/mbv-2.0.0) · [Plugin guide](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-2.0.0/yellowstone-grpc-geyser/README.md) · [Sample config](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-2.0.0/yellowstone-grpc-geyser/config.json)
-- [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.2/programs/v42-calculator-program/README.md) · [Runtime program persistence](../runtime/README.md)
+- [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/programs/v42-calculator-program/README.md) · [Runtime program persistence](../runtime/README.md)
 - [Leader](../bins/validator/README.md) · [Verifier](../bins/verifier/README.md)
 - [Configuration](../config/README.md) · [Operator commands](../bins/magicblock/README.md)
 - [Metrics](../metrics/README.md)
-- [Engine 0.23.1 replication](https://github.com/magicblock-labs/magicblock-engine/blob/0.23.1/replicator/README.md)
+- [Engine 0.25.0 replication](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md)
