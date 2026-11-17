@@ -6,11 +6,12 @@ use std::{
 
 use agave_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoV3, ReplicaAccountInfoVersions,
-    ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV2,
+    ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV3,
     ReplicaTransactionInfoVersions, SlotStatus,
 };
 use engine::Engine;
-use json::{JsonValueTrait, Value};
+use json::Value;
+use keeper::error::KeeperError;
 use ledger::schema::Block;
 use libloading::{Library, Symbol};
 use nucleus::runtime::FullTransaction;
@@ -19,7 +20,7 @@ use tokio::{sync::mpsc, task::JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::{ApertureResult, transaction::processed_transaction};
+use crate::transaction::processed_transaction;
 
 const ENTRYPOINT_SYMBOL: &[u8] = b"_create_plugin";
 const EVENT_QUEUE_CAPACITY: usize = 1_024;
@@ -45,7 +46,7 @@ enum GeyserEvent {
 impl GeyserPluginManager {
     /// Loads every valid plugin, logging individual failures so a plugin cannot
     /// prevent RPC startup or disable other plugins.
-    fn load(configs: &[PathBuf]) -> Self {
+    pub(crate) fn load(configs: &[PathBuf]) -> Self {
         let mut manager = Self {
             plugins: Vec::with_capacity(configs.len()),
             write_version: 0,
@@ -67,6 +68,18 @@ impl GeyserPluginManager {
         manager
     }
 
+    /// Opens Engine streams only for loaded plugins, without starting delivery.
+    pub(crate) async fn prepare(self, engine: &Engine) -> Result<Option<Delivery>, KeeperError> {
+        if self.plugins.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Delivery {
+            manager: self,
+            transactions: engine.transactions().subscribe_processed()?,
+            blocks: engine.blocks().subscribe().await,
+        }))
+    }
+
     /// Loads one operator-configured dynamic library and adopts its plugin.
     ///
     /// # Safety
@@ -82,7 +95,7 @@ impl GeyserPluginManager {
             json::from_str(&config).map_err(|error| GeyserPluginError::ConfigFileReadError {
                 msg: format!("failed to parse plugin configuration: {error}"),
             })?;
-        let path = config.get("libpath").and_then(JsonValueTrait::as_str).ok_or_else(|| {
+        let path = config.get("libpath").and_then(Value::as_str).ok_or_else(|| {
             GeyserPluginError::ConfigFileReadError {
                 msg: "plugin configuration must contain a string `libpath` field".into(),
             }
@@ -128,10 +141,12 @@ impl GeyserPluginManager {
             return;
         };
         let signature = &sanitized.signatures()[0];
-        let info = ReplicaTransactionInfoV2 {
+        let versioned = sanitized.to_versioned_transaction();
+        let info = ReplicaTransactionInfoV3 {
+            message_hash: sanitized.message_hash(),
             signature,
             is_vote: sanitized.is_simple_vote_transaction(),
-            transaction: &sanitized,
+            transaction: &versioned,
             transaction_status_meta: &meta,
             // The engine does not currently retain an intra-block index.
             index: 0,
@@ -139,7 +154,7 @@ impl GeyserPluginManager {
         for plugin in &self.plugins {
             if plugin.transaction_notifications_enabled()
                 && let Err(error) =
-                    plugin.notify_transaction(ReplicaTransactionInfoVersions::V0_0_2(&info), slot)
+                    plugin.notify_transaction(ReplicaTransactionInfoVersions::V0_0_3(&info), slot)
             {
                 warn!(
                     plugin = plugin.name(),
@@ -257,26 +272,6 @@ pub(crate) struct Delivery {
     manager: GeyserPluginManager,
     transactions: mpsc::UnboundedReceiver<Arc<FullTransaction>>,
     blocks: mpsc::Receiver<Block>,
-}
-
-/// Loads plugins and opens subscriptions without spawning tasks; empty managers do no work.
-pub(crate) fn prepare(configs: &[PathBuf], engine: Engine) -> ApertureResult<Option<Delivery>> {
-    Ok(prepare_manager(GeyserPluginManager::load(configs), engine)?)
-}
-
-/// Acquires Engine streams only when there are loaded plugins to receive them.
-fn prepare_manager(
-    manager: GeyserPluginManager,
-    engine: Engine,
-) -> Result<Option<Delivery>, keeper::error::KeeperError> {
-    if manager.plugins.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(Delivery {
-        manager,
-        transactions: engine.transactions().subscribe_processed()?,
-        blocks: engine.blocks().subscribe(),
-    }))
 }
 
 impl Delivery {
