@@ -3,7 +3,6 @@
 mod errors;
 mod leader;
 mod ledger;
-mod metrics;
 
 use std::{alloc::System, process::ExitCode};
 

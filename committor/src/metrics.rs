@@ -1,8 +1,8 @@
 //! Event-driven committor metrics registered in the default Prometheus registry.
 
 use crate::{
-    intent_executor::{ExecutionOutput, error::IntentExecutorError},
-    tasks::BaseTaskImpl,
+    execution::{ExecutionOutput, error::IntentExecutorError},
+    shared::tasks::Task,
 };
 use nucleus::metrics::{
     Histogram, HistogramOpts, HistogramTimer, HistogramVec, IntCounter, IntCounterVec, IntGauge,
@@ -26,7 +26,6 @@ struct Metrics {
     alt_preparation: Histogram,
     alt_count: Histogram,
     account_fetches: IntCounter,
-    retiring: IntGauge,
     history: Histogram,
 }
 
@@ -108,13 +107,6 @@ fn metrics() -> &'static Metrics {
             ),
             0,
         ),
-        retiring: gauge(
-            Opts::new(
-                "committor_retiring_nonce_locks",
-                "Evicted nonce locks still held by active operations",
-            ),
-            0,
-        ),
         history: histogram(
             HistogramOpts::new(
                 "committor_signature_history_query_duration_seconds",
@@ -153,7 +145,7 @@ pub(crate) fn execution(seconds: f64, result: &Result<ExecutionOutput, IntentExe
         metrics().failures.with_label_values(&[error.metric_label()]).inc();
     }
 }
-pub(crate) fn time_task(task: &BaseTaskImpl) -> HistogramTimer {
+pub(crate) fn time_task(task: &Task) -> HistogramTimer {
     metrics()
         .task_preparation
         .with_label_values(&[task.metric_label()])
@@ -167,9 +159,6 @@ pub(crate) fn lookup_tables(count: usize) {
 }
 pub(crate) fn account_fetch() {
     metrics().account_fetches.inc();
-}
-pub(crate) fn retiring(before: usize, after: usize) {
-    metrics().retiring.add(gauge_value(after) - gauge_value(before));
 }
 pub(crate) fn time_history() -> HistogramTimer {
     metrics().history.start_timer()
@@ -187,4 +176,19 @@ impl Drop for Inflight {
     fn drop(&mut self) {
         metrics().inflight.dec();
     }
+}
+
+pub(crate) fn compute_units(units: u64) {
+    static GAUGE: OnceLock<IntGauge> = OnceLock::new();
+    GAUGE
+        .get_or_init(|| {
+            gauge(
+                Opts::new(
+                    "committor_intent_cu_usage",
+                    "Compute units used by the last observed intent",
+                ),
+                0,
+            )
+        })
+        .set(i64::try_from(units).unwrap_or(i64::MAX));
 }

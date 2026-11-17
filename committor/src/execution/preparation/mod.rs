@@ -1,5 +1,5 @@
+use crate::metrics;
 use async_trait::async_trait;
-use metrics::metrics;
 use solana_keypair::Keypair;
 use solana_message::VersionedMessage;
 
@@ -57,7 +57,7 @@ impl TransactionPreparator for Preparator {
             )?
             .message;
             self.prepare_for_delivery(authority, tx_strategy, cleanup).await?;
-            metrics::observe_committor_intent_alt_count(0);
+            metrics::lookup_tables(0);
             return Ok(message);
         }
 
@@ -77,7 +77,7 @@ impl TransactionPreparator for Preparator {
 
         // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self.prepare_for_delivery(authority, tx_strategy, cleanup).await?;
-        metrics::observe_committor_intent_alt_count(lookup_tables.len());
+        metrics::lookup_tables(lookup_tables.len());
 
         let message = TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
             authority,

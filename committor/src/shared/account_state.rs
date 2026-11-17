@@ -1,12 +1,12 @@
 use std::{collections::HashMap, num::NonZeroUsize, time::Duration};
 
+use crate::metrics;
 use async_trait::async_trait;
 use delegation_program_api::{
     delegation_metadata_seeds_from_delegated_account,
     delegation_record_seeds_from_delegated_account,
     state::{DelegationMetadata, DelegationRecord},
 };
-use metrics::metrics;
 use rpc_client::{MagicBlockRpcClientError, MagicblockRpcClient};
 use solana_account::Account;
 use solana_account_decoder::UiAccountEncoding;
@@ -193,7 +193,7 @@ impl RpcTaskInfoProvider {
             return Ok(Vec::new());
         }
 
-        metrics::inc_task_info_fetcher_a_count();
+        metrics::account_fetch();
         let commitment = rpc_client.commitment();
         let mut accounts = rpc_client
             .get_multiple_accounts_with_config(
