@@ -58,11 +58,18 @@ impl ChainSync {
         let mut projection = None;
         for ata in candidates {
             let accessor = self.engine.account(ata).await?;
-            let Some(base) =
+            let Some(mut base) =
                 self.read_account(ata, |account| AccountBuilder::from(account.clone()))?
             else {
                 continue;
             };
+            if base.read().is(AccountMode::Magic) {
+                let fetched = self.fetcher.fetch(&[ata], Some(raw.read().slot())).await?;
+                let Some(remote) = fetched.accounts.into_iter().next().flatten() else {
+                    continue;
+                };
+                base = remote;
+            }
             let Some(account) =
                 ata::project(ata, base, eata, &raw, &record, self.engine.authority())
             else {
@@ -210,7 +217,7 @@ impl ChainSync {
     }
 
     /// Retains the current image until Readonly acquisition resolves a fresh account image.
-    /// HTTP failures fall back to deletion only after rechecking the lifecycle under a new lease.
+    /// Fetch or subscription failures fall back to deletion after rechecking under a new lease.
     async fn refresh_undelegated(
         &self,
         accessor: AccountAccessor<'_>,
@@ -223,7 +230,7 @@ impl ChainSync {
         let pubkey = accessor.pubkey();
         let target = SyncTarget::new(accessor, AccountProperty::Readonly);
         let result = self.sync(vec![target], Some(slot)).await;
-        if let Err(Error::Fetch(error)) = &result {
+        if let Err(error @ (Error::Fetch(_) | Error::Subscribe(_))) = &result {
             warn!(%pubkey, slot, %error, "undelegation refresh failed; deleting eligible account");
             // Synchronization consumed the original lease. Recheck the current
             // observation before fallback deletion, not the pre-fetch state.
@@ -241,5 +248,5 @@ impl ChainSync {
 /// only if the event is not older than the lease's observation.
 fn can_apply_undelegation(accessor: &AccountAccessor<'_>, slot: u64) -> bool {
     matches!(accessor.observed(), Some((mode, observed))
-        if observed <= slot && (!mode.authoritative() || mode == AccountMode::Transient))
+        if observed <= slot && (!mode.requires_persistence() || mode == AccountMode::Undelegating))
 }

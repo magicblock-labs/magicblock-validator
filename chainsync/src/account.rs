@@ -1,9 +1,13 @@
 //! Account roles, transport destinations, and mirror state.
 
-use engine::AccountAccessor;
+use engine::{AccountAccessor, Engine, EngineError};
 use solana_account::{AccountBuilder, AccountMode};
+use solana_instruction::error::InstructionError;
 use solana_loader_v3_interface::get_program_data_address;
 use solana_pubkey::Pubkey;
+use solana_transaction_error::TransactionError;
+
+use crate::Result;
 
 /// Account role that determines companion fetches and live updates during synchronization.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,9 +91,36 @@ impl AccountSubscription {
 /// Assigns the absence/read-only mode without interpreting the account's data.
 pub(super) fn mirror(account: AccountBuilder) -> AccountBuilder {
     let mode = if account.read().lamports() > 0 {
-        AccountMode::ReadOnly
+        AccountMode::Mirrored
     } else {
-        AccountMode::Uninit
+        AccountMode::Missing
     };
     account.mode(mode)
+}
+
+/// Reconciles an absence rejected by a competing local creation, without replacing protected state.
+pub(super) async fn materialize_missing<'a>(
+    engine: &'a Engine,
+    mut accessor: AccountAccessor<'a>,
+    account: AccountBuilder,
+) -> Result<()> {
+    let pubkey = accessor.pubkey();
+    let mut retries = 3;
+    loop {
+        let result = accessor.materialize(account.clone(), None).await;
+        let conflict = matches!(
+            result,
+            Err(EngineError::TransactionExecution(
+                TransactionError::InstructionError(1, InstructionError::InvalidArgument)
+            ))
+        );
+        if !conflict || retries == 0 {
+            return result.map_err(Into::into);
+        }
+        retries -= 1;
+        accessor = engine.account(pubkey).await?;
+        if accessor.observed().is_some_and(|(mode, _)| mode.requires_persistence()) {
+            return Ok(());
+        }
+    }
 }

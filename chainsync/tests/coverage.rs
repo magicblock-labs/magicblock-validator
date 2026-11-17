@@ -61,7 +61,7 @@ async fn grpc_survives_websocket_loss_then_full_loss_requires_reacquisition() {
         http.next().await.respond_accounts(CONTEXT_SLOT, &[Some(Account::new(key))]);
     };
     scripted(acquire(&chain_sync, &accounts), script).await.unwrap();
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     let mut grpc_image = Account::new(key);
     let mut slot = CONTEXT_SLOT;
     for data in [BEFORE_LOSS_DATA, AFTER_LOSS_DATA] {
@@ -162,7 +162,7 @@ async fn websocket_updates_continue_after_established_grpc_loss() {
     let mut image = Account::new(key);
     image.data = vec![BEFORE_LOSS_DATA];
     let slot = wait_for_retained_update(&mut engine, from_ref(&grpc), &image).await.sent_slot;
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     grpc.malformed_transaction(slot + 1);
     // Lost is queued before the stream terminates; observe the actual service
     // termination rather than inferring loss from a closed socket.
@@ -260,7 +260,7 @@ async fn cache_eviction_unsubscribes_and_reacquisition_ignores_retired_ids() {
     )
     .await
     .unwrap();
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     let mut image = Account::new(key);
     image.data = vec![STALE_DATA];
     ws.notify(old_id, CONTEXT_SLOT + 4, &image);

@@ -70,6 +70,8 @@ pub struct ChainSync {
 pub enum Error {
     #[error("at least one gRPC lifecycle stream is required")]
     MissingGrpc,
+    #[error("invalid ATA projection: {0}")]
+    InvalidAtaProjection(&'static str),
     #[error("HTTP account fetch failed: {0}")]
     Fetch(#[from] HttpError),
     #[error("WebSocket subscription failed: {0}")]

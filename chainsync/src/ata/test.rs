@@ -47,7 +47,7 @@ fn canonical_projection_preserves_extensions_and_native_reserve_for_both_token_p
             assert!(is_projection_of(ata, eata, &projected));
             let transient = AccountBuilder::from(projected)
                 .owner(delegation_program_api::id())
-                .mode(AccountMode::Transient)
+                .mode(AccountMode::Undelegating)
                 .build();
             assert!(is_projection_of(ata, eata, &transient));
         }

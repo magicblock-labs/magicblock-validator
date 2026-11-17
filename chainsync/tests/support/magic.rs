@@ -1,12 +1,7 @@
-use std::sync::{Arc, OnceLock};
-
 use engine::testkit::{Pacing, TestEngine};
 use keeper::testkit::{Dirs, keeper_builder};
 use magic_program_api::{MAGIC_CONTEXT_PUBKEY, id};
-use program::{
-    MagicContext, init_magic_sys, magicblock_processor::Entrypoint, test_utils::MagicSysStub,
-    validator,
-};
+use program::{MagicContext, magicblock_processor::Entrypoint};
 use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
 use solana_keypair::Keypair;
 use solana_program_runtime::solana_sbpf::program::BuiltinFunctionDefinition;
@@ -19,21 +14,12 @@ pub(crate) fn intents(engine: &TestEngine) -> usize {
 
 /// Installs the host's real Magic builtin into the existing externally paced Engine testkit.
 pub(crate) async fn engine() -> TestEngine {
-    // Magic's sent-transaction signer and host syscalls are process-global.
-    static AUTHORITY: OnceLock<Arc<Keypair>> = OnceLock::new();
-    let authority = AUTHORITY
-        .get_or_init(|| {
-            let signer = Arc::new(Keypair::new());
-            validator::init_validator_authority(signer.clone());
-            init_magic_sys(Arc::new(MagicSysStub::default()));
-            signer
-        })
-        .clone();
+    let authority = Keypair::new();
     let dirs = Dirs::default();
     let mut builder = keeper_builder(&dirs);
     builder.authority = authority.into();
     builder.builtins.insert(id(), (Entrypoint::vm, Entrypoint::codegen));
-    builder.accounts.insert(
+    builder.possibly_missing_accounts.insert(
         MAGIC_CONTEXT_PUBKEY,
         AccountBuilder::default()
             .owner(id())

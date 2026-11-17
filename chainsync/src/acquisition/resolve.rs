@@ -158,9 +158,9 @@ impl<'engine> Acquisition<'engine> {
             // Incomplete images stay out of Engine until companions or tracking are acquired.
             // Readonly program discovery must not leave raw loader layouts in the cache.
             if target.property == Readonly && executable {
-                account = program::normalize(account, None, self.sync.engine.rent())?;
+                account = program::normalize(account, None, &self.sync.engine.rent())?;
             }
-            if account.read().is(AccountMode::Uninit) {
+            if account.read().is(AccountMode::Missing) {
                 account = mirror(account);
             }
         }
@@ -179,7 +179,14 @@ impl<'engine> Acquisition<'engine> {
             outcome.delegations.push(PendingDelegation { delegation, unsubscribe });
             return Ok(());
         }
-        target.accessor.materialize(account, None).await?;
+        if projected {
+            ata::materialize(&self.sync.engine, target.accessor, account, None).await?;
+        } else if account.read().is(AccountMode::Missing) {
+            crate::account::materialize_missing(&self.sync.engine, target.accessor, account)
+                .await?;
+        } else {
+            target.accessor.materialize(account, None).await?;
+        }
         if unsubscribe {
             self.sync.unsubscribe([pubkey]).await;
         }

@@ -132,7 +132,7 @@ impl<'engine> Acquisition<'engine> {
         self.subs.extend(sync.subscribe(&plan.subscriptions).await?);
         let mut fetched = sync.fetcher.fetch(&plan.keys, self.floor).await?;
         self.count += plan.keys.len() as u64;
-        let prune = prepare_programs(&plan, &mut fetched, sync.engine.rent())?;
+        let prune = prepare_programs(&plan, &mut fetched, &sync.engine.rent())?;
         let projected = self.fetch_ata_companions(&plan, &fetched).await?;
         // Retire unused program subscriptions before transferring completed mirrors
         // out of cleanup ownership, including when a later target fails materialization.

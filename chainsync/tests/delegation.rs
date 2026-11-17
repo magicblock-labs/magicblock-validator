@@ -35,17 +35,21 @@ async fn opening_replays_two_slots_back_and_clock_advances_without_tracking() {
     let http = http::Server::new().await;
     let grpc = yellowstone::Server::new().await;
     let key = Pubkey::new_unique();
-    let (account, record) = delegation(key, V42_ID, engine.authority(), DELEGATION_SLOT, &[]);
+    let (mut account, record) = delegation(key, V42_ID, engine.authority(), DELEGATION_SLOT, &[]);
+    let delegated_lamports = account.lamports;
+    account.lamports += 123;
     grpc.seed(DELEGATION_SLOT, &[account, record]).await;
     grpc.seed(DELEGATION_SLOT + 1, &[]).await;
     engine.accounts().advance_chain_slot(DELEGATION_SLOT + 2);
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     let config = config(&http.endpoint, None, &[&grpc.endpoint]);
     let chain_sync = start(&mut engine, config);
     let account = within(updates.recv()).await.unwrap();
     assert_eq!(account.mode(), AccountMode::Delegated);
     assert_eq!(account.slot(), DELEGATION_SLOT);
     assert_eq!(account.owner(), &V42_ID);
+    // Credits on base after delegation do not belong to the ER balance.
+    assert_eq!(account.lamports(), delegated_lamports);
     assert_eq!(engine.accounts().chain_slot(), DELEGATION_SLOT + 2);
 
     let clock = Account::new(CLOCK_ID);
@@ -110,7 +114,7 @@ async fn grpc_undelegation_requests_and_confirmations_apply_once_across_streams(
         provider.delegation_barrier(&engine, slot + 1).await;
         assert_eq!(
             engine.get_account(key).unwrap().mode(),
-            AccountMode::Transient
+            AccountMode::Undelegating
         );
         assert_eq!(magic::intents(&engine), 1);
     }
@@ -126,7 +130,7 @@ async fn grpc_undelegation_requests_and_confirmations_apply_once_across_streams(
         assert_eq!(call.min_context_slot(), Some(RELEASE_SLOT));
         assert_eq!(
             engine.get_account(key).unwrap().mode(),
-            AccountMode::Transient
+            AccountMode::Undelegating
         );
         call.respond_accounts(RELEASE_SLOT, &[Some(image.clone())]);
     };
@@ -137,14 +141,14 @@ async fn grpc_undelegation_requests_and_confirmations_apply_once_across_streams(
     .await;
     assert_eq!(
         engine.get_account(key).unwrap().mode(),
-        AccountMode::ReadOnly
+        AccountMode::Mirrored
     );
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     image.data = LOCAL_TRANSFER.to_le_bytes().to_vec();
     ws.notify(ACCOUNT_SUBSCRIPTION, RELEASE_SLOT + 1, &image);
     let updated = within(updates.recv()).await.unwrap();
     assert_eq!(updated.data(), &LOCAL_TRANSFER.to_le_bytes());
-    assert_eq!(updated.mode(), AccountMode::ReadOnly);
+    assert_eq!(updated.mode(), AccountMode::Mirrored);
 
     providers[1].undelegated(DUPLICATE_RELEASE_SLOT, key, engine.authority());
     let (account, record) =
@@ -256,7 +260,7 @@ async fn grpc_delegation_retires_tracking_and_duplicates_preserve_local_executio
     let mut stale = Account::new(key);
     stale.owner = V42_ID;
     stale.data = 999i64.to_le_bytes().to_vec();
-    let mut canaries = engine.accounts().subscribe(canary);
+    let mut canaries = engine.accounts().subscribe(canary).await;
     // This notification is newer than the delegated image but belongs to a retired
     // provider ID. A live canary also proves the late ID did not drop the socket.
     ws.notify(ACCOUNT_SUBSCRIPTION, slot + 2, &stale);

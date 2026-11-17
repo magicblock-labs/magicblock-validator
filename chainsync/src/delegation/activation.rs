@@ -3,7 +3,8 @@
 use std::collections::BTreeMap;
 
 use delegation_program_api::{Decrypt, args::PostDelegationActions};
-use engine::PostFinalize;
+use engine::{AccountAccessor, PostFinalize};
+use mbv_core::token_programs::EATA_PROGRAM_ID;
 use solana_account::{AccountBuilder, AccountMode};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
@@ -11,7 +12,7 @@ use tracing::{error, warn};
 
 use super::{Delegation, appended, undelegation_action};
 use crate::{
-    AccountProperty, ChainSync, ChainSyncAccount, Error, Result, aml,
+    AccountProperty, ChainSync, ChainSyncAccount, Error, Result, aml, ata,
     metrics::{self, Op},
 };
 
@@ -75,11 +76,17 @@ impl ChainSync {
             Ok(actions) => {
                 let actions = actions.map(|actions| PostFinalize { source_program, actions });
                 let accessor = self.engine.account(pubkey).await?;
-                accessor.materialize(account.clone(), actions).await.map_err(Error::from)
+                self.activate(accessor, account.clone(), source_program, actions).await
             }
             Err(error) => Err(error),
         };
         let Err(error) = result else { return Ok(()) };
+        if matches!(
+            error,
+            Error::InvalidAtaProjection(_) | Error::Engine(engine::EngineError::AccountChanged)
+        ) {
+            return Err(error);
+        }
         metrics::activation_failed();
         warn!(%pubkey, %error, "activation failed; rescuing");
         if let Err(rescue_error) = self.rescue_delegation(pubkey, account, source_program).await {
@@ -96,13 +103,13 @@ impl ChainSync {
         pubkey: Pubkey,
         account: AccountBuilder,
         source_program: Pubkey,
-    ) -> engine::Result<()> {
+    ) -> Result<()> {
         let slot = account.read().slot();
         let accessor = self.engine.account(pubkey).await?;
         // Skip rescue for an already handled delegation, newer state, or confined account.
         let superseded = match accessor.observed() {
             Some((AccountMode::Magic, _)) => true,
-            Some((AccountMode::Transient, observed)) if observed == slot => true,
+            Some((AccountMode::Undelegating, observed)) if observed == slot => true,
             _ => accessor.skipped(AccountMode::Delegated, slot).is_some(),
         };
         if superseded {
@@ -114,9 +121,26 @@ impl ChainSync {
             source_program,
             actions: vec![action],
         };
-        accessor.materialize(account, Some(rescue)).await?;
+        self.activate(accessor, account, source_program, Some(rescue)).await?;
         metrics::rescue("scheduled");
         Ok(())
+    }
+
+    /// Activation and rescue share the same conditional Magic ATA takeover policy.
+    async fn activate(
+        &self,
+        accessor: AccountAccessor<'_>,
+        account: AccountBuilder,
+        source_program: Pubkey,
+        actions: Option<PostFinalize>,
+    ) -> Result<()> {
+        if source_program == EATA_PROGRAM_ID
+            && ata::companion(accessor.pubkey(), &account).is_some()
+        {
+            ata::materialize(&self.engine, accessor, account, actions).await
+        } else {
+            accessor.materialize(account, actions).await.map_err(Into::into)
+        }
     }
 }
 

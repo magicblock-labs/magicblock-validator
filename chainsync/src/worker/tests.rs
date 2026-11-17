@@ -39,7 +39,7 @@ async fn grpc_delegation_retires_tracking_and_rejects_buffered_mirror_updates() 
             .accounts()
             .store(&[(
                 key,
-                v42_builder(LOCAL_BALANCE, AccountMode::Uninit).slot(CONTEXT_SLOT).build(),
+                v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(CONTEXT_SLOT).build(),
             )])
             .unwrap();
         let authority =
@@ -103,7 +103,7 @@ async fn grpc_delegation_retires_tracking_and_rejects_buffered_mirror_updates() 
             .on_websocket(
                 Event::Update {
                     sub,
-                    account: v42_builder(LOCAL_BALANCE, AccountMode::Uninit).slot(BUFFERED_SLOT),
+                    account: v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(BUFFERED_SLOT),
                 },
                 &mut coverage,
             )
@@ -114,7 +114,7 @@ async fn grpc_delegation_retires_tracking_and_rejects_buffered_mirror_updates() 
                 grpc::Event::Update {
                     stream: 0,
                     sub,
-                    account: v42_builder(LOCAL_BALANCE, AccountMode::Uninit)
+                    account: v42_builder(LOCAL_BALANCE, AccountMode::Missing)
                         .slot(BUFFERED_SLOT + 1),
                 },
                 &mut coverage,
@@ -125,7 +125,7 @@ async fn grpc_delegation_retires_tracking_and_rejects_buffered_mirror_updates() 
     }
     assert_eq!(
         engine.get_account(eata).unwrap().mode(),
-        AccountMode::ReadOnly
+        AccountMode::Mirrored
     );
     drop(chain_sync);
     engine.close().await;
@@ -151,14 +151,14 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         .unwrap();
     for (slot, mode, count) in [
         (DELEGATION_SLOT - 1, AccountMode::Delegated, 0),
-        (DELEGATION_SLOT, AccountMode::Transient, 1),
-        (DELEGATION_SLOT + 1, AccountMode::Transient, 1),
+        (DELEGATION_SLOT, AccountMode::Undelegating, 1),
+        (DELEGATION_SLOT + 1, AccountMode::Undelegating, 1),
     ] {
         within(chain_sync.undelegation_requested(key, slot)).await.unwrap();
         assert_eq!(engine.get_account(key).unwrap().mode(), mode);
         assert_eq!(intents(&engine), count);
     }
-    let readonly = store_v42(&engine, V42_INITIAL, AccountMode::ReadOnly);
+    let readonly = store_v42(&engine, V42_INITIAL, AccountMode::Mirrored);
     within(chain_sync.undelegation_requested(readonly, BUFFERED_SLOT))
         .await
         .unwrap();
@@ -168,9 +168,9 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         .unwrap();
     assert_eq!(
         engine.get_account(key).unwrap().mode(),
-        AccountMode::Transient
+        AccountMode::Undelegating
     );
-    let image = Account::from_builder(key, &v42_builder(LOCAL_BALANCE, AccountMode::ReadOnly));
+    let image = Account::from_builder(key, &v42_builder(LOCAL_BALANCE, AccountMode::Mirrored));
     let script = async {
         let call = ws.next().await;
         assert_eq!(call.pubkey, key);
@@ -180,7 +180,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         // Neither subscription acknowledgement nor an in-flight HTTP request demotes local state.
         assert_eq!(
             engine.get_account(key).unwrap().mode(),
-            AccountMode::Transient
+            AccountMode::Undelegating
         );
         call.respond_accounts(DELEGATION_SLOT, &[Some(image)]);
     };
@@ -191,14 +191,14 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
     .await
     .unwrap();
     let refreshed = engine.get_account(key).unwrap();
-    assert_eq!(refreshed.mode(), AccountMode::ReadOnly);
+    assert_eq!(refreshed.mode(), AccountMode::Mirrored);
     assert_eq!(refreshed.data(), &LOCAL_BALANCE.to_le_bytes());
     for (mode, observed) in [
-        (AccountMode::Uninit, DELEGATION_SLOT + 1),
-        (AccountMode::ReadOnly, DELEGATION_SLOT + 1),
+        (AccountMode::Missing, DELEGATION_SLOT + 1),
+        (AccountMode::Mirrored, DELEGATION_SLOT + 1),
         (AccountMode::Delegated, DELEGATION_SLOT),
         (AccountMode::Magic, DELEGATION_SLOT),
-        (AccountMode::System, DELEGATION_SLOT + 1),
+        (AccountMode::Runtime, DELEGATION_SLOT + 1),
     ] {
         let key = Pubkey::new_unique();
         engine
@@ -213,7 +213,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
     }
     assert!(!http.pending());
 
-    let absent = store_v42(&engine, V42_INITIAL, AccountMode::Transient);
+    let absent = store_v42(&engine, V42_INITIAL, AccountMode::Undelegating);
     let script = async {
         ws.next().await.ack(FIRST_SUBSCRIPTION + 1);
         http.next().await.respond_accounts(DELEGATION_SLOT, &[None]);
@@ -225,11 +225,11 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
     .await
     .unwrap();
     let account = engine.get_account(absent).unwrap();
-    assert_eq!(account.mode(), AccountMode::Uninit);
+    assert_eq!(account.mode(), AccountMode::Missing);
     assert_eq!(account.slot(), DELEGATION_SLOT);
 
     // A terminal provider response must not delete state installed while HTTP was in flight.
-    let protected = store_v42(&engine, V42_INITIAL, AccountMode::Transient);
+    let protected = store_v42(&engine, V42_INITIAL, AccountMode::Undelegating);
     let script = async {
         ws.next().await.ack(FIRST_SUBSCRIPTION + 2);
         let call = http.next().await;
@@ -253,7 +253,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         AccountMode::Magic
     );
 
-    let failed = store_v42(&engine, V42_INITIAL, AccountMode::Transient);
+    let failed = store_v42(&engine, V42_INITIAL, AccountMode::Undelegating);
     let mut attempts = 0;
     let result = {
         let script = async {
@@ -263,7 +263,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
                 attempts += 1;
                 assert_eq!(
                     engine.get_account(failed).unwrap().mode(),
-                    AccountMode::Transient
+                    AccountMode::Undelegating
                 );
                 call.respond(StatusCode::SERVICE_UNAVAILABLE, SERVICE_ERROR);
             }
@@ -290,6 +290,38 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
     grpc.close().await;
 }
 
+/// Subscription failure deletes eligible released images but preserves protected or newer state.
+#[tokio::test]
+async fn subscription_failure_deletes_only_eligible_undelegating_state() {
+    let mut engine = TestEngine::new().await;
+    let chain_sync = start_handler_sync(&mut engine, None);
+    let mut coverage = Coverage::default();
+    for (mode, slot, delete) in [
+        (AccountMode::Undelegating, DELEGATION_SLOT - 1, true),
+        (AccountMode::Undelegating, NEWER_SLOT, false),
+        (AccountMode::Delegated, DELEGATION_SLOT - 1, false),
+        (AccountMode::Magic, DELEGATION_SLOT - 1, false),
+    ] {
+        let key = Pubkey::new_unique();
+        let account: AccountSharedData = v42_builder(V42_INITIAL, mode).slot(slot).build();
+        engine.accounts().store(&[(key, account.clone())]).unwrap();
+        let result = chain_sync.undelegated(key, DELEGATION_SLOT, &mut coverage).await;
+        if delete {
+            // This fixture has no WebSocket providers, so subscription capacity is zero.
+            assert!(matches!(
+                result,
+                Err(Error::Subscribe(WebSocketError::Capacity))
+            ));
+            assert!(engine.get_account(key).is_none());
+        } else {
+            result.unwrap();
+            assert_eq!(engine.get_account(key).unwrap(), account);
+        }
+    }
+    drop(chain_sync);
+    engine.close().await;
+}
+
 /// Obsolete updates cannot resurrect coverage; explicit release preserves a reacquired mirror and rejects buffered updates.
 #[tokio::test]
 async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_updates() {
@@ -304,7 +336,7 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
     let mirror_update = |stream| grpc::Event::Update {
         stream,
         sub,
-        account: v42_builder(V42_INITIAL, AccountMode::Uninit).slot(DELEGATION_SLOT),
+        account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(DELEGATION_SLOT),
     };
     // A delayed confirmation for the previous acquisition cannot grant coverage.
     coverage.confirmed(0, key, old_generation);
@@ -321,7 +353,7 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
         .accounts()
         .store(&[(
             key,
-            v42_builder(LOCAL_BALANCE, AccountMode::Uninit).slot(NEWER_SLOT).build(),
+            v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(NEWER_SLOT).build(),
         )])
         .unwrap();
     // Removal revokes coverage only. Deletion belongs to the eviction caller,
@@ -331,7 +363,7 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
         .on_websocket(
             Event::Update {
                 sub,
-                account: v42_builder(V42_INITIAL, AccountMode::Uninit).slot(NEWER_SLOT + 1),
+                account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(NEWER_SLOT + 1),
             },
             &mut coverage,
         )
@@ -367,7 +399,7 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
     } = Ata::new(spl_token::id(), false, authority, PROJECTION_SLOT);
     let projected = ata::project(key, base.clone(), eata, &delegated, &record, authority)
         .unwrap()
-        .mode(AccountMode::Transient);
+        .mode(AccountMode::Undelegating);
     engine
         .accounts()
         .store(&[(key, projected.build()), (eata, ata::normalize_raw(delegated.clone()).build())])
@@ -439,7 +471,7 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
     assert_eq!(ws.unsubscribed().await, FIRST_SUBSCRIPTION + 1);
     assert_eq!(
         engine.get_account(eata).unwrap().mode(),
-        AccountMode::ReadOnly
+        AccountMode::Mirrored
     );
     drop(chain_sync);
     engine.close().await;
@@ -487,7 +519,7 @@ async fn raw_eata_requests_and_closure_preserve_the_projection_lifecycle() {
     assert_eq!(engine.get_account(fixture.eata).unwrap(), raw);
     assert_eq!(
         engine.get_account(fixture.ata).unwrap().mode(),
-        AccountMode::Transient
+        AccountMode::Undelegating
     );
 
     let slot = PROJECTION_SLOT + 1;
@@ -514,10 +546,10 @@ async fn raw_eata_requests_and_closure_preserve_the_projection_lifecycle() {
     .unwrap();
     assert_eq!(
         engine.get_account(fixture.eata).unwrap().mode(),
-        AccountMode::Uninit
+        AccountMode::Missing
     );
     let restored = engine.get_account(fixture.ata).unwrap();
-    assert_eq!(restored.mode(), AccountMode::ReadOnly);
+    assert_eq!(restored.mode(), AccountMode::Mirrored);
     assert_eq!(
         TokenAccount::unpack(restored.data()).unwrap().amount,
         TOKEN_BALANCE
@@ -535,11 +567,11 @@ async fn last_source_loss_evicts_only_non_authoritative_accounts() {
     let mut engine = TestEngine::new().await;
     let chain_sync = start_handler_sync(&mut engine, None);
     for (mode, preserved) in [
-        (AccountMode::Uninit, false),
-        (AccountMode::ReadOnly, false),
+        (AccountMode::Missing, false),
+        (AccountMode::Mirrored, false),
         (AccountMode::Delegated, true),
         (AccountMode::Magic, true),
-        (AccountMode::Transient, true),
+        (AccountMode::Undelegating, true),
     ] {
         let key = Pubkey::new_unique();
         engine

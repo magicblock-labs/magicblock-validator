@@ -1,3 +1,5 @@
+mod materialize;
+pub(crate) use materialize::materialize;
 use mbv_core::token_programs::{
     EATA_PROGRAM_ID, EphemeralAta, derive_ata_with_token_program, try_derive_eata_address_and_bump,
 };
@@ -17,7 +19,7 @@ pub(crate) fn is_raw_eata(pubkey: Pubkey, account: &AccountBuilder) -> bool {
 
 /// Restores eSPL ownership and makes a validated raw eATA readonly, never locally authoritative.
 pub(crate) fn normalize_raw(account: AccountBuilder) -> AccountBuilder {
-    account.owner(EATA_PROGRAM_ID).mode(AccountMode::ReadOnly)
+    account.owner(EATA_PROGRAM_ID).mode(AccountMode::Mirrored)
 }
 
 /// The canonical eATA derived from a token account's owner and mint.
@@ -32,7 +34,7 @@ pub(crate) fn companion(pubkey: Pubkey, account: &AccountBuilder) -> Option<Pubk
 pub(crate) fn is_projection_of(ata: Pubkey, eata: Pubkey, account: &AccountSharedData) -> bool {
     if !matches!(
         account.mode(),
-        AccountMode::Delegated | AccountMode::Transient
+        AccountMode::Delegated | AccountMode::Undelegating
     ) {
         return false;
     }
@@ -84,7 +86,7 @@ fn token_account(
     data: &[u8],
 ) -> Option<TokenAccount> {
     // Scheduling undelegation changes the owner to DLP but retains the token layout.
-    let transient = program == delegation_program_api::id() && mode == AccountMode::Transient;
+    let transient = program == delegation_program_api::id() && mode == AccountMode::Undelegating;
     let token = if program == spl_token::id() {
         TokenAccount::unpack(data).ok()?
     } else if program == spl_token_2022::id() || transient {
