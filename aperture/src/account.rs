@@ -1,9 +1,7 @@
 use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
 use engine::Engine;
-use json::{Deserialize, Serialize};
-use metrics::metrics::ENSURE_ACCOUNTS_TIME;
 use nucleus::runtime::TransactionView;
-use serde::{Deserializer, de::Error as _};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
 use solana_account::{AccountMode, AccountSharedData};
 use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
 use solana_pubkey::Pubkey;
@@ -33,7 +31,7 @@ impl Accounts {
 
     /// Uninitialized images are storage placeholders, not RPC-visible accounts.
     pub(crate) fn account_is_visible(account: &AccountSharedData) -> bool {
-        !account.is(AccountMode::Uninit)
+        !account.is(AccountMode::Missing)
     }
 
     /// Ensure best-effort, then project the account while its borrowed image is scoped.
@@ -72,7 +70,6 @@ impl Accounts {
         fetches: &mut u64,
     ) -> RpcResult<TransactionView> {
         let transaction = decode_transaction(transaction, encoding)?;
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["transaction"]).start_timer();
         *fetches += self
             .chainsync
             .ensure_transaction_accounts(&transaction)
@@ -92,7 +89,6 @@ impl Accounts {
 
     /// Account for successful synchronization before any later projection or admission error.
     async fn fetch(&self, pubkeys: &[Pubkey], fetches: &mut u64) -> ChainSyncResult<()> {
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&["account"]).start_timer();
         let requests = pubkeys.iter().map(|&pubkey| ChainSyncAccount {
             pubkey,
             property: AccountProperty::Readonly,
@@ -123,15 +119,6 @@ impl AccountWithPubkey {
     }
 }
 
-/// Match validated filters without decoding their bytes for each account.
-pub(crate) fn matches_filters(filters: &[PreparedFilter], data: &[u8]) -> bool {
-    filters.iter().all(|filter| match &filter.0 {
-        RpcFilterType::DataSize(size) => data.len() as u64 == *size,
-        RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
-        RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
-    })
-}
-
 /// The upstream program config, with filters decoded during parameter parsing.
 #[derive(Deserialize, Default)]
 pub(crate) struct ProgramConfig {
@@ -142,6 +129,17 @@ pub(crate) struct ProgramConfig {
 
 /// A size-checked RPC filter with memcmp bytes decoded once, before scanning or subscribing.
 pub(crate) struct PreparedFilter(RpcFilterType);
+
+impl PreparedFilter {
+    /// Matches account data without repeating memcmp decoding.
+    pub(crate) fn matches(&self, data: &[u8]) -> bool {
+        match &self.0 {
+            RpcFilterType::DataSize(size) => data.len() as u64 == *size,
+            RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
+            RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
+        }
+    }
+}
 
 impl<'de> Deserialize<'de> for PreparedFilter {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
@@ -165,12 +163,12 @@ impl<'de> Deserialize<'de> for PreparedFilter {
             Filter::DataSize(size) => RpcFilterType::DataSize(size),
             Filter::TokenAccountState => RpcFilterType::TokenAccountState,
             Filter::Memcmp(compare) => {
-                // Reject oversized wire values before allocating decoded bytes. These
-                // are Solana's encoded limits; verify below enforces the raw 128-byte limit.
+                // Bound decoding work using Solana's encoded limits. The upstream
+                // verify below enforces the 128-byte limit for all decoded/raw inputs.
                 let oversized = match &compare.bytes {
                     MemcmpEncodedBytes::Base58(bytes) => bytes.len() > 175,
                     MemcmpEncodedBytes::Base64(bytes) => bytes.len() > 172,
-                    MemcmpEncodedBytes::Bytes(bytes) => bytes.len() > 128,
+                    MemcmpEncodedBytes::Bytes(_) => false,
                 };
                 if oversized {
                     return Err(D::Error::custom(RpcFilterError::DataTooLarge));

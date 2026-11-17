@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use config::types::{ResolvedUrl, network::websocket_url};
+use config::types::network::ResolvedUrl;
 use futures_util::{SinkExt, StreamExt};
 use json::Value;
 use tokio::{net::TcpStream, time::timeout};
@@ -25,11 +25,21 @@ impl Args {
     /// Bounds connection setup, then logs live failures until Ctrl-C or disconnection.
     /// Idle monitoring has no deadline and does not detect missed notifications.
     pub(crate) async fn run(self) -> Result<()> {
-        let url = match self.url.scheme() {
-            "http" | "https" => websocket_url(self.url.0),
-            "ws" | "wss" => self.url.0,
+        let mut url = self.url.0;
+        match url.scheme() {
+            "http" | "https" => {
+                let scheme = if url.scheme() == "http" { "ws" } else { "wss" };
+                if let Some(port) = url.port() {
+                    url.set_port(Some(
+                        port.checked_add(1).context("WebSocket port overflow")?,
+                    ))
+                    .map_err(|_| anyhow::anyhow!("invalid WebSocket port"))?;
+                }
+                url.set_scheme(scheme).map_err(|_| anyhow::anyhow!("invalid WebSocket URL"))?;
+            }
+            "ws" | "wss" => {}
             _ => bail!("monitor requires an HTTP or WebSocket URL"),
-        };
+        }
         let mut ws = timeout(Duration::from_secs(10), subscribe(url.as_str()))
             .await
             .context("timed out connecting and subscribing")??;

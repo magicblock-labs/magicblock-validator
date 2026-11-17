@@ -1,250 +1,235 @@
-use std::{sync::Arc, time::Duration};
-
-use engine::Engine;
-use mbv_core::intent::outbox::outbox_intent_pda_with_bump;
-use metrics::metrics;
-use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
-use program::outbox_intent_bundles::OutboxIntentBundle;
-use solana_account::AccountMode;
-use solana_transaction::Transaction;
-use tokio_util::sync::CancellationToken;
-use tracing::error;
-
-use crate::{
-    committor_processor::CommittorProcessor,
-    error::CommittorServiceResult,
-    intent_engine::db::BacklogDB,
-    intent_executor::error::IntentExecutorError,
-    outbox::{
-        OutboxClient,
-        outbox_client::InternalOutboxClientError,
-        outbox_intent_bundles_reader::{OutboxIntentBundlesReader, OutboxIntentBundlesReaderError},
-    },
-    tasks::task_info_fetcher::AccountSnapshot,
+use std::{
+    sync::{Arc, atomic::AtomicU64},
+    time::Duration,
 };
 
-/// Recovers durable intents from an already-restored Engine, then accepts new work.
-pub struct IntentExecutionService<O, D> {
-    engine: Engine,
-    /// ER client specific for Intent needs. Could be switched to RpcClient
-    outbox_client: Arc<O>,
-    /// Processor of accepted intents
-    processor: Arc<CommittorProcessor<D>>,
-    /// Time interval to scrape MagicContext(ER slot interval)
-    // TODO(edwin): can be removed if LatestBlocK moved into magicblock-core
-    slot_interval: Duration,
+use engine::Engine;
+use mbv_core::traits::ActionsCallbackScheduler;
+use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
+use parking_lot::Mutex;
+use rpc_client::MagicblockRpcClient;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_signer::Signer;
+use table_mania::{GarbageCollectorConfig, TableMania};
+use tokio::{sync::mpsc, task::JoinSet};
+use tokio_util::{sync::CancellationToken, task::TaskTracker};
+
+use crate::{
+    config::CommittorConfig,
+    execution::{
+        ExecutionContext, IntentExecutor, backlog::AccountsDbIntentBacklog,
+        client::IntentExecutionClient, preparation::Preparator, queue::IntentQueue,
+        stream::IntentStream,
+    },
+    intake::worker::IntentIntake,
+    shared::{
+        account_state::RpcTaskInfoProvider,
+        outbox::{
+            outbox_client::InternalOutboxClient,
+            outbox_intent_bundles_reader::OutboxIntentBundlesReaderError,
+        },
+    },
+};
+
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+
+/// Owns intake and execution. Only `run` starts background workers.
+pub struct CommittorService {
+    intake: IntentIntake,
+    executor: IntentExecutor,
+    context: Arc<ExecutionContext>,
+    tables: TableMania,
 }
 
-impl<O, D: BacklogDB> IntentExecutionService<O, D>
-where
-    O: OutboxClient,
-    // OutboxClient errors should be convertible to Service errors
-    O::Error: Into<IntentExecutionServiceError>,
-    // OutboxClient errors should be convertible into IntentExecutor errors
-    O::Error: Into<IntentExecutorError>,
-    // OutboxReader errors should be convertible to Service errors
-    <O::OutboxReader as OutboxIntentBundlesReader>::Error: Into<IntentExecutionServiceError>,
-{
+impl CommittorService {
     pub fn new(
+        config: CommittorConfig,
+        chain_slot: Arc<AtomicU64>,
         engine: Engine,
-        outbox_client: Arc<O>,
-        processor: Arc<CommittorProcessor<D>>,
-        slot_interval: Duration,
+        callbacks: Arc<dyn ActionsCallbackScheduler>,
     ) -> Self {
+        let rpc = MagicblockRpcClient::new_with_chain_slot_and_websocket(
+            Arc::new(RpcClient::new_with_commitment(
+                config.rpc_uri,
+                config.commitment,
+            )),
+            chain_slot,
+            config.websocket_uri,
+        );
+        let tables = TableMania::new(rpc.clone(), engine.signer().pubkey());
+        let task_info_provider = Arc::new(RpcTaskInfoProvider::new(rpc.clone()));
+        let outbox = Arc::new(InternalOutboxClient::new(engine.clone()));
+        let backlog = Arc::new(Mutex::new(AccountsDbIntentBacklog::new(engine.clone())));
+        let (sender, receiver) = mpsc::channel(1000);
+        let tasks = TaskTracker::new();
+        let context = Arc::new(ExecutionContext {
+            engine: engine.clone(),
+            intent_client: IntentExecutionClient::new(
+                rpc.clone(),
+                config.compute_budget_config.compute_unit_price,
+            ),
+            transaction_preparator: Arc::new(Preparator::new(
+                rpc,
+                tables.clone(),
+                config.compute_budget_config,
+            )),
+            task_info_provider: task_info_provider.clone(),
+            outbox_client: outbox.clone(),
+            actions_callback_executor: callbacks,
+            actions_timeout: config.actions_timeout,
+            maintenance: tasks.clone(),
+            cancel: CancellationToken::new(),
+        });
+        let executor = IntentExecutor::new(
+            IntentStream::new(backlog.clone(), receiver),
+            context.clone(),
+            tasks,
+        );
+        let intake = IntentIntake {
+            outbox_client: outbox.clone(),
+            queue: Arc::new(IntentQueue {
+                engine,
+                outbox_client: outbox,
+                backlog,
+                intent_sender: sender,
+            }),
+            slot_interval: config.slot_interval,
+        };
         Self {
-            engine,
-            outbox_client,
-            processor,
-            slot_interval,
+            intake,
+            executor,
+            context,
+            tables,
         }
     }
 
     pub async fn run(self, mut shutdown: ShutdownHandle) {
-        let result = self.accept_worker(shutdown.child()).await;
-        let reason = match result {
-            Err(error) => ShutdownReason::Error(Box::new(error)),
-            Ok(()) if shutdown.requested() => ShutdownReason::Signalled,
-            Ok(()) => ShutdownReason::Unexpected,
-        };
-        shutdown.terminate(reason);
-    }
-
-    async fn accept_worker(
-        self,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), IntentExecutionServiceError> {
-        // Recover durable outbox work before accepting new intents.
-        if let Err(err) = self.reschedule_intents().await {
-            // TODO(edwin): alerts
-            error!(error = ?err, "Failed to reschedule pending bundles")
-        }
-
-        let mut interval = tokio::time::interval(self.slot_interval);
-        loop {
+        let stop = shutdown.child();
+        let _cancel_on_drop = self.context.cancel.clone().drop_guard();
+        let _stop_on_drop = stop.clone().drop_guard();
+        let tables = self.tables.clone();
+        let engine = self.context.engine.clone();
+        let mut gc = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
+            tables
+                .run_garbage_collector(engine.signer(), GarbageCollectorConfig::default())
+                .await;
+        }));
+        let mut workers = JoinSet::new();
+        let executor_stop = stop.clone();
+        workers.spawn(async move {
+            self.executor.run(executor_stop).await.map_err(CommittorServiceError::from)
+        });
+        let intake_stop = stop.clone();
+        workers.spawn(async move {
             tokio::select! {
                 biased;
-                _ = cancellation_token.cancelled() => {
-                    // Accepted intents are durable, so no drain is needed here.
-                    break;
-                }
-                _ = interval.tick() => {
-                    let accept_result = self
-                        .outbox_client
-                        .accept_scheduled_intents()
-                        .await;
-                    let intent_bundles = accept_result.unwrap_or_else(|(accepted_intents, err)| {
-                        error!("Failed to accept intents: {}", err);
-                        accepted_intents
-                    });
-
-                    let intent_bundles = intent_bundles.into_iter().map(|bundle| {
-                        let bump =
-                            outbox_intent_pda_with_bump(bundle.intent_id).1;
-                        OutboxIntentBundle::accepted(bundle, bump)
-                    }).collect();
-                    if let Err(err) = self.schedule_intent_execution(intent_bundles).await {
-                        error!("Failed to schedule intent execution: {}", err);
-                    }
-                }
+                _ = intake_stop.cancelled() => Ok(()),
+                result = async {
+                    self.intake.queue.reschedule_intents().await?;
+                    self.intake.run().await;
+                    Ok(())
+                } => result,
             }
+        });
+        let mut reason = tokio::select! {
+            biased;
+            _ = stop.cancelled() => ShutdownReason::Signalled,
+            result = workers.join_next() => worker_reason(result),
+            result = &mut gc => worker_reason(Some(result.map(|_| Ok(())))),
+        };
+        stop.cancel();
+        reason = reason.combine(
+            drain_workers(
+                &mut workers,
+                &self.context.maintenance,
+                &self.context.cancel,
+            )
+            .await,
+        );
+        if !gc.is_finished() {
+            gc.abort();
+            let _ = gc.await;
         }
-        Ok(())
-    }
-
-    async fn reschedule_intents(&self) -> Result<(), IntentExecutionServiceError> {
-        const BATCH_SIZE: usize = 1000;
-
-        let mut reader = self.outbox_client.outbox_reader();
-        loop {
-            // Read by chunks in order not to overload `IntentExecutionEngine`
-            let bundles = reader.read(BATCH_SIZE).await.map_err(Into::into)?;
-            let read_len = bundles.len();
-            if bundles.is_empty() {
-                return Ok(());
-            }
-
-            // Original blockhash is stale after restart; signal recovery so
-            // notify_commit_sent rebuilds the tx with a fresh ER blockhash.
-            let mut recoverable = Vec::with_capacity(read_len);
-            for mut bundle in bundles {
-                bundle.inner.sent_transaction = Transaction::default();
-                if self.recoverable(&bundle).await {
-                    recoverable.push(bundle);
-                }
-            }
-            // Schedule without initial persistence as bundles already exist in db.
-            if !recoverable.is_empty()
-                && let Err(err) = self.processor.schedule_intent_bundles(recoverable).await
-            {
-                error!(error = ?err, "Failed to reschedule pending bundles")
-            }
-
-            if read_len != BATCH_SIZE {
-                return Ok(());
-            }
-        }
-    }
-
-    async fn schedule_intent_execution(
-        &self,
-        intent_bundles: Vec<OutboxIntentBundle>,
-    ) -> CommittorServiceResult<()> {
-        if intent_bundles.is_empty() {
-            return Ok(());
-        }
-
-        metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
-
-        self.processor.schedule_intent_bundles(intent_bundles).await
-    }
-
-    async fn recoverable(&self, bundle: &OutboxIntentBundle) -> bool {
-        let accounts = bundle
-            .get_all_committed_accounts()
-            .into_iter()
-            .map(|account| (account.pubkey, account.remote_slot))
-            .collect::<Vec<AccountSnapshot>>();
-        self.same_session(bundle.intent_id, &accounts) && self.valid_nonces(bundle, &accounts).await
-    }
-
-    /// Recovery uses authoritative state already restored by Engine; missing accounts are not refetched.
-    fn same_session(&self, intent_id: u64, snapshots: &[AccountSnapshot]) -> bool {
-        let accounts = self.engine.accounts();
-        let loader = accounts.loader();
-        for &(pubkey, recovered_slot) in snapshots {
-            let current =
-                loader.read(&pubkey, |account| (account.mode(), account.slot())).ok().flatten();
-            let Some((mode, current_slot)) = current else {
-                error!(intent_id, %pubkey,
-                    "Skipping outbox recovery because committed account is missing locally");
-                return false;
-            };
-            let locally_protected = matches!(mode, AccountMode::Delegated | AccountMode::Transient);
-            if !locally_protected || (recovered_slot != 0 && recovered_slot != current_slot) {
-                error!(intent_id, %pubkey, recovered_slot, current_slot, locally_protected,
-                    "Skipping outbox recovery because delegation session changed");
-                return false;
-            }
-        }
-        true
-    }
-
-    async fn valid_nonces(
-        &self,
-        bundle: &OutboxIntentBundle,
-        accounts: &[AccountSnapshot],
-    ) -> bool {
-        let recovery_nonces = bundle.recovery_commit_nonces();
-        if recovery_nonces.is_empty() {
-            return true;
-        }
-
-        let min_context_slot = accounts.iter().map(|(_, slot)| *slot).max().unwrap_or_default();
-        let current_nonces =
-            match self.processor.fetch_current_commit_nonces(accounts, min_context_slot).await {
-                Ok(nonces) => nonces,
-                Err(err) => {
-                    error!(
-                        intent_id = bundle.intent_id,
-                        error = ?err,
-                        "Skipping outbox recovery after commit nonce lookup failed"
-                    );
-                    return false;
-                }
-            };
-
-        for &(pubkey, recovery_commit_nonce) in recovery_nonces {
-            let Some(&current_commit_nonce) = current_nonces.get(&pubkey) else {
-                error!(
-                    intent_id = bundle.intent_id,
-                    %pubkey,
-                    "Skipping outbox recovery because current commit nonce is missing"
-                );
-                return false;
-            };
-            if recovery_commit_nonce < current_commit_nonce {
-                error!(
-                    intent_id = bundle.intent_id,
-                    %pubkey,
-                    recovery_commit_nonce,
-                    current_commit_nonce,
-                    "Skipping stale outbox recovery because chain nonce has advanced"
-                );
-                return false;
-            }
-        }
-        true
+        shutdown.terminate(reason);
     }
 }
 
-#[derive(thiserror::Error, Debug)]
-pub enum IntentExecutionServiceError {
-    #[error("Intent execution worker '{0}' stopped unexpectedly")]
-    WorkerStopped(&'static str),
-    #[error("IntentRpcClientError: {0}")]
-    IntentRpcClientError(#[from] InternalOutboxClientError),
-    #[error("OutboxReaderError")]
-    OutboxReaderError(#[from] OutboxIntentBundlesReaderError),
-    #[error("IntentExecutorError: {0}")]
-    IntentExecutorError(#[from] Box<IntentExecutorError>),
+async fn drain_workers(
+    workers: &mut JoinSet<Result<(), CommittorServiceError>>,
+    tasks: &TaskTracker,
+    cancel: &CancellationToken,
+) -> ShutdownReason {
+    let mut reason = ShutdownReason::Signalled;
+    let drain = async {
+        while let Some(result) = workers.join_next().await {
+            if !matches!(result, Ok(Ok(()))) {
+                reason = std::mem::take(&mut reason).combine(worker_reason(Some(result)));
+            }
+        }
+        tasks.close();
+        tasks.wait().await;
+    };
+    if tokio::time::timeout(SHUTDOWN_GRACE, drain).await.is_err() {
+        cancel.cancel();
+        workers.shutdown().await;
+        tasks.close();
+        tasks.wait().await;
+    }
+    reason
+}
+
+fn worker_reason(
+    result: Option<Result<Result<(), CommittorServiceError>, tokio::task::JoinError>>,
+) -> ShutdownReason {
+    match result {
+        Some(Ok(Err(err))) => ShutdownReason::Error(Box::new(err)),
+        Some(Err(err)) => ShutdownReason::Error(Box::new(err)),
+        _ => ShutdownReason::Unexpected,
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum CommittorServiceError {
+    #[error(transparent)]
+    Outbox(#[from] OutboxIntentBundlesReaderError),
+    #[error(transparent)]
+    Worker(#[from] tokio::task::JoinError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn shutdown_drains_then_cancels_remaining_work() {
+        for stalled in [false, true] {
+            let tasks = TaskTracker::new();
+            let cancel = CancellationToken::new();
+            let mut workers = JoinSet::new();
+            let (finished, result) = tokio::sync::oneshot::channel();
+            workers.spawn(tasks.track_future(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                finished.send(()).unwrap();
+                Ok(())
+            }));
+            if stalled {
+                workers.spawn(tasks.track_future(std::future::pending()));
+                let token = cancel.clone();
+                tasks.spawn(async move { token.cancelled().await });
+            }
+            let start = tokio::time::Instant::now();
+            let reason = drain_workers(&mut workers, &tasks, &cancel).await;
+            assert!(matches!(reason, ShutdownReason::Signalled));
+            assert!(
+                result.await.is_ok(),
+                "active work can finish during the drain"
+            );
+            assert!(workers.is_empty() && tasks.is_empty());
+            assert_eq!(cancel.is_cancelled(), stalled);
+            assert_eq!(
+                start.elapsed(),
+                if stalled { SHUTDOWN_GRACE } else { Duration::from_millis(50) }
+            );
+        }
+    }
 }
