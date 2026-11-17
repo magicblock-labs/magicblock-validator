@@ -43,7 +43,7 @@ fn supported_loaders_normalize_to_rent_funded_readonly_elf() {
         let result = normalize(image, companion, &rent).unwrap();
         assert_eq!(result.read().data(), ELF);
         assert_eq!(result.read().owner(), owner);
-        assert_eq!(result.read().mode(), AccountMode::ReadOnly);
+        assert_eq!(result.read().mode(), AccountMode::Mirrored);
         assert_eq!(result.read().slot(), SLOT);
         assert_eq!(result.read().lamports(), rent.minimum_balance(ELF.len()));
     }

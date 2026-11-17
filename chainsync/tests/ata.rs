@@ -86,7 +86,7 @@ async fn http_and_grpc_delegations_retain_raw_eata_and_refresh_both_images() {
         );
         assert_eq!(ws.unsubscribed().await, subscription);
         let raw = engine.get_account(fixture.eata).unwrap();
-        assert_eq!(raw.mode(), AccountMode::ReadOnly);
+        assert_eq!(raw.mode(), AccountMode::Mirrored);
         assert_eq!(raw.owner(), &EATA_PROGRAM_ID);
         assert_eq!(raw.data(), fixture.delegated.read().data());
         // v42 reads the first eight bytes of its operand. Empty raw data would
@@ -138,12 +138,12 @@ async fn http_and_grpc_delegations_retain_raw_eata_and_refresh_both_images() {
         assert_eq!(engine.get_account(fixture.ata).unwrap(), projected);
         assert_eq!(
             engine.get_account(fixture.eata).unwrap().mode(),
-            AccountMode::ReadOnly
+            AccountMode::Mirrored
         );
 
         // Real commit scheduling belongs in RedSuite; retain the actual projection
         // and seed the eligible local boundary before testing the streamed release.
-        let transient = AccountBuilder::from(projected).mode(AccountMode::Transient).build();
+        let transient = AccountBuilder::from(projected).mode(AccountMode::Undelegating).build();
         engine.accounts().store(&[(fixture.ata, transient)]).unwrap();
         grpc.undelegated(release_slot, fixture.eata, engine.authority());
         let script = async {
@@ -169,18 +169,18 @@ async fn http_and_grpc_delegations_retain_raw_eata_and_refresh_both_images() {
         };
         scripted(grpc.delegation_barrier(&engine, release_slot + 1), script).await;
         let restored = engine.get_account(fixture.ata).unwrap();
-        assert_eq!(restored.mode(), AccountMode::ReadOnly);
+        assert_eq!(restored.mode(), AccountMode::Mirrored);
         assert_eq!(restored.slot(), release_slot);
         assert_eq!(
             TokenAccount::unpack(restored.data()).unwrap().amount,
             TOKEN_BALANCE
         );
         let raw = engine.get_account(fixture.eata).unwrap();
-        assert_eq!(raw.mode(), AccountMode::ReadOnly);
+        assert_eq!(raw.mode(), AccountMode::Mirrored);
         assert_eq!(raw.slot(), release_slot);
         assert_eq!(raw.owner(), &EATA_PROGRAM_ID);
 
-        let mut updates = engine.accounts().subscribe(fixture.eata);
+        let mut updates = engine.accounts().subscribe(fixture.eata).await;
         let mut update = Account::from_builder(fixture.eata, &fixture.delegated);
         update.data[64..72].copy_from_slice(&(DELEGATED_TOKEN_BALANCE + 1).to_le_bytes());
         ws.notify(subscription + 1, release_slot + 2, &update);
@@ -257,7 +257,7 @@ async fn raw_eata_and_ata_acquisition_share_readonly_raw_eata_without_deadlock()
     scripted(acquire(&chain_sync, &requests), script).await.unwrap();
     assert_eq!(ws.unsubscribed().await, FIRST_SUBSCRIPTION);
     let raw = engine.get_account(fixture.eata).unwrap();
-    assert_eq!(raw.mode(), AccountMode::ReadOnly);
+    assert_eq!(raw.mode(), AccountMode::Mirrored);
     assert_eq!(raw.owner(), &EATA_PROGRAM_ID);
     assert_eq!(raw.slot(), DELEGATION_SLOT + 2);
     assert_eq!(

@@ -50,7 +50,7 @@ fn elf_account(account: AccountBuilder, owner: Pubkey, rent: &Rent) -> AccountBu
     account
         .lamports(rent.minimum_balance(len))
         .owner(owner)
-        .mode(AccountMode::ReadOnly)
+        .mode(AccountMode::Mirrored)
         .executable(true)
 }
 

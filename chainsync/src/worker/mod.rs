@@ -222,9 +222,9 @@ impl ChainSync {
         }
         let accessor = self.engine.account(subscription.local_pubkey()).await?;
         let account = match program {
-            Some(_) => program::normalize_program_data(account, self.engine.rent())?,
+            Some(_) => program::normalize_program_data(account, &self.engine.rent())?,
             None if account.read().flags().contains(StateFlags::EXECUTABLE) => {
-                program::normalize(account, None, self.engine.rent())?
+                program::normalize(account, None, &self.engine.rent())?
             }
             None => mirror(account),
         };

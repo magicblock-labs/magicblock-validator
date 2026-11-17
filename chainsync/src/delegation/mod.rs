@@ -56,7 +56,7 @@ pub(crate) fn account(account: AccountBuilder, record: &DelegationRecord) -> Acc
     if record.authority == Pubkey::default() {
         account.lamports(0).mode(AccountMode::Magic)
     } else {
-        account.mode(AccountMode::Delegated)
+        account.lamports(record.lamports).mode(AccountMode::Delegated)
     }
 }
 

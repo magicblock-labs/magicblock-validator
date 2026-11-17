@@ -92,7 +92,7 @@ async fn aml_errors_skip_rescue_but_rejected_signers_and_invalid_actions_schedul
     assert!(!http.pending());
     assert_eq!(
         engine.get_account(key).unwrap().mode(),
-        AccountMode::Transient
+        AccountMode::Undelegating
     );
     assert_eq!(intents(&engine), 1);
     let invalid = Pubkey::new_unique();
@@ -111,7 +111,7 @@ async fn aml_errors_skip_rescue_but_rejected_signers_and_invalid_actions_schedul
     within(chain_sync.materialize_delegation(prepared)).await.unwrap();
     assert_eq!(
         engine.get_account(invalid).unwrap().mode(),
-        AccountMode::Transient
+        AccountMode::Undelegating
     );
     assert_eq!(intents(&engine), 2);
     drop(chain_sync);
@@ -127,7 +127,7 @@ async fn newer_confined_and_transient_state_suppress_obsolete_rescue() {
     for (mode, slot) in [
         (AccountMode::Delegated, DELEGATION_SLOT + 1),
         (AccountMode::Magic, DELEGATION_SLOT - 1),
-        (AccountMode::Transient, DELEGATION_SLOT),
+        (AccountMode::Undelegating, DELEGATION_SLOT),
     ] {
         let key = Pubkey::new_unique();
         engine

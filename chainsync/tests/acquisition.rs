@@ -78,7 +78,7 @@ async fn overlapping_acquisitions_subscribe_before_fetch_and_skip_stale_updates(
     )
     .await
     .unwrap();
-    let mut updates = engine.accounts().subscribe(key);
+    let mut updates = engine.accounts().subscribe(key).await;
     let mut image = Account::new(key);
     image.data = vec![UPDATED_DATA];
     ws.notify(FIRST_SUBSCRIPTION, CONTEXT_SLOT + 1, &image);
@@ -93,7 +93,7 @@ async fn overlapping_acquisitions_subscribe_before_fetch_and_skip_stale_updates(
     })
     .await;
     image.data = vec![9];
-    let mut canaries = engine.accounts().subscribe(canary);
+    let mut canaries = engine.accounts().subscribe(canary).await;
     // The canary follows each rejected update on the same socket and worker queue.
     // Its materialization makes the subsequent absence-of-update assertion meaningful.
     for (slot, barrier_slot) in
