@@ -1,8 +1,8 @@
 use std::{cell::RefCell, collections::VecDeque};
 
+use crate::metrics;
 use engine::Engine;
 use mbv_core::intent::outbox::outbox_intent_pda;
-use metrics::metrics;
 #[cfg(test)]
 use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
@@ -37,9 +37,10 @@ impl AccountsDbIntentBacklog {
 impl BacklogDB for AccountsDbIntentBacklog {
     fn store_intent_bundles(&self, intent_bundles: Vec<OutboxIntentBundle>) -> DBResult<()> {
         let mut queue = self.queue.borrow_mut();
+        let count = intent_bundles.len();
         queue.extend(intent_bundles.into_iter().map(|el| el.inner.intent_id));
 
-        metrics::set_committor_intents_backlog_count(queue.len() as i64);
+        metrics::backlog_added(count);
         Ok(())
     }
 
@@ -48,7 +49,7 @@ impl BacklogDB for AccountsDbIntentBacklog {
         let Some(id) = queue.pop_front() else {
             return Ok(None);
         };
-        metrics::set_committor_intents_backlog_count(queue.len() as i64);
+        metrics::backlog_removed(1);
         drop(queue);
 
         let intent_pda = outbox_intent_pda(id);

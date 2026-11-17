@@ -91,8 +91,7 @@ impl Leader {
 
         let chainsync = ChainSync::new(engine.clone(), config.chainsync.clone(), &mut shutdown)?;
 
-        let committor =
-            Self::init_committor(&config, &engine, shared_chain_slot);
+        let committor = Self::init_committor(&config, &engine, shared_chain_slot);
         timer.record("Committor service initialized");
 
         let metrics = MetricsService::bind(config.metrics.address.0)
@@ -142,7 +141,7 @@ impl Leader {
     fn init_committor(
         config: &LeaderParams,
         engine: &Engine,
-            chain_slot: Arc<AtomicU64>,
+        chain_slot: Arc<AtomicU64>,
     ) -> CommittorService {
         let er_rpc = Arc::new(RpcClient::new(config.aperture.listen.http()));
         let callbacks = Arc::new(ActionsCallbackService::new(er_rpc, engine.clone()));
@@ -361,7 +360,6 @@ impl Leader {
         let mut timer = EventTimer::new("startup");
         self.spawn_primary_onchain_setup();
 
-
         let shutdown = self.shutdown.handle(Service::IntentExecution);
         tokio::spawn(self.committor.run(shutdown));
         timer.record("Intent execution service started");
@@ -374,9 +372,7 @@ impl Leader {
         tokio::spawn(self.metrics.run(shutdown));
         timer.record("Metrics service started");
 
-        RunningLeader {
-            shutdown: self.shutdown,
-        }
+        RunningLeader { shutdown: self.shutdown }
     }
 }
 

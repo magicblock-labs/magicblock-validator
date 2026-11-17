@@ -28,8 +28,8 @@ impl IntentIntake {
                     OutboxIntentBundle::accepted(bundle, bump)
                 })
                 .collect::<Vec<_>>();
-            metrics::metrics::inc_committor_intents_count_by(intent_bundles.len() as u64);
-            if let Err(err) = self.queue.schedule(intent_bundles).await {
+            crate::metrics::scheduled(intent_bundles.len());
+            if let Err(err) = self.queue.schedule(intent_bundles) {
                 error!("Failed to schedule intent execution: {}", err);
             }
         }
