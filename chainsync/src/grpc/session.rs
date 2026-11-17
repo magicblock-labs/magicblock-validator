@@ -122,7 +122,8 @@ impl Session {
         self.sync_filter()?;
         // Set the replay start only when opening a stream; Yellowstone handles replay
         // on its internal reconnects, and filter refreshes must not restart it.
-        let request = self.request(Some(self.engine.accounts().chain_slot().saturating_sub(2)));
+        let from_slot = self.engine.accounts().chain_slot().checked_sub(2).filter(|slot| *slot > 0);
+        let request = self.request(from_slot);
         let (mut sink, mut stream) = client.subscribe_with_request(Some(request)).await?;
         // Report only tracked accounts included in the initial filter, not those still waiting.
         for (&pubkey, entry) in &self.desired {
