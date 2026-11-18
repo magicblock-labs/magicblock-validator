@@ -23,18 +23,47 @@ const DEFAULT_BALANCE: u64 = LAMPORTS_PER_SOL * 10;
 const TRANSFER_AMOUNT: u64 = 1000;
 
 /// Proves duplicate message keys are rejected for raw and pre-sanitized execution
-/// and simulation, without preventing later work on the same account.
+/// and simulation, oversized key tables are rejected before duplicate scanning,
+/// and later work on the same account still completes.
 #[tokio::test]
 async fn test_duplicate_account_keys_rejected_without_stalling() {
     let mut env = setup_env(1);
     let account = create_accounts(&mut env, 1)[0];
+
+    for key_count in [256, 257] {
+        for duplicate in [false, true] {
+            let mut transaction = tx_write(&mut env, account, 42);
+            transaction
+                .message
+                .account_keys
+                .resize_with(key_count, Pubkey::new_unique);
+            if duplicate {
+                transaction.message.account_keys[key_count - 1] = account;
+            }
+            let expected = if key_count > 256 {
+                Err(TransactionError::TooManyAccountLocks)
+            } else if duplicate {
+                Err(TransactionError::AccountLoadedTwice)
+            } else {
+                Ok(())
+            };
+            let sanitized = SanitizedTransaction::try_from_legacy_transaction(
+                transaction.clone(),
+                &HashSet::default(),
+            )
+            .unwrap();
+            assert_eq!(transaction.sanitize(false).map(|_| ()), expected);
+            assert_eq!(sanitized.sanitize(false).map(|_| ()), expected);
+        }
+    }
+
     env.run_scheduler();
     env.advance_slot();
 
     // Exercise writable/writable, writable/readonly, and readonly/readonly keys.
     for readonly in [1, 2, 3] {
         let mut transaction = tx_write(&mut env, account, 42);
-        // Message builders deduplicate instruction accounts; construct the wire
+        // Message builders deduplicate account_keys; construct the wire
         // message keys directly so this reaches the admission check.
         transaction.message.account_keys =
             vec![env.payers[0].pubkey(), account, account, guinea::ID];
