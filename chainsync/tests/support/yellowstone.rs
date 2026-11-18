@@ -229,7 +229,7 @@ impl Server {
     /// Sealing the canary also establishes opening readiness via replay; preceding direct broadcasts do not replay.
     pub(crate) async fn delegation_barrier(&self, engine: &TestEngine, slot: u64) {
         let key = Pubkey::new_unique();
-        let mut updates = engine.accounts().subscribe(key);
+        let mut updates = engine.accounts().subscribe(key).await;
         let (account, record) = delegation(key, V42_ID, engine.authority(), slot, &[]);
         self.seed(slot, &[account, record]).await;
         let account = within(updates.recv()).await.unwrap();
@@ -258,7 +258,7 @@ pub(crate) async fn wait_for_retained_update(
     providers: &[Server],
     image: &Account,
 ) -> Delivery {
-    let mut updates = engine.accounts().subscribe(image.key);
+    let mut updates = engine.accounts().subscribe(image.key).await;
     let clock = Account::new(clock::ID);
     let floor = engine
         .accounts()
