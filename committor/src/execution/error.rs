@@ -1,5 +1,4 @@
 use mbv_core::traits::ActionError;
-use metrics::metrics;
 use rpc_client::MagicBlockRpcClientError;
 use solana_message::CompileError;
 use solana_signature::Signature;
@@ -103,12 +102,10 @@ impl IntentExecutorError {
             _ => None,
         }
     }
-}
 
-impl metrics::LabelValue for IntentExecutorError {
-    fn value(&self) -> &str {
+    pub(crate) fn metric_label(&self) -> &'static str {
         match self {
-            Self::FailedExecution(err) => err.value(),
+            Self::FailedExecution(err) => err.metric_label(),
             _ => "failed",
         }
     }

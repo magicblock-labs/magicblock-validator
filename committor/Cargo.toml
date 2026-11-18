@@ -16,16 +16,14 @@ async-trait = { workspace = true }
 engine = { workspace = true }
 futures-util = { workspace = true }
 lru = { workspace = true }
-
 committor-interface = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }
-metrics = { workspace = true }
 program = { workspace = true }
 rpc-client = { workspace = true }
 parking_lot = { workspace = true }
 table-mania = { workspace = true }
-nucleus = { workspace = true }
+nucleus = { workspace = true, features = ["metrics"] }
 pin-project = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder = { workspace = true }

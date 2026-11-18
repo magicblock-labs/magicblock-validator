@@ -1,4 +1,3 @@
-use ::metrics::metrics::LabelValue;
 use delegation_program_api::{AccountSizeClass, args::CallHandlerArgs};
 use mbv_core::intent::{BaseAction, BaseActionCallback};
 use solana_instruction::{AccountMeta, Instruction};
@@ -65,10 +64,8 @@ impl Task {
             }
         }
     }
-}
 
-impl LabelValue for Task {
-    fn value(&self) -> &str {
+    pub(crate) fn metric_label(&self) -> &'static str {
         match self {
             Self::CommitFinalize(task) => {
                 if task.is_buffer() {

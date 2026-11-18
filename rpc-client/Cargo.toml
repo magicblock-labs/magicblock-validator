@@ -11,8 +11,8 @@ version.workspace = true
 doctest = false
 
 [dependencies]
+nucleus = { workspace = true, features = ["metrics"] }
 futures-util = { workspace = true }
-metrics = { workspace = true }
 json = { workspace = true }
 solana-account = { workspace = true }
 solana-account-decoder-client-types = { workspace = true }

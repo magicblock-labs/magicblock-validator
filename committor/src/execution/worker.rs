@@ -10,7 +10,7 @@ use std::{
 #[cfg(test)]
 use tokio::sync::broadcast;
 
-use metrics::metrics;
+use crate::metrics;
 use parking_lot::Mutex;
 use program::outbox_intent_bundles::OutboxIntentBundle;
 use tokio::{
@@ -191,7 +191,8 @@ impl IntentExecutor {
                 capacity_changed: self.execution_capacity_changed.clone(),
             };
 
-            self.running_executors.spawn(self.tasks.track_future(Self::execute(
+            let inflight = metrics::Inflight::new();
+            let execution = Self::execute(
                 runner,
                 intent,
                 scheduler,
@@ -200,9 +201,11 @@ impl IntentExecutor {
                 self.stop.clone(),
                 #[cfg(test)]
                 self.result_sender.clone(),
-            )));
-
-            metrics::set_committor_executors_busy_count(self.running_executors.len() as i64);
+            );
+            self.running_executors.spawn(self.tasks.track_future(async move {
+                let _inflight = inflight;
+                execution.await;
+            }));
         }
         Ok(())
     }
@@ -291,7 +294,6 @@ impl IntentExecutor {
                     Vec::new()
                 }
             };
-            metrics::set_committor_poisoned_keys_count(scheduler.poisoned_keys_count() as i64);
             drop(scheduler);
             #[cfg(test)]
             Self::broadcast_result(
@@ -337,7 +339,7 @@ impl IntentExecutor {
         poisoned_intents: Vec<OutboxIntentBundle>,
         #[cfg(test)] result_sender: &broadcast::Sender<RecordedResult>,
     ) {
-        metrics::inc_committor_cascade_voided_intents_count_by(poisoned_intents.len() as u64);
+        metrics::voided(poisoned_intents.len());
         for intent in poisoned_intents {
             warn!(poisoned_intent = ?intent.intent_id, "Intent poisoned");
             #[cfg(test)]
@@ -432,17 +434,9 @@ impl IntentExecutor {
         result: &IntentExecutorResult<ExecutionOutput>,
     ) {
         const EXECUTION_TIME_THRESHOLD: f64 = 5.0;
-        const INTENT_BUNDLE_LABEL: &str = "intent_bundle";
 
         let intent_execution_secs = execution_time.as_secs_f64();
-        metrics::observe_committor_intent_execution_time_histogram(
-            intent_execution_secs,
-            &INTENT_BUNDLE_LABEL,
-            result,
-        );
-        if let Err(err) = &result {
-            metrics::inc_committor_failed_intents_count(&INTENT_BUNDLE_LABEL, err);
-        }
+        metrics::execution(intent_execution_secs, result);
 
         // Loki alerts
         if intent_execution_secs >= EXECUTION_TIME_THRESHOLD {

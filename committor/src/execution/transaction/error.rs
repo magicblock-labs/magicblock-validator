@@ -1,5 +1,4 @@
 use mbv_core::traits::ActionError;
-use metrics::metrics;
 use rpc_client::{MagicBlockRpcClientError, utils::TransactionErrorMapper};
 use solana_instruction::error::InstructionError;
 use solana_signature::Signature;
@@ -188,10 +187,8 @@ impl TransactionExecutionError {
             }
         }
     }
-}
 
-impl metrics::LabelValue for TransactionExecutionError {
-    fn value(&self) -> &str {
+    pub(crate) fn metric_label(&self) -> &'static str {
         match self {
             Self::ActionsError(_, _) => "actions_failed",
             Self::CpiLimitError(_, _) => "cpi_limit_failed",

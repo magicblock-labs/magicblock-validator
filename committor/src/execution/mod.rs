@@ -13,7 +13,6 @@ use std::sync::Arc;
 
 use engine::Engine;
 use mbv_core::traits::CallbackScheduleError;
-use metrics::metrics;
 use progress::{ExecutionProgress, TransactionProgress};
 use solana_keypair::Keypair;
 use solana_signature::Signature;
@@ -60,10 +59,8 @@ impl ExecutionOutput {
             transaction: TransactionProgress::Confirmed(self.signature),
         }
     }
-}
 
-impl metrics::LabelValue for ExecutionOutput {
-    fn value(&self) -> &str {
+    pub(crate) fn metric_label(&self) -> &'static str {
         // Keep existing dashboard labels while the internal stage types disappear.
         if self.confirmed_commit.is_some() {
             "two_stage_succeeded"
