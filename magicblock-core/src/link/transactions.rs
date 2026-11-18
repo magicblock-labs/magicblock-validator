@@ -231,6 +231,14 @@ where
 
 impl SanitizeableTransaction for SanitizedTransaction {
     fn sanitize(self, _: bool) -> Result<Self, TransactionError> {
+        let message = self.message();
+        // Account indices are u8; bound the table before the quadratic scan.
+        if message.account_keys().len() > usize::from(u8::MAX) + 1 {
+            return Err(TransactionError::TooManyAccountLocks);
+        }
+        if message.has_duplicates() {
+            return Err(TransactionError::AccountLoadedTwice);
+        }
         Ok(self)
     }
 }
@@ -251,7 +259,8 @@ impl SanitizeableTransaction for VersionedTransaction {
             Some(false),
             SimpleAddressLoader::Enabled(Default::default()),
             &Default::default(),
-        )
+        )?
+        .sanitize(false)
     }
 }
 

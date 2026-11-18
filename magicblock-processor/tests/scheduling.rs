@@ -4,6 +4,7 @@ use std::{
 };
 
 use guinea::GuineaInstruction;
+use magicblock_core::link::transactions::SanitizeableTransaction;
 use solana_account::ReadableAccount;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -11,7 +12,8 @@ use solana_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
-use solana_transaction::Transaction;
+use solana_transaction::{sanitized::SanitizedTransaction, Transaction};
+use solana_transaction_error::TransactionError;
 use test_kit::{ExecutionTestEnv, Signer};
 use tokio::time::timeout;
 
@@ -19,6 +21,114 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 const STRESS_TIMEOUT: Duration = Duration::from_secs(10);
 const DEFAULT_BALANCE: u64 = LAMPORTS_PER_SOL * 10;
 const TRANSFER_AMOUNT: u64 = 1000;
+
+/// Proves duplicate message keys are rejected for raw and pre-sanitized execution
+/// and simulation, oversized key tables are rejected before duplicate scanning,
+/// and later work on the same account still completes.
+#[tokio::test]
+async fn test_duplicate_account_keys_rejected_without_stalling() {
+    let mut env = setup_env(1);
+    let account = create_accounts(&mut env, 1)[0];
+
+    for key_count in [256, 257] {
+        for duplicate in [false, true] {
+            let mut transaction = tx_write(&mut env, account, 42);
+            transaction
+                .message
+                .account_keys
+                .resize_with(key_count, Pubkey::new_unique);
+            if duplicate {
+                transaction.message.account_keys[key_count - 1] = account;
+            }
+            let expected = if key_count > 256 {
+                Err(TransactionError::TooManyAccountLocks)
+            } else if duplicate {
+                Err(TransactionError::AccountLoadedTwice)
+            } else {
+                Ok(())
+            };
+            let sanitized = SanitizedTransaction::try_from_legacy_transaction(
+                transaction.clone(),
+                &HashSet::default(),
+            )
+            .unwrap();
+            assert_eq!(transaction.sanitize(false).map(|_| ()), expected);
+            assert_eq!(sanitized.sanitize(false).map(|_| ()), expected);
+        }
+    }
+
+    env.run_scheduler();
+    env.advance_slot();
+
+    // Exercise writable/writable, writable/readonly, and readonly/readonly keys.
+    for readonly in [1, 2, 3] {
+        let mut transaction = tx_write(&mut env, account, 42);
+        // Message builders deduplicate account_keys; construct the wire
+        // message keys directly so this reaches the admission check.
+        transaction.message.account_keys =
+            vec![env.payers[0].pubkey(), account, account, guinea::ID];
+        transaction.message.header.num_readonly_unsigned_accounts = readonly;
+        transaction.message.instructions[0].program_id_index = 3;
+        transaction.message.instructions[0].accounts = vec![1, 2];
+        transaction.sign(&[&env.payers[0]], env.ledger.latest_blockhash());
+
+        assert!(matches!(
+            transaction.clone().sanitize(false),
+            Err(TransactionError::AccountLoadedTwice)
+        ));
+        // Solana's structural sanitization allows duplicates; callers can hand
+        // this value directly to the scheduler without our raw-input conversion.
+        let sanitized = SanitizedTransaction::try_from_legacy_transaction(
+            transaction.clone(),
+            &HashSet::default(),
+        )
+        .unwrap();
+        assert!(sanitized.message().has_duplicates());
+
+        assert_eq!(
+            timeout(
+                TIMEOUT,
+                env.transaction_scheduler.execute(transaction.clone())
+            )
+            .await
+            .expect("raw execution admission stalled"),
+            Err(TransactionError::AccountLoadedTwice)
+        );
+        assert!(matches!(
+            timeout(TIMEOUT, env.transaction_scheduler.simulate(transaction))
+                .await
+                .expect("raw simulation admission stalled"),
+            Err(TransactionError::AccountLoadedTwice)
+        ));
+        assert_eq!(
+            timeout(
+                TIMEOUT,
+                env.transaction_scheduler.execute(sanitized.clone())
+            )
+            .await
+            .expect("pre-sanitized execution admission stalled"),
+            Err(TransactionError::AccountLoadedTwice)
+        );
+        assert!(matches!(
+            timeout(TIMEOUT, env.transaction_scheduler.simulate(sanitized))
+                .await
+                .expect("pre-sanitized simulation admission stalled"),
+            Err(TransactionError::AccountLoadedTwice)
+        ));
+
+        let valid = tx_write(&mut env, account, readonly);
+        let simulation =
+            timeout(TIMEOUT, env.transaction_scheduler.simulate(valid.clone()))
+                .await
+                .expect("subsequent simulation stalled")
+                .unwrap();
+        assert!(simulation.result.is_ok());
+        timeout(TIMEOUT, env.transaction_scheduler.execute(valid))
+            .await
+            .expect("subsequent execution stalled")
+            .unwrap();
+    }
+}
 
 // --- Helpers ---
 
