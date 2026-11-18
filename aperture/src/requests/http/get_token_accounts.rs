@@ -78,11 +78,11 @@ impl RpcHandlers {
                     TokenAccountAuthority::Owner => token.base.owner == authority_key,
                     TokenAccountAuthority::Delegate => token.base.delegate.contains(&authority_key),
                 };
-                matches.then(|| AccountWithPubkey::new(*pubkey, account, encoding, slice))
+                matches.then(|| AccountWithPubkey::checked(*pubkey, account, encoding, slice))
             })
             .map_err(RpcError::internal)?
             .filter_map(|(_, account)| account)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         let slot = self.engine.blocks().latest().slot;
         ResponsePayload::encode(&request.id, accounts, slot)

@@ -22,11 +22,11 @@ impl RpcHandlers {
         let accounts = accounts
             .program(&program, |pubkey, account| {
                 matches_filters(&filters, account.data())
-                    .then(|| AccountWithPubkey::new(*pubkey, account, encoding, slice))
+                    .then(|| AccountWithPubkey::checked(*pubkey, account, encoding, slice))
             })
             .map_err(RpcError::internal)?
             .filter_map(|(_, account)| account)
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
 
         if config.with_context.unwrap_or_default() {
             let slot = self.engine.blocks().latest().slot;
