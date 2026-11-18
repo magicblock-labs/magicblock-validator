@@ -19,9 +19,26 @@ impl MetricOperation for Op {
         }
     }
 }
+/// Subscription source and transport-failure label shared by the workers.
+#[derive(Clone, Copy)]
+pub(crate) enum Transport {
+    WebSocket,
+    Grpc,
+}
+
+impl Transport {
+    fn label(self) -> &'static str {
+        match self {
+            Self::WebSocket => "ws",
+            Self::Grpc => "grpc",
+        }
+    }
+}
+
 struct Metrics {
     durations: OperationCounters,
     http: IntCounterVec,
+    transport: IntCounterVec,
 }
 pub(crate) fn init() {
     METRICS.get_or_init(|| Metrics {
@@ -33,6 +50,13 @@ pub(crate) fn init() {
             spec("chainsync_http_attempts", "HTTP attempt results"),
             &["outcome"],
         ),
+        transport: counter_vec(
+            spec(
+                "chainsync_transport_failures",
+                "WS attempt and gRPC outer-session failures",
+            ),
+            &["transport"],
+        ),
     });
 }
 fn spec(name: &'static str, help: &'static str) -> MetricSpec {
@@ -42,6 +66,14 @@ fn spec(name: &'static str, help: &'static str) -> MetricSpec {
 /// Records elapsed microseconds on drop; a no-op before initialization.
 pub(crate) fn time(op: Op) -> OperationTimer<'static> {
     op.time(METRICS.get().map(|metrics| &metrics.durations))
+}
+
+/// Counts one failed WS attempt or gRPC outer session by transport.
+/// Yellowstone's internal reconnects do not enter this boundary.
+pub(crate) fn transport(transport: Transport) {
+    with_metrics(&METRICS, |metrics| {
+        metrics.transport.with_label_values(&[transport.label()]).inc();
+    });
 }
 
 /// Counts a completed HTTP attempt using the retry policy's error categories.
