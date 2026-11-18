@@ -3,7 +3,6 @@ use std::{
     time::Duration,
 };
 
-use chainlink::ProdChainlink;
 use engine::Engine;
 use mbv_core::traits::ActionsCallbackScheduler;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
@@ -47,7 +46,6 @@ impl CommittorService {
         config: CommittorConfig,
         chain_slot: Arc<AtomicU64>,
         engine: Engine,
-        chainlink: Arc<ProdChainlink>,
         callbacks: Arc<dyn ActionsCallbackScheduler>,
     ) -> Self {
         let rpc = MagicblockRpcClient::new_with_chain_slot_and_websocket(
@@ -65,7 +63,7 @@ impl CommittorService {
         let (sender, receiver) = mpsc::channel(1000);
         let tasks = TaskTracker::new();
         let context = Arc::new(ExecutionContext {
-            engine,
+            engine: engine.clone(),
             intent_client: IntentExecutionClient::new(
                 rpc.clone(),
                 config.compute_budget_config.compute_unit_price,
@@ -90,7 +88,7 @@ impl CommittorService {
         let intake = IntentIntake {
             outbox_client: outbox.clone(),
             queue: Arc::new(IntentQueue {
-                chainlink,
+                engine,
                 outbox_client: outbox,
                 backlog,
                 intent_sender: sender,

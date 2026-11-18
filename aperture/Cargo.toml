@@ -24,7 +24,7 @@ tokio-util = { workspace = true }
 # magicblock
 engine = { workspace = true }
 ledger = { workspace = true }
-chainlink = { workspace = true }
+chainsync = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
 ledger-deprecated = { workspace = true }

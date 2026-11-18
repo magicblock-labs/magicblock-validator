@@ -1,11 +1,7 @@
-pub use mbv_core::token_programs::{
-    EATA_PROGRAM_ID, EphemeralAta, TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID, derive_ata,
-    derive_ata_with_token_program, derive_eata,
-};
+use mbv_core::token_programs::{TOKEN_2022_PROGRAM_ID, TOKEN_PROGRAM_ID};
 use solana_account::Account;
-use solana_program::{program_option::COption, program_pack::Pack};
+use solana_program::{program_option::COption, program_pack::Pack, rent::Rent};
 use solana_pubkey::Pubkey;
-use solana_rent::Rent;
 use spl_token::state::{Account as SplAccount, AccountState};
 use spl_token_2022::{
     extension::{
@@ -19,16 +15,16 @@ use spl_token_2022::{
 /// # Arguments
 /// * `owner` - The public key of the account owner
 /// * `mint` - The public key of the token mint
-pub fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
+pub(crate) fn create_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
     create_ata_account_with_token_program(owner, mint, TOKEN_PROGRAM_ID, SplAccount::LEN)
 }
 
-pub fn create_token_2022_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
+pub(crate) fn create_token_2022_ata_account(owner: &Pubkey, mint: &Pubkey) -> Account {
     // Default Token-2022 ATAs carry ImmutableOwner; mint-specific extensions can require more.
     create_token_2022_ata_account_with_extensions(owner, mint, &[ExtensionType::ImmutableOwner])
 }
 
-pub fn create_token_2022_ata_account_with_extensions(
+pub(crate) fn create_token_2022_ata_account_with_extensions(
     owner: &Pubkey,
     mint: &Pubkey,
     account_extensions: &[ExtensionType],
@@ -87,27 +83,3 @@ fn create_ata_account_with_token_program(
         ..Default::default()
     }
 }
-
-pub fn create_eata_account(owner: &Pubkey, mint: &Pubkey, amount: u64, delegate: bool) -> Account {
-    let bump = mbv_core::token_programs::try_derive_eata_address_and_bump(owner, mint)
-        .expect("derive eATA")
-        .1;
-    let eata_account: Account = EphemeralAta {
-        owner: *owner,
-        mint: *mint,
-        amount,
-        bump,
-    }
-    .into();
-
-    let account_owner = if delegate { delegation_program_api::id() } else { EATA_PROGRAM_ID };
-
-    Account {
-        owner: account_owner,
-        data: eata_account.data,
-        lamports: eata_account.lamports,
-        ..Default::default()
-    }
-}
-
-// Reuse EphemeralAta definition from mbv_core::token_programs

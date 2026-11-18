@@ -25,7 +25,7 @@ for overrides; see [configuration](../../config/README.md).
 
 ## Monitoring and recovery
 
-Monitor the process through logs and [metrics](../../metrics/README.md),
+Monitor the process through logs and [metrics](../../aperture/README.md#metrics),
 not the application TUI. A reachable metrics endpoint does not mean replication
 is caught up.
 

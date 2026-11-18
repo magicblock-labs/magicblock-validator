@@ -105,7 +105,7 @@ ports, external remotes, and individual services.
 | Run a leader from source | [Validator setup](bins/validator/README.md) |
 | Follow a leader with a verifier | [Verifier setup](bins/verifier/README.md) |
 | Configure a deployment | [Configuration guide](config/README.md) |
-| Manage a validator | [Operator CLI](bins/magicblock/README.md) · [Terminal monitor](bins/validator-tui/README.md) · [Metrics](metrics/README.md) |
+| Manage a validator | [Operator CLI](bins/magicblock/README.md) · [Terminal monitor](bins/validator-tui/README.md) · [Metrics](aperture/README.md#metrics) |
 | Understand the system | [Architecture and operations](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/README.md) |
 
 ## 🦀 Inside the project
@@ -114,7 +114,7 @@ ports, external remotes, and individual services.
 transactions and stores their results. To explore the surrounding services,
 start with the part of the application flow that interests you:
 
-- **Bring accounts into the rollup:** [Chainlink](chainlink/README.md).
+- **Bring accounts into the rollup:** [ChainSync](chainsync/README.md).
 - **Submit transactions and follow updates:** [Aperture](aperture/README.md).
 - **Commit state back to Solana:** [Committor](committor/README.md).
 - **Run recurring actions:** [task scheduler](task-scheduler/README.md).

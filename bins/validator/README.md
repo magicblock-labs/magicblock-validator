@@ -32,7 +32,7 @@ To let a verifier follow this leader, add its local public identity to
 `engine.replication.allowed-followers`. An empty list allows no followers.
 
 If a managed service exits unexpectedly, the process stops. Use its logs and
-[metrics](../../metrics/README.md) to investigate before restarting.
+[metrics](../../aperture/README.md#metrics) to investigate before restarting.
 For a replication follower without application services, run the
 [verifier](../verifier/README.md).
 
