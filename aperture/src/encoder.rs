@@ -8,7 +8,7 @@ use solana_transaction_error::{TransactionError, TransactionResult};
 
 use crate::{
     RpcResult,
-    account::{AccountWithPubkey, PreparedFilter, matches_filters},
+    account::{AccountWithPubkey, PreparedFilter},
     requests::payload::NotificationPayload,
     state::subscriptions::SubscriptionID,
 };
@@ -47,7 +47,7 @@ impl ProgramAccountEncoder {
         account: &AccountSharedData,
         id: SubscriptionID,
     ) -> RpcResult<Option<Bytes>> {
-        if !matches_filters(&self.filters, account.data()) {
+        if !self.filters.iter().all(|filter| filter.matches(account.data())) {
             return Ok(None);
         }
         let value = AccountWithPubkey::new(
