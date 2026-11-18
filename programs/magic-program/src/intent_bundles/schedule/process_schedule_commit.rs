@@ -251,10 +251,10 @@ pub(crate) fn process_schedule_commit(
     context.add_scheduled_action(scheduled_base_intent);
     context.write_to(context_acc.borrow_mut()?.data_as_mut_slice())?;
 
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", intent_id);
+    ic_msg!(invoke_context, "Scheduled intent id: {}", intent_id);
     ic_msg!(
         invoke_context,
-        "ScheduledCommitSent outbox: {}",
+        "Outbox for scheduled intent: {}",
         outbox_intent_pda(intent_id),
     );
 

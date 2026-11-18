@@ -693,7 +693,7 @@ mod tests {
 
     #[test]
     #[serial]
-    /// An ephemeral payer cannot charge the vault even when it is supplied.
+    /// A confined payer cannot charge the vault even when it is supplied.
     fn test_add_action_callback_confined_payer_cannot_charge_fee_vault() {
         let payer = Keypair::from_seed(&[35u8; 32]).unwrap();
         let (mut accounts_data, mut transaction_accounts, fee_vault) =
@@ -1872,11 +1872,11 @@ async fn commit_reservations_are_atomic_and_reused_after_rollback() {
     assert_eq!(ids, vec![4, 5]);
     let logs = first.execution_details.log_messages.unwrap();
     for intent in &context.scheduled_base_intents {
+        assert!(logs.contains(&format!("Scheduled intent id: {}", intent.intent_id)));
         assert!(logs.contains(&format!(
-            "ScheduledCommitSent outbox: {}",
+            "Outbox for scheduled intent: {}",
             mbv_core::intent::outbox::outbox_intent_pda(intent.intent_id)
         )));
     }
-    assert!(!logs.iter().any(|line| line.starts_with("ScheduledCommitSent signature:")));
     engine.close().await;
 }

@@ -68,6 +68,7 @@ pub(crate) fn create_commit_finalize_task(
 
 pub(crate) struct TransactionUtils;
 impl TransactionUtils {
+    pub(crate) const MAX_COMPUTE_UNIT_LIMIT: u32 = 1_400_000;
     pub(crate) const COMPUTE_BUDGET_INSTRUCTION_COUNT: u8 = 2;
     const UNIQUENESS_NOOP_PROGRAM_DATA_SIZE_BUDGET: u32 = 42 * 1024;
     const UNIQUENESS_NOOP_COMPUTE_UNITS: u32 = 1_000;
@@ -198,12 +199,16 @@ impl TransactionUtils {
         }
     }
 
+    /// Sums task estimates and caps the requested transaction limit at the runtime maximum.
     pub(crate) fn tasks_compute_units(tasks: &[Task], uniqueness_nonce: Option<u64>) -> u32 {
         // Empty recovery stages can still execute the uniqueness no-op.
         let overhead = uniqueness_nonce.map_or(0, |_| Self::UNIQUENESS_NOOP_COMPUTE_UNITS);
-        tasks.iter().fold(overhead, |sum, task| {
-            sum.saturating_add(task.compute_units())
-        })
+        tasks
+            .iter()
+            .fold(overhead, |sum, task| {
+                sum.saturating_add(task.compute_units())
+            })
+            .min(Self::MAX_COMPUTE_UNIT_LIMIT)
     }
 
     pub(crate) fn tasks_accounts_size_budget(tasks: &[Task]) -> u32 {

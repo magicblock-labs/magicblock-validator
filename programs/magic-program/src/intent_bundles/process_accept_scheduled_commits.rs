@@ -46,7 +46,7 @@ pub(crate) fn process_accept_scheduled_commits(
         let pda_idx = INTENT_PDAS_OFFSET + i as u16;
         let (pda, bump) = verify_intent_pda(invoke_context, intent.intent_id, pda_idx)?;
 
-        // Create outbox ephemeral account
+        // Create outbox intent PDA
         create_outbox_intent_cpi(
             invoke_context,
             validator_auth,

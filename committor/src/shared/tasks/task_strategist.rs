@@ -190,9 +190,6 @@ impl TaskStrategist {
         validator: &Pubkey,
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
-        if TransactionUtils::tasks_compute_units(&tasks, uniqueness_nonce) > 1_400_000 {
-            return Err(TaskStrategistError::FailedToFit);
-        }
         let mut optimized_tasks = tasks.clone();
         if Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?
             <= MAX_TRANSACTION_V1_WIRE_SIZE
@@ -223,9 +220,6 @@ impl TaskStrategist {
     /// Returns `true` if ALTs make tx fit, otherwise `false`
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub(crate) fn attempt_lookup_tables(tasks: &[Task], uniqueness_nonce: Option<u64>) -> bool {
-        if TransactionUtils::tasks_compute_units(tasks, uniqueness_nonce) > 1_400_000 {
-            return false;
-        }
         let placeholder = Keypair::new();
         let dummy_lookup_tables = TransactionUtils::dummy_lookup_table(
             &Self::collect_lookup_table_keys(&placeholder.pubkey(), tasks, uniqueness_nonce),
@@ -495,6 +489,7 @@ mod tests {
             commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInArgs { .. }
         ));
+        assert_eq!(strategy.tasks[0].compute_units(), 120_000);
     }
 
     #[test]
@@ -529,6 +524,31 @@ mod tests {
             commit_delivery(&strategy.tasks[0]),
             CommitDelivery::DiffInBuffer { .. }
         ));
+        assert_eq!(strategy.tasks[0].compute_units(), 300_000);
+    }
+
+    #[test]
+    fn test_build_strategy_caps_over_budget_buffered_diff_limit() {
+        let validator = Pubkey::new_unique();
+
+        for count in [2, 5, 8] {
+            let tasks =
+                (0..count).map(|i| create_test_commit_task(i, 10_240, 5000).into()).collect();
+            let result = TaskStrategist::build_strategy(tasks, &validator, None);
+
+            let strategy = result.expect("Compute-unit limit should be capped at the runtime max");
+            assert_eq!(strategy.tasks.len(), count as usize);
+            assert_eq!(
+                TransactionUtils::tasks_compute_units(&strategy.tasks, None),
+                if count == 2 { 600_000 } else { TransactionUtils::MAX_COMPUTE_UNIT_LIMIT }
+            );
+            assert!(
+                strategy.tasks.iter().all(|task| matches!(
+                    commit_delivery(task),
+                    CommitDelivery::DiffInBuffer { .. }
+                ))
+            );
+        }
     }
 
     #[test]
@@ -926,20 +946,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_build_split_plan_when_combined_compute_budget_exceeded() {
+    async fn test_build_plan_caps_combined_compute_budget() {
         let pubkeys: [Pubkey; 6] = std::array::from_fn(|_| Pubkey::new_unique());
         let intent = create_test_intent_bundle(0, &[], &pubkeys).inner;
         let info_provider = Arc::new(MockInfoProvider { ..Default::default() });
         let commit_tasks = TaskBuilder::commit_tasks(&info_provider, &intent).await.unwrap();
         let follow_up_tasks = TaskBuilder::follow_up_tasks(&info_provider, &intent).await.unwrap();
 
-        // Six commits and six undelegations need 1.44M CU together;
-        // each group fits separately with 720K CU.
+        // Six commits and six undelegations estimate to 1.44M CU together.
         let plan =
             TaskStrategist::build_plan(commit_tasks, follow_up_tasks, &Pubkey::new_unique(), None)
-                .expect("Both transactions fit separately");
+                .expect("The combined transaction should use the capped CU limit");
 
-        assert_eq!(plan.current.tasks.len(), 6);
-        assert_eq!(plan.follow_up.unwrap().tasks.len(), 6);
+        assert_eq!(plan.current.tasks.len(), 12);
+        assert!(plan.follow_up.is_none());
+        assert_eq!(
+            TransactionUtils::tasks_compute_units(&plan.current.tasks, None),
+            TransactionUtils::MAX_COMPUTE_UNIT_LIMIT
+        );
     }
 }

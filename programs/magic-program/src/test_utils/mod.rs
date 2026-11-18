@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use magic_program_api::{
-    EPHEMERAL_SYSTEM_PROGRAM_ID, EPHEMERAL_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
+    MAGIC_ACCOUNT_PROGRAM_ID, MAGIC_ACCOUNT_VAULT_PUBKEY, OUTBOX_INTENT_PROGRAM_ID, id,
 };
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::{AccountMeta, error::InstructionError};
@@ -13,7 +13,7 @@ use solana_program_runtime::{
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::{native_loader, system_program};
 
-use self::magicblock_processor::{Entrypoint, EphemeralSystemEntrypoint, OutboxIntentEntrypoint};
+use self::magicblock_processor::{Entrypoint, MagicAccountEntrypoint, OutboxIntentEntrypoint};
 use super::*;
 use crate::validator;
 
@@ -29,10 +29,10 @@ fn register_sibling_builtins(invoke_context: &mut InvokeContext<'_, '_>) {
         ))),
     );
     invoke_context.program_cache_for_tx_batch.replenish(
-        EPHEMERAL_SYSTEM_PROGRAM_ID,
+        MAGIC_ACCOUNT_PROGRAM_ID,
         Arc::new(ProgramCacheEntry::new_builtin((
-            EphemeralSystemEntrypoint::vm,
-            EphemeralSystemEntrypoint::codegen,
+            MagicAccountEntrypoint::vm,
+            MagicAccountEntrypoint::codegen,
         ))),
     );
 }
@@ -60,8 +60,8 @@ pub fn ensure_started_validator(
     map.entry(validator_authority_id)
         .or_insert_with(|| AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id()));
 
-    // Ensure ephemeral vault account exists
-    map.entry(EPHEMERAL_VAULT_PUBKEY).or_insert_with(|| {
+    // Ensure Magic account vault exists
+    map.entry(MAGIC_ACCOUNT_VAULT_PUBKEY).or_insert_with(|| {
         AccountBuilder::from(AccountSharedData::new(0, 0, &id()))
             .mode(AccountMode::Magic)
             .build()
@@ -70,7 +70,7 @@ pub fn ensure_started_validator(
     // Ensure the sibling builtin programs CPI'd into from the main
     // entrypoint are resolvable as accounts (mock_process_instruction only
     // auto-injects the entrypoint under test, not its CPI targets)
-    map.entry(EPHEMERAL_SYSTEM_PROGRAM_ID)
+    map.entry(MAGIC_ACCOUNT_PROGRAM_ID)
         .or_insert_with(|| AccountSharedData::new(0, 0, &native_loader::id()));
     map.entry(OUTBOX_INTENT_PROGRAM_ID)
         .or_insert_with(|| AccountSharedData::new(0, 0, &native_loader::id()));

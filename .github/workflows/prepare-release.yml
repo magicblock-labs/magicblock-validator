@@ -172,6 +172,8 @@ jobs:
               BEGIN { RS = "" }
               # First pass: local packages (no source) at the old version.
               NR == FNR {
+                # The API version is independent, even when it matches the workspace.
+                if ($0 ~ /\nname = "magicblock-magic-program-api"\n/) next
                 if ($0 !~ /\nsource = / && index($0 "\n", "\nversion = \"" from "\"\n") && match($0, /\nname = "[^"]+"/))
                   local[substr($0, RSTART + 9, RLENGTH - 10)] = 1
                 next

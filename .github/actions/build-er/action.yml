@@ -11,7 +11,7 @@ runs:
         echo 'CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS=-C link-arg=-fuse-ld=lld' >> "$GITHUB_ENV"
 
     # Stage exact artifacts after restoring Cargo's potentially older target directory.
-    - name: Restore validator and verifier
+    - name: Restore validator, verifier, and CLI
       id: native
       uses: actions/cache/restore@v6
       with:
@@ -63,17 +63,17 @@ runs:
       with:
         cache-key: validator-dev
 
-    - name: Build validator and verifier
+    - name: Build validator, verifier, and CLI
       if: steps.native.outputs.cache-hit != 'true'
       shell: bash
       working-directory: magicblock-validator
       run: |
         sudo apt-get install -y lld
-        /usr/bin/time -v cargo build --locked --bin magicblock-validator --bin magicblock-verifier
+        /usr/bin/time -v cargo build --locked --bin magicblock-validator --bin magicblock-verifier --bin magicblock
         mkdir -p ../er-dist/native
-        cp target/debug/magicblock-validator target/debug/magicblock-verifier ../er-dist/native/
+        cp target/debug/magicblock-validator target/debug/magicblock-verifier target/debug/magicblock ../er-dist/native/
 
-    - name: Save validator and verifier
+    - name: Save validator, verifier, and CLI
       if: steps.native.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:

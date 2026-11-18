@@ -29,7 +29,7 @@ pub(crate) fn process_close_outbox_intent(
     intent_id: u64,
 ) -> Result<(), InstructionError> {
     validate(&signers, invoke_context, intent_id)?;
-    close_outbox_ephemeral_account(invoke_context)
+    close_outbox_intent_account(invoke_context)
 }
 
 fn validate(
@@ -110,7 +110,7 @@ fn validate(
     Ok(())
 }
 
-fn close_outbox_ephemeral_account(
+fn close_outbox_intent_account(
     invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
     let transaction_context = &*invoke_context.transaction_context;
@@ -127,10 +127,7 @@ fn close_outbox_ephemeral_account(
 
 #[cfg(test)]
 mod tests {
-    use magic_program_api::{
-        EPHEMERAL_VAULT_PUBKEY,
-        outbox::{ExecutionStage, PendingTransaction, TwoStageProgress},
-    };
+    use magic_program_api::outbox::{ExecutionStage, PendingTransaction, TwoStageProgress};
     use mbv_core::intent::{MagicIntentBundle, outbox::outbox_intent_pda_with_bump};
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_hash::Hash;
@@ -190,13 +187,7 @@ mod tests {
         pda_account.set_data_from_slice(&data);
 
         let mut map = std::collections::HashMap::new();
-        // Pre-fund vault so CloseEphemeralAccount CPI can refund sponsor -
-        // refund is rent-exempt-minimum for the PDA's actual data length
-        let vault = AccountBuilder::from(AccountSharedData::new(1_000_000, 0, &crate::id()))
-            .mode(AccountMode::Magic)
-            .build::<AccountSharedData>();
-        map.insert(EPHEMERAL_VAULT_PUBKEY, vault);
-        // Add outbox PDA as existing ephemeral account (created by accept)
+        // Add outbox intent PDA as initialized during accept.
         map.insert(pda, pda_account);
         map
     }

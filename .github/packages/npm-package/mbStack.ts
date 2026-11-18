@@ -141,10 +141,7 @@ const SERVICES: Service[] = [
   {
     name: "ephemeral-validator",
     script: "ephemeralValidator.js",
-    // --no-tui is required: the published ER is built with the TUI feature, and a
-    // supervised child with redirected stdio (no TTY) would otherwise exit
-    // immediately. The stack is headless by design.
-    args: ["--no-tui", "--listen", `${HOST}:${ER_PORT}`, ...erRemotes()],
+    args: ["--listen", `${HOST}:${ER_PORT}`, ...erRemotes()],
     healthPort: ER_PORT,
     tag: "er",
     color: "\x1b[32m", // green

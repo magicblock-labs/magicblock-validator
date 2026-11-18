@@ -274,7 +274,7 @@ mod aml_check_strategy {
             EATA_PROGRAM_ID,
             magic_program_api::ID,
             system_program::ID,
-            magic_program_api::EPHEMERAL_SYSTEM_PROGRAM_ID,
+            magic_program_api::MAGIC_ACCOUNT_PROGRAM_ID,
         ] {
             let actions = vec![action_for_program(program)];
             assert!(
@@ -354,6 +354,7 @@ async fn released_collision_candidate_does_not_retry_settled_delegation() {
         fetch.validator_pubkey,
         owner,
         DELEGATION_SLOT,
+        1_000_000,
     );
 
     let local = AccountBuilder::from(Account {
@@ -416,6 +417,7 @@ async fn released_collision_candidate_settles_after_successful_clone() {
         fetch.validator_pubkey,
         owner,
         DELEGATION_SLOT,
+        1_000_000,
     );
 
     let before = fetch.fetch_count();

@@ -1,7 +1,7 @@
 #![doc = include_str!("../README.md")]
 
-mod ephemeral_accounts;
 pub mod errors;
+mod magic_accounts;
 mod magic_context;
 mod schedule_task;
 pub use magic_context::MagicContext;

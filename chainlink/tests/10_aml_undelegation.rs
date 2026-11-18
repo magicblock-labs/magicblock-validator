@@ -112,7 +112,7 @@ fn add_delegation_record_with_signer_action(
         authority: ctx.validator_pubkey,
         owner,
         delegation_slot: 1,
-        lamports: 1_000,
+        lamports: ctx.rpc_client.get_account_at_slot(&delegated_pubkey).unwrap().account.lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = vec![0; DelegationRecord::size_with_discriminator()];

@@ -39,15 +39,18 @@ the process and can be recovered after restart.
 
 ## Settlement receipts
 
-Each successful scheduling transaction logs `ScheduledCommitSent outbox: <address>`
-for every intent it creates. The address is known before the acceptance transaction
-creates its account; an absent outbox at that point means the intent is still queued.
+Each successful scheduling transaction logs `Scheduled intent id: <id>` and
+`Outbox for scheduled intent: <address>` for every intent it creates. The address
+is known before the acceptance transaction creates its account; an absent outbox
+at that point means the intent is still queued.
 
 After settlement, the committor asks Engine to sign and execute
 `OutboxIntentInstruction::ScheduledCommitSent(SentCommit)`. Its payload contains
 the result, actual base-chain signatures, and callback scheduling results.
-Execution emits the same receipt logs on leaders and followers and closes the
-outbox in that transaction. Failed submission leaves the outbox pending.
+Execution emits the same `Settlement receipt ...` logs on leaders and followers,
+including `Settlement receipt intent id: <id>` and
+`Settlement receipt signature[0]: <signature>`, and closes the outbox in that
+transaction. Failed submission leaves the outbox pending.
 
 Clients discover completion through `getSignaturesForAddress(outbox)` and
 `getTransaction(signature)`, including after the account closes. Select a successful

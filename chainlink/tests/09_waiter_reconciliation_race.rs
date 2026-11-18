@@ -36,7 +36,7 @@ fn add_increment_action(ctx: &TestContext, pubkey: Pubkey, output: Pubkey) -> Pu
         authority: ctx.validator_pubkey,
         owner: V42_ID,
         delegation_slot: ctx.rpc_client.get_slot(),
-        lamports: 1_000,
+        lamports: ctx.rpc_client.get_account_at_slot(&pubkey).unwrap().account.lamports,
         commit_frequency_ms: 2_000,
     };
     let mut data = delegation_record_to_vec(&record);
@@ -116,7 +116,7 @@ async fn fetch_and_discovery_subscription_race_materializes_once() {
     let remote_account = remote_account();
     rpc_client.add_account(account_pubkey, remote_account.clone());
     let deleg_record_pubkey = add_increment_action(&ctx, account_pubkey, output);
-    let mut updates = bank.accounts().subscribe(account_pubkey);
+    let mut updates = bank.accounts().subscribe(account_pubkey).await;
     let blocker = bank.account(account_pubkey).await.unwrap();
 
     let requested = [account_pubkey];

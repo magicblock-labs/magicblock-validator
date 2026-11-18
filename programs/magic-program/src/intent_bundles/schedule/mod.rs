@@ -122,7 +122,7 @@ pub(crate) fn try_get_fee_vault<'a, 'ix_data>(
     fee_vault_idx: u16,
 ) -> Result<(Option<InstructionAccount<'a, 'ix_data>>, usize), InstructionError> {
     let payer_account = get_instruction_account_with_idx(transaction_context, payer_idx)?;
-    // Confined payers are Ephemeral in the engine's exclusive account modes.
+    // Confined payers use Magic mode in the engine's exclusive account modes.
     let payer_requires_fee_vault = payer_account.borrow()?.is(AccountMode::Delegated);
 
     let fee_vault = match get_instruction_pubkey_with_idx(transaction_context, fee_vault_idx) {

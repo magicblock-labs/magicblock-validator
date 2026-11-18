@@ -20,7 +20,7 @@ pub(crate) fn seeds(programs: &HashMap<Pubkey, Vec<u8>>) -> HashMap<Pubkey, Acco
                 .build(),
         ),
         (
-            magic_program::EPHEMERAL_VAULT_PUBKEY,
+            magic_program::MAGIC_ACCOUNT_VAULT_PUBKEY,
             AccountBuilder::default()
                 .lamports(Rent::default().minimum_balance(0))
                 .owner(magic_program::ID)

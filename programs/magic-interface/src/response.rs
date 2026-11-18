@@ -1,11 +1,8 @@
 use serde::{Deserialize, Serialize};
-#[cfg(not(feature = "backward-compat"))]
+use solana_signature::Signature;
 use wincode::{SchemaRead, SchemaWrite};
 
-use crate::compat::Signature;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub enum MagicResponse {
     V1(MagicResponseV1),
 }
@@ -30,8 +27,7 @@ impl MagicResponse {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct MagicResponseV1 {
     pub ok: bool,
     /// Data user specified as payload for callback
@@ -45,8 +41,7 @@ pub struct MagicResponseV1 {
     pub receipt: Option<ActionReceipt>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Debug, Clone, Serialize, Deserialize, SchemaRead, SchemaWrite)]
 pub struct ActionReceipt {
     /// action signature
     pub signature: Signature,

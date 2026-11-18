@@ -16,7 +16,7 @@ pub(super) async fn materialize<'a>(
     actions: Option<PostFinalize>,
 ) -> ClonerResult<()> {
     let pubkey = accessor.pubkey();
-    let mut retries = 2;
+    let mut retries = 3;
     loop {
         let expected = engine
             .accounts()

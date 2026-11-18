@@ -96,7 +96,7 @@ jobs:
 
   correctness:
     name: RedSuite correctness
-    runs-on: blacksmith-8vcpu-ubuntu-2404
+    runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5

@@ -1,18 +1,16 @@
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
-#[cfg(not(feature = "backward-compat"))]
+use solana_program::instruction::Instruction;
 use wincode::{SchemaRead, SchemaWrite};
 
 use crate::{
     Pubkey,
     args::{AddActionCallbackArgs, MagicBaseIntentArgs, MagicIntentBundleArgs, ScheduleTaskArgs},
-    compat::Instruction,
     outbox::{ExecutionStage, SentCommit},
 };
 
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
@@ -178,42 +176,42 @@ pub enum MagicBlockInstruction {
     /// indices in the accounts array.
     ScheduleIntentBundle(MagicIntentBundleArgs),
 
-    /// Creates a new ephemeral account with rent paid by a sponsor.
+    /// Creates a new Magic account with rent paid by a sponsor.
     /// The account is automatically owned by the calling program (CPI caller).
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Pays rent; can be PDA or oncurve. | WRITE |
-    /// | `1` | Ephemeral account. Account to create; must have 0 lamports. | WRITE |
+    /// | `1` | Magic account. Account to create; must have 0 lamports. | WRITE |
     /// | `2` | Vault. Receives rent payment. | WRITE |
-    CreateEphemeralAccount {
+    CreateMagicAccount {
         /// Initial data length in bytes
         data_len: u32,
     },
 
-    /// Resizes an existing ephemeral account, adjusting rent accordingly.
+    /// Resizes an existing Magic account, adjusting rent accordingly.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Pays or receives the rent difference. | WRITE |
-    /// | `1` | Ephemeral account. Account to resize. | WRITE |
+    /// | `1` | Magic account. Account to resize. | WRITE |
     /// | `2` | Vault. Holds lamports for rent transfer. | WRITE |
-    ResizeEphemeralAccount {
+    ResizeMagicAccount {
         /// New data length in bytes
         new_data_len: u32,
     },
 
-    /// Closes an ephemeral account, refunding rent to the sponsor.
+    /// Closes a Magic account, refunding rent to the sponsor.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor. Receives rent refund. | WRITE |
-    /// | `1` | Ephemeral account. Account to close. | WRITE |
+    /// | `1` | Magic account. Account to close. | WRITE |
     /// | `2` | Vault. Source of rent refund. | WRITE |
-    CloseEphemeralAccount,
+    CloseMagicAccount,
 
     /// Creates or verifies a local Magic ATA.
     ///
@@ -395,19 +393,12 @@ pub enum MagicBlockInstruction {
 }
 
 impl MagicBlockInstruction {
-    #[cfg(not(feature = "backward-compat"))]
     pub fn try_to_vec(&self) -> Result<Vec<u8>, wincode::WriteError> {
         wincode::serialize(self)
     }
-
-    #[cfg(feature = "backward-compat")]
-    pub fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
-        bincode::serialize(self)
-    }
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct AccountModification {
     pub pubkey: Pubkey,
     pub owner: Option<Pubkey>,
@@ -415,8 +406,7 @@ pub struct AccountModification {
     pub confined: Option<bool>,
 }
 
-#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub struct AccountModificationForInstruction {
     pub owner: Option<Pubkey>,
     pub delegated: Option<bool>,
@@ -424,8 +414,9 @@ pub struct AccountModificationForInstruction {
 }
 
 /// Common fields for cloning an account.
-#[derive(Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(
+    Default, Clone, Copy, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite,
+)]
 pub struct AccountCloneFields {
     pub lamports: u64,
     pub owner: Pubkey,
@@ -436,8 +427,7 @@ pub struct AccountCloneFields {
 }
 
 /// Instruction(s) for Callback Executor builtin-program
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum CallbackInstruction {
     /// Executes a callback
     ///
@@ -450,48 +440,46 @@ pub enum CallbackInstruction {
     ExecuteCallback { instruction: Instruction },
 }
 
-/// Instruction(s) for the ephemeral system builtin-program: creates,
-/// resizes, and closes ephemeral accounts.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
-pub enum EphemeralSystemInstruction {
+/// Instructions for the Magic account builtin program: creates,
+/// resizes, and closes Magic accounts.
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
+pub enum MagicAccountInstruction {
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (pays rent, can be PDA or oncurve) | WRITE |
-    /// | `1` | Ephemeral account to create (must have 0 lamports) | WRITE |
+    /// | `1` | Magic account to create (must have 0 lamports) | WRITE |
     /// | `2` | Vault account (receives rent payment) | WRITE |
-    CreateEphemeralAccount { data_len: u32 },
+    CreateMagicAccount { data_len: u32 },
 
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (pays/receives rent difference) | WRITE |
-    /// | `1` | Ephemeral account to resize | WRITE |
+    /// | `1` | Magic account to resize | WRITE |
     /// | `2` | Vault account (holds/receives lamports for rent transfer) | WRITE |
-    ResizeEphemeralAccount { new_data_len: u32 },
+    ResizeMagicAccount { new_data_len: u32 },
 
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
     /// | `0` | Sponsor account (receives rent refund) | WRITE |
-    /// | `1` | Ephemeral account to close | WRITE |
+    /// | `1` | Magic account to close | WRITE |
     /// | `2` | Vault account (source of rent refund) | WRITE |
-    CloseEphemeralAccount,
+    CloseMagicAccount,
 }
 
 /// Instruction(s) for the outbox intent builtin-program: stores accepted
 /// intents in per-intent PDA accounts and tracks their execution stage
 /// until they are sent to Base.
-#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq, SchemaRead, SchemaWrite)]
 pub enum OutboxIntentInstruction {
     /// Creates and populates an outbox intent PDA account. CPI-only, called
     /// by the magic program from `MagicBlockInstruction::AcceptScheduleCommits`
     /// after popping the intent off `MagicContext`. `data` is the already
     /// serialized `OutboxIntentBundle` bytes. Claims ownership of the PDA
     /// directly (it arrives as a fresh, system-owned, zero-lamport account),
-    /// so no rent-paying vault or ephemeral system program CPI is needed.
+    /// so no rent-paying vault or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - 0. [SIGNER] Sponsor (validator authority)
@@ -500,7 +488,7 @@ pub enum OutboxIntentInstruction {
 
     /// Closes the outbox intent PDA on successful execution of the intent.
     /// The PDA never held lamports, so this just zeroes and marks it closed
-    /// directly - no rent refund or ephemeral system program CPI is needed.
+    /// directly - no rent refund or Magic account program CPI is needed.
     ///
     /// # Account references
     /// - **0.** `[SIGNER]` Validator Authority
@@ -512,7 +500,7 @@ pub enum OutboxIntentInstruction {
     ///
     /// # Account references
     /// - 0. [SIGNER] Validator Authority
-    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", message_id.to_le_bytes()]`
+    /// - 1. [WRITE]  Outbox intent PDA, seeds: `["outbox-intent", intent_id.to_le_bytes()]`
     ScheduledCommitSent(SentCommit),
 
     /// Sets or advances the execution stage of an outbox intent.

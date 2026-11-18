@@ -127,7 +127,12 @@ impl CommitFinalizeTask {
     }
 
     pub fn compute_units(&self) -> u32 {
-        120_000
+        match &self.delivery {
+            // Buffered diffs have consumed over 185,000 CU per commit on devnet.
+            // Inline diffs are bounded by the transaction size.
+            CommitDelivery::DiffInBuffer { .. } => 300_000,
+            _ => 120_000,
+        }
     }
 
     pub fn accounts_size_budget(&self) -> u32 {

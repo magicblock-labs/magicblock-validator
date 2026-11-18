@@ -24,7 +24,6 @@ program = { workspace = true }
 runtime = { workspace = true }
 services = { workspace = true }
 task-scheduler = { workspace = true }
-mimalloc = { workspace = true }
 nucleus = { workspace = true }
 num_cpus = { workspace = true }
 replicator = { workspace = true }

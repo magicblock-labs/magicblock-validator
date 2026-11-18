@@ -328,7 +328,7 @@ impl TestContext {
         remote: AccountSharedData,
         expected: &AccountSharedData,
     ) {
-        let mut local_updates = self.bank.accounts().subscribe(pubkey);
+        let mut local_updates = self.bank.accounts().subscribe(pubkey).await;
         assert!(
             self.send_and_receive_account_update(pubkey, remote, Some(8_000)).await,
             "subscription update and cleanup complete"

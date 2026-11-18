@@ -1,9 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This script fetches program .so binaries and account .json files into
-# <package-root>/bin/local-dumps, to be used by mb-test-validator.
-# It mirrors the list from the issue description and defaults to MagicBlock devnet RPC.
+# Fetch the programs and accounts bundled with mb-test-validator.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -32,9 +30,7 @@ accounts=(
 for acc in "${accounts[@]}"; do
   out="$DUMPS_DIR/$acc.json"
   echo "Dumping account $acc -> $out"
-  if ! solana account "$acc" --output json --url "$RPC_URL" > "$out"; then
-    echo "Warning: failed to dump account $acc" >&2
-  fi
+  solana account "$acc" --output json --url "$RPC_URL" > "$out"
 done
 
 # Dump programs
@@ -53,9 +49,7 @@ programs=(
 for prog in "${programs[@]}"; do
   out="$DUMPS_DIR/$prog.so"
   echo "Dumping program $prog -> $out"
-  if ! solana program dump "$prog" "$out" --url "$RPC_URL"; then
-    echo "Warning: failed to dump program $prog" >&2
-  fi
+  solana program dump "$prog" "$out" --url "$RPC_URL"
 done
 
 echo "local-dumps directory: $DUMPS_DIR"
