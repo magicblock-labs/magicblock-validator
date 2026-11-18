@@ -5,7 +5,7 @@
 //! - FIFO ordering within blocked queues
 //! - Executor pool management
 //! - Coordination modes (Primary/Replica)
-//! - Edge cases (empty transactions, duplicate accounts)
+//! - Edge cases (empty transactions, repeated instruction accounts)
 
 use std::sync::Arc;
 
@@ -287,13 +287,12 @@ fn empty_transaction_always_succeeds() {
 }
 
 #[test]
-fn transaction_with_duplicate_accounts() {
-    // Real transactions shouldn't have duplicates, but verify we don't panic
+/// Proves repeated instruction accounts compile to one message key and lock once.
+fn transaction_with_repeated_instruction_accounts() {
     let mut c = new_coordinator(1);
     let acc = Pubkey::new_unique();
     let e = c.get_ready_executor().unwrap();
 
-    // Same account twice as writable - second lock attempt is no-op (already held)
     assert!(c
         .try_schedule(e, mock_txn(&[(acc, true), (acc, true)]))
         .is_ok());

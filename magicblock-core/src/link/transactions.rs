@@ -231,6 +231,9 @@ where
 
 impl SanitizeableTransaction for SanitizedTransaction {
     fn sanitize(self, _: bool) -> Result<Self, TransactionError> {
+        if self.message().has_duplicates() {
+            return Err(TransactionError::AccountLoadedTwice);
+        }
         Ok(self)
     }
 }
@@ -251,7 +254,8 @@ impl SanitizeableTransaction for VersionedTransaction {
             Some(false),
             SimpleAddressLoader::Enabled(Default::default()),
             &Default::default(),
-        )
+        )?
+        .sanitize(false)
     }
 }
 
