@@ -151,6 +151,7 @@ fn deserialize_transaction(
 }
 
 /// Group CPI instructions with the original top-level instruction index.
+/// Like Solana, omit top-level instructions that made no CPI.
 fn group_inner_instructions(
     groups: impl IntoIterator<Item = impl IntoIterator<Item = InnerInstruction>>,
 ) -> Vec<InnerInstructions> {
@@ -161,6 +162,7 @@ fn group_inner_instructions(
             index: u8::try_from(index).unwrap_or(u8::MAX),
             instructions: instructions.into_iter().collect(),
         })
+        .filter(|group| !group.instructions.is_empty())
         .collect()
 }
 
