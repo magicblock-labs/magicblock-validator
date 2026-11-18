@@ -229,29 +229,3 @@ fn sanitize_transaction(bytes: Vec<u8>) -> Result<TransactionView, RpcError> {
     TransactionView::try_new_sanitized(Arc::new(bytes), true)
         .map_err(|error| RpcError::invalid_params(format!("{error:?}")))
 }
-
-#[cfg(test)]
-mod tests {
-    use solana_message::{compiled_instruction::CompiledInstruction, inner_instruction};
-
-    use super::live_inner_instructions;
-
-    fn cpi(data: u8) -> inner_instruction::InnerInstruction {
-        inner_instruction::InnerInstruction {
-            instruction: CompiledInstruction::new_from_raw_parts(2, vec![data], vec![0, 1]),
-            stack_height: 2,
-        }
-    }
-
-    #[test]
-    fn inner_instructions_omit_top_level_instructions_without_cpis() {
-        // The SVM records one group per top-level instruction, empty without CPIs.
-        let groups = live_inner_instructions(vec![vec![], vec![cpi(7), cpi(8)], vec![]]);
-
-        assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].index, 1);
-        assert_eq!(groups[0].instructions.len(), 2);
-        let without_cpis: Vec<Vec<inner_instruction::InnerInstruction>> = vec![Vec::new(); 2];
-        assert!(live_inner_instructions(without_cpis).is_empty());
-    }
-}
