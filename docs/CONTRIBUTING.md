@@ -17,7 +17,7 @@ application services.
 
 Install Rust through `rustup`; the checkout selects its toolchain through
 [rust-toolchain.toml](../rust-toolchain.toml). Native builds require a C/C++
-toolchain, libclang, and the Protobuf compiler (`protoc`).
+toolchain and the Protobuf compiler (`protoc`).
 
 From the workspace root, build the leader and verifier:
 

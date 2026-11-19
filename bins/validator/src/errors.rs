@@ -3,7 +3,6 @@ use std::io;
 use aperture::ApertureError;
 use chainlink::errors::ChainlinkError;
 use engine::EngineError;
-use ledger_deprecated::errors::LedgerError;
 use replicator::ReplicationError;
 use runtime::Error as RuntimeError;
 use solana_pubkey::Pubkey;
@@ -21,9 +20,6 @@ pub(crate) enum ApiError {
 
     #[error("Aperture service error: {0}")]
     Aperture(#[from] ApertureError),
-
-    #[error("Ledger error: {0}")]
-    LedgerError(Box<LedgerError>),
 
     #[error("Engine error: {0}")]
     Engine(#[from] EngineError),
@@ -55,26 +51,14 @@ pub(crate) enum ApiError {
     #[error("On-chain setup transaction for validator '{0}' was rejected: {1}")]
     OnchainSetupTransactionRejected(Pubkey, #[source] TransactionError),
 
-    #[error("Unable to clean ledger directory at '{0}'")]
-    UnableToCleanLedgerDirectory(String),
-
     #[error("Failed to start metrics service: {0}")]
     FailedToStartMetricsService(io::Error),
-
-    #[error("Ledger Path is missing a parent directory: {0}")]
-    LedgerPathIsMissingParent(String),
 
     #[error("TaskSchedulerServiceError")]
     TaskSchedulerServiceError(Box<TaskSchedulerError>),
 
     #[error("Failed to sanitize transaction: {0}")]
     FailedToSanitizeTransaction(#[from] TransactionError),
-}
-
-impl From<LedgerError> for ApiError {
-    fn from(e: LedgerError) -> Self {
-        Self::LedgerError(Box::new(e))
-    }
 }
 
 impl From<ChainlinkError> for ApiError {

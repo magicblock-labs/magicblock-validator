@@ -1,6 +1,4 @@
-use super::{
-    HandlerResult, RpcHandlers, get_blocks::BlockRange, get_token_accounts::TokenAccountAuthority,
-};
+use super::{HandlerResult, RpcHandlers, get_token_accounts::TokenAccountAuthority};
 use crate::{error::RpcError, requests::JsonHttpRequest};
 use ::metrics::metrics::{RPC_REQUEST_HANDLING_TIME, RPC_REQUESTS_COUNT};
 
@@ -23,13 +21,13 @@ impl RpcHandlers {
             GetBlockCommitment => self.get_block_commitment(request),
             GetBlockHeight => self.get_slot(request),
             GetBlockTime => self.get_block_time(request).await,
-            GetBlocks => self.get_blocks(request, BlockRange::EndSlot).await,
-            GetBlocksWithLimit => self.get_blocks(request, BlockRange::Limit).await,
+            GetBlocks => self.get_blocks(request),
+            GetBlocksWithLimit => self.get_blocks_with_limit(request),
             GetClusterNodes => self.get_cluster_nodes(request),
             GetEpochInfo => self.get_epoch_info(request),
             GetEpochSchedule => self.get_epoch_schedule(request),
             GetFeeForMessage => self.get_fee_for_message(request),
-            GetFirstAvailableBlock | MinimumLedgerSlot => self.first_available_block(request).await,
+            GetFirstAvailableBlock | MinimumLedgerSlot => self.first_available_block(request),
             GetGenesisHash => self.get_genesis_hash(request),
             GetHealth => self.get_health(request),
             GetHighestSnapshotSlot => self.get_highest_snapshot_slot(request),

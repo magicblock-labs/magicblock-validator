@@ -26,7 +26,7 @@ mod tests;
 pub mod types;
 
 use crate::{
-    config::{ChainLinkConfig, CommittorConfig, LedgerConfig, LoadableProgram},
+    config::{ChainLinkConfig, CommittorConfig, LoadableProgram},
     types::Remote,
 };
 
@@ -68,7 +68,6 @@ pub struct LeaderParams {
 
     // --- File-Only Configuration ---
     pub commit: CommittorConfig,
-    pub ledger: LedgerConfig,
     pub chainlink: ChainLinkConfig,
     pub programs: Vec<LoadableProgram>,
 }

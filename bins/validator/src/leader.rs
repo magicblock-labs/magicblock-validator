@@ -32,10 +32,7 @@ use solana_signer::Signer;
 use task_scheduler::TaskSchedulerService;
 use tracing::*;
 
-use crate::{
-    errors::{ApiError, ApiResult},
-    ledger,
-};
+use crate::errors::{ApiError, ApiResult};
 
 // -----------------
 // Leader
@@ -63,12 +60,6 @@ impl Leader {
     #[instrument(skip_all, fields(last_slot = field::Empty))]
     pub(crate) async fn try_from_config(config: LeaderParams) -> ApiResult<Self> {
         let mut timer = EventTimer::new("init");
-
-        let engine_ledger = config.engine.ledger.directory.clone();
-
-        let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
-        let ledger = Arc::new(ledger);
-        timer.record("Deprecated ledger initialized");
 
         let mut shutdown = ShutdownManager::default();
         let mut builder = keeper_builder(&config.engine, &config.programs)?;
@@ -123,7 +114,6 @@ impl Leader {
             &config.aperture,
             engine.clone(),
             chainlink.clone(),
-            ledger.clone(),
             config.engine.blockstore.blocktime,
             rpc_shutdown.child(),
         )

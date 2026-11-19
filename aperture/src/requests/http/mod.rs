@@ -3,16 +3,14 @@ use parking_lot::Mutex;
 use solana_rpc_client_api::response::RpcPerfSample;
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 
-use crate::{RpcResult, account::Accounts, history::History, requests::payload::JsonBody};
+use crate::{RpcResult, account::Accounts, requests::payload::JsonBody};
 
 /// A serialized RPC envelope, independent of HTTP status and headers.
 pub(crate) type HandlerResult = RpcResult<JsonBody>;
 
+mod blocks;
 pub(crate) mod get_account_info;
 pub(crate) mod get_balance;
-pub(crate) mod get_block;
-pub(crate) mod get_block_time;
-pub(crate) mod get_blocks;
 pub(crate) mod get_delegation_status;
 pub(crate) mod get_fee_for_message;
 pub(crate) mod get_identity;
@@ -33,27 +31,20 @@ pub(crate) mod request_airdrop;
 pub(crate) mod send_transaction;
 pub(crate) mod simulate_transaction;
 
-/// RPC operations with concrete account/history owners and service-local samples.
+/// RPC operations backed by Engine, with account materialization and service-local samples.
 pub(crate) struct RpcHandlers {
     pub(crate) blocktime_ms: u64,
     pub(crate) engine: Engine,
     pub(crate) accounts: Accounts,
-    pub(crate) history: History,
     /// Newest first; the collector replaces equal slots and caps retention at 720.
     pub(crate) samples: Mutex<VecDeque<RpcPerfSample>>,
 }
 
 impl RpcHandlers {
-    pub(crate) fn new(
-        engine: Engine,
-        accounts: Accounts,
-        history: History,
-        blocktime: Duration,
-    ) -> Arc<Self> {
+    pub(crate) fn new(engine: Engine, accounts: Accounts, blocktime: Duration) -> Arc<Self> {
         Arc::new(Self {
             blocktime_ms: blocktime.as_millis() as u64,
             accounts,
-            history,
             engine,
             samples: Mutex::new(VecDeque::new()),
         })

@@ -17,7 +17,6 @@ hyper-util = { workspace = true, features = ["http1", "http2", "server"] }
 # runtime
 futures = { workspace = true }
 libloading = { workspace = true }
-num_cpus = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 
@@ -27,7 +26,6 @@ ledger = { workspace = true }
 chainlink = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
-ledger-deprecated = { workspace = true }
 metrics = { workspace = true }
 nucleus = { workspace = true, features = ["runtime"] }
 
@@ -42,7 +40,7 @@ solana-pubkey = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-signature = { workspace = true }
 solana-svm = { workspace = true }
-solana-transaction = { workspace = true, features = ["wincode"] }
+solana-transaction = { workspace = true, features = ["blake3", "wincode"] }
 solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
@@ -73,6 +71,7 @@ solana-instruction = { workspace = true }
 solana-program-pack = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-signature = { workspace = true, features = ["rand"] }
 solana-signer = { workspace = true }
 v42-calculator-interface = { workspace = true }
 
