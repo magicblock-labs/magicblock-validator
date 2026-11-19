@@ -135,12 +135,12 @@ impl GeyserPluginManager {
             return;
         }
         let slot = transaction.execution.slot;
-        let Ok((sanitized, meta)) = processed_transaction(transaction)
-            .inspect_err(|error| warn!(?error, "failed to convert engine transaction for Geyser"))
-        else {
+        let signature = &transaction.transaction.signatures()[0];
+        let Ok((sanitized, meta)) = processed_transaction(transaction).inspect_err(|error| {
+            warn!(slot, %signature, ?error, "failed to convert engine transaction for Geyser");
+        }) else {
             return;
         };
-        let signature = &sanitized.signatures()[0];
         let versioned = sanitized.to_versioned_transaction();
         let info = ReplicaTransactionInfoV3 {
             message_hash: sanitized.message_hash(),
@@ -337,7 +337,10 @@ mod tests {
     };
     use engine::testkit::TestEngine;
     use keeper::testkit::store_v42;
+    use nucleus::testkit::{WireVersion, sign_versioned_instructions};
     use solana_account::AccountMode;
+    use solana_message::VersionedMessage;
+    use solana_signature::Signature;
     use tokio_util::sync::CancellationToken;
     use v42_calculator_interface::builder::Expr as E;
 
@@ -346,6 +349,8 @@ mod tests {
 
     #[derive(Debug)]
     struct TransactionEvent {
+        signature: Signature,
+        v0_without_lookups: bool,
         slot: u64,
         success: bool,
         logs: bool,
@@ -384,6 +389,11 @@ mod tests {
             };
             let meta = info.transaction_status_meta;
             self.0.lock().transactions.push(TransactionEvent {
+                signature: *info.signature,
+                v0_without_lookups: matches!(
+                    &info.transaction.message,
+                    VersionedMessage::V0(message) if message.address_table_lookups.is_empty()
+                ) && meta.loaded_addresses.is_empty(),
                 slot,
                 success: meta.status.is_ok(),
                 logs: meta.log_messages.as_ref().is_some_and(|logs| !logs.is_empty()),
@@ -432,7 +442,8 @@ mod tests {
         }
     }
 
-    /// Proves that both plugins receive metadata and monotonically versioned writes.
+    /// Proves that both plugins receive legacy and lookup-free v0 transactions,
+    /// execution metadata, and monotonically versioned account writes.
     #[tokio::test(flavor = "multi_thread")]
     async fn fake_plugin_receives_engine_metadata_and_monotonic_writes() {
         let mut te = TestEngine::new().await;
@@ -450,9 +461,13 @@ mod tests {
         te.execute(&[E::lit(7).cpi().compose(output, &[])])
             .await
             .expect("transaction succeeds");
-        te.execute(&[E::lit(8).compose(output, &[])])
-            .await
-            .expect("second transaction succeeds");
+        let (v0_signature, v0_transaction) = sign_versioned_instructions(
+            te.signer(),
+            WireVersion::V0,
+            [E::lit(8).compose(output, &[])],
+            te.blockhash(),
+        );
+        te.execute(v0_transaction).await.expect("v0 transaction succeeds");
         te.advance(1).await;
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
         loop {
@@ -488,6 +503,16 @@ mod tests {
             assert!(transaction.cpi, "CPI metadata is retained");
             assert!(transaction.return_data, "return data is retained");
             assert!(transaction.compute_units > 0, "compute units are retained");
+            let v0 = events
+                .transactions
+                .iter()
+                .find(|event| event.signature == v0_signature)
+                .expect("v0 signature delivered");
+            assert!(v0.success);
+            assert!(
+                v0.v0_without_lookups,
+                "v0 message and empty loaded addresses are retained"
+            );
             assert!(!events.accounts.is_empty(), "account updates are delivered");
             for versions in events.accounts.windows(2) {
                 assert_eq!(versions[1].1, versions[0].1 + 1);

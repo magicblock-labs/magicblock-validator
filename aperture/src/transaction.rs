@@ -90,7 +90,9 @@ pub(crate) fn processed_transaction(
         versioned,
         MessageHash::Compute,
         None,
-        SimpleAddressLoader::Disabled,
+        // Solana invokes the loader even for v0 messages without lookups.
+        // The sanitized Engine view rejects lookup tables at admission.
+        SimpleAddressLoader::Enabled(LoadedAddresses::default()),
         &Default::default(),
     )
     .map_err(|error| RpcError::internal(format!("invalid processed transaction: {error}")))?;
