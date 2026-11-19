@@ -156,17 +156,13 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libssl-dev
+          sudo apt-get install -y pkg-config libssl-dev
 
       - name: Set up macOS build environment
         if: startsWith(matrix.build.OS, 'macos')
         shell: bash
         run: |
-          brew install llvm
-          llvm=$(brew --prefix llvm)
-          echo "$llvm/bin" >> "$GITHUB_PATH"
           {
-            echo "LIBCLANG_PATH=$llvm/lib"
             echo "MACOSX_DEPLOYMENT_TARGET=11.0"
             echo "CFLAGS=-mmacosx-version-min=11.0"
             echo "CXXFLAGS=-mmacosx-version-min=11.0"

@@ -2,7 +2,6 @@
 
 mod errors;
 mod leader;
-mod ledger;
 
 use std::{alloc::System, process::ExitCode};
 

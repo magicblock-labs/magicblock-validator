@@ -55,10 +55,6 @@ pub const DEFAULT_SUPERBLOCK_SIZE: u64 = 3600 * 20;
 /// Default leader replication listener.
 pub const DEFAULT_REPLICATION_BIND_ADDRESS: &str = "127.0.0.1:10000";
 
-/// Default ledger block cache size (512 MB, suits local dev;
-/// production nodes should configure 16 GB or more)
-pub const DEFAULT_LEDGER_BLOCK_CACHE_SIZE: u64 = 512 * 1024 * 1024;
-
 /// Metrics Defaults
 /// Default address for the metrics endpoint (Prometheus format)
 pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";

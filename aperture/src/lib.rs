@@ -3,8 +3,6 @@
 use account::Accounts;
 use chainlink::ProdChainlink;
 use engine::Engine;
-use history::History;
-use ledger_deprecated::Ledger;
 use requests::http::RpcHandlers;
 use std::{io, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::task::JoinSet;
@@ -38,7 +36,6 @@ impl Aperture {
         config: &ApertureConfig,
         engine: Engine,
         chainlink: Arc<ProdChainlink>,
-        legacy: Arc<Ledger>,
         blocktime: Duration,
         cancel: CancellationToken,
     ) -> ApertureResult<Self> {
@@ -72,8 +69,7 @@ impl Aperture {
         // delivery tasks, so a bind failure cannot leak engine subscriptions.
         let websocket = WebsocketServer::new(ws, engine.clone(), cancel.clone());
         let accounts = Accounts::new(engine.clone(), chainlink);
-        let history = History::new(engine.clone(), legacy);
-        let handlers = RpcHandlers::new(engine.clone(), accounts, history, blocktime);
+        let handlers = RpcHandlers::new(engine.clone(), accounts, blocktime);
         let http = HttpServer::new(http, handlers.clone(), cancel.clone());
         let geyser = GeyserPluginManager::load(&config.geyser_plugins).prepare(&engine).await?;
         Ok(Self {
@@ -122,7 +118,6 @@ mod account;
 mod encoder;
 mod error;
 mod geyser;
-mod history;
 mod requests;
 mod server;
 mod state;

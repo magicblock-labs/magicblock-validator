@@ -34,7 +34,6 @@ runs:
       with:
         workspace: redsuite
         cache-key: redsuite-release
-        libclang: "false"
 
     - name: Build RedSuite CLI
       if: steps.cli.outputs.cache-hit != 'true'

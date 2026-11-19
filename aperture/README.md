@@ -32,10 +32,8 @@ multiple workers may see lower callback throughput.
 
 ## What responses mean
 
-A transaction signature is not proof of base-chain settlement. History comes
-from Engine, with a read-only [legacy ledger](../ledger/README.md)
-fallback for older records. Aperture preserves Engine's transaction metadata;
-it does not repair fees or balances.
+A transaction signature is not proof of base-chain settlement. Aperture serves only the history retained by Engine and preserves its
+transaction metadata; it does not repair fees or balances.
 
 See [service interfaces](https://github.com/magicblock-labs/knowledge-base/blob/main/projects/magicblock-validator/service-interfaces.md)
 for detailed client-facing behavior.
