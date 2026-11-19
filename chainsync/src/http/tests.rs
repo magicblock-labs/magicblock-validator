@@ -3,7 +3,7 @@ use hyper::StatusCode;
 use solana_pubkey::Pubkey;
 
 use super::*;
-use crate::transport::{Account, SERVICE_ERROR, http::Server, scripted};
+use crate::support::{Account, SERVICE_ERROR, http::Server, scripted};
 
 const FRESHNESS_FLOOR: u64 = 90;
 const CLOCK_SLOT: u64 = 95;
