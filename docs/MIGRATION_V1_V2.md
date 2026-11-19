@@ -6,7 +6,7 @@
 - [Repair an already-migrated node](#repair-an-already-migrated-node)
 - [Validation](#validation)
 - [Replication](#replication)
-- [Retire legacy history](#retire-legacy-history)
+- [Upgrade to v2.1.0](#upgrade-to-v210)
 - [References](#references)
 
 ## Prepare
@@ -112,9 +112,11 @@ See [runtime program persistence](../runtime/README.md#integration).
 
 ## Configuration changes
 
-Create configs from the V2 [leader](../config.validator.example.toml) and
-[verifier](../config.verifier.example.toml) examples. Apply the following changes
-to TOML and service environment files; V2 rejects unknown settings.
+Create configs from the v2.0.0
+[leader](https://github.com/magicblock-labs/magicblock-validator/blob/v2.0.0/config.validator.example.toml) and
+[verifier](https://github.com/magicblock-labs/magicblock-validator/blob/v2.0.0/config.verifier.example.toml)
+examples. Apply the following changes to TOML and service environment files;
+v2.0.0 rejects unknown settings.
 
 ### Move or replace
 
@@ -343,7 +345,7 @@ for reconciliation and sequence handling.
 
 ### 3. Link the legacy ledger and start V2
 
-V2 reads legacy history at `<engine.ledger.directory>/rocksdb`:
+v2.0.0 reads legacy history at `<engine.ledger.directory>/rocksdb`:
 
 ```sh
 mkdir -p /srv/magicblock-v2/ledger
@@ -500,17 +502,20 @@ recovery, task progress, replication lag/errors, and snapshot completion during
 the initial observation period. See [metrics scraping](../metrics/README.md#scraping-metrics) and
 [live failure monitoring](../bins/magicblock/README.md#monitor-failures).
 
-## Retire legacy history
+## Upgrade to v2.1.0
 
-Keep the legacy ledger for a few days, then remove it manually once pre-cutover
-history is no longer needed. During a brief leader stop, remove the `rocksdb`
-symlink and its legacy target, leaving the V2 Engine ledger and migrated AccountsDB
-intact. Restart the leader; it recreates an empty compatibility store.
+Upgrade once the retained Engine history no longer connects to pre-cutover
+history. Engine is the only history backend in v2.1.0: RPC no longer serves
+transactions or blocks held only in the legacy ledger.
 
-Removing the legacy files releases filesystem usage against `size-limit` once
-their open handles are closed. The freed budget becomes available for V2 history;
-revisit the limit if it was raised temporarily for coexistence. Pre-cutover history
-will no longer be available through V2.
+Remove the top-level `[ledger]` section from the leader config and unset
+`MBV_LEDGER__BLOCK_CACHE_SIZE`, `MBV_LEDGER__VERIFY_KEYPAIR`, and
+`MBV_LEDGER__RESET` if set. Keep `[engine.ledger]` and point it at the existing
+V2 Engine ledger.
+
+The upgrade does not delete legacy files. Remove the symlink and archive or
+remove its target separately once it is no longer needed. Revisit
+`engine.ledger.size-limit` if you raised it temporarily for coexistence.
 
 ## References
 
