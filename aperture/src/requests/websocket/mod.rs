@@ -6,7 +6,6 @@ mod prelude {
         RpcResult,
         requests::{JsonWsRequest as JsonRequest, params::Serde32Bytes},
         server::websocket::dispatch::{SubResult, WsDispatcher},
-        state::subscriptions::next_subid,
     };
 }
 

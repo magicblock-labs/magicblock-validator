@@ -34,10 +34,9 @@ impl WsDispatcher {
             }
         };
 
-        let id = next_subid();
         let rx = self.engine.transactions().subscribe_logs(pubkey).await;
         let engine = self.engine.clone();
-        self.forward(id, rx, move |transaction| {
+        Ok(self.forward(rx, move |id, transaction| {
             let execution = transaction.execution.result.processed_transaction();
             let value = LogsValue {
                 signature: SerdeSignature(transaction.transaction.signatures()[0]),
@@ -49,8 +48,6 @@ impl WsDispatcher {
             };
             NotificationPayload::encode(value, context_slot(&engine), "logsNotification", id)
                 .map(Some)
-        });
-
-        Ok(SubResult::SubId(id))
+        }))
     }
 }

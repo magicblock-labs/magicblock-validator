@@ -72,12 +72,13 @@ impl ConnectionHandler {
         } = self;
         let (mut reader, mut writer) = ws.split(tokio::io::split);
         let cancel = dispatcher.cancel.clone();
+        let cancelled = cancel.cancelled();
         reader.set_auto_pong(false);
         let mut last_activity = Instant::now();
         let mut last_request = Value::Null;
         let mut replies = 0_u64;
         let next_ping = time::sleep_until(Instant::now() + PING_PERIOD);
-        tokio::pin!(next_ping);
+        tokio::pin!(cancelled, next_ping);
 
         'connection: loop {
             // Reading consumes frame headers before awaiting the remaining bytes.
@@ -92,12 +93,13 @@ impl ConnectionHandler {
                 };
                 let read = reader.read_frame(&mut defer_close);
                 tokio::pin!(read);
+                // Give a queued notification one turn before the next inbound frame.
+                let mut can_read = updates_rx.is_empty();
                 loop {
                     tokio::select! {
-                        // Prioritize cancellation even while a frame is incomplete.
                         biased;
-                        _ = cancel.cancelled() => break 'connection,
-                        result = &mut read => break result,
+                        _ = &mut cancelled => break 'connection,
+                        result = &mut read, if can_read => break result,
                         _ = &mut next_ping => {
                             if last_activity.elapsed() > MAX_INACTIVE_INTERVAL {
                                 let frame = Frame::close(
@@ -114,12 +116,13 @@ impl ConnectionHandler {
                             };
                             next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
                         }
-
                         Some(update) = updates_rx.recv() => {
-                            if let Err(error) = write_frame(&mut writer, Frame::text(update.as_ref().into())).await {
+                            let frame = Frame::text(update.as_ref().into());
+                            if let Err(error) = write_frame(&mut writer, frame).await {
                                 warn!(?error, %last_request, replies, "WebSocket notification failed");
                                 return;
                             }
+                            can_read = true;
                         }
                     }
                 }
@@ -141,7 +144,7 @@ impl ConnectionHandler {
                 }
             };
             last_activity = Instant::now();
-            next_ping.as_mut().reset(Instant::now() + PING_PERIOD);
+            next_ping.as_mut().reset(last_activity + PING_PERIOD);
             match frame.opcode {
                 OpCode::Close => return,
                 OpCode::Ping => {
