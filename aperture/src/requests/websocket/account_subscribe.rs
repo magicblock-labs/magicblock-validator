@@ -18,13 +18,10 @@ impl WsDispatcher {
             data_slice: config.data_slice,
         };
 
-        let id = next_subid();
         let rx = self.engine.accounts().subscribe(pubkey).await;
         let engine = self.engine.clone();
-        self.forward(id, rx, move |account: AccountSharedData| {
+        Ok(self.forward(rx, move |id, account: AccountSharedData| {
             encoder.encode(context_slot(&engine), &pubkey, &account, id).map(Some)
-        });
-
-        Ok(SubResult::SubId(id))
+        }))
     }
 }

@@ -22,13 +22,10 @@ impl WsDispatcher {
         };
         let encoder = ProgramAccountEncoder { encoder, filters };
 
-        let id = next_subid();
         let rx = self.engine.accounts().subscribe_program(pubkey).await;
         let engine = self.engine.clone();
-        self.forward(id, rx, move |(pubkey, account)| {
+        Ok(self.forward(rx, move |id, (pubkey, account)| {
             encoder.encode(context_slot(&engine), &pubkey, &account, id)
-        });
-
-        Ok(SubResult::SubId(id))
+        }))
     }
 }

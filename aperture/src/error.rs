@@ -7,6 +7,7 @@ pub(crate) const BLOCK_CLEANED_UP: i16 = -32001;
 pub(crate) const TRANSACTION_SIMULATION: i16 = -32002;
 pub(crate) const TRANSACTION_VERIFICATION: i16 = -32003;
 pub(crate) const BLOCK_NOT_FOUND: i16 = -32009;
+pub(crate) const SUBSCRIPTION_LIMIT_REACHED: i16 = -32050;
 pub(crate) const INVALID_REQUEST: i16 = -32600;
 pub(crate) const METHOD_NOT_FOUND: i16 = -32601;
 pub(crate) const INVALID_PARAMS: i16 = -32602;
