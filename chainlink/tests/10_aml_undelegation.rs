@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     io::{Read, Write},
     net::TcpListener,
+    rc::Rc,
     sync::Arc,
     time::Duration,
 };
@@ -21,7 +22,7 @@ use delegation_program_api::{
 use magicblock_chainlink::testing::{context::TestContext, init_logger};
 use solana_account::{Account, AccountMode};
 use solana_pubkey::Pubkey;
-use tokio::task::JoinHandle;
+use tokio::{runtime::Builder, task::JoinHandle};
 
 /// Threshold the mock risk server uses to decide `isRisky`. The seeded scores
 /// (1 and 9) sit either side of it.
@@ -181,41 +182,49 @@ async fn setup(risk_score: u64) -> (TestContext, MockRiskServer, Pubkey) {
     (ctx, server, delegated_pubkey)
 }
 
-#[tokio::test]
-async fn post_delegation_aml_rejects_high_risk_signer() {
-    let (ctx, server, delegated_pubkey) = setup(9).await;
+fn run_aml_case<T>(risk_score: u64, run: impl AsyncFnOnce(&TestContext, Pubkey) -> T) -> T {
+    let runtime = Builder::new_current_thread().enable_all().build().unwrap();
+    let (result, bank, dirs) = runtime.block_on(async {
+        let (ctx, server, delegated_pubkey) = setup(risk_score).await;
+        let result = run(&ctx, delegated_pubkey).await;
+        server.join().await;
+        let TestContext { test_engine, bank, .. } = ctx;
+        let (dirs, _) = Rc::into_inner(test_engine).expect("unique test engine").close().await;
+        (result, bank, dirs)
+    });
 
-    let err = ctx
-        .ensure_account(&delegated_pubkey)
-        .await
+    // Chainlink tasks can still hold Engine clones. Drop them before the last
+    // database owner, on this thread and before its LMDB TLS destructor runs.
+    drop(runtime);
+    drop(bank);
+    drop(dirs);
+    result
+}
+
+#[test]
+fn post_delegation_aml_rejects_high_risk_signer() {
+    let err = run_aml_case(9, async |ctx, key| ctx.ensure_account(&key).await)
         .expect_err("high-risk signer must reject the post-delegation action");
     assert!(
         err.to_string().contains("high risk"),
         "AML rejection must identify the high-risk signer: {err}"
     );
-
-    server.join().await;
 }
 
-#[tokio::test]
-async fn post_delegation_aml_accepts_low_risk_signer() {
-    let (ctx, server, delegated_pubkey) = setup(1).await;
-
-    ctx.ensure_account(&delegated_pubkey)
-        .await
-        .expect("low-risk signer should be cloned");
-
-    assert!(
-        ctx.bank
+#[test]
+fn post_delegation_aml_accepts_low_risk_signer() {
+    let (result, delegated) = run_aml_case(1, async |ctx, key| {
+        let result = ctx.ensure_account(&key).await;
+        let delegated = ctx
+            .bank
             .accounts()
             .loader()
-            .read(&delegated_pubkey, |account| {
-                account.is(AccountMode::Delegated)
-            })
-            .unwrap()
-            .unwrap_or(false),
+            .read(&key, |account| account.is(AccountMode::Delegated));
+        (result, delegated)
+    });
+    result.expect("low-risk signer should be cloned");
+    assert!(
+        delegated.unwrap().unwrap_or(false),
         "AML-accepted action should clone the delegated account"
     );
-
-    server.join().await;
 }
