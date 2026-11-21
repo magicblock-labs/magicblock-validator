@@ -33,7 +33,7 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: 4010b7e76463b4f57d784dfabd2fa3c94dde5921
+        ref: 3.7.0
         path: redsuite
         persist-credentials: false
 
@@ -130,7 +130,8 @@ runs:
         key: >-
           yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
             'magicblock-validator/.github/actions/setup-solana/agave-version',
-            'redsuite/crates/redsuite-core/src/topology/yellowstone.rs'
+            'redsuite/core/src/topology/yellowstone.rs',
+            'redsuite/shared/components.toml'
           ) }}
 
     - name: Prepare run root
@@ -148,7 +149,7 @@ runs:
       env:
         REDSUITE_FAMILY: ${{ inputs.family }}
         REDSUITE_CLONE_URL: ${{ inputs.clone-url }}
-        RUST_LOG: info
+        RUST_LOG: ${{ inputs.family == 'redline' && 'info' || 'info,redsuite::suite=debug' }}
 
     - name: Upload stack logs
       if: always()

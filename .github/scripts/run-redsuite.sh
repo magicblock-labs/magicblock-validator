@@ -11,7 +11,7 @@ sudo sysctl -q fs.inotify.max_user_watches=655360
 [ -n "${REDSUITE_CLONE_URL:-}" ] || unset REDSUITE_CLONE_URL
 args=("$family" run)
 if [ "$family" = redshift ]; then
-  args+=(--serial)
+  args+=(--fresh-concurrency 1)
 fi
 if [ "$family" = redline ]; then
   args+=(--profile lite --duration 30s)
