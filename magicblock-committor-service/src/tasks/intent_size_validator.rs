@@ -30,6 +30,7 @@ use crate::{
 /// distinct keys for unknown rent payers, and includes a uniqueness noop in each
 /// stage. Each stage is checked against v1, then v0 with full ALT coverage.
 /// Actual ALT coverage is unknown at admission time.
+/// CU estimates above the runtime limit are capped at execution, not rejected here.
 ///
 /// This estimate can reject an intent that a smaller execution-time diff would
 /// allow. Passing the estimate also does not guarantee execution succeeds:
@@ -204,10 +205,6 @@ impl IntentSizeValidator {
         mut tasks: Vec<BaseTaskImpl>,
         uniqueness_nonce: Option<u64>,
     ) -> bool {
-        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
-            return false;
-        }
-
         let placeholder = Keypair::new();
         Self::assign_unknown_rent_payers(
             &mut tasks,
@@ -556,9 +553,10 @@ mod tests {
         // The actual diff is unknown at admission time, so an account above
         // COMMIT_STATE_SIZE_THRESHOLD is estimated using a buffer.
         let intent = MagicIntentBundle {
-            commit: Some(CommitType::Standalone(vec![make_committed_account(
-                10_240,
-            )])),
+            // Five buffered commits estimate 1.5M CU but still fit on the wire.
+            commit: Some(CommitType::Standalone(
+                (0..5).map(|_| make_committed_account(10_240)).collect(),
+            )),
             ..Default::default()
         };
         assert!(IntentSizeValidator::fits(&intent));

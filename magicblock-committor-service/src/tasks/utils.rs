@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use dlp_api::{AccountSizeClass, DLP_PROGRAM_DATA_SIZE_CLASS};
 use magicblock_core::intent::{types::CommittedAccount, BaseAction};
 use solana_account::Account;
-use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
+use solana_compute_budget::compute_budget_limits::{
+    ComputeBudgetLimits, MAX_COMPUTE_UNIT_LIMIT,
+};
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::Instruction;
@@ -334,6 +336,7 @@ impl TransactionUtils {
         compute_units: u32,
         compute_unit_price: u64,
     ) -> v1::TransactionConfig {
+        let compute_units = compute_units.min(MAX_COMPUTE_UNIT_LIMIT);
         let limits = ComputeBudgetLimits {
             compute_unit_limit: compute_units,
             compute_unit_price,
@@ -357,10 +360,40 @@ impl TransactionUtils {
         _accounts_size_budget: u32,
     ) -> [Instruction; Self::COMPUTE_BUDGET_INSTRUCTION_COUNT as usize] {
         [
-            ComputeBudgetInstruction::set_compute_unit_limit(compute_units),
+            ComputeBudgetInstruction::set_compute_unit_limit(
+                compute_units.min(MAX_COMPUTE_UNIT_LIMIT),
+            ),
             ComputeBudgetInstruction::set_compute_unit_price(
                 compute_unit_price,
             ),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_budget_caps_both_formats_and_v1_priority_fee() {
+        for (estimated_cu, requested_cu) in [
+            (120_000, 120_000),
+            (1_400_000, 1_400_000),
+            (1_500_000, 1_400_000),
+            (u32::MAX, 1_400_000),
+        ] {
+            // One lamport per CU makes an uncapped priority fee visible.
+            let config = TransactionUtils::v1_config(estimated_cu, 1_000_000);
+            assert_eq!(config.compute_unit_limit, Some(requested_cu));
+            assert_eq!(config.priority_fee, Some(u64::from(requested_cu)));
+            assert_eq!(
+                TransactionUtils::budget_instructions(
+                    estimated_cu,
+                    1_000_000,
+                    0
+                )[0],
+                ComputeBudgetInstruction::set_compute_unit_limit(requested_cu)
+            );
+        }
     }
 }
