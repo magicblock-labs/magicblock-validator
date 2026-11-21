@@ -10,8 +10,14 @@ runs:
       working-directory: redsuite
       run: |
         # Use the tracked fixture inputs, not the runner revision, for the SBF cache.
-        fixtures=$(git ls-tree HEAD -- programs shared .cargo Cargo.toml Cargo.lock rust-toolchain.toml \
-          xtask/Cargo.toml xtask/src/fixtures xtask/src/main.rs | sha256sum | cut -d ' ' -f 1)
+        fixtures=$(
+          {
+            printf '%s\n' "$RUNNER_OS" "$RUNNER_ARCH"
+            cat ../magicblock-validator/.github/actions/setup-solana/agave-version
+            git ls-tree HEAD -- programs shared .cargo Cargo.toml Cargo.lock rust-toolchain.toml \
+              xtask/Cargo.toml xtask/src/fixtures xtask/src/main.rs
+          } | git hash-object --stdin
+        )
         {
           echo "sha=$(git rev-parse HEAD)"
           echo "fixtures=$fixtures"
@@ -30,10 +36,7 @@ runs:
       uses: actions/cache/restore@v6
       with:
         path: redsuite-dist/deploy
-        key: >-
-          redsuite-fixtures-v5-${{ runner.os }}-${{ runner.arch }}-${{ steps.source.outputs.fixtures }}-${{
-            hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
-          }}
+        key: redsuite-fixtures-v5-${{ steps.source.outputs.fixtures }}
 
     - uses: ./magicblock-validator/.github/actions/setup-build-env
       id: build-env
