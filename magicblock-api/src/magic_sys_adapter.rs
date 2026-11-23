@@ -9,13 +9,12 @@ use magicblock_committor_service::{
 };
 use magicblock_core::{
     intent::{types::CommittedAccount, MagicIntentBundle},
-    traits::MagicSys,
+    traits::{IntentSizeError, MagicSys},
 };
 use magicblock_metrics::metrics;
-use magicblock_program::magic_sys::INTENT_TOO_LARGE_ERR;
 use solana_instruction::error::InstructionError;
 use solana_pubkey::Pubkey;
-use tracing::error;
+use tracing::{error, warn};
 
 #[derive(Clone)]
 pub struct MagicSysAdapter {
@@ -111,11 +110,12 @@ impl MagicSys for MagicSysAdapter {
     fn validate_intent_size(
         &self,
         intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError> {
-        if IntentSizeValidator::fits(intent) {
-            Ok(())
-        } else {
-            Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))
-        }
+    ) -> Result<(), IntentSizeError> {
+        IntentSizeValidator::validate(intent).inspect_err(|error| match error {
+            IntentSizeError::FitCheckFailed { .. } => {
+                error!(error = %error, "Failed to validate scheduled intent size");
+            }
+            _ => warn!(error = %error, "Scheduled intent exceeds base-layer transaction limits"),
+        })
     }
 }

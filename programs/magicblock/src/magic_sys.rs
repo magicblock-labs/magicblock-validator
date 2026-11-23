@@ -9,6 +9,8 @@ use magicblock_core::{
     traits::MagicSys,
 };
 use solana_instruction::error::InstructionError;
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_pubkey::Pubkey;
 
 /// Maximum number of times an account may be committed before it must be
@@ -48,11 +50,24 @@ pub(crate) fn fetch_current_commit_nonces(
 
 pub(crate) fn validate_intent_size(
     intent: &MagicIntentBundle,
+    invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
-    MAGIC_SYS
+    let magic_sys = MAGIC_SYS
         .read()
         .expect(MAGIC_SYS_POISONED_MSG)
         .as_ref()
-        .ok_or(InstructionError::UninitializedAccount)?
-        .validate_intent_size(intent)
+        .cloned()
+        .ok_or(InstructionError::UninitializedAccount)?;
+
+    match magic_sys.validate_intent_size(intent) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            ic_msg!(invoke_context, "ScheduleCommit ERR: {}", error);
+            Err(if error.is_fit_limit() {
+                InstructionError::Custom(INTENT_TOO_LARGE_ERR)
+            } else {
+                InstructionError::GenericError
+            })
+        }
+    }
 }

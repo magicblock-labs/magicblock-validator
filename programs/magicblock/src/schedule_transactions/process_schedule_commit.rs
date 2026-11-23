@@ -67,8 +67,8 @@ pub(crate) fn process_schedule_commit(
 
     // Assert Payer is signer
     let payer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
-    if !signers.contains(payer_pubkey) {
+        *get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+    if !signers.contains(&payer_pubkey) {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: payer pubkey {} not in signers",
@@ -288,19 +288,22 @@ pub(crate) fn process_schedule_commit(
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    let mut context = MagicContext::deserialize(context_acc.borrow()?.data())
-        .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "Failed to deserialize MagicContext: {}",
-            err
-        );
-        InstructionError::GenericError
-    })?;
+    let mut context = {
+        let context_acc = get_instruction_account_with_idx(
+            transaction_context,
+            MAGIC_CONTEXT_IDX,
+        )?;
+        let context = MagicContext::deserialize(context_acc.borrow()?.data())
+            .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to deserialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
+        context
+    };
 
     // Get next intent id
     let intent_id = context.next_intent_id();
@@ -331,19 +334,19 @@ pub(crate) fn process_schedule_commit(
         ))
     }
     .into();
-    validate_intent_size(&base_intent).inspect_err(|_| {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: intent is too large to ever fit into transaction",
-        );
-    })?;
+    validate_intent_size(&base_intent, invoke_context)?;
+
+    let context_acc = get_instruction_account_with_idx(
+        &*invoke_context.transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
         id: intent_id,
         slot: clock.slot,
         blockhash,
         sent_transaction: action_sent_transaction,
-        payer: *payer_pubkey,
+        payer: payer_pubkey,
         intent_bundle: base_intent,
     };
 

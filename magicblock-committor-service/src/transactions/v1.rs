@@ -14,8 +14,8 @@ use solana_signer::{Signer, SignerError};
 
 const MESSAGE_VERSION_PREFIX: u8 = 0x80;
 const V1_PREFIX: u8 = MESSAGE_VERSION_PREFIX | 1;
-const MAX_ADDRESSES: usize = 64;
-const MAX_INSTRUCTIONS: usize = 64;
+pub(crate) const MAX_ACCOUNT_KEYS: usize = 64;
+pub(crate) const MAX_INSTRUCTIONS: usize = 64;
 const MAX_SIGNATURES: usize = 12;
 
 const PRIORITY_FEE_MASK: u32 = 0b11;
@@ -125,7 +125,7 @@ impl Message {
         if usize::from(self.header.num_required_signatures) > MAX_SIGNATURES {
             return Err(());
         }
-        if self.account_keys.len() > MAX_ADDRESSES {
+        if self.account_keys.len() > MAX_ACCOUNT_KEYS {
             return Err(());
         }
         if self.instructions.len() > MAX_INSTRUCTIONS {

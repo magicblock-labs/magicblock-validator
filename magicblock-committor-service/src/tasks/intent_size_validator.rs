@@ -3,6 +3,9 @@ use std::collections::HashSet;
 use magicblock_core::intent::{
     types::CommittedAccount, CommitType, MagicIntentBundle, UndelegateType,
 };
+use magicblock_core::traits::{
+    FormatFitError, IntentSizeError, IntentSizeStage,
+};
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -10,7 +13,7 @@ use solana_signer::Signer;
 use crate::{
     tasks::{
         commit_delivery::CommitDelivery,
-        task_strategist::TaskStrategist,
+        task_strategist::{TaskStrategist, TaskStrategistError},
         utils::{
             create_action_tasks, create_commit_finalize_task, TransactionUtils,
         },
@@ -22,6 +25,8 @@ use crate::{
         MAX_TRANSACTION_WIRE_SIZE,
     },
 };
+
+const MAX_INTENT_COMPUTE_UNITS: u32 = 1_400_000;
 
 /// Estimates whether an intent's commit and finalize stages fit the supported
 /// transaction formats and base-layer account-lock limit without fetching
@@ -39,21 +44,32 @@ use crate::{
 pub struct IntentSizeValidator;
 
 impl IntentSizeValidator {
-    /// Returns whether both estimated stages fit v1 or the v0 + ALT fallback.
+    /// Returns an actionable reason if either estimated stage cannot fit.
     /// A rejection applies to these estimates, not every possible delivery plan.
-    pub fn fits(intent: &MagicIntentBundle) -> bool {
-        Self::commit_fits(intent) && Self::finalize_fits(intent)
+    pub fn validate(intent: &MagicIntentBundle) -> Result<(), IntentSizeError> {
+        Self::commit_fits(intent)?;
+        Self::finalize_fits(intent)
     }
 
     /// Checks the commit-stage tasks fit. Always assumes a uniqueness noop
     /// is present - worst case, since we can't rule it out ahead of time.
-    fn commit_fits(intent: &MagicIntentBundle) -> bool {
-        Self::tasks_fit(Self::commit_tasks(intent), Some(0))
+    fn commit_fits(intent: &MagicIntentBundle) -> Result<(), IntentSizeError> {
+        Self::tasks_fit(
+            Self::commit_tasks(intent),
+            Some(0),
+            IntentSizeStage::Commit,
+        )
     }
 
     /// Checks the finalize-stage tasks fit; same worst-case noop assumption.
-    fn finalize_fits(intent: &MagicIntentBundle) -> bool {
-        Self::tasks_fit(Self::finalize_tasks(intent), Some(0))
+    fn finalize_fits(
+        intent: &MagicIntentBundle,
+    ) -> Result<(), IntentSizeError> {
+        Self::tasks_fit(
+            Self::finalize_tasks(intent),
+            Some(0),
+            IntentSizeStage::Finalize,
+        )
     }
 
     /// Builds the commit-stage tasks used for the size estimate: real
@@ -200,14 +216,21 @@ impl IntentSizeValidator {
         tasks
     }
 
-    /// Returns `true` if `tasks` plus `uniqueness_nonce` (if any) fit through
-    /// either v1 or the v0 + ALT fallback.
+    /// Checks `tasks` plus `uniqueness_nonce` against v1, then v0 + ALT, and
+    /// preserves both candidate failures when neither format fits.
     fn tasks_fit(
         mut tasks: Vec<BaseTaskImpl>,
         uniqueness_nonce: Option<u64>,
-    ) -> bool {
-        if TransactionUtils::tasks_compute_units(&tasks) > 1_400_000 {
-            return false;
+        stage: IntentSizeStage,
+    ) -> Result<(), IntentSizeError> {
+        let estimated_compute_units =
+            TransactionUtils::tasks_compute_units(&tasks);
+        if estimated_compute_units > MAX_INTENT_COMPUTE_UNITS {
+            return Err(IntentSizeError::ComputeBudgetExceeded {
+                stage,
+                estimated: estimated_compute_units,
+                limit: MAX_INTENT_COMPUTE_UNITS,
+            });
         }
 
         let placeholder = Keypair::new();
@@ -216,12 +239,35 @@ impl IntentSizeValidator {
             &placeholder.pubkey(),
             uniqueness_nonce,
         );
-        Self::tasks_fit_v1(&placeholder, &tasks, uniqueness_nonce)
-            || Self::tasks_fit_v0_with_alts(
-                &placeholder,
-                &tasks,
-                uniqueness_nonce,
-            )
+        let v1_failure =
+            match Self::tasks_fit_v1(&placeholder, &tasks, uniqueness_nonce) {
+                Ok(()) => return Ok(()),
+                Err(CandidateFitError::DoesNotFit(error)) => error,
+                Err(CandidateFitError::Internal(reason)) => {
+                    return Err(IntentSizeError::FitCheckFailed {
+                        stage,
+                        reason,
+                    })
+                }
+            };
+
+        let v0_with_alts_failure = match Self::tasks_fit_v0_with_alts(
+            &placeholder,
+            &tasks,
+            uniqueness_nonce,
+        ) {
+            Ok(()) => return Ok(()),
+            Err(CandidateFitError::DoesNotFit(error)) => error,
+            Err(CandidateFitError::Internal(reason)) => {
+                return Err(IntentSizeError::FitCheckFailed { stage, reason })
+            }
+        };
+
+        Err(IntentSizeError::NoSupportedFormatFits {
+            stage,
+            v1: v1_failure,
+            v0_with_alts: v0_with_alts_failure,
+        })
     }
 
     /// Give unknown payers separate keys so account-key deduplication cannot
@@ -278,22 +324,67 @@ impl IntentSizeValidator {
         placeholder: &Keypair,
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
-    ) -> bool {
-        TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
-            placeholder,
-            tasks,
-            0,
-            uniqueness_nonce,
-        )
-        .map(|tx| tx.serialized_size() <= MAX_TRANSACTION_V1_WIRE_SIZE)
-        .unwrap_or(false)
+    ) -> Result<(), CandidateFitError> {
+        let authority = placeholder.pubkey();
+        let mut instructions =
+            TransactionUtils::tasks_instructions(&authority, tasks);
+        if let Some(nonce) = uniqueness_nonce {
+            instructions
+                .push(TransactionUtils::uniqueness_noop_instruction(nonce));
+        }
+
+        let instruction_count = instructions.len();
+        if instruction_count > crate::transactions::v1::MAX_INSTRUCTIONS {
+            return Err(CandidateFitError::DoesNotFit(
+                FormatFitError::InstructionCountLimitExceeded {
+                    actual: instruction_count,
+                    limit: crate::transactions::v1::MAX_INSTRUCTIONS,
+                },
+            ));
+        }
+
+        let mut account_keys = HashSet::from([authority]);
+        for instruction in &instructions {
+            account_keys.insert(instruction.program_id);
+            account_keys
+                .extend(instruction.accounts.iter().map(|meta| meta.pubkey));
+        }
+        let account_key_count = account_keys.len();
+        if account_key_count > crate::transactions::v1::MAX_ACCOUNT_KEYS {
+            return Err(CandidateFitError::DoesNotFit(
+                FormatFitError::AccountKeyLimitExceeded {
+                    actual: account_key_count,
+                    limit: crate::transactions::v1::MAX_ACCOUNT_KEYS,
+                },
+            ));
+        }
+
+        let transaction =
+            TransactionUtils::assemble_tasks_v1_tx_with_uniqueness_nonce(
+                placeholder,
+                tasks,
+                0,
+                uniqueness_nonce,
+            )
+            .map_err(Self::candidate_assembly_error)?;
+        let actual_size = transaction.serialized_size();
+        if actual_size > MAX_TRANSACTION_V1_WIRE_SIZE {
+            return Err(CandidateFitError::DoesNotFit(
+                FormatFitError::WireSizeExceeded {
+                    actual: actual_size,
+                    limit: MAX_TRANSACTION_V1_WIRE_SIZE,
+                },
+            ));
+        }
+
+        Ok(())
     }
 
     fn tasks_fit_v0_with_alts(
         placeholder: &Keypair,
         tasks: &[BaseTaskImpl],
         uniqueness_nonce: Option<u64>,
-    ) -> bool {
+    ) -> Result<(), CandidateFitError> {
         let lookup_table_keys = TaskStrategist::collect_lookup_table_keys(
             &placeholder.pubkey(),
             tasks,
@@ -302,20 +393,59 @@ impl IntentSizeValidator {
         let lookup_tables =
             TransactionUtils::dummy_lookup_table(&lookup_table_keys);
 
-        TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
-            placeholder,
-            tasks,
-            0,
-            &lookup_tables,
-            uniqueness_nonce,
-        )
-        .map(|tx| {
-            resolved_account_lock_count(&tx.message)
-                <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
-                && serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
-        })
-        .unwrap_or(false)
+        let transaction =
+            TransactionUtils::assemble_tasks_tx_with_uniqueness_nonce(
+                placeholder,
+                tasks,
+                0,
+                &lookup_tables,
+                uniqueness_nonce,
+            )
+            .map_err(Self::candidate_assembly_error)?;
+
+        let account_lock_count =
+            resolved_account_lock_count(&transaction.message);
+        if account_lock_count > MAX_BASE_LAYER_TX_ACCOUNT_LOCKS {
+            return Err(CandidateFitError::DoesNotFit(
+                FormatFitError::AccountLockLimitExceeded {
+                    actual: account_lock_count,
+                    limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+                },
+            ));
+        }
+
+        let actual_size = serialized_transaction_size(&transaction);
+        if actual_size > MAX_TRANSACTION_WIRE_SIZE {
+            return Err(CandidateFitError::DoesNotFit(
+                FormatFitError::WireSizeExceeded {
+                    actual: actual_size,
+                    limit: MAX_TRANSACTION_WIRE_SIZE,
+                },
+            ));
+        }
+
+        Ok(())
     }
+
+    fn candidate_assembly_error(
+        error: TaskStrategistError,
+    ) -> CandidateFitError {
+        match error {
+            TaskStrategistError::FailedToFitError => {
+                CandidateFitError::DoesNotFit(
+                    FormatFitError::MessageCannotBeCompiled,
+                )
+            }
+            TaskStrategistError::SignerError(error) => {
+                CandidateFitError::Internal(error.to_string())
+            }
+        }
+    }
+}
+
+enum CandidateFitError {
+    DoesNotFit(FormatFitError),
+    Internal(String),
 }
 
 #[cfg(test)]
@@ -401,7 +531,7 @@ mod tests {
                         finalizes.len(),
                         usize::from(!combined) + usize::from(undelegate)
                     );
-                    assert!(IntentSizeValidator::fits(&intent));
+                    assert!(IntentSizeValidator::validate(&intent).is_ok());
                 }
             }
         }
@@ -409,7 +539,8 @@ mod tests {
 
     #[test]
     fn test_empty_intent_fits() {
-        assert!(IntentSizeValidator::fits(&MagicIntentBundle::default()));
+        assert!(IntentSizeValidator::validate(&MagicIntentBundle::default())
+            .is_ok());
     }
 
     #[test]
@@ -496,17 +627,18 @@ mod tests {
                 wire_size(&actual_tasks(&at_boundary)),
                 MAX_TRANSACTION_V1_WIRE_SIZE
             );
-            assert!(IntentSizeValidator::fits(&at_boundary));
+            assert!(IntentSizeValidator::validate(&at_boundary).is_ok());
 
             let above_boundary = make_intent(boundary_len + 1, commit_finalize);
             let actual = actual_tasks(&above_boundary);
             assert_eq!(wire_size(&actual), MAX_TRANSACTION_V1_WIRE_SIZE + 1);
-            assert!(!IntentSizeValidator::tasks_fit_v0_with_alts(
+            assert!(IntentSizeValidator::tasks_fit_v0_with_alts(
                 &authority,
                 &actual,
                 Some(0)
-            ));
-            assert!(!IntentSizeValidator::fits(&above_boundary));
+            )
+            .is_err());
+            assert!(IntentSizeValidator::validate(&above_boundary).is_err());
 
             // Sharing the old default payer would incorrectly admit this case.
             let original = IntentSizeValidator::finalize_tasks(&above_boundary);
@@ -514,7 +646,8 @@ mod tests {
                 &authority,
                 &original,
                 Some(0)
-            ));
+            )
+            .is_ok());
             let mut estimated = original.clone();
             IntentSizeValidator::assign_unknown_rent_payers(
                 &mut estimated,
@@ -541,8 +674,8 @@ mod tests {
                 Some(0),
             );
             assert_eq!(payer_keys(&repeated), payers);
-            assert!(IntentSizeValidator::fits(&at_boundary));
-            assert!(!IntentSizeValidator::fits(&above_boundary));
+            assert!(IntentSizeValidator::validate(&at_boundary).is_ok());
+            assert!(IntentSizeValidator::validate(&above_boundary).is_err());
         }
     }
 
@@ -558,9 +691,81 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(IntentSizeValidator::commit_fits(&intent));
-        assert!(!IntentSizeValidator::finalize_fits(&intent));
-        assert!(!IntentSizeValidator::fits(&intent));
+        assert!(IntentSizeValidator::commit_fits(&intent).is_ok());
+        assert!(IntentSizeValidator::finalize_fits(&intent).is_err());
+        let error = IntentSizeValidator::validate(&intent).unwrap_err();
+        assert!(matches!(
+            error,
+            IntentSizeError::NoSupportedFormatFits {
+                stage: IntentSizeStage::Finalize,
+                v1: FormatFitError::AccountKeyLimitExceeded {
+                    limit: crate::transactions::v1::MAX_ACCOUNT_KEYS,
+                    ..
+                },
+                v0_with_alts: FormatFitError::AccountLockLimitExceeded {
+                    limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+                    ..
+                },
+            }
+        ));
+    }
+
+    #[test]
+    fn test_over_compute_budget_reports_stage_and_estimate() {
+        let mut action = make_base_action(0);
+        action.compute_units = MAX_INTENT_COMPUTE_UNITS + 1;
+        let intent = MagicIntentBundle {
+            standalone_actions: vec![action],
+            ..Default::default()
+        };
+
+        assert!(matches!(
+            IntentSizeValidator::validate(&intent),
+            Err(IntentSizeError::ComputeBudgetExceeded {
+                stage: IntentSizeStage::Commit,
+                estimated,
+                limit: MAX_INTENT_COMPUTE_UNITS,
+            }) if estimated == MAX_INTENT_COMPUTE_UNITS + 1
+        ));
+    }
+
+    #[test]
+    fn test_reports_both_format_failures_for_unfit_stage() {
+        let mut action = make_base_action(0);
+        action.compute_units = 1;
+        let actions = (0..=crate::transactions::v1::MAX_INSTRUCTIONS)
+            .map(|id| {
+                let mut action = action.clone();
+                action.id = id as u64;
+                action
+            })
+            .collect();
+        let intent = MagicIntentBundle {
+            standalone_actions: actions,
+            ..Default::default()
+        };
+
+        let error = IntentSizeValidator::validate(&intent).unwrap_err();
+        assert!(matches!(
+            &error,
+            IntentSizeError::NoSupportedFormatFits {
+                stage: IntentSizeStage::Commit,
+                v1: FormatFitError::InstructionCountLimitExceeded {
+                    actual,
+                    limit,
+                },
+                v0_with_alts: FormatFitError::WireSizeExceeded {
+                    actual: alt_actual,
+                    limit: alt_limit,
+                },
+            } if actual > limit && alt_actual > alt_limit
+        ));
+        let message = error.to_string();
+        assert!(
+            message.contains("commit stage fits neither transaction format")
+        );
+        assert!(message.contains("v1: instruction count"));
+        assert!(message.contains("v0+ALT: wire size"));
     }
 
     #[test]
@@ -571,7 +776,7 @@ mod tests {
             )])),
             ..Default::default()
         };
-        assert!(IntentSizeValidator::fits(&intent));
+        assert!(IntentSizeValidator::validate(&intent).is_ok());
     }
 
     #[test]
@@ -584,7 +789,7 @@ mod tests {
             )])),
             ..Default::default()
         };
-        assert!(IntentSizeValidator::fits(&intent));
+        assert!(IntentSizeValidator::validate(&intent).is_ok());
     }
 
     #[test]
@@ -593,7 +798,7 @@ mod tests {
             standalone_actions: vec![make_base_action(2_000)],
             ..Default::default()
         };
-        assert!(IntentSizeValidator::fits(&intent));
+        assert!(IntentSizeValidator::validate(&intent).is_ok());
     }
 
     #[test]
@@ -602,6 +807,14 @@ mod tests {
             standalone_actions: vec![make_base_action(5_000)],
             ..Default::default()
         };
-        assert!(!IntentSizeValidator::fits(&intent));
+        assert!(matches!(
+            IntentSizeValidator::validate(&intent),
+            Err(IntentSizeError::NoSupportedFormatFits {
+                stage: IntentSizeStage::Commit,
+                v1: FormatFitError::WireSizeExceeded { limit, .. },
+                v0_with_alts: FormatFitError::WireSizeExceeded { limit: alt_limit, .. },
+            }) if limit == MAX_TRANSACTION_V1_WIRE_SIZE
+                && alt_limit == MAX_TRANSACTION_WIRE_SIZE
+        ));
     }
 }

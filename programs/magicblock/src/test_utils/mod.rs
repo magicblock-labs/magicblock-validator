@@ -9,7 +9,7 @@ use std::{
 
 use magicblock_core::{
     intent::{types::CommittedAccount, MagicIntentBundle},
-    traits::MagicSys,
+    traits::{IntentSizeError, MagicSys},
 };
 use magicblock_magic_program_api::{id, EPHEMERAL_VAULT_PUBKEY};
 use solana_account::AccountSharedData;
@@ -167,7 +167,7 @@ impl MagicSys for MagicSysStub {
     fn validate_intent_size(
         &self,
         _intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError> {
+    ) -> Result<(), IntentSizeError> {
         Ok(())
     }
 }
