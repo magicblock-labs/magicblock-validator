@@ -605,9 +605,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Eleven combined commits fit within the compute budget. Extra action
-        // accounts push their buffered form beyond V1's static-key limit.
+    fn test_build_strategy_rejects_combined_tasks_over_account_lock_limit() {
         const NUM_COMMITS: u64 = 11;
 
         let validator = Pubkey::new_unique();
@@ -631,16 +629,8 @@ mod tests {
             .collect();
         tasks.push(action.into());
 
-        let strategy = TaskStrategist::build_strategy(tasks, &validator, None)
-            .expect("Should build strategy with buffer optimization");
-
-        for optimized_task in &strategy.tasks[..NUM_COMMITS as usize] {
-            assert!(matches!(
-                commit_delivery(optimized_task),
-                CommitDelivery::StateInBuffer
-            ));
-        }
-        assert!(!strategy.lookup_tables_keys.is_empty());
+        let result = TaskStrategist::build_strategy(tasks, &validator, None);
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFit)));
     }
 
     #[test]
@@ -927,45 +917,35 @@ mod tests {
     #[tokio::test]
     async fn test_combined_commit_delivery_formats_without_follow_up() {
         for data_len in [40, 10_240] {
-            for use_alts in [false, true] {
-                let pubkey = Pubkey::new_unique();
-                let mut intent = create_test_intent_bundle(0, &[pubkey], &[]).inner;
-                intent.intent_bundle.commit.as_mut().unwrap().get_committed_accounts_mut()[0]
-                    .account
-                    .data = vec![1; data_len];
-                let BaseActionTask::V1(mut action) = create_test_base_action_task(0) else {
-                    panic!("expected v1 action");
-                };
-                if use_alts {
-                    action.action.account_metas_per_program = (0..65)
-                        .map(|_| ShortAccountMeta {
-                            pubkey: Pubkey::new_unique(),
-                            is_writable: false,
-                        })
-                        .collect();
-                }
-                intent.intent_bundle.standalone_actions.push(action.action);
-                let provider = Arc::new(MockInfoProvider {
-                    base_accounts: HashMap::from([(pubkey, None)]),
-                    ..Default::default()
-                });
-                let commits = TaskBuilder::commit_tasks(&provider, &intent).await.unwrap();
-                let follow_ups = TaskBuilder::follow_up_tasks(&provider, &intent).await.unwrap();
-                assert!(follow_ups.is_empty());
-                let plan =
-                    TaskStrategist::build_plan(commits, follow_ups, &Pubkey::new_unique(), Some(1))
-                        .unwrap();
-                assert!(plan.follow_up.is_none());
-                let strategy = plan.current;
-                assert_eq!(strategy.uses_alts(), use_alts);
-                let Task::CommitFinalize(task) = &strategy.tasks[1] else {
-                    panic!("format fallback must retain CommitFinalize");
-                };
-                assert_eq!(
-                    matches!(task.delivery, CommitDelivery::StateInBuffer),
-                    data_len > 4096
-                );
-            }
+            let pubkey = Pubkey::new_unique();
+            let mut intent = create_test_intent_bundle(0, &[pubkey], &[]).inner;
+            intent.intent_bundle.commit.as_mut().unwrap().get_committed_accounts_mut()[0]
+                .account
+                .data = vec![1; data_len];
+            let BaseActionTask::V1(action) = create_test_base_action_task(0) else {
+                panic!("expected v1 action");
+            };
+            intent.intent_bundle.standalone_actions.push(action.action);
+            let provider = Arc::new(MockInfoProvider {
+                base_accounts: HashMap::from([(pubkey, None)]),
+                ..Default::default()
+            });
+            let commits = TaskBuilder::commit_tasks(&provider, &intent).await.unwrap();
+            let follow_ups = TaskBuilder::follow_up_tasks(&provider, &intent).await.unwrap();
+            assert!(follow_ups.is_empty());
+            let plan =
+                TaskStrategist::build_plan(commits, follow_ups, &Pubkey::new_unique(), Some(1))
+                    .unwrap();
+            assert!(plan.follow_up.is_none());
+            let strategy = plan.current;
+            assert!(!strategy.uses_alts());
+            let Task::CommitFinalize(task) = &strategy.tasks[1] else {
+                panic!("format fallback must retain CommitFinalize");
+            };
+            assert_eq!(
+                matches!(task.delivery, CommitDelivery::StateInBuffer),
+                data_len > 4096
+            );
         }
     }
 
