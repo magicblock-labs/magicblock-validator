@@ -1,7 +1,7 @@
 //! Deterministic scheduling estimate. Base-chain state and account diffs are
 //! unavailable here, so large accounts use buffers and v0 assumes full ALT
 //! coverage. Passing this check does not guarantee successful settlement.
-use std::collections::BTreeSet;
+use std::{collections::BTreeSet, fmt};
 
 use delegation_program_api::{
     args::{CallHandlerArgs, CommitFinalizeArgs},
@@ -11,7 +11,7 @@ use solana_compute_budget::compute_budget_limits::ComputeBudgetLimits;
 use solana_compute_budget_interface::ComputeBudgetInstruction;
 use solana_hash::Hash;
 use solana_instruction::{AccountMeta, Instruction};
-use solana_message::{AddressLookupTableAccount, VersionedMessage, v0, v1};
+use solana_message::{AddressLookupTableAccount, CompileError, VersionedMessage, v0, v1};
 use solana_pubkey::Pubkey;
 use solana_signature::Signature;
 use solana_transaction::versioned::VersionedTransaction;
@@ -21,13 +21,115 @@ use super::{BaseAction, CommitType, MagicIntentBundle, UndelegateType, types::Co
 /// Above this size execution may use a diff; scheduling must assume a buffer.
 pub const COMMIT_STATE_SIZE_THRESHOLD: usize = 256;
 const TASK_CU: u32 = 120_000;
+const MAX_INTENT_COMPUTE_UNITS: u32 = 1_400_000;
+pub const MAX_BASE_LAYER_TX_ACCOUNT_LOCKS: usize = 64;
 type EstimatedTransaction = Vec<(Instruction, u32)>;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntentLimitStage {
+    Commit,
+    Finalize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatFitError {
+    AccountLockLimitExceeded { actual: usize, limit: usize },
+    InstructionDataLimitExceeded { actual: usize, limit: usize },
+    WireSizeExceeded { actual: usize, limit: usize },
+    MessageCannotBeCompiled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IntentLimitError {
+    ComputeBudgetExceeded {
+        stage: IntentLimitStage,
+        estimated: u32,
+        limit: u32,
+    },
+    NoSupportedFormatFits {
+        stage: IntentLimitStage,
+        v1: FormatFitError,
+        v0_with_alts: FormatFitError,
+    },
+    FitCheckFailed {
+        stage: IntentLimitStage,
+        reason: String,
+    },
+}
+
+impl IntentLimitError {
+    pub fn is_fit_limit(&self) -> bool {
+        !matches!(self, Self::FitCheckFailed { .. })
+    }
+}
+
+impl fmt::Display for IntentLimitStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Commit => f.write_str("commit"),
+            Self::Finalize => f.write_str("finalize"),
+        }
+    }
+}
+
+impl fmt::Display for FormatFitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AccountLockLimitExceeded { actual, limit } => {
+                write!(f, "account locks {actual} exceed limit {limit}")
+            }
+            Self::InstructionDataLimitExceeded { actual, limit } => {
+                write!(f, "instruction data {actual} bytes exceeds limit {limit}")
+            }
+            Self::WireSizeExceeded { actual, limit } => {
+                write!(f, "wire size {actual} bytes exceeds limit {limit}")
+            }
+            Self::MessageCannotBeCompiled => f.write_str("message cannot be compiled"),
+        }
+    }
+}
+
+impl fmt::Display for IntentLimitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ComputeBudgetExceeded { stage, estimated, limit } => write!(
+                f,
+                "{stage} stage compute estimate {estimated} CU exceeds limit {limit} CU"
+            ),
+            Self::NoSupportedFormatFits { stage, v1, v0_with_alts } => write!(
+                f,
+                "{stage} stage fits neither transaction format (v1: {v1}; v0+ALT: {v0_with_alts})"
+            ),
+            Self::FitCheckFailed { stage, reason } => {
+                write!(f, "{stage} stage fit check failed: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IntentLimitError {}
+
+/// Counts account keys represented by a compiled transaction, including
+/// read-only addresses loaded through v0 lookup tables.
+pub fn resolved_account_lock_count(message: &VersionedMessage) -> usize {
+    message.static_account_keys().len()
+        + message.address_table_lookups().map_or(0, |lookups| {
+            lookups
+                .iter()
+                .map(|lookup| lookup.writable_indexes.len() + lookup.readonly_indexes.len())
+                .sum()
+        })
+}
 
 /// Checks both settlement transactions without RPC, randomness, or signing.
 /// `authority` is the effective validator identity, also available during replay.
-pub fn is_intent_within_limits(intent: &MagicIntentBundle, authority: &Pubkey) -> bool {
+pub fn validate_intent_within_limits(
+    intent: &MagicIntentBundle,
+    authority: &Pubkey,
+) -> Result<(), IntentLimitError> {
     let (commits, follow_up) = estimate(intent, authority);
-    fits(commits, authority) && fits(follow_up, authority)
+    fits(commits, authority, IntentLimitStage::Commit)?;
+    fits(follow_up, authority, IntentLimitStage::Finalize)
 }
 
 fn estimate(
@@ -165,10 +267,18 @@ fn action(action: &BaseAction, authority: &Pubkey) -> (Instruction, u32) {
     (ix, action.compute_units)
 }
 
-fn fits(tasks: EstimatedTransaction, authority: &Pubkey) -> bool {
+fn fits(
+    tasks: EstimatedTransaction,
+    authority: &Pubkey,
+    stage: IntentLimitStage,
+) -> Result<(), IntentLimitError> {
     let compute_units = tasks.iter().fold(1_000u32, |total, (_, cu)| total.saturating_add(*cu));
-    if compute_units > 1_400_000 {
-        return false;
+    if compute_units > MAX_INTENT_COMPUTE_UNITS {
+        return Err(IntentLimitError::ComputeBudgetExceeded {
+            stage,
+            estimated: compute_units,
+            limit: MAX_INTENT_COMPUTE_UNITS,
+        });
     }
     let mut instructions: Vec<_> = tasks.into_iter().map(|(ix, _)| ix).collect();
     instructions.push(Instruction {
@@ -176,8 +286,40 @@ fn fits(tasks: EstimatedTransaction, authority: &Pubkey) -> bool {
         accounts: vec![],
         data: 0u64.to_le_bytes().to_vec(),
     });
-    if instructions.iter().any(|ix| ix.data.len() > u16::MAX as usize) {
-        return false;
+
+    let v1_failure = match fits_v1(&instructions, authority, compute_units) {
+        Ok(()) => return Ok(()),
+        Err(CandidateFitError::DoesNotFit(error)) => error,
+        Err(CandidateFitError::Internal(reason)) => {
+            return Err(IntentLimitError::FitCheckFailed { stage, reason });
+        }
+    };
+    let v0_with_alts_failure = match fits_v0_with_alts(&instructions, authority, compute_units) {
+        Ok(()) => return Ok(()),
+        Err(CandidateFitError::DoesNotFit(error)) => error,
+        Err(CandidateFitError::Internal(reason)) => {
+            return Err(IntentLimitError::FitCheckFailed { stage, reason });
+        }
+    };
+
+    Err(IntentLimitError::NoSupportedFormatFits {
+        stage,
+        v1: v1_failure,
+        v0_with_alts: v0_with_alts_failure,
+    })
+}
+
+fn fits_v1(
+    instructions: &[Instruction],
+    authority: &Pubkey,
+    compute_units: u32,
+) -> Result<(), CandidateFitError> {
+    if let Some(actual) = instructions.iter().map(|ix| ix.data.len()).max()
+        && actual > u16::MAX as usize
+    {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::InstructionDataLimitExceeded { actual, limit: u16::MAX as usize },
+        ));
     }
     let config = v1::TransactionConfig::empty()
         .with_priority_fee(0)
@@ -185,13 +327,41 @@ fn fits(tasks: EstimatedTransaction, authority: &Pubkey) -> bool {
         .with_loaded_accounts_data_size_limit(
             ComputeBudgetLimits::default().loaded_accounts_bytes.get(),
         );
-    if let Ok(message) =
-        v1::Message::try_compile_with_config(authority, &instructions, Hash::default(), config)
-        && message.validate().is_ok()
-        && wire_size(VersionedMessage::V1(message)) <= v1::MAX_TRANSACTION_SIZE
-    {
-        return true;
+    let message =
+        v1::Message::try_compile_with_config(authority, instructions, Hash::default(), config)
+            .map_err(candidate_compile_error)?;
+    let lock_count = message.account_keys.len();
+    if lock_count > MAX_BASE_LAYER_TX_ACCOUNT_LOCKS {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::AccountLockLimitExceeded {
+                actual: lock_count,
+                limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+            },
+        ));
     }
+
+    message.validate().map_err(|error| {
+        CandidateFitError::Internal(format!("v1 message validation failed: {error:?}"))
+    })?;
+    let actual_size = wire_size(VersionedMessage::V1(message));
+    if actual_size > v1::MAX_TRANSACTION_SIZE {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::WireSizeExceeded {
+                actual: actual_size,
+                limit: v1::MAX_TRANSACTION_SIZE,
+            },
+        ));
+    }
+
+    Ok(())
+}
+
+fn fits_v0_with_alts(
+    instructions: &[Instruction],
+    authority: &Pubkey,
+    compute_units: u32,
+) -> Result<(), CandidateFitError> {
+    let mut instructions = instructions.to_vec();
     instructions.splice(
         0..0,
         [
@@ -199,6 +369,15 @@ fn fits(tasks: EstimatedTransaction, authority: &Pubkey) -> bool {
             ComputeBudgetInstruction::set_compute_unit_price(0),
         ],
     );
+
+    if let Some(actual) = instructions.iter().map(|ix| ix.data.len()).max()
+        && actual > u16::MAX as usize
+    {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::InstructionDataLimitExceeded { actual, limit: u16::MAX as usize },
+        ));
+    }
+
     let keys: BTreeSet<_> = instructions
         .iter()
         .flat_map(|ix| ix.accounts.iter().map(|a| a.pubkey))
@@ -216,9 +395,45 @@ fn fits(tasks: EstimatedTransaction, authority: &Pubkey) -> bool {
             }
         })
         .collect();
-    v0::Message::try_compile(authority, &instructions, &tables, Hash::default()).is_ok_and(
-        |message| wire_size(VersionedMessage::V0(message)) <= solana_packet::PACKET_DATA_SIZE,
-    )
+    let message = v0::Message::try_compile(authority, &instructions, &tables, Hash::default())
+        .map_err(candidate_compile_error)?;
+    let message = VersionedMessage::V0(message);
+    let lock_count = resolved_account_lock_count(&message);
+    if lock_count > MAX_BASE_LAYER_TX_ACCOUNT_LOCKS {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::AccountLockLimitExceeded {
+                actual: lock_count,
+                limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+            },
+        ));
+    }
+
+    let actual_size = wire_size(message);
+    if actual_size > solana_packet::PACKET_DATA_SIZE {
+        return Err(CandidateFitError::DoesNotFit(
+            FormatFitError::WireSizeExceeded {
+                actual: actual_size,
+                limit: solana_packet::PACKET_DATA_SIZE,
+            },
+        ));
+    }
+    Ok(())
+}
+
+fn candidate_compile_error(error: CompileError) -> CandidateFitError {
+    match error {
+        CompileError::AccountIndexOverflow | CompileError::AddressTableLookupIndexOverflow => {
+            CandidateFitError::DoesNotFit(FormatFitError::MessageCannotBeCompiled)
+        }
+        CompileError::UnknownInstructionKey(key) => {
+            CandidateFitError::Internal(format!("unknown instruction key {key}"))
+        }
+    }
+}
+
+enum CandidateFitError {
+    DoesNotFit(FormatFitError),
+    Internal(String),
 }
 
 fn wire_size(message: VersionedMessage) -> usize {
@@ -287,7 +502,7 @@ mod tests {
                 assert_eq!(commits.len(), 1 + usize::from(combined));
                 assert_eq!(follow_up.len(), 1 + usize::from(!combined));
                 assert_eq!((commits, follow_up), estimate(&intent, &authority));
-                assert!(is_intent_within_limits(&intent, &authority));
+                assert!(validate_intent_within_limits(&intent, &authority).is_ok());
             }
         }
         for (data_len, cu, expected) in
@@ -299,7 +514,10 @@ mod tests {
                 standalone_actions: vec![action],
                 ..Default::default()
             };
-            assert_eq!(is_intent_within_limits(&intent, &authority), expected);
+            assert_eq!(
+                validate_intent_within_limits(&intent, &authority).is_ok(),
+                expected
+            );
         }
     }
 
@@ -330,12 +548,69 @@ mod tests {
         // Find the accepted payload boundary without hard-coding DLP wire sizes.
         let boundary = (0..=v1::MAX_TRANSACTION_SIZE)
             .rev()
-            .find(|size| is_intent_within_limits(&make_intent(*size), &authority))
+            .find(|size| validate_intent_within_limits(&make_intent(*size), &authority).is_ok())
             .unwrap();
-        assert!(!is_intent_within_limits(
-            &make_intent(boundary + 1),
-            &authority
+        assert!(validate_intent_within_limits(&make_intent(boundary + 1), &authority).is_err());
+        assert!(validate_intent_within_limits(&make_intent(boundary), &authority).is_ok());
+    }
+
+    #[test]
+    fn resolved_account_lock_count_includes_readonly_alt_loaded_keys() {
+        let lookup = v0::MessageAddressTableLookup {
+            account_key: Pubkey::new_unique(),
+            writable_indexes: (0..32).collect(),
+            readonly_indexes: (32..63).collect(),
+        };
+        let message = VersionedMessage::V0(v0::Message {
+            account_keys: vec![Pubkey::new_unique()],
+            address_table_lookups: vec![lookup.clone()],
+            ..Default::default()
+        });
+        assert_eq!(
+            resolved_account_lock_count(&message),
+            MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
+        );
+
+        let over_limit = VersionedMessage::V0(v0::Message {
+            account_keys: vec![Pubkey::new_unique()],
+            address_table_lookups: vec![v0::MessageAddressTableLookup {
+                readonly_indexes: (32..64).collect(),
+                ..lookup
+            }],
+            ..Default::default()
+        });
+        assert_eq!(
+            resolved_account_lock_count(&over_limit),
+            MAX_BASE_LAYER_TX_ACCOUNT_LOCKS + 1
+        );
+    }
+
+    #[test]
+    fn oversized_finalize_reports_account_lock_count_for_both_formats() {
+        let intent = MagicIntentBundle {
+            commit_finalize_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(
+                    (0..10).map(|_| make_committed_account(10)).collect(),
+                ),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            ..Default::default()
+        };
+
+        let error = validate_intent_within_limits(&intent, &Pubkey::new_unique()).unwrap_err();
+        assert!(matches!(
+            error,
+            IntentLimitError::NoSupportedFormatFits {
+                stage: IntentLimitStage::Finalize,
+                v1: FormatFitError::AccountLockLimitExceeded {
+                    limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+                    ..
+                },
+                v0_with_alts: FormatFitError::AccountLockLimitExceeded {
+                    limit: MAX_BASE_LAYER_TX_ACCOUNT_LOCKS,
+                    ..
+                },
+            }
         ));
-        assert!(is_intent_within_limits(&make_intent(boundary), &authority));
     }
 }

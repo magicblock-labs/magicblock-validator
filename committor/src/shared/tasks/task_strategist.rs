@@ -1,6 +1,9 @@
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet};
 
-use mbv_core::intent::BaseActionCallback;
+use mbv_core::intent::{
+    BaseActionCallback,
+    limits::{MAX_BASE_LAYER_TX_ACCOUNT_LOCKS, resolved_account_lock_count},
+};
 use solana_keypair::Keypair;
 use solana_message::CompileError;
 use solana_pubkey::Pubkey;
@@ -191,8 +194,11 @@ impl TaskStrategist {
         uniqueness_nonce: Option<u64>,
     ) -> TaskStrategistResult<TransactionStrategy> {
         let mut optimized_tasks = tasks.clone();
-        if Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?
-            <= MAX_TRANSACTION_V1_WIRE_SIZE
+        let optimized_tx_size =
+            Self::try_optimize_tx_size_if_needed(&mut optimized_tasks, uniqueness_nonce)?;
+        if optimized_tx_size <= MAX_TRANSACTION_V1_WIRE_SIZE
+            && Self::v1_account_lock_count(&optimized_tasks, validator, uniqueness_nonce)
+                <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
         {
             return Ok(TransactionStrategy {
                 tasks: optimized_tasks,
@@ -234,7 +240,10 @@ impl TaskStrategist {
             &dummy_lookup_tables,
             uniqueness_nonce,
         ) {
-            Ok(tx) => serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE,
+            Ok(tx) => {
+                resolved_account_lock_count(&tx.message) <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
+                    && serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
+            }
             // Transaction doesn't fit, see CompileError
             Err(_) => false,
         }
@@ -254,6 +263,24 @@ impl TaskStrategist {
         }
 
         TransactionUtils::unique_involved_pubkeys(tasks, authority, &service_instructions)
+    }
+
+    fn v1_account_lock_count(
+        tasks: &[Task],
+        authority: &Pubkey,
+        uniqueness_nonce: Option<u64>,
+    ) -> usize {
+        let mut instructions = TransactionUtils::tasks_instructions(authority, tasks);
+        if let Some(nonce) = uniqueness_nonce {
+            instructions.push(TransactionUtils::uniqueness_noop_instruction(nonce));
+        }
+
+        let mut keys = HashSet::from([*authority]);
+        for instruction in instructions {
+            keys.insert(instruction.program_id);
+            keys.extend(instruction.accounts.into_iter().map(|meta| meta.pubkey));
+        }
+        keys.len()
     }
 
     /// Optimizes tasks to fit the v1 wire limit.
@@ -648,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_tries_v0_alts_before_buffering_v1_key_overflow() {
+    fn test_build_strategy_rejects_v0_alts_over_account_lock_limit() {
         let validator = Pubkey::new_unique();
         let action: BaseActionTask = BaseActionTaskV1 {
             action: BaseAction {
@@ -669,11 +696,8 @@ mod tests {
         }
         .into();
 
-        let strategy = TaskStrategist::build_strategy(vec![action.into()], &validator, None)
-            .expect("should fall back to v0 + ALTs");
-
-        assert!(!strategy.lookup_tables_keys.is_empty());
-        assert!(matches!(strategy.tasks.as_slice(), [Task::BaseAction(_)]));
+        let result = TaskStrategist::build_strategy(vec![action.into()], &validator, None);
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFit)));
     }
 
     #[test]

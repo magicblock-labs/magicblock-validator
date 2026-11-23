@@ -253,12 +253,7 @@ impl TryFromArgs<MagicIntentBundleArgs> for MagicIntentBundle {
             standalone_actions: actions,
         };
         post_validate_magic_intent_bundle(&this, context)?;
-        validate_intent_size(&this).inspect_err(|_| {
-            ic_msg!(
-                context.invoke_context,
-                "ScheduleCommit ERR: intent is too large to ever fit into transaction",
-            );
-        })?;
+        validate_intent_size(&this, context.invoke_context)?;
 
         Ok(this)
     }
