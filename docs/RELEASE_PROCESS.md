@@ -23,13 +23,16 @@ npm dependencies.
 
 ## Validate and publish
 
-1. Run the [package publishing workflow](../.github/workflows/publish-packages.yml)
-   manually against `release/v<version>`, with `release_version` set to
-   `v<version>`. For stable versions this builds and dry-runs publication;
-   RCs skip artifact/package publication jobs. Wait for applicable checks to pass.
-2. Merge the release PR into its release line. The [tag workflow](../.github/workflows/release-tag.yml)
+1. Wait for the PR checks, then merge the release PR into its release line.
+   The [tag workflow](../.github/workflows/release-tag.yml)
    creates an annotated tag at the commit that introduced the version and opens
    a draft GitHub Release. Do not create validator `v*` release tags manually.
+2. For a stable v2 release, run the
+   [package publishing workflow](../.github/workflows/publish-packages.yml)
+   from `master` with `release_version` set to the draft's tag,
+   `v<version>`. It builds and dry-runs publication from the tagged commit,
+   not from the tip of `master`. Wait for the dry run to pass. For V1,
+   continue to run the package dry run on `release/v<version>` before merging.
 3. Review the draft's tag target and release notes. Publish the stable release
    to trigger actual distribution. Keep testing-only RCs as draft prereleases;
    RC/prerelease builds do not publish binaries or npm packages.
@@ -38,9 +41,13 @@ npm dependencies.
    platform-independent `v42_calculator_program.so`; platform and wrapper npm
    packages. A GitHub Release alone does not prove that every output published.
 
-The publishing workflow builds v42 once from the Engine revision in the validator's
-`Cargo.lock`. Deployment hosts download the ELF from the same release as the native
-binaries; they do not need an SBF toolchain.
+For v2, publication reuses the dry run's binaries for that exact tag commit
+and builds from the tag if the cache misses. The dry run also warms the Cargo
+cache on `master` so later releases can reuse unchanged dependencies.
+
+The publishing workflow reuses or builds v42 from the Engine revision in the
+validator's `Cargo.lock`. Deployment hosts download the ELF from the same release
+as the native binaries; they do not need an SBF toolchain.
 
 Stable releases on the current line use the npm `latest` channel and the latest
 GitHub Release designation. Legacy releases use the npm `legacy` channel and do
