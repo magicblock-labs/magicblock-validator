@@ -1,0 +1,129 @@
+name: Build release binaries
+description: Restore exact release executables or build them from a rolling Cargo snapshot
+
+inputs:
+  target:
+    description: Rust target triple
+    required: true
+  runner-label:
+    description: Matrix runner label used to select native dependencies
+    required: true
+  save-cache:
+    description: Save the rolling Cargo snapshot from a master dry run
+    required: true
+
+outputs:
+  restored:
+    description: Whether all release binaries were restored
+    value: ${{ steps.bundle.outputs.restored }}
+  key:
+    description: Exact key for the validated binaries
+    value: ${{ steps.key.outputs.key }}
+
+runs:
+  using: composite
+  steps:
+    - name: Identify release binary bundle
+      id: key
+      working-directory: magicblock-validator
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        commit=$(git rev-parse HEAD)
+        echo "key=release-native-v1-$TARGET-$commit" >> "$GITHUB_OUTPUT"
+
+    - name: Restore release binaries
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: magicblock-validator/release-dist
+        key: ${{ steps.key.outputs.key }}
+
+    - name: Check release binaries
+      if: steps.cache.outputs.cache-hit == 'true'
+      id: bundle
+      working-directory: magicblock-validator
+      shell: bash
+      run: |
+        for binary in $RELEASE_BINARIES; do
+          if [[ ! -s "release-dist/$binary" || ! -x "release-dist/$binary" ]]; then
+            exit 0
+          fi
+        done
+        echo 'restored=true' >> "$GITHUB_OUTPUT"
+
+    - name: Set up GCC
+      if: steps.bundle.outputs.restored != 'true' && inputs.runner-label == 'ubuntu-latest'
+      uses: egor-tensin/setup-gcc@v1.3
+      with:
+        version: latest
+
+    - name: Install additional build dependencies
+      if: steps.bundle.outputs.restored != 'true' && startsWith(inputs.runner-label, 'ubuntu')
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake pkg-config libssl-dev
+
+    - name: Set up macOS build environment
+      if: steps.bundle.outputs.restored != 'true' && startsWith(inputs.runner-label, 'macos')
+      shell: bash
+      run: |
+        brew install llvm
+        llvm=$(brew --prefix llvm)
+        echo "$llvm/bin" >> "$GITHUB_PATH"
+        {
+          echo "LIBCLANG_PATH=$llvm/lib"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0"
+          echo "CFLAGS=-mmacosx-version-min=11.0"
+          echo "CXXFLAGS=-mmacosx-version-min=11.0"
+          echo "LDFLAGS=-mmacosx-version-min=11.0"
+          echo "OPENSSL_STATIC=1"
+          echo "OPENSSL_VENDORED=1"
+        } >> "$GITHUB_ENV"
+
+    - uses: ./magicblock-validator/.github/actions/setup-build-env
+      if: steps.bundle.outputs.restored != 'true'
+      id: build-env
+      with:
+        cache-key: publish-${{ inputs.target }}-release
+
+    - name: Install target
+      if: steps.bundle.outputs.restored != 'true'
+      working-directory: magicblock-validator
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: rustup target add "$TARGET"
+
+    - name: Build and stage release binaries
+      if: steps.bundle.outputs.restored != 'true'
+      working-directory: magicblock-validator
+      shell: bash
+      env:
+        TARGET: ${{ inputs.target }}
+      run: |
+        set -euo pipefail
+        packages=()
+        for package in $RELEASE_BINARIES; do
+          packages+=(-p "$package")
+        done
+        cargo build --release --locked --target "$TARGET" "${packages[@]}"
+        rm -rf release-dist
+        mkdir -p release-dist
+        for package in $RELEASE_BINARIES; do
+          cp "target/$TARGET/release/$package" "release-dist/$package"
+        done
+
+    - uses: ./magicblock-validator/.github/actions/save-build-cache
+      if: inputs.save-cache == 'true' && steps.build-env.outputs.save-key != ''
+      with:
+        key: ${{ steps.build-env.outputs.save-key }}
+        path: ${{ steps.build-env.outputs.cache-paths }}
+
+    - name: Record release binary checksums
+      working-directory: magicblock-validator/release-dist
+      shell: bash
+      run: shasum -a 256 $RELEASE_BINARIES

@@ -1,7 +1,7 @@
 name: Publish ephemeral validator packages and crates
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ inputs.release_version }}
   cancel-in-progress: true
 
 on:
@@ -13,9 +13,9 @@ on:
   workflow_dispatch:
     inputs:
       release_version:
-        description: 'The release version'
+        description: 'Stable v2 tag to dry-run from master (for example v2.0.4)'
         required: true
-        default: 'v2.0.0'
+        type: string
 
 permissions:
   contents: read
@@ -41,6 +41,49 @@ jobs:
         shell: bash
         run: |
           cd magicblock-validator/.github && ./version-align.sh --check
+
+  resolve-dry-run:
+    name: Resolve tagged source for dry run
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      commit: ${{ steps.source.outputs.commit }}
+    steps:
+      - name: Require master dispatch
+        if: github.ref != 'refs/heads/master'
+        shell: bash
+        run: |
+          echo "::error::Run the v2 package dry run from master after the release is tagged."
+          exit 1
+
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify and pin release tag
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_VERSION" =~ ^v2\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::The package dry run requires a stable v2 tag."
+            exit 1
+          fi
+          if ! commit=$(git rev-parse --verify "refs/tags/${RELEASE_VERSION}^{commit}"); then
+            echo "::error::Tag ${RELEASE_VERSION} has not been created."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$commit" HEAD ||
+             [[ "v$(.github/scripts/workspace-version.sh "$commit")" != "$RELEASE_VERSION" ]]; then
+            echo "::error::Tag ${RELEASE_VERSION} must point to a master commit carrying that version."
+            exit 1
+          fi
+          if ! git cat-file -e "$commit:.github/actions/build-release-binaries/action.yml"; then
+            echo "::error::Tag ${RELEASE_VERSION} predates the master-based package dry run."
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
 
   # A release event runs this workflow from the tagged commit, so this guard must
   # exist on every branch a tag could point at.
@@ -106,12 +149,13 @@ jobs:
     name: Publish Binaries
     permissions:
       contents: write
-    needs: verify-release
+    needs: [verify-release, resolve-dry-run]
     if: >-
-      ${{ !cancelled() && github.event_name != 'push' &&
-          needs.verify-release.result != 'failure' &&
-          !github.event.release.prerelease &&
-          !contains(github.event.release.tag_name || inputs.release_version, '-rc.') }}
+      ${{ !cancelled() &&
+          (needs.resolve-dry-run.result == 'success' ||
+            (needs.verify-release.result == 'success' &&
+             !github.event.release.prerelease &&
+             !contains(github.event.release.tag_name, '-rc.'))) }}
     runs-on: ${{ matrix.build.OS }}
     strategy:
       fail-fast: false
@@ -142,90 +186,41 @@ jobs:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v5
         with:
+          ref: ${{ needs.resolve-dry-run.outputs.commit || github.sha }}
           path: magicblock-validator
           persist-credentials: false
 
-      - name: Set up GCC
-        if: matrix.build.OS == 'ubuntu-latest'
-        uses: egor-tensin/setup-gcc@v1.3
+      - uses: ./magicblock-validator/.github/actions/build-release-binaries
+        id: binaries
         with:
-          version: latest
-
-      - name: Install additional build dependencies
-        if: startsWith(matrix.build.OS, 'ubuntu')
-        shell: bash
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake pkg-config libssl-dev
-
-      - name: Set up macOS build environment
-        if: startsWith(matrix.build.OS, 'macos')
-        shell: bash
-        run: |
-          brew install llvm
-          llvm=$(brew --prefix llvm)
-          echo "$llvm/bin" >> "$GITHUB_PATH"
-          {
-            echo "LIBCLANG_PATH=$llvm/lib"
-            echo "MACOSX_DEPLOYMENT_TARGET=11.0"
-            echo "CFLAGS=-mmacosx-version-min=11.0"
-            echo "CXXFLAGS=-mmacosx-version-min=11.0"
-            echo "LDFLAGS=-mmacosx-version-min=11.0"
-            echo "OPENSSL_STATIC=1"
-            echo "OPENSSL_VENDORED=1"
-          } >> "$GITHUB_ENV"
-
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        id: build-env
-        with:
-          cache-key: publish-${{ matrix.build.TARGET }}-release
-
-      - name: Install target
-        working-directory: magicblock-validator
-        shell: bash
-        run: rustup target add ${{ matrix.build.TARGET }}
-
-      - name: Build (linux/macos)
-        working-directory: magicblock-validator
-        shell: bash
-        env:
-          TARGET: ${{ matrix.build.TARGET }}
-        run: |
-          packages=()
-          for package in $RELEASE_BINARIES; do
-            packages+=(-p "$package")
-          done
-          cargo build --release --locked --target "$TARGET" "${packages[@]}"
+          target: ${{ matrix.build.TARGET }}
+          runner-label: ${{ matrix.build.OS }}
+          save-cache: ${{ env.DRY_RUN }}
 
       - name: Check versions are aligned
         shell: bash
-        run: |
-          cd magicblock-validator/.github && ./version-align.sh --check
-
-      - uses: ./magicblock-validator/.github/actions/save-build-cache
-        with:
-          key: ${{ steps.build-env.outputs.save-key }}
-          path: ${{ steps.build-env.outputs.cache-paths }}
+        working-directory: magicblock-validator/.github
+        run: ./version-align.sh --check
 
       - name: Build the NPM package
         working-directory: magicblock-validator
         shell: bash
         env:
           ASSET_SUFFIX: ${{ matrix.build.NAME }}
-          TARGET: ${{ matrix.build.TARGET }}
         run: |
+          set -euo pipefail
           bin="ephemeral-validator"
           export node_os="${ASSET_SUFFIX%%-*}"
           arch="${ASSET_SUFFIX#*-}"
           export node_arch="${arch%%-*}"
           export node_pkg="${bin}-${node_os}-${node_arch}"
-          echo "node_pkg=${node_pkg}" >> $GITHUB_ENV
+          echo "node_pkg=${node_pkg}" >> "$GITHUB_ENV"
           mkdir -p "${node_pkg}/bin"
           envsubst < .github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
-          cp "target/$TARGET/release/magicblock-validator" "${node_pkg}/bin/${bin}"
+          cp "release-dist/magicblock-validator" "${node_pkg}/bin/${bin}"
           for artifact in $RELEASE_BINARIES; do
-            cp "target/$TARGET/release/$artifact" "target/$TARGET/release/$artifact-$ASSET_SUFFIX"
+            cp "release-dist/$artifact" "$artifact-$ASSET_SUFFIX"
           done
 
       - name: Publish binaries to GitHub release
@@ -234,32 +229,39 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           ASSET_SUFFIX: ${{ matrix.build.NAME }}
-          TARGET: ${{ matrix.build.TARGET }}
         working-directory: magicblock-validator
         run: |
+          set -euo pipefail
           for artifact in $RELEASE_BINARIES; do
-            gh release upload "$RELEASE_VERSION" "target/$TARGET/release/$artifact-$ASSET_SUFFIX" --clobber
+            gh release upload "$RELEASE_VERSION" "$artifact-$ASSET_SUFFIX" --clobber
           done
 
       - name: Publish the NPM package
+        working-directory: magicblock-validator
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          cd magicblock-validator
-          echo "DRY_RUN=${{ env.DRY_RUN }}"
-          cd ${{ env.node_pkg }}
+          set -euo pipefail
+          cd "$node_pkg"
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
-          if [ "${{ env.DRY_RUN }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             echo "Running npm publish in dry-run mode"
             npm publish --access public --tag "$NPM_CHANNEL" --dry-run
           else
             npm publish --access public --tag "$NPM_CHANNEL"
           fi
 
+      - name: Save validated release binaries
+        if: env.DRY_RUN == 'true' && steps.binaries.outputs.restored != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: magicblock-validator/release-dist
+          key: ${{ steps.binaries.outputs.key }}
+
   publish-v42:
     name: Publish v42 calculator
-    needs: publish-binaries
+    needs: [publish-binaries, resolve-dry-run]
     if: ${{ !cancelled() && needs.publish-binaries.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
@@ -268,6 +270,7 @@ jobs:
       - name: Checkout validator release
         uses: actions/checkout@v5
         with:
+          ref: ${{ needs.resolve-dry-run.outputs.commit || github.sha }}
           path: magicblock-validator
           persist-credentials: false
 
@@ -276,6 +279,7 @@ jobs:
         working-directory: magicblock-validator
         shell: bash
         run: |
+          set -euo pipefail
           revision=$(python3 - <<'PY'
           import tomllib
 
@@ -287,7 +291,28 @@ jobs:
           )
           echo "revision=$revision" >> "$GITHUB_OUTPUT"
 
+      # Bump the format when the SBF build recipe changes.
+      - name: Restore release calculator
+        id: calculator
+        uses: actions/cache/restore@v6
+        with:
+          path: release-sbf/v42_calculator_program.so
+          key: >-
+            release-v42-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.engine.outputs.revision }}-${{
+              hashFiles('magicblock-validator/.github/actions/setup-solana/agave-version')
+            }}
+
+      - name: Check calculator
+        if: steps.calculator.outputs.cache-hit == 'true'
+        id: sbf
+        shell: bash
+        run: |
+          if [[ -s release-sbf/v42_calculator_program.so ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout Engine
+        if: steps.sbf.outputs.ready != 'true'
         uses: actions/checkout@v5
         with:
           repository: magicblock-labs/magicblock-engine
@@ -296,38 +321,54 @@ jobs:
           persist-credentials: false
 
       - name: Install Rust toolchain
+        if: steps.sbf.outputs.ready != 'true'
         working-directory: magicblock-engine
         shell: bash
         run: rustup toolchain install
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
+        if: steps.sbf.outputs.ready != 'true'
 
       - name: Build v42 calculator
+        if: steps.sbf.outputs.ready != 'true'
         working-directory: magicblock-engine
         shell: bash
         run: |
+          set -euo pipefail
+          output="$GITHUB_WORKSPACE/release-sbf"
+          mkdir -p "$output"
           env -u RUSTC_WRAPPER -u RUSTC_WORKSPACE_WRAPPER cargo build-sbf \
             --manifest-path programs/v42-calculator-program/Cargo.toml \
-            --arch v3 --sbf-out-dir target/deploy -- --locked
+            --arch v3 --sbf-out-dir "$output" -- --locked
+          test -s "$output/v42_calculator_program.so"
+
+      - name: Save release calculator
+        if: env.DRY_RUN == 'true' && steps.sbf.outputs.ready != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: release-sbf/v42_calculator_program.so
+          key: ${{ steps.calculator.outputs.cache-primary-key }}
 
       - name: Publish v42 calculator to GitHub release
         if: env.DRY_RUN == 'false'
-        working-directory: magicblock-engine
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
-          gh release upload "$RELEASE_VERSION" target/deploy/v42_calculator_program.so --clobber
+          gh release upload "$RELEASE_VERSION" release-sbf/v42_calculator_program.so --clobber
 
   publish-wrapper-npm-package:
     name: Publish wrapper NPM packages
-    if: ${{ !cancelled() && github.event_name != 'push' && needs.publish-binaries.result == 'success' }}
+    if: ${{ !cancelled() && needs.publish-binaries.result == 'success' }}
     runs-on: ubuntu-latest
-    needs: publish-binaries
+    needs: [publish-binaries, resolve-dry-run]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.resolve-dry-run.outputs.commit || github.sha }}
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-solana
         with:
@@ -338,12 +379,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          set -euo pipefail
           cd .github/packages/npm-package
           npm install
           npm run build
           cd lib
           printf '//registry.npmjs.org/:_authToken=%s\n' "$NODE_AUTH_TOKEN" > ~/.npmrc
-          if [ "${{ env.DRY_RUN }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             echo "Running npm publish in dry-run mode"
             npm publish --access public --tag "$NPM_CHANNEL" --dry-run
           else
