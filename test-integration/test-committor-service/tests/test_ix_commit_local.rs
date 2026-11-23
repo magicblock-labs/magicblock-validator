@@ -589,9 +589,9 @@ async fn test_commit_20_accounts_1kb_bundle_size_8() {
 }
 
 #[tokio::test]
-async fn test_commitfinalize_and_undelefate_20_accounts_1kb_bundle_size_9() {
+async fn test_commitfinalize_and_undelefate_20_accounts_1kb_bundle_size_8() {
     commit_20_accounts_1kb(
-        9,
+        8,
         expect_strategies(&[(CommitStrategy::DiffArgs, 20)]),
         CommitIntentKind::CommitFinalizeAndUndelegate,
     )
