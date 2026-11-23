@@ -1336,12 +1336,19 @@ mod tests {
                     &Pubkey::new_unique(),
                     &None::<IntentPersisterImpl>,
                     Some(1),
-                )
-                .unwrap();
+                );
+                if use_alts {
+                    assert!(matches!(
+                        mode,
+                        Err(TaskStrategistError::FailedToFitError)
+                    ));
+                    continue;
+                }
+                let mode = mode.unwrap();
                 let StrategyExecutionMode::SingleStage(strategy) = mode else {
                     panic!("no separate finalization transaction is needed");
                 };
-                assert_eq!(strategy.uses_alts(), use_alts);
+                assert!(!strategy.uses_alts());
                 let BaseTaskImpl::CommitFinalize(task) =
                     &strategy.optimized_tasks[1]
                 else {

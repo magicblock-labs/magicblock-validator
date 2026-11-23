@@ -1,10 +1,10 @@
 use std::collections::HashSet;
 
-use magicblock_core::intent::{
-    types::CommittedAccount, CommitType, MagicIntentBundle, UndelegateType,
-};
-use magicblock_core::traits::{
-    FormatFitError, IntentSizeError, IntentSizeStage,
+use magicblock_core::{
+    intent::{
+        types::CommittedAccount, CommitType, MagicIntentBundle, UndelegateType,
+    },
+    traits::{FormatFitError, IntentSizeError, IntentSizeStage},
 };
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
