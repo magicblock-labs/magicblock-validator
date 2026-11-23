@@ -14,6 +14,104 @@ use crate::{
     Slot,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IntentSizeStage {
+    Commit,
+    Finalize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormatFitError {
+    AccountKeyLimitExceeded { actual: usize, limit: usize },
+    InstructionCountLimitExceeded { actual: usize, limit: usize },
+    AccountLockLimitExceeded { actual: usize, limit: usize },
+    WireSizeExceeded { actual: usize, limit: usize },
+    MessageCannotBeCompiled,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IntentSizeError {
+    ComputeBudgetExceeded {
+        stage: IntentSizeStage,
+        estimated: u32,
+        limit: u32,
+    },
+    NoSupportedFormatFits {
+        stage: IntentSizeStage,
+        v1: FormatFitError,
+        v0_with_alts: FormatFitError,
+    },
+    FitCheckFailed {
+        stage: IntentSizeStage,
+        reason: String,
+    },
+}
+
+impl IntentSizeError {
+    pub fn is_fit_limit(&self) -> bool {
+        !matches!(self, Self::FitCheckFailed { .. })
+    }
+}
+
+impl fmt::Display for IntentSizeStage {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Commit => f.write_str("commit"),
+            Self::Finalize => f.write_str("finalize"),
+        }
+    }
+}
+
+impl fmt::Display for FormatFitError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::AccountKeyLimitExceeded { actual, limit } => {
+                write!(f, "account keys {actual} exceed limit {limit}")
+            }
+            Self::InstructionCountLimitExceeded { actual, limit } => {
+                write!(f, "instruction count {actual} exceeds limit {limit}")
+            }
+            Self::AccountLockLimitExceeded { actual, limit } => {
+                write!(f, "account locks {actual} exceed limit {limit}")
+            }
+            Self::WireSizeExceeded { actual, limit } => {
+                write!(f, "wire size {actual} bytes exceeds limit {limit}")
+            }
+            Self::MessageCannotBeCompiled => {
+                f.write_str("message cannot be compiled or validated")
+            }
+        }
+    }
+}
+
+impl fmt::Display for IntentSizeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ComputeBudgetExceeded {
+                stage,
+                estimated,
+                limit,
+            } => write!(
+                f,
+                "{stage} stage compute estimate {estimated} CU exceeds limit {limit} CU"
+            ),
+            Self::NoSupportedFormatFits {
+                stage,
+                v1,
+                v0_with_alts,
+            } => write!(
+                f,
+                "{stage} stage fits neither transaction format (v1: {v1}; v0+ALT: {v0_with_alts})"
+            ),
+            Self::FitCheckFailed { stage, reason } => {
+                write!(f, "{stage} stage fit check failed: {reason}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for IntentSizeError {}
+
 /// Trait that provides access to system calls implemented outside of SVM,
 /// accessible in magic-program.
 pub trait MagicSys: Sync + Send + 'static {
@@ -25,13 +123,13 @@ pub trait MagicSys: Sync + Send + 'static {
     /// Returns `Ok(())` if `intent` could ever fit on the base layer, even
     /// under the smallest possible task representation (buffer-mode commits,
     /// address lookup tables, 2-stage execution). If it can never fit no
-    /// matter how it gets optimized at execution time, returns `Err` so the
-    /// intent can be refused up front instead of failing later during
-    /// commit/finalize.
+    /// matter how it gets optimized at execution time, returns the failed
+    /// stage and format checks so the intent can be refused up front instead
+    /// of failing later during commit/finalize.
     fn validate_intent_size(
         &self,
         intent: &MagicIntentBundle,
-    ) -> Result<(), InstructionError>;
+    ) -> Result<(), IntentSizeError>;
 }
 
 /// Provides read access to the latest confirmed block's metadata.

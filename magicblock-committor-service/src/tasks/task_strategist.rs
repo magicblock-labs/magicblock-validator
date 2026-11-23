@@ -13,7 +13,8 @@ use crate::{
         BaseActionTask, BaseTask, BaseTaskImpl,
     },
     transactions::{
-        serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
+        resolved_account_lock_count, serialized_transaction_size,
+        MAX_BASE_LAYER_TX_ACCOUNT_LOCKS, MAX_TRANSACTION_V1_WIRE_SIZE,
         MAX_TRANSACTION_WIRE_SIZE,
     },
 };
@@ -344,7 +345,8 @@ impl TaskStrategist {
     }
 
     /// Attempt to use ALTs for ALL keys in tx
-    /// Returns `true` if ALTs make tx fit, otherwise `false`
+    /// Returns `true` if the V0 + ALT transaction fits wire and account-lock
+    /// limits, otherwise `false`.
     /// TODO(edwin): optimize to use only necessary amount of pubkeys
     pub fn attempt_lookup_tables(
         tasks: &[BaseTaskImpl],
@@ -373,7 +375,10 @@ impl TaskStrategist {
             uniqueness_nonce,
         ) {
             Ok(tx) => {
-                serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
+                resolved_account_lock_count(&tx.message)
+                    <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
+                    && serialized_transaction_size(&tx)
+                        <= MAX_TRANSACTION_WIRE_SIZE
             }
             // Transaction doesn't fit, see CompileError
             Err(_) => false,
@@ -911,9 +916,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_with_lookup_tables_when_needed() {
-        // Eleven combined commits fit within the compute budget. Extra action
-        // accounts push their buffered form beyond V1's static-key limit.
+    fn test_build_strategy_rejects_alt_fallback_over_account_lock_limit() {
+        // Eleven commits plus extra action accounts exceed the base-layer
+        // lock limit. ALTs reduce wire size, not the number of locked keys.
         const NUM_COMMITS: u64 = 11;
 
         let validator = Pubkey::new_unique();
@@ -937,22 +942,14 @@ mod tests {
             .collect();
         tasks.push(action.into());
 
-        let strategy = TaskStrategist::build_strategy(
+        let result = TaskStrategist::build_strategy(
             tasks,
             &validator,
             &None::<IntentPersisterImpl>,
             None,
-        )
-        .expect("Should build strategy with buffer optimization");
+        );
 
-        for optimized_task in &strategy.optimized_tasks[..NUM_COMMITS as usize]
-        {
-            assert!(matches!(
-                commit_delivery(optimized_task),
-                CommitDelivery::StateInBuffer { .. }
-            ));
-        }
-        assert!(!strategy.lookup_tables_keys.is_empty());
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
     #[test]
@@ -988,9 +985,9 @@ mod tests {
     }
 
     #[test]
-    fn test_build_strategy_tries_v0_alts_before_buffering_v1_key_overflow() {
-        let validator = Pubkey::new_unique();
-        let action: BaseActionTask = BaseActionTaskV1 {
+    fn test_two_stage_strategy_rejects_overlimit_finalize_before_commit() {
+        let authority = Pubkey::new_unique();
+        let finalize_action: BaseActionTask = BaseActionTaskV1 {
             action: BaseAction {
                 id: 0,
                 destination_program: Pubkey::new_unique(),
@@ -1012,19 +1009,15 @@ mod tests {
         }
         .into();
 
-        let strategy = TaskStrategist::build_strategy(
-            vec![action.into()],
-            &validator,
+        let result = TaskStrategist::build_execution_strategy(
+            vec![create_test_commit_task(1, 10, 0).into()],
+            vec![finalize_action.into()],
+            &authority,
             &None::<IntentPersisterImpl>,
             None,
-        )
-        .expect("should fall back to v0 + ALTs");
+        );
 
-        assert!(!strategy.lookup_tables_keys.is_empty());
-        assert!(matches!(
-            strategy.optimized_tasks.as_slice(),
-            [BaseTaskImpl::BaseAction(_)]
-        ));
+        assert!(matches!(result, Err(TaskStrategistError::FailedToFitError)));
     }
 
     #[test]
@@ -1343,12 +1336,19 @@ mod tests {
                     &Pubkey::new_unique(),
                     &None::<IntentPersisterImpl>,
                     Some(1),
-                )
-                .unwrap();
+                );
+                if use_alts {
+                    assert!(matches!(
+                        mode,
+                        Err(TaskStrategistError::FailedToFitError)
+                    ));
+                    continue;
+                }
+                let mode = mode.unwrap();
                 let StrategyExecutionMode::SingleStage(strategy) = mode else {
                     panic!("no separate finalization transaction is needed");
                 };
-                assert_eq!(strategy.uses_alts(), use_alts);
+                assert!(!strategy.uses_alts());
                 let BaseTaskImpl::CommitFinalize(task) =
                     &strategy.optimized_tasks[1]
                 else {
