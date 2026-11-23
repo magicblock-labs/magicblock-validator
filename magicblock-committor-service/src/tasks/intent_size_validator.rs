@@ -17,13 +17,15 @@ use crate::{
         BaseTask, BaseTaskImpl, UndelegateTask,
     },
     transactions::{
-        serialized_transaction_size, MAX_TRANSACTION_V1_WIRE_SIZE,
+        resolved_account_lock_count, serialized_transaction_size,
+        MAX_BASE_LAYER_TX_ACCOUNT_LOCKS, MAX_TRANSACTION_V1_WIRE_SIZE,
         MAX_TRANSACTION_WIRE_SIZE,
     },
 };
 
 /// Estimates whether an intent's commit and finalize stages fit the supported
-/// transaction formats without fetching base-layer state or commit metadata.
+/// transaction formats and base-layer account-lock limit without fetching
+/// base-layer state or commit metadata.
 ///
 /// Unlike [`crate::tasks::task_builder::TaskBuilderImpl`], admission cannot compute
 /// the actual account diff. It estimates larger accounts using buffers, reserves
@@ -307,7 +309,11 @@ impl IntentSizeValidator {
             &lookup_tables,
             uniqueness_nonce,
         )
-        .map(|tx| serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE)
+        .map(|tx| {
+            resolved_account_lock_count(&tx.message)
+                <= MAX_BASE_LAYER_TX_ACCOUNT_LOCKS
+                && serialized_transaction_size(&tx) <= MAX_TRANSACTION_WIRE_SIZE
+        })
         .unwrap_or(false)
     }
 }
@@ -538,6 +544,23 @@ mod tests {
             assert!(IntentSizeValidator::fits(&at_boundary));
             assert!(!IntentSizeValidator::fits(&above_boundary));
         }
+    }
+
+    #[test]
+    fn test_undelegation_over_account_lock_limit_does_not_fit() {
+        let intent = MagicIntentBundle {
+            commit_and_undelegate: Some(CommitAndUndelegate {
+                commit_action: CommitType::Standalone(
+                    (0..10).map(|_| make_committed_account(10)).collect(),
+                ),
+                undelegate_action: UndelegateType::Standalone,
+            }),
+            ..Default::default()
+        };
+
+        assert!(IntentSizeValidator::commit_fits(&intent));
+        assert!(!IntentSizeValidator::finalize_fits(&intent));
+        assert!(!IntentSizeValidator::fits(&intent));
     }
 
     #[test]
