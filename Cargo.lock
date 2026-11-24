@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -3768,7 +3768,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aml"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "futures-util",
  "magicblock-config",
@@ -3782,7 +3782,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-aperture"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "agave-geyser-plugin-interface",
  "agave-transaction-view",
@@ -3838,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-chainlink"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "agave-feature-set",
  "arc-swap",
@@ -3902,7 +3902,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-interface"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "borsh",
  "paste",
@@ -3916,7 +3916,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "borsh",
  "magicblock-committor-interface",
@@ -3928,7 +3928,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-service"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -3978,7 +3978,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "clap",
  "derive_more",
@@ -3998,7 +3998,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "agave-feature-set",
  "console-subscriber",
@@ -4194,7 +4194,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger-deprecated"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "bincode",
  "byteorder",
@@ -4234,7 +4234,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "http-body-util",
  "hyper",
@@ -4283,7 +4283,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "assert_matches",
  "lazy_static",
@@ -4352,7 +4352,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -4380,7 +4380,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-runtime"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "magicblock-config",
  "magicblock-keeper",
@@ -4396,7 +4396,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-services"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "futures-util",
  "magicblock-chainlink",
@@ -4426,7 +4426,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-table-mania"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "magicblock-metrics",
  "magicblock-rpc-client",
@@ -4452,7 +4452,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-task-scheduler"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "hydra-api",
  "magic-root-interface",
@@ -4480,7 +4480,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "anyhow",
  "bincode",
@@ -4520,7 +4520,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-validator-tui"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "chrono",
  "clap",
@@ -4540,7 +4540,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-verifier"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "anyhow",
  "magicblock-config",
@@ -8117,7 +8117,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "2.0.4"
+version = "2.0.5"
 dependencies = [
  "bincode",
  "bs58",
