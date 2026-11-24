@@ -233,12 +233,7 @@ pub(crate) fn process_schedule_commit(
         MagicBaseIntent::CommitFinalize(CommitType::Standalone(committed_accounts))
     }
     .into();
-    validate_intent_size(&base_intent).inspect_err(|_| {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: intent is too large to ever fit into transaction",
-        );
-    })?;
+    validate_intent_size(&base_intent, invoke_context)?;
 
     let scheduled_base_intent = ScheduledIntentBundle {
         intent_id,

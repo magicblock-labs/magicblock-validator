@@ -201,11 +201,18 @@ pub const INTENT_TOO_LARGE_ERR: u32 = 0xA000_0002;
 
 pub(crate) fn validate_intent_size(
     intent: &mbv_core::intent::MagicIntentBundle,
+    invoke_context: &InvokeContext<'_, '_>,
 ) -> Result<(), InstructionError> {
-    if mbv_core::intent::limits::is_intent_within_limits(intent, &authority()) {
-        Ok(())
-    } else {
-        Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR))
+    match mbv_core::intent::limits::validate_intent_within_limits(intent, &authority()) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            ic_msg!(invoke_context, "ScheduleCommit ERR: {}", error);
+            Err(if error.is_fit_limit() {
+                InstructionError::Custom(INTENT_TOO_LARGE_ERR)
+            } else {
+                InstructionError::GenericError
+            })
+        }
     }
 }
 

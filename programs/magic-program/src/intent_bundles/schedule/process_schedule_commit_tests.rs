@@ -27,8 +27,7 @@ use crate::{
     magic_context::MagicContext,
     magic_scheduled_base_intent::ScheduledIntentBundle,
     outbox_intent::outbox_intent_bundles::OutboxIntentBundle,
-    schedule_transactions::COMMIT_LIMIT,
-    schedule_transactions::magic_fee_vault_pubkey,
+    schedule_transactions::{COMMIT_LIMIT, INTENT_TOO_LARGE_ERR, magic_fee_vault_pubkey},
     test_utils::{
         StubNonces, ensure_authority, ensure_started_validator, process_instruction,
         process_instruction_with_logs,
@@ -782,6 +781,49 @@ mod tests {
         }
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+    }
+
+    #[test]
+    #[serial]
+    fn test_schedule_commit_rejects_over_account_lock_limit_with_details() {
+        let payer = Keypair::from_seed(b"schedule_commit_over_account_lock_limit").unwrap();
+        let program = Pubkey::new_unique();
+        let committees: Vec<_> = (0..10).map(|_| Pubkey::new_unique()).collect();
+        let (mut accounts_data, mut transaction_accounts) =
+            prepare_transaction_with_single_committee(&payer, program, committees[0]);
+        for committee in &committees[1..] {
+            accounts_data.insert(
+                *committee,
+                AccountBuilder::from(AccountSharedData::new(0, 0, &program))
+                    .mode(AccountMode::Delegated)
+                    .build(),
+            );
+        }
+
+        let ix = InstructionUtils::schedule_commit_and_undelegate_instruction(
+            &payer.pubkey(),
+            committees,
+        );
+        extend_transaction_accounts_from_ix(&ix, &mut accounts_data, &mut transaction_accounts);
+
+        let (processed, logs) = process_instruction_with_logs(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::Custom(INTENT_TOO_LARGE_ERR)),
+        );
+
+        assert!(
+            logs.iter()
+                .any(|log| { log.contains("account locks") && log.contains("exceed limit 64") })
+        );
+        let magic_context = find_magic_context_account(&processed).unwrap();
+        assert!(
+            MagicContext::deserialize(magic_context.data())
+                .unwrap()
+                .scheduled_base_intents
+                .is_empty()
+        );
     }
 
     #[test]
