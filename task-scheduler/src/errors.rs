@@ -14,8 +14,6 @@ pub enum TaskSchedulerError {
     #[error(transparent)]
     RpcClient(#[from] solana_rpc_client::api::client_error::Error),
 
-    /// A live account at the crank address is owned by something other than
-    /// hydra, so it is not a crank this service can cancel.
     #[error("account {crank} at crank address is owned by {owner}, not hydra")]
     UnexpectedCrankOwner { crank: Pubkey, owner: Pubkey },
 }
