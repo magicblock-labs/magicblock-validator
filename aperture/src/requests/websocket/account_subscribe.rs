@@ -1,9 +1,8 @@
 use solana_account::AccountSharedData;
-use solana_account_decoder::UiAccountEncoding;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 
 use super::prelude::*;
-use crate::encoder::AccountEncoder;
+use crate::{account::encoding::AccountEncoder, requests::payload::NotificationPayload};
 
 impl WsDispatcher {
     pub(crate) async fn account_subscribe(
@@ -12,16 +11,16 @@ impl WsDispatcher {
     ) -> RpcResult<SubResult> {
         let pubkey = request.required::<Serde32Bytes>(0)?.into();
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
-        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
-        let encoder = AccountEncoder {
-            encoding,
-            data_slice: config.data_slice,
-        };
+        let encoder = AccountEncoder::from(config);
 
         let rx = self.engine.accounts().subscribe(pubkey).await;
         let engine = self.engine.clone();
         Ok(self.forward(rx, move |id, account: AccountSharedData| {
-            encoder.encode(context_slot(&engine), &pubkey, &account, id).map(Some)
+            let block = engine.blocks().latest();
+            let account = encoder.encode(&pubkey, &account, |mint| {
+                mint.read(&engine.accounts().loader(), block.time)
+            });
+            NotificationPayload::encode(account, block.slot, "accountNotification", id).map(Some)
         }))
     }
 }
