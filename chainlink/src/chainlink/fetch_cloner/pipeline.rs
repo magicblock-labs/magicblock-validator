@@ -8,6 +8,7 @@ use ::metrics::metrics::{
     ChainlinkCloneRemoteResult, ChainlinkCompanionFetchKind,
 };
 use delegation_program_api::pda::delegation_record_pda_from_delegated_account;
+use futures_util::future::join_all;
 use mbv_core::token_programs::is_ata;
 use solana_account::{AccountBuilder, AccountMode, StateFlags};
 use solana_pubkey::Pubkey;
@@ -25,7 +26,8 @@ use crate::{
     chainlink::errors::{ChainlinkError, ChainlinkResult},
     cloner::{AccountCloneRequest, ClonePostDelegationMode, CloneSourceSlots},
     remote_account_provider::{
-        ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, RemoteAccount, SubscriptionReason,
+        ChainPubsubClient, ChainRpcClient, MAX_MULTIPLE_ACCOUNTS_PER_REQUEST, MatchSlotsConfig,
+        RemoteAccount, SubscriptionReason,
         program_account::{
             LOADER_V3, ProgramAccountResolver, get_loaderv3_get_program_data_address,
         },
@@ -146,61 +148,94 @@ where
     )
     .await?;
 
-    // For potentially delegated accounts we update the owner and delegation state first
-    let mut fetch_with_delegation_record_join_set = JoinSet::new();
-    for (pubkey, _, account_slot) in &owned_by_deleg {
-        let effective_slot = if let Some(min_slot) = min_context_slot {
-            min_slot.max(*account_slot)
-        } else {
-            *account_slot
-        };
-        fetch_with_delegation_record_join_set.spawn(this.task_to_fetch_with_delegation_record(
-            *pubkey,
-            effective_slot,
-            fetch_context.clone(),
-        ));
-    }
+    let release_records = || {
+        let releases = record_subs
+            .iter()
+            .copied()
+            .map(|pubkey| SubscriptionRelease::Pubkey {
+                pubkey,
+                reason: SubscriptionReason::DelegationRecord,
+            })
+            .collect::<Vec<_>>();
+        release_subs(&this.remote_account_provider, releases)
+    };
+
+    // Primaries are already watched by the initial fetch and records by the
+    // acquisition above. Read each pair in one RPC snapshot without taking
+    // additional direct subscription references.
+    let pairs_per_batch = MAX_MULTIPLE_ACCOUNTS_PER_REQUEST / 2;
+    let min_context_slot = min_context_slot
+        .unwrap_or_default()
+        .max(this.remote_account_provider.chain_slot());
+    let batches = owned_by_deleg
+        .chunks(pairs_per_batch)
+        .zip(record_subs.chunks(pairs_per_batch))
+        .map(|(primaries, records)| {
+            let mut pubkeys = Vec::with_capacity(primaries.len() * 2);
+            let mut slot = min_context_slot;
+            for ((pubkey, _, account_slot), record) in primaries.iter().zip(records) {
+                pubkeys.extend([*pubkey, *record]);
+                slot = slot.max(*account_slot);
+            }
+            (pubkeys, slot)
+        })
+        .collect::<Vec<_>>();
+    let fetch_context = fetch_context.with_reason(AccountFetchReason::DelegationRecord);
+    let fetched = join_all(batches.into_iter().map(|(pubkeys, slot)| {
+        let fetch_context = fetch_context.clone();
+        async move {
+            this.fetch_count.fetch_add(pubkeys.len() as u64, Ordering::Relaxed);
+            let accounts = this
+                .remote_account_provider
+                .fetch_snapshot_until_slot(
+                    &pubkeys,
+                    slot,
+                    fetch_context,
+                    Some(ChainlinkCompanionFetchKind::DelegationRecord),
+                )
+                .await?;
+            Ok::<_, ChainlinkError>((pubkeys, accounts))
+        }
+    }))
+    .await;
 
     let mut missing_delegation_record = vec![];
 
     let accounts_to_clone = {
-        let joined = fetch_with_delegation_record_join_set.join_all().await;
-        let (errors, accounts_fully_resolved) =
-            joined.into_iter().fold((vec![], vec![]), |(mut errors, mut successes), res| {
-                match res {
-                    Ok(Ok(account_with_deleg)) => successes.push(account_with_deleg),
-                    Ok(Err(err)) => errors.push(err),
-                    Err(err) => errors.push(err.into()),
+        let mut errors = Vec::new();
+        let mut accounts_fully_resolved = Vec::with_capacity(owned_by_deleg.len());
+        for batch in fetched {
+            let (pubkeys, accounts) = match batch {
+                Ok(batch) => batch,
+                Err(err) => {
+                    errors.push(err);
+                    continue;
                 }
-                (errors, successes)
-            });
+            };
+            for ([pubkey, record], [account, companion]) in
+                pubkeys.as_chunks::<2>().0.iter().zip(accounts.as_chunks::<2>().0)
+            {
+                match FetchCloner::<T, U>::resolve_account_with_companion(
+                    *pubkey, *record, account, companion,
+                ) {
+                    Ok(resolved) => accounts_fully_resolved.push(resolved),
+                    Err(err) => errors.push(err),
+                }
+            }
+        }
 
         // If we encounter any error while fetching delegated accounts then
         // we have to abort as we cannot resume without the ability to sync
         // with the remote
         if !errors.is_empty() {
-            let releases = owned_by_deleg
-                .iter()
-                .map(|(pubkey, _, _)| *pubkey)
-                .chain(record_subs.iter().copied())
-                .map(|pubkey| SubscriptionRelease::Pubkey {
-                    pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                })
-                .chain(
-                    record_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
-                        pubkey,
-                        reason: SubscriptionReason::DelegationRecord,
-                    }),
-                )
-                .collect::<Vec<_>>();
-            release_subs(&this.remote_account_provider, releases).await;
+            release_records().await;
             return Err(ChainlinkError::DelegatedAccountResolutionsFailed(
                 errors.iter().map(|e| e.to_string()).collect::<Vec<_>>().join(", "),
             ));
         }
 
         let mut accounts_to_clone = plain;
+        let first_resolved = accounts_to_clone.len();
 
         // Collect unique owner programs to subscribe to concurrently
         let mut owner_programs_to_subscribe: HashSet<Pubkey> = HashSet::new();
@@ -227,22 +262,7 @@ where
                 {
                     Ok(x) => x,
                     Err(err) => {
-                        let releases = owned_by_deleg
-                            .iter()
-                            .map(|(pubkey, _, _)| *pubkey)
-                            .chain(record_subs.iter().copied())
-                            .map(|pubkey| SubscriptionRelease::Pubkey {
-                                pubkey,
-                                reason: SubscriptionReason::DirectAccount,
-                            })
-                            .chain(record_subs.iter().copied().map(|pubkey| {
-                                SubscriptionRelease::Pubkey {
-                                    pubkey,
-                                    reason: SubscriptionReason::DelegationRecord,
-                                }
-                            }))
-                            .collect::<Vec<_>>();
-                        release_subs(&this.remote_account_provider, releases).await;
+                        release_records().await;
                         return Err(err);
                     }
                 };
@@ -277,9 +297,6 @@ where
                 }
                 (None, None)
             };
-            let cleanup_delegated_subscription = account.read().is(AccountMode::Delegated);
-            let cleanup_undelegation_tracking = cleanup_delegated_subscription
-                && this.account_mode(&pubkey).is_some_and(|mode| mode != AccountMode::Delegated);
             accounts_to_clone.push(AccountCloneRequest {
                 pubkey,
                 account,
@@ -287,25 +304,19 @@ where
                 delegated_to_other,
                 source_slots: Some(source_slots),
             });
-            if cleanup_delegated_subscription {
-                if cleanup_undelegation_tracking {
-                    this.cleanup_undelegation_tracking_for_completed_account(pubkey).await;
-                }
-                this.cleanup_direct_subscription_for_delegated_account(pubkey).await;
-            }
         }
 
-        release_subs(
-            &this.remote_account_provider,
-            owned_by_deleg
-                .iter()
-                .map(|(pubkey, _, _)| SubscriptionRelease::Pubkey {
-                    pubkey: *pubkey,
-                    reason: SubscriptionReason::DirectAccount,
-                })
-                .collect::<Vec<_>>(),
-        )
-        .await;
+        // A malformed record must not drop the watches for an earlier pair.
+        for request in &accounts_to_clone[first_resolved..] {
+            if !request.account.read().is(AccountMode::Delegated) {
+                continue;
+            }
+            let pubkey = request.pubkey;
+            if this.account_mode(&pubkey).is_some_and(|mode| mode != AccountMode::Delegated) {
+                this.cleanup_undelegation_tracking_for_completed_account(pubkey).await;
+            }
+            this.cleanup_direct_subscription_for_delegated_account(pubkey).await;
+        }
 
         // Subscribe to owner programs concurrently in background (best-effort)
         if !owner_programs_to_subscribe.is_empty() {
@@ -318,7 +329,7 @@ where
                         (owner, result)
                     }
                 });
-                let results = futures_util::future::join_all(subscribe_futures).await;
+                let results = join_all(subscribe_futures).await;
                 for (owner, result) in results {
                     if let Err(err) = result {
                         warn!(program_id = %owner, error = %err, "Failed to subscribe to owner program");
@@ -427,13 +438,11 @@ where
                     let (pubkey, _, _) = program_info;
                     let program_data_pubkey = pubkey_pair[1];
 
-                    let account_program = account_pair[0].clone();
-                    let account_data = account_pair[1].clone();
                     let result = FetchCloner::<T, U>::resolve_account_with_companion(
                         pubkey,
                         program_data_pubkey,
-                        account_program,
-                        account_data,
+                        &account_pair[0],
+                        &account_pair[1],
                     );
                     match result {
                         Ok(res) => successes.push(res),
@@ -540,7 +549,6 @@ pub(crate) fn compute_subscription_releases<'a>(
             .into_iter()
             .filter_map(|(pubkey, delegated)| delegated.then_some(pubkey)),
     );
-    direct_releases.extend(record_subs.iter().copied());
     direct_releases.extend(program_data_subs.iter().copied());
 
     let mut releases = direct_releases

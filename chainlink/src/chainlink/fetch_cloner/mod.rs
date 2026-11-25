@@ -323,9 +323,9 @@ struct ResolvedSubscriptionAccount {
 impl ResolvedSubscriptionAccount {
     fn plain(account: AccountBuilder) -> Self {
         Self {
+            source_slots: Some(CloneSourceSlots::single(account.read().slot())),
             account,
             delegation: None,
-            source_slots: None,
         }
     }
 }
@@ -1205,6 +1205,10 @@ where
             .is_some_and(|account| account.owner() == &delegation_program_api::id());
         let is_internal_dlp_update = fresh_update_account
             .is_some_and(|account| is_internal_dlp_account_data(account.data()));
+        let is_undelegation_request = is_dlp_owned_update
+            && fresh_update_account.is_some_and(|account| {
+                delegation::parse_undelegation_request(pubkey, account.data()).is_some()
+            });
 
         let dlp_program_interest =
             if matches!(update.source, SubscriptionSource::Program) && is_dlp_owned_update {
@@ -1263,7 +1267,9 @@ where
             }
         }
 
-        if self.maybe_greedily_clone_discovered_delegated_account(pubkey, &update).await {
+        if !is_undelegation_request
+            && self.maybe_greedily_clone_discovered_delegated_account(pubkey, &update).await
+        {
             return;
         }
         // A late forwarded update can arrive after an account was removed from
@@ -1320,8 +1326,11 @@ where
         }
 
         let update_source = update.source;
-        let resolved =
-            self.resolve_subscription_account(update, &companion_fetch_log_context).await;
+        let resolved = if is_undelegation_request {
+            self.refresh_undelegation_request(pubkey, update_slot).await
+        } else {
+            self.resolve_subscription_account(update, &companion_fetch_log_context).await
+        };
         let Some(resolved) = resolved else {
             return;
         };
@@ -1953,6 +1962,80 @@ where
         }
     }
 
+    async fn refresh_undelegation_request(
+        &self,
+        pubkey: Pubkey,
+        min_context_slot: u64,
+    ) -> Option<ResolvedSubscriptionAccount> {
+        let reason = SubscriptionReason::DirectAccount;
+        self.acquire_subscription_reason(&pubkey, reason)
+            .await
+            .inspect_err(|error| {
+                error!(request_pda = %pubkey, error = %error, "Failed to watch undelegation request");
+            })
+            .ok()?;
+
+        let fetch_context =
+            AccountFetchContext::subscription_update(AccountFetchReason::SubscriptionUpdateClone);
+        self.fetch_count.fetch_add(1, Ordering::Relaxed);
+        let account = self
+            .remote_account_provider
+            .fetch_snapshot_until_slot(&[pubkey], min_context_slot, fetch_context, None)
+            .await
+            .inspect_err(|error| {
+                error!(
+                    request_pda = %pubkey,
+                    min_context_slot,
+                    error = %error,
+                    "Failed to refresh undelegation request"
+                );
+            })
+            .ok()
+            .and_then(|mut accounts| accounts.pop())
+            .and_then(RemoteAccount::into_fresh_account);
+        if let Some(account) = account
+            && account.owner() == &delegation_program_api::id()
+            && let Some(request) = delegation::parse_undelegation_request(pubkey, account.data())
+        {
+            self.publish_undelegation_request(pubkey, request, account.slot());
+            return Some(ResolvedSubscriptionAccount::plain(AccountBuilder::from(
+                account,
+            )));
+        }
+        release_subs(
+            &self.remote_account_provider,
+            [SubscriptionRelease::Pubkey { pubkey, reason }],
+        )
+        .await;
+        None
+    }
+
+    fn publish_undelegation_request(
+        &self,
+        request_pda: Pubkey,
+        request: UndelegationRequest,
+        observed_slot: u64,
+    ) {
+        let observed = ObservedUndelegationRequest {
+            request_pda,
+            delegated_account: request.delegated_account,
+            expires_at_slot: request.expires_at_slot,
+            observed_slot,
+        };
+        if let Err(broadcast::error::SendError(observed)) =
+            self.undelegation_request_sender.send(observed)
+        {
+            warn!(
+                request_pda = %observed.request_pda,
+                delegated_account = %observed.delegated_account,
+                observed_slot = observed.observed_slot,
+                expires_at_slot = observed.expires_at_slot,
+                drop_reason = "no_active_subscribers",
+                "Dropped observed DLP undelegation request because no subscribers are active"
+            );
+        }
+    }
+
     async fn resolve_subscription_account(
         &self,
         update: ForwardedSubscriptionUpdate,
@@ -2009,6 +2092,15 @@ where
                 });
                 self.resolve_subscription_snapshot(snapshot, companion_fetch_log_context).await
             }
+            Err(ChainlinkError::ResolvedAccountCouldNoLongerBeFound(_)) => {
+                error!(
+                    primary_pubkey = %pubkey,
+                    companion_pubkey = %record_pubkey,
+                    context_slot = min_context_slot,
+                    "Primary account missing from delegation snapshot after subscription update"
+                );
+                None
+            }
             Err(error) => {
                 log_companion_fetch_failure(
                     companion_fetch_log_context,
@@ -2054,27 +2146,10 @@ where
             );
         }
         let Some(record) = companion_account else {
-            if let Ok(request) =
-                UndelegationRequest::try_from_bytes_with_discriminator(account.read().data())
+            if let Some(request) =
+                delegation::parse_undelegation_request(pubkey, account.read().data())
             {
-                let observed = ObservedUndelegationRequest {
-                    request_pda: pubkey,
-                    delegated_account: request.delegated_account,
-                    expires_at_slot: request.expires_at_slot,
-                    observed_slot: account.read().slot(),
-                };
-                if let Err(broadcast::error::SendError(observed)) =
-                    self.undelegation_request_sender.send(observed)
-                {
-                    warn!(
-                        request_pda = %observed.request_pda,
-                        delegated_account = %observed.delegated_account,
-                        observed_slot = observed.observed_slot,
-                        expires_at_slot = observed.expires_at_slot,
-                        drop_reason = "no_active_subscribers",
-                        "Dropped observed DLP undelegation request because no subscribers are active"
-                    );
-                }
+                self.publish_undelegation_request(pubkey, request, account.read().slot());
                 return Some(ResolvedSubscriptionAccount::plain(account));
             }
             if is_internal_dlp_account_data(account.read().data()) {
@@ -2315,12 +2390,6 @@ where
                     .chain(
                         record_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
                             pubkey,
-                            reason: SubscriptionReason::DirectAccount,
-                        }),
-                    )
-                    .chain(
-                        record_subs.iter().copied().map(|pubkey| SubscriptionRelease::Pubkey {
-                            pubkey,
                             reason: SubscriptionReason::DelegationRecord,
                         }),
                     )
@@ -2332,7 +2401,6 @@ where
 
         let mut loaded_programs = loaded_programs;
         let mut all_requested_pubkeys = pubkeys.to_vec();
-        all_requested_pubkeys.extend(record_subs.iter().copied());
         all_requested_pubkeys.extend(program_data_subs.iter().copied());
 
         // We will compute subscription cancellations after ATA handling, once accounts_to_clone is finalized
@@ -2440,7 +2508,6 @@ where
                 ));
             }
 
-            all_requested_pubkeys.extend(action_dep_record_subs.iter().copied());
             record_subs.extend(action_dep_record_subs);
 
             let ResolvedPrograms {
@@ -2777,22 +2844,6 @@ where
         Ok(batch.result)
     }
 
-    fn task_to_fetch_with_delegation_record(
-        &self,
-        pubkey: Pubkey,
-        slot: u64,
-        fetch_context: AccountFetchContext,
-    ) -> task::JoinHandle<ChainlinkResult<AccountWithCompanion>> {
-        let delegation_record_pubkey = delegation_record_pda_from_delegated_account(&pubkey);
-        self.task_to_fetch_with_companion(
-            pubkey,
-            delegation_record_pubkey,
-            slot,
-            fetch_context.with_reason(AccountFetchReason::DelegationRecord),
-            ChainlinkCompanionFetchKind::DelegationRecord,
-        )
-    }
-
     fn task_to_fetch_with_program_data(
         &self,
         pubkey: Pubkey,
@@ -2835,7 +2886,12 @@ where
                 .await
                 .map_err(ChainlinkError::from)
                 .and_then(|accs| match accs.as_slice() {
-                    [acc_first, acc_last] => Ok((acc_first.clone(), acc_last.clone())),
+                    [account, companion] => Self::resolve_account_with_companion(
+                        pubkey,
+                        companion_pubkey,
+                        account,
+                        companion,
+                    ),
                     _ => Err(ChainlinkError::UnexpectedAccountCount(format!(
                         "Expected exactly 2 accounts for pubkey {} and companion {}, got {}",
                         pubkey,
@@ -2843,17 +2899,14 @@ where
                         accs.len()
                     ))),
                 })
-                .and_then(|(acc, deleg)| {
-                    Self::resolve_account_with_companion(pubkey, companion_pubkey, acc, deleg)
-                })
         })
     }
 
     fn resolve_account_with_companion(
         pubkey: Pubkey,
         companion_pubkey: Pubkey,
-        acc: RemoteAccount,
-        companion: RemoteAccount,
+        acc: &RemoteAccount,
+        companion: &RemoteAccount,
     ) -> ChainlinkResult<AccountWithCompanion> {
         use RemoteAccount::*;
         let resolve = |account: &AccountSharedData| {
