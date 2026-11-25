@@ -120,7 +120,7 @@ async fn snapshot_retries_lagging_rpc_without_subscribing() {
                 &[record, metadata],
                 101,
                 AccountFetchContext::rpc_get_multiple_accounts(),
-                ChainlinkCompanionFetchKind::DelegationRecord,
+                Some(ChainlinkCompanionFetchKind::DelegationRecord),
             )
             .await
     });

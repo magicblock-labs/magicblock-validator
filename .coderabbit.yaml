@@ -8,20 +8,18 @@ reviews:
   review_status: false
   review_details: false
   poem: false
-  request_changes_workflow: false
-  auto_approve: false
+  auto_approvals:
+    enabled: false
 
-  
-  
   auto_review:
-    enabled: true               
+    enabled: true
     drafts: true
     base_branches:
       - ".*"
     auto_incremental_review: true
 
-  # Never pause after repeated pushes.
-  auto_pause_after_reviewed_commits: 0
+    # Never pause after repeated pushes.
+    auto_pause_after_reviewed_commits: 0
 
   path_instructions:
     - path: "**/*.rs"
