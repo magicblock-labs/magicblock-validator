@@ -15,7 +15,7 @@ use solana_loader_v4_interface::state::LoaderV4Status;
 use solana_program::instruction::InstructionError;
 use solana_pubkey::Pubkey;
 use solana_transaction_error::TransactionError;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use crate::remote_account_provider::program_account::{
     LOADER_V1, LOADER_V4, LoadedProgram, RemoteProgramLoader,
@@ -204,13 +204,6 @@ pub(crate) async fn clone_account<'a>(
     mut accessor: AccountAccessor<'a>,
     request: AccountCloneRequest,
 ) -> ClonerResult<()> {
-    if let Some(authority) = request.delegated_to_other {
-        warn!(
-            pubkey = %request.pubkey,
-            delegated_to = %authority,
-            "Cloning account delegated to another validator"
-        );
-    }
     let ata_projection = request.is_ata_projection();
     let mut actions = match request.post_delegation_mode {
         ClonePostDelegationMode::None => None,
