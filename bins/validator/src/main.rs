@@ -11,7 +11,6 @@ use config::{ConfigError, LeaderParams};
 use leader::Leader;
 use mbv_core::version::Version;
 use nucleus::shutdown::ShutdownReason;
-use solana_signer::Signer;
 use tokio::runtime::Builder;
 use tracing::{error, info, instrument};
 
@@ -51,19 +50,16 @@ async fn run() -> Result<ShutdownReason> {
         return Ok(ShutdownReason::Signalled);
     };
 
-    info!("Starting leader\n{config}");
-    let rpc_url = config.aperture.listen.http();
-    let ws_url = config.aperture.listen.websocket();
-    let identity = config.engine.authority.local.pubkey().to_string();
-    let remote_rpc_url = config.rpc_url().to_owned();
+    let version = Version::default();
+    info!(
+        version = version.core,
+        git = version.git_version,
+        config = %config,
+        "Starting leader"
+    );
 
-    let leader = Leader::try_from_config(config)
-        .await
-        .context("failed to create leader runtime")?;
+    let leader = Leader::start(config).await.context("failed to create leader runtime")?;
 
-    let leader = leader.start();
-
-    print_startup(&rpc_url, &ws_url, &remote_rpc_url, &identity);
     Ok(leader.wait().await)
 }
 
@@ -85,37 +81,5 @@ fn load_config() -> Result<Option<LeaderParams>> {
             Ok(None)
         }
         Err(error) => Err(error).context("failed to load leader config"),
-    }
-}
-
-fn print_startup(rpc_url: &str, ws_url: &str, remote_rpc_url: &str, identity: &str) {
-    let version = Version::default();
-    for line in [
-        String::new(),
-        "🧙 MagicBlock leader is running! 🪄✦".to_owned(),
-        format!(
-            "🏷️ Version: {} (Git: {})",
-            version.core, version.git_version
-        ),
-        "-----------------------------------".to_owned(),
-        format!("📡 RPC endpoint:       {rpc_url}"),
-        format!("🔌 WebSocket endpoint: {ws_url}"),
-        format!("🌐 Remote RPC:         {remote_rpc_url}"),
-        format!("🖥️ Leader identity:    {identity}"),
-        "-----------------------------------".to_owned(),
-        "Ready for connections!".to_owned(),
-        String::new(),
-    ] {
-        print_info(line);
-    }
-}
-
-fn print_info(message: impl std::fmt::Display) {
-    let rust_log = std::env::var("RUST_LOG").unwrap_or_default();
-    let rust_log = rust_log.trim().to_ascii_lowercase();
-    if rust_log.is_empty() || rust_log == "quiet" {
-        println!("{message}");
-    } else {
-        info!("{message}");
     }
 }

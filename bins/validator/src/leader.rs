@@ -15,7 +15,7 @@ use engine::Engine;
 use metrics::MetricsService;
 use nucleus::{
     metrics::EventTimer,
-    shutdown::{Service, ShutdownManager, ShutdownReason},
+    shutdown::{Service, ShutdownHandle, ShutdownManager, ShutdownReason},
 };
 use replicator::ReplicationDispatcher;
 use runtime::keeper_builder;
@@ -41,17 +41,6 @@ use crate::{
 // Leader
 // -----------------
 pub(crate) struct Leader {
-    config: LeaderParams,
-    engine: Engine,
-    chainlink: Arc<ProdChainlink>,
-    shutdown: ShutdownManager,
-    committor: CommittorService,
-    undelegation_request_service: UndelegationRequestService,
-    metrics: MetricsService,
-    task_scheduler: TaskSchedulerService,
-}
-
-pub(crate) struct RunningLeader {
     chainlink: Arc<ProdChainlink>,
     shutdown: ShutdownManager,
 }
@@ -60,14 +49,11 @@ impl Leader {
     // -----------------
     // Initialization
     // -----------------
-    #[instrument(skip_all, fields(last_slot = field::Empty))]
-    pub(crate) async fn try_from_config(config: LeaderParams) -> ApiResult<Self> {
+    #[instrument(skip_all)]
+    pub(crate) async fn start(config: LeaderParams) -> ApiResult<Self> {
         let mut timer = EventTimer::new("init");
 
-        let engine_ledger = config.engine.ledger.directory.clone();
-
-        let (ledger, _) = ledger::init(&engine_ledger, &config.ledger)?;
-        let ledger = Arc::new(ledger);
+        let (ledger, _) = ledger::init(&config.engine.ledger.directory, &config.ledger)?;
         timer.record("Deprecated ledger initialized");
 
         let mut shutdown = ShutdownManager::default();
@@ -123,11 +109,13 @@ impl Leader {
             &config.aperture,
             engine.clone(),
             chainlink.clone(),
-            ledger.clone(),
+            Arc::new(ledger),
             config.engine.blockstore.blocktime,
             rpc_shutdown.child(),
         )
         .await?;
+        let rpc_bind = rpc.http_addr();
+        let ws_bind = rpc.ws_addr();
         timer.record("RPC service initialized");
         tokio::spawn(async move {
             rpc.run().await;
@@ -146,17 +134,29 @@ impl Leader {
             config.engine.blockstore.blocktime,
         )?;
         timer.record("Task scheduler initialized");
+        drop(timer);
 
-        Ok(Self {
-            config,
+        let mut timer = EventTimer::new("startup");
+        Self::spawn_primary_onchain_setup(
             engine,
-            chainlink,
-            shutdown,
-            committor,
-            undelegation_request_service,
-            metrics,
-            task_scheduler,
-        })
+            config.rpc_url().to_owned(),
+            shutdown.handle(Service::OnchainSetup),
+        );
+
+        tokio::spawn(
+            undelegation_request_service.run(shutdown.handle(Service::UndelegationRequests)),
+        );
+        timer.record("Undelegation request service started");
+        tokio::spawn(committor.run(shutdown.handle(Service::IntentExecution)));
+        timer.record("Intent execution service started");
+        tokio::spawn(task_scheduler.run(shutdown.handle(Service::TaskScheduler)));
+        timer.record("Task scheduler started");
+        tokio::spawn(metrics.run(shutdown.handle(Service::Metrics)));
+        timer.record("Metrics service started");
+        drop(timer);
+
+        info!(%rpc_bind, %ws_bind, "Leader services started");
+        Ok(Self { chainlink, shutdown })
     }
 
     fn init_committor(
@@ -361,24 +361,20 @@ impl Leader {
         }
     }
 
-    fn spawn_primary_onchain_setup(&mut self) {
-        let engine = self.engine.clone();
-        let rpc_url = self.config.rpc_url().to_owned();
-        let identity = self.engine.authority();
-
-        let mut shutdown = self.shutdown.handle(Service::OnchainSetup);
+    fn spawn_primary_onchain_setup(engine: Engine, rpc_url: String, mut shutdown: ShutdownHandle) {
+        let identity = engine.authority();
         // Ephemeral mode does a non-blocking startup balance check.
         tokio::spawn(async move {
             let setup = async move {
                 let mut timer = EventTimer::new("onchain-setup");
                 Self::with_onchain_setup_retries("ensure_funded_on_chain", || {
-                    Leader::ensure_validator_funded_on_chain(rpc_url.clone(), identity)
+                    Self::ensure_validator_funded_on_chain(rpc_url.clone(), identity)
                 })
                 .await?;
                 timer.record("Validator balance checked");
 
                 Self::with_onchain_setup_retries("ensure_magic_fee_vault_on_chain", || {
-                    Leader::ensure_magic_fee_vault_on_chain(&engine, rpc_url.clone())
+                    Self::ensure_magic_fee_vault_on_chain(&engine, rpc_url.clone())
                 })
                 .await?;
                 timer.record("Magic fee vault setup attempt completed");
@@ -403,35 +399,6 @@ impl Leader {
         });
     }
 
-    #[instrument(skip(self))]
-    pub(crate) fn start(mut self) -> RunningLeader {
-        let mut timer = EventTimer::new("startup");
-        self.spawn_primary_onchain_setup();
-
-        let shutdown = self.shutdown.handle(Service::UndelegationRequests);
-        tokio::spawn(self.undelegation_request_service.run(shutdown));
-        timer.record("Undelegation request service started");
-
-        let shutdown = self.shutdown.handle(Service::IntentExecution);
-        tokio::spawn(self.committor.run(shutdown));
-        timer.record("Intent execution service started");
-
-        let shutdown = self.shutdown.handle(Service::TaskScheduler);
-        tokio::spawn(self.task_scheduler.run(shutdown));
-        timer.record("Task scheduler started");
-
-        let shutdown = self.shutdown.handle(Service::Metrics);
-        tokio::spawn(self.metrics.run(shutdown));
-        timer.record("Metrics service started");
-
-        RunningLeader {
-            chainlink: self.chainlink,
-            shutdown: self.shutdown,
-        }
-    }
-}
-
-impl RunningLeader {
     #[instrument(skip(self))]
     pub(crate) async fn wait(mut self) -> ShutdownReason {
         let reason = self.shutdown.wait().await;
