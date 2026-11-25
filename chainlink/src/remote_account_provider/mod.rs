@@ -537,7 +537,7 @@ const RPC_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MATCH_SLOTS_MAX_TOTAL_TIME: Duration = Duration::from_secs(10);
 
 // getMultipleAccounts accepts at most this many keys per request.
-const MAX_MULTIPLE_ACCOUNTS_PER_REQUEST: usize = 100;
+pub(crate) const MAX_MULTIPLE_ACCOUNTS_PER_REQUEST: usize = 100;
 
 // Splits keys into the minimum number of chunks that fit the RPC's
 // getMultipleAccounts limit, sized as evenly as possible.
@@ -1822,7 +1822,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
         pubkeys: &[Pubkey],
         min_context_slot: u64,
         fetch_context: AccountFetchContext,
-        companion_fetch_kind: ChainlinkCompanionFetchKind,
+        companion_fetch_kind: Option<ChainlinkCompanionFetchKind>,
     ) -> RemoteAccountProviderResult<Vec<RemoteAccount>> {
         let started_at = Instant::now();
         let config = MatchSlotsRetryConfig::default();
@@ -1837,7 +1837,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                 Ok(accounts) => {
                     observe_companion_fetch_if_configured(
                         fetch_context,
-                        Some(companion_fetch_kind),
+                        companion_fetch_kind,
                         ChainlinkCompanionFetchOutcome::Succeeded,
                         attempts,
                         started_at,
@@ -1850,7 +1850,7 @@ impl<T: ChainRpcClient, U: ChainPubsubClient> RemoteAccountProvider<T, U> {
                         Err(_) => {
                             observe_companion_fetch_if_configured(
                                 fetch_context,
-                                Some(companion_fetch_kind),
+                                companion_fetch_kind,
                                 ChainlinkCompanionFetchOutcome::FailedRpc,
                                 attempts,
                                 started_at,

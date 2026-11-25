@@ -1,7 +1,12 @@
 use ::metrics::metrics::{self, ChainlinkCompanionFetchKind};
 use delegation_program_api::{
-    args::PostDelegationActions, decrypt::Decrypt,
-    pda::delegation_record_pda_from_delegated_account, state::DelegationRecord,
+    args::PostDelegationActions,
+    decrypt::Decrypt,
+    pda::{
+        delegation_record_pda_from_delegated_account,
+        undelegation_request_pda_from_delegated_account,
+    },
+    state::{DelegationRecord, UndelegationRequest},
 };
 use mbv_core::token_programs::{EATA_PROGRAM_ID, EphemeralAta, try_derive_eata_address_and_bump};
 use solana_account::{AccountBuilder, AccountMode, ReadableAccount};
@@ -22,6 +27,15 @@ use crate::{
         ChainPubsubClient, ChainRpcClient, MatchSlotsConfig, SubscriptionReason,
     },
 };
+
+pub(super) fn parse_undelegation_request(
+    pubkey: Pubkey,
+    data: &[u8],
+) -> Option<UndelegationRequest> {
+    let request = UndelegationRequest::try_from_bytes_with_discriminator(data).ok()?;
+    (undelegation_request_pda_from_delegated_account(&request.delegated_account) == pubkey)
+        .then_some(*request)
+}
 
 /// Parses a delegation record from account data bytes. Returns the parsed DelegationRecord
 /// or {InvalidDelegationRecord, InvalidDelegationActions} error if parsing fails.
@@ -283,7 +297,7 @@ pub(super) async fn initial_commit_id<T: ChainRpcClient, U: ChainPubsubClient>(
             &[record_pubkey, metadata_pubkey],
             request.source_slots().view,
             fetch_context,
-            ChainlinkCompanionFetchKind::DelegationRecord,
+            Some(ChainlinkCompanionFetchKind::DelegationRecord),
         )
         .await?;
     let invalid =
