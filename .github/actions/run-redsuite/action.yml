@@ -33,8 +33,8 @@ runs:
       uses: actions/checkout@v5
       with:
         repository: magicblock-labs/redsuite
-        ref: ${{ inputs.family == 'redshift-dlp' && '731aa2a738ed1ea1009d05bc4b56bcf063353519' || '3.7.1' }}
-        fetch-depth: ${{ inputs.family == 'redshift-dlp' && '0' || '1' }}
+        # RedSuite dlp-v2, rebased onto 3.7.2.
+        ref: 0fa1ae3a98630f939650dd9434ee17fb89f337e7
         path: redsuite
         persist-credentials: false
 
