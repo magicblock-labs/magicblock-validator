@@ -9,18 +9,12 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Align the DLP scenarios with the validator and delegation program
+    - name: Resolve the DLP program revision for compatibility checks
       id: dlp
       if: inputs.dlp-v2 == 'true'
       shell: bash
       working-directory: redsuite
       run: |
-        # Apply RedSuite's two upstream receipt parser fixes (#346 and #348).
-        receipt_fix=a81c3f345e42c3944bc815b1020f64230d67732a
-        git diff "$receipt_fix~2" "$receipt_fix" -- core/src/receipt.rs | git apply
-        # The v2 callback receives its cell already allocated. Observe buffer closure
-        # before reading transaction history so nested slot watches cannot lose updates.
-        git apply "$GITHUB_ACTION_PATH/dlp-v2-fixture.patch"
         revision=$(python3 - <<'PYTHON'
         import tomllib
 
@@ -36,12 +30,11 @@ runs:
 
         validator = pins("../magicblock-validator/Cargo.lock")
         if pins("Cargo.lock") != validator:
-            raise SystemExit("Update dlp-v2-fixture.patch to match the validator's DLP and Wheels revisions")
+            raise SystemExit("RedSuite and the validator pin different DLP or Wheels dependencies")
         print(validator[0])
         PYTHON
         )
         echo "revision=$revision" >> "$GITHUB_OUTPUT"
-        echo "cache-suffix=-$(git diff HEAD | git hash-object --stdin)" >> "$GITHUB_OUTPUT"
         echo "REDSUITE_DLP_SO=$GITHUB_WORKSPACE/runroot/target/deploy/delegation_program.so" >> "$GITHUB_ENV"
 
     - name: Resolve RedSuite build inputs
@@ -69,14 +62,14 @@ runs:
       uses: actions/cache/restore@v6
       with:
         path: redsuite-dist/redsuite
-        key: redsuite-cli-v4-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}${{ steps.dlp.outputs.cache-suffix }}
+        key: redsuite-cli-v4-${{ runner.os }}-${{ runner.arch }}-release-portable-${{ steps.source.outputs.sha }}
 
     - name: Restore RedSuite fixtures
       id: fixtures
       uses: actions/cache/restore@v6
       with:
         path: redsuite-dist/deploy
-        key: redsuite-fixtures-v5-${{ steps.source.outputs.fixtures }}${{ steps.dlp.outputs.cache-suffix }}
+        key: redsuite-fixtures-v5-${{ steps.source.outputs.fixtures }}-${{ steps.dlp.outputs.revision || 'rpc' }}
 
     - uses: ./magicblock-validator/.github/actions/setup-build-env
       id: build-env
