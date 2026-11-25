@@ -2,15 +2,16 @@ use std::sync::Arc;
 
 use engine::Engine;
 use hydra_api::{ephemeral::ID as EPHEMERAL_PROGRAM_ID, instruction::ephemeral};
+use keeper::error::KeeperError;
 use magic_root_interface::MagicRootInstruction;
 use nucleus::shutdown::{ShutdownHandle, ShutdownReason};
 use program::args::{CancelTaskRequest, ScheduleTaskRequest, TaskRequest};
-use solana_account::ReadableAccount;
-use solana_instruction::{Instruction, error::InstructionError};
+use solana_account::{AccountMode, ReadableAccount};
+use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_signer::Signer;
-use solana_transaction::{Transaction, TransactionError};
+use solana_transaction::Transaction;
 use tokio::{
     select,
     sync::{Semaphore, mpsc},
@@ -118,21 +119,6 @@ impl TaskSchedulerService {
     }
 }
 
-/// Whether `error` is hydra rejecting the cancel instruction (index 0) because
-/// the crank is not hydra-owned, i.e. the crank closed before execution.
-fn is_crank_owner_rejection(error: &TaskSchedulerError) -> bool {
-    let TaskSchedulerError::RpcClient(error) = error else {
-        return false;
-    };
-    matches!(
-        error.get_transaction_error(),
-        Some(TransactionError::InstructionError(
-            0,
-            InstructionError::InvalidAccountOwner
-        ))
-    )
-}
-
 impl Processor {
     /// Processes a [TaskRequest] from the transaction executor.
     async fn process(&self, request: TaskRequest) {
@@ -194,25 +180,34 @@ impl Processor {
     /// to fail its owner check.
     async fn cancel(&self, request: CancelTaskRequest) -> TaskSchedulerResult<()> {
         let crank = crank_pubkey(&request.authority, request.task_id);
-        if !self.crank_exists(&crank) {
+        if self.crank_is_gone(&crank)? {
             debug!("Hydra crank for task {} is already closed", request.task_id);
             return Ok(());
         }
         let sponsor = self.engine.signer().pubkey();
         let cancel_ix = ephemeral::cancel(sponsor, crank, sponsor);
-        if let Err(error) = self.submit(vec![cancel_ix]).await {
-            // The crank closed between the lookup and execution.
-            if is_crank_owner_rejection(&error) {
-                debug!(
-                    "Hydra crank for task {} closed before cancellation",
-                    request.task_id
-                );
-                return Ok(());
-            }
-            return Err(error);
-        }
+        self.submit(vec![cancel_ix]).await?;
         debug!("Cancelled hydra crank for task {}", request.task_id);
         Ok(())
+    }
+
+    /// Returns whether `crank` is known to be gone: absent or `Missing`.
+    /// A live account owned by anything other than hydra, or a failed lookup,
+    /// is an error rather than a reason to skip the cancel.
+    fn crank_is_gone(&self, crank: &Pubkey) -> TaskSchedulerResult<bool> {
+        let image = self
+            .engine
+            .accounts()
+            .loader()
+            .read(crank, |account| (account.mode(), *account.owner()))
+            .map_err(KeeperError::from)?;
+        match image {
+            None | Some((AccountMode::Missing, _)) => Ok(true),
+            Some((_, owner)) if owner == EPHEMERAL_PROGRAM_ID => Ok(false),
+            Some((_, owner)) => {
+                Err(TaskSchedulerError::UnexpectedCrankOwner { crank: *crank, owner })
+            }
+        }
     }
 
     /// Returns whether a hydra-owned crank account currently exists at `crank`.
@@ -247,8 +242,7 @@ impl Processor {
 mod tests {
     use engine::testkit::TestEngine;
     use nucleus::shutdown::{Service, ShutdownManager};
-    use solana_account::{AccountBuilder, AccountMode};
-    use solana_rpc_client::api::client_error::Error as ClientError;
+    use solana_account::AccountBuilder;
 
     use super::*;
 
@@ -282,7 +276,7 @@ mod tests {
     /// another transaction: the unreachable RPC would turn any submit into an
     /// error.
     #[tokio::test]
-    async fn cancel_of_non_hydra_crank_is_a_noop() {
+    async fn cancel_of_absent_or_closed_crank_is_a_noop() {
         let engine = TestEngine::new().await;
         let processor = unreachable_processor(&engine);
         let authority = Pubkey::new_unique();
@@ -293,15 +287,11 @@ mod tests {
         // Created, then closed: the address is left as a tombstone/placeholder.
         let crank = crank_pubkey(&authority, 2);
         create_account(&engine, crank, EPHEMERAL_PROGRAM_ID).await;
-        assert!(processor.crank_exists(&crank));
+        assert!(!processor.crank_is_gone(&crank).unwrap());
         let delete = MagicRootInstruction::Delete.compose(crank).unwrap();
         engine.execute(&[delete]).await.unwrap();
-        assert!(!processor.crank_exists(&crank));
+        assert!(processor.crank_is_gone(&crank).unwrap());
         processor.cancel(cancel_request(authority, 2)).await.unwrap();
-
-        // Not hydra-owned: not a crank, so considered closed.
-        create_account(&engine, crank_pubkey(&authority, 4), Pubkey::new_unique()).await;
-        processor.cancel(cancel_request(authority, 4)).await.unwrap();
 
         engine.close().await;
     }
@@ -320,27 +310,27 @@ mod tests {
         engine.close().await;
     }
 
-    /// Only hydra's owner rejection of the cancel instruction counts as the
-    /// crank closing mid-flight.
-    #[test]
-    fn owner_rejection_matches_only_cancel_instruction() {
-        let rejection = |index, error| {
-            TaskSchedulerError::RpcClient(ClientError::from(TransactionError::InstructionError(
-                index, error,
-            )))
-        };
-        assert!(is_crank_owner_rejection(&rejection(
-            0,
-            InstructionError::InvalidAccountOwner
-        )));
-        assert!(!is_crank_owner_rejection(&rejection(
-            1,
-            InstructionError::InvalidAccountOwner
-        )));
-        assert!(!is_crank_owner_rejection(&rejection(
-            0,
-            InstructionError::InvalidArgument
-        )));
+    /// An existing account with an unexpected owner surfaces an error instead
+    /// of being treated as an already-closed crank.
+    #[tokio::test]
+    async fn cancel_of_foreign_owned_account_errors() {
+        let engine = TestEngine::new().await;
+        let processor = unreachable_processor(&engine);
+        let authority = Pubkey::new_unique();
+        let crank = crank_pubkey(&authority, 4);
+        let owner = Pubkey::new_unique();
+        create_account(&engine, crank, owner).await;
+
+        let error = processor.cancel(cancel_request(authority, 4)).await.unwrap_err();
+        assert!(
+            matches!(
+                error,
+                TaskSchedulerError::UnexpectedCrankOwner { crank: c, owner: o } if c == crank && o == owner
+            ),
+            "{error}"
+        );
+
+        engine.close().await;
     }
 
     /// Builds a service wired to a real test engine and returns it alongside
