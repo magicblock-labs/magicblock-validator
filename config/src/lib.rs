@@ -4,6 +4,7 @@ use std::{
     ffi::OsString,
     fmt,
     path::{Path, PathBuf},
+    time::Duration,
 };
 
 use clap::{Error as CliError, Parser};
@@ -16,8 +17,10 @@ use figment::{
     providers::{Env, Format, Serialized, Toml},
     value::Uncased,
 };
+use humantime::re::humantime::format_duration;
 use serde::{Deserialize, Serialize};
 use solana_signer::Signer;
+use url::Position;
 
 pub mod config;
 pub mod consts;
@@ -222,104 +225,70 @@ impl LeaderParams {
 
 impl fmt::Display for LeaderParams {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (mut http, mut websocket, mut grpc) = (0, 0, 0);
-        for remote in &self.remotes {
-            match remote {
-                Remote::Http(_) => http += 1,
-                Remote::Websocket(..) => websocket += 1,
-                Remote::Grpc(_) => grpc += 1,
+        let engine = &self.engine;
+        let bytes = engine.ledger.size_limit;
+        let (unit, scale) = match bytes {
+            bytes if bytes >= 1 << 30 => ("GiB", 1 << 30),
+            bytes if bytes >= 1 << 20 => ("MiB", 1 << 20),
+            bytes if bytes >= 1 << 10 => ("KiB", 1 << 10),
+            _ => ("B", 1),
+        };
+        let ledger_limit = bytes as f64 / scale as f64;
+        let precision = if bytes.is_multiple_of(scale) { 0 } else { 2 };
+
+        let blocktime = engine.blockstore.blocktime;
+        let seal_slots = engine.blockstore.superblock;
+        write!(
+            f,
+            "{{authority={} accounts_db={:?} ledger={:?} ledger_limit=\"{ledger_limit:.precision$} {unit}\" block_interval={blocktime:?}",
+            engine.authority.local.pubkey(),
+            engine.accountsdb.directory,
+            engine.ledger.directory,
+        )?;
+        if seal_slots == 0 {
+            f.write_str(" periodic_seals=disabled")?;
+        } else {
+            write!(f, " seal_every_slots={seal_slots}")?;
+            let seconds = (blocktime.as_secs_f64() * seal_slots as f64).round();
+            if let Ok(interval) = Duration::try_from_secs_f64(seconds)
+                && !interval.is_zero()
+            {
+                write!(
+                    f,
+                    " seal_interval_estimate=\"{}\"",
+                    format_duration(interval)
+                )?;
             }
         }
-        let rows = [
-            ("Role", "leader".to_owned()),
-            (
-                "Authority",
-                self.engine.authority.local.pubkey().to_string(),
-            ),
-            (
-                "AccountsDB",
-                format!(
-                    "{} (LRU {})",
-                    self.engine.accountsdb.directory.display(),
-                    self.engine.accountsdb.lru_capacity,
-                ),
-            ),
-            (
-                "Ledger",
-                format!(
-                    "{} (limit {})",
-                    self.engine.ledger.directory.display(),
-                    self.engine.ledger.size_limit,
-                ),
-            ),
-            (
-                "Blocks",
-                format!(
-                    "{:?}; superblock {}",
-                    self.engine.blockstore.blocktime, self.engine.blockstore.superblock,
-                ),
-            ),
-            (
-                "Replication",
-                format!(
-                    "{} ({} followers)",
-                    self.engine.replication.bind_address,
-                    self.engine.replication.allowed_followers.len(),
-                ),
-            ),
-            (
-                "RPC",
-                format!(
-                    "{} ({} Geyser plugins)",
-                    self.aperture.listen,
-                    self.aperture.geyser_plugins.len(),
-                ),
-            ),
-            (
-                "Metrics",
-                format!(
-                    "{} every {:?}",
-                    self.metrics.address, self.metrics.collect_frequency,
-                ),
-            ),
-            (
-                "Remotes",
-                format!("HTTP {http}; WS {websocket}; gRPC {grpc}"),
-            ),
-            (
-                "Chainlink",
-                format!(
-                    "risk {}; resubscribe {:?}",
-                    if self.chainlink.risk.enabled { "enabled" } else { "disabled" },
-                    self.chainlink.resubscription_delay,
-                ),
-            ),
-            (
-                "Services",
-                format!("{} programs; TUI external", self.programs.len()),
-            ),
-        ];
-        let key_width = rows
-            .iter()
-            .map(|(key, _)| key.chars().count())
-            .max()
-            .unwrap_or_default()
-            .max("Setting".len());
-        let value_width = rows
-            .iter()
-            .map(|(_, value)| value.chars().count())
-            .max()
-            .unwrap_or_default()
-            .max("Value".len());
-        let horizontal = |width| "─".repeat(width + 2);
 
-        writeln!(f, "┌{}┬{}┐", horizontal(key_width), horizontal(value_width))?;
-        writeln!(f, "│ {:key_width$} │ {:value_width$} │", "Setting", "Value")?;
-        writeln!(f, "├{}┼{}┤", horizontal(key_width), horizontal(value_width))?;
-        for (key, value) in rows {
-            writeln!(f, "│ {key:key_width$} │ {value:value_width$} │")?;
+        write!(
+            f,
+            " replication_bind={} allowed_followers={} metrics_bind={} geyser_plugins_configured={} risk_checks={} upstreams=",
+            engine.replication.bind_address,
+            engine.replication.allowed_followers.len(),
+            self.metrics.address,
+            self.aperture.geyser_plugins.len(),
+            self.chainlink.risk.enabled,
+        )?;
+        let mut upstreams = f.debug_list();
+        for remote in &self.remotes {
+            let (protocol, url) = match remote {
+                Remote::Http(url) => ("HTTP", url),
+                Remote::Websocket(url, _) => ("WS", url),
+                Remote::Grpc(url) => ("gRPC", url),
+            };
+            let host = &url.0[Position::BeforeHost..Position::AfterPort];
+            upstreams.entry(&format_args!("{protocol}:{host}"));
         }
-        write!(f, "└{}┴{}┘", horizontal(key_width), horizontal(value_width))
+        upstreams.finish()?;
+
+        if !self.programs.is_empty() {
+            f.write_str(" configured_programs=")?;
+            f.debug_list()
+                .entries(self.programs.iter().map(|program| &program.id.0))
+                .finish()?;
+        }
+        f.write_str("}")
     }
 }
 

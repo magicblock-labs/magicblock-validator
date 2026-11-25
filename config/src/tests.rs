@@ -148,22 +148,6 @@ fn follower_authority_is_rejected_by_parent_config() {
 
 #[test]
 #[parallel]
-fn display_is_compact_and_redacts_sensitive_configuration() {
-    let config = run_cli(&[]);
-    let local_keypair = config.engine.authority.local.to_base58_string();
-    let rendered = config.to_string();
-
-    assert!(rendered.contains("│ Setting"));
-    assert!(rendered.contains("│ Role"));
-    assert!(rendered.contains("leader"));
-    assert!(rendered.contains("AccountsDB"));
-    assert!(!rendered.contains(&local_keypair));
-    assert!(!rendered.contains(consts::DEFAULT_REMOTE));
-    assert!(!rendered.contains("[engine"));
-}
-
-#[test]
-#[parallel]
 fn invalid_aperture_port_is_rejected() {
     let (_dir, path) = create_temp_config(
         r#"

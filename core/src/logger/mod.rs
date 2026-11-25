@@ -1,3 +1,5 @@
+use std::fmt::Arguments;
+
 use tracing_log::LogTracer;
 use tracing_subscriber::{EnvFilter, fmt};
 
@@ -145,31 +147,27 @@ impl<'a, 'writer> SpaceSeparatedVisitor<'a, 'writer> {
     fn new(writer: &'a mut Writer<'writer>) -> Self {
         Self { writer, first: true }
     }
+
+    fn record(&mut self, field: &tracing::field::Field, value: Arguments<'_>) {
+        if !self.first {
+            let _ = write!(self.writer, " ");
+        }
+        self.first = false;
+        if field.name() == "message" {
+            let _ = write!(self.writer, "{value}");
+        } else {
+            let _ = write!(self.writer, "{}={value}", field.name());
+        }
+    }
 }
 
 impl tracing::field::Visit for SpaceSeparatedVisitor<'_, '_> {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
-            let _ = write!(self.writer, "{:?}", value);
-        } else {
-            if !self.first {
-                let _ = write!(self.writer, " ");
-            }
-            let _ = write!(self.writer, "{}={:?}", field.name(), value);
-            self.first = false;
-        }
+        self.record(field, format_args!("{value:?}"));
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        if field.name() == "message" {
-            let _ = write!(self.writer, "{}", value);
-        } else {
-            if !self.first {
-                let _ = write!(self.writer, " ");
-            }
-            let _ = write!(self.writer, "{}={}", field.name(), value);
-            self.first = false;
-        }
+        self.record(field, format_args!("{value}"));
     }
 }
 
