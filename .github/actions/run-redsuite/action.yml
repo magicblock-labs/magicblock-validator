@@ -1,5 +1,5 @@
 name: Run RedSuite
-description: Build or restore artifacts, run one family, and collect logs
+description: Prepare artifacts, run one family, and collect logs
 
 inputs:
   family:
@@ -15,29 +15,63 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Configure RedSuite paths
+    - name: Download RedSuite release artifacts
+      id: redsuite
       shell: bash
+      env:
+        REDSUITE_VERSION: "3.7.2"
       run: |
+        set -euo pipefail
+
+        download() (
+          local release=$1 archive=$2.tar.gz checksum
+          local base="https://github.com/magicblock-labs/redsuite/releases/download/$release"
+          echo "Downloading $archive from RedSuite $release"
+          cd "$downloads"
+          curl --fail-early --fail --silent --show-error --location --retry 3 --remote-name-all \
+            "$base/$archive" "$base/$archive.sha256"
+          read -r checksum _ < "$archive.sha256"
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check -
+        )
+
+        downloads=$(mktemp -d)
+        trap 'rm -rf "$downloads"' EXIT
+        runner="redsuite-runner-$REDSUITE_VERSION-x86_64-unknown-linux-gnu"
+        download "$REDSUITE_VERSION" "$runner"
+        tar -xzf "$downloads/$runner.tar.gz" -C "$downloads"
+
+        pins=$(python3 - "$downloads/$runner/components.toml" <<'PYTHON'
+        import sys
+        import tomllib
+
+        with open(sys.argv[1], "rb") as file:
+            components = tomllib.load(file)
+        fixtures = components["fixtures"]
+        yellowstone = components["yellowstone"]["version"]
+        agave = components["agave"]["version"]
+        print(fixtures["release"], fixtures["version"], f"v{yellowstone}+solana.{agave}")
+        PYTHON
+        )
+        read -r fixture_release fixture_version yellowstone_tag <<< "$pins"
+
+        fixtures="redsuite-fixtures-$fixture_version"
+        download "$fixture_release" "$fixtures"
+        mkdir -p redsuite-dist
+        tar -xzf "$downloads/$fixtures.tar.gz" -C redsuite-dist
+        install -m 755 "$downloads/$runner/bin/redsuite" redsuite-dist/redsuite
+
         {
           echo "REDSUITE_ROOT=$GITHUB_WORKSPACE/runroot"
+          echo "REDSUITE_FIXTURES_DIR=$GITHUB_WORKSPACE/redsuite-dist/$fixtures"
           echo "REDSUITE_YELLOWSTONE_DIR=$GITHUB_WORKSPACE/yellowstone-cache"
           echo "MAGICBLOCK_VALIDATOR_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-validator"
           echo "MAGICBLOCK_VERIFIER_BIN=$GITHUB_WORKSPACE/magicblock-validator/target/debug/magicblock-verifier"
         } >> "$GITHUB_ENV"
+        echo "yellowstone-tag=$yellowstone_tag" >> "$GITHUB_OUTPUT"
 
     - uses: ./magicblock-validator/.github/actions/setup-solana
       with:
         sbf_tools: "false"
-
-    - name: Checkout redsuite
-      uses: actions/checkout@v5
-      with:
-        repository: magicblock-labs/redsuite
-        ref: 3.7.1
-        path: redsuite
-        persist-credentials: false
-
-    - uses: ./magicblock-validator/.github/actions/build-redsuite
 
     - uses: ./magicblock-validator/.github/actions/build-er
 
@@ -127,21 +161,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: ${{ env.REDSUITE_YELLOWSTONE_DIR }}
-        key: >-
-          yellowstone-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles(
-            'magicblock-validator/.github/actions/setup-solana/agave-version',
-            'redsuite/core/src/topology/yellowstone.rs',
-            'redsuite/shared/components.toml'
-          ) }}
-
-    - name: Prepare run root
-      shell: bash
-      run: |
-        set -euxo pipefail
-        mkdir -p runroot/target/deploy runroot/target/redsuite-stack
-        cp redsuite-dist/deploy/* runroot/target/deploy/
-        chmod +x redsuite-dist/redsuite "$MAGICBLOCK_VALIDATOR_BIN" "$MAGICBLOCK_VERIFIER_BIN"
-        test -x "$MAGICBLOCK_VALIDATOR_BIN" -a -x "$MAGICBLOCK_VERIFIER_BIN"
+        key: yellowstone-v2-${{ runner.os }}-${{ runner.arch }}-${{ steps.redsuite.outputs.yellowstone-tag }}
 
     - name: Run RedSuite
       shell: bash
