@@ -89,7 +89,8 @@ pub(crate) fn processed_transaction(
     let sanitized = SanitizedTransaction::try_create(
         versioned,
         MessageHash::Compute,
-        None,
+        // MBV does not produce consensus votes.
+        Some(false),
         // Solana invokes the loader even for v0 messages without lookups.
         // The sanitized Engine view rejects lookup tables at admission.
         SimpleAddressLoader::Enabled(LoadedAddresses::default()),

@@ -9,6 +9,7 @@ use agave_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaBlockInfoV4, ReplicaBlockInfoVersions, ReplicaTransactionInfoV3,
     ReplicaTransactionInfoVersions, SlotStatus,
 };
+use agave_transaction_view::transaction_version::TransactionVersion;
 use engine::Engine;
 use json::Value;
 use keeper::error::KeeperError;
@@ -131,11 +132,15 @@ impl GeyserPluginManager {
     }
 
     fn notify_transaction(&self, transaction: &FullTransaction) {
+        let view = &transaction.transaction;
+        if matches!(view.version(), TransactionVersion::Magicblock) {
+            return;
+        }
         if !self.plugins.iter().any(|plugin| plugin.transaction_notifications_enabled()) {
             return;
         }
         let slot = transaction.execution.slot;
-        let signature = &transaction.transaction.signatures()[0];
+        let signature = &view.signatures()[0];
         let Ok((sanitized, meta)) = processed_transaction(transaction).inspect_err(|error| {
             warn!(slot, %signature, ?error, "failed to convert engine transaction for Geyser");
         }) else {
