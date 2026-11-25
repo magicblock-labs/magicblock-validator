@@ -1,8 +1,10 @@
-use crate::account::ProgramConfig;
-use solana_account_decoder::UiAccountEncoding;
+use solana_account::ReadableAccount;
 
 use super::prelude::*;
-use crate::encoder::{AccountEncoder, ProgramAccountEncoder};
+use crate::{
+    account::{ProgramConfig, encoding::AccountEncoder, matches_filters},
+    requests::payload::NotificationPayload,
+};
 
 impl WsDispatcher {
     pub(crate) async fn program_subscribe(
@@ -13,19 +15,23 @@ impl WsDispatcher {
         let ProgramConfig { config, filters } =
             request.optional::<ProgramConfig>(1)?.unwrap_or_default();
 
-        let encoding = config.account_config.encoding.unwrap_or(UiAccountEncoding::Base58);
-
         let filters = filters.unwrap_or_default();
-        let encoder = AccountEncoder {
-            encoding,
-            data_slice: config.account_config.data_slice,
-        };
-        let encoder = ProgramAccountEncoder { encoder, filters };
+        let encoder = AccountEncoder::from(config.account_config);
 
         let rx = self.engine.accounts().subscribe_program(pubkey).await;
         let engine = self.engine.clone();
         Ok(self.forward(rx, move |id, (pubkey, account)| {
-            encoder.encode(context_slot(&engine), &pubkey, &account, id)
+            if !matches_filters(&filters, account.data()) {
+                return Ok(None);
+            }
+            let block = engine.blocks().latest();
+            let encoded = encoder.encode(&pubkey, &account, |mint| {
+                mint.read(&engine.accounts().loader(), block.time)
+            });
+            let Some(account) = encoder.program_row(account.owner(), pubkey, encoded) else {
+                return Ok(None);
+            };
+            NotificationPayload::encode(account, block.slot, "programNotification", id).map(Some)
         }))
     }
 }

@@ -2,9 +2,8 @@ use ::metrics::metrics::{AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME};
 use chainlink::{ProdChainlink, errors::ChainlinkResult};
 use engine::Engine;
 use nucleus::runtime::TransactionView;
-use serde::{Deserialize, Deserializer, Serialize, de::Error as _};
-use solana_account::{AccountMode, AccountSharedData};
-use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig, encode_ui_account};
+use serde::{Deserialize, Deserializer, de::Error as _};
+use solana_account::AccountSharedData;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
@@ -14,10 +13,10 @@ use solana_transaction_status::UiTransactionEncoding;
 use spl_token_2022::{generic_token_account::GenericTokenAccount, state::Account as TokenAccount};
 use std::sync::Arc;
 
-use crate::{
-    RpcResult, error::RpcError, requests::params::Serde32Bytes, transaction::decode_transaction,
-};
+use crate::{RpcResult, error::RpcError, transaction::decode_transaction};
 use tracing::warn;
+
+pub(crate) mod encoding;
 
 /// Account synchronization and scoped reads used by fetch-capable RPCs.
 pub(crate) struct Accounts {
@@ -30,11 +29,6 @@ impl Accounts {
         Self { engine, chainlink }
     }
 
-    /// Uninitialized images are storage placeholders, not RPC-visible accounts.
-    pub(crate) fn account_is_visible(account: &AccountSharedData) -> bool {
-        !account.is(AccountMode::Missing)
-    }
-
     /// Ensure best-effort, then project the account while its borrowed image is scoped.
     pub(crate) async fn read<R>(
         &self,
@@ -43,26 +37,18 @@ impl Accounts {
         claims: &mut u64,
         reader: impl Fn(&AccountSharedData) -> R,
     ) -> Option<R> {
-        // Single-account RPCs tolerate ensure failures and read any existing image.
-        let _ = self.fetch(&[*pubkey], origin, "account", claims).await;
+        self.ensure_one(pubkey, origin, claims).await;
         self.engine.accounts().loader().read(pubkey, reader).ok().flatten()
     }
 
-    /// Read projections in request order after best-effort synchronization.
-    pub(crate) async fn read_many<R>(
+    /// Single-account RPCs tolerate ensure failures and read any existing image.
+    pub(crate) async fn ensure_one(
         &self,
-        pubkeys: &[Pubkey],
+        pubkey: &Pubkey,
         origin: AccountFetchEntrypoint,
         claims: &mut u64,
-        reader: impl Fn(&Pubkey, &AccountSharedData) -> R,
-    ) -> Vec<Option<R>> {
-        self.ensure(pubkeys, origin, claims).await;
-        let accessor = self.engine.accounts();
-        let loader = accessor.loader();
-        pubkeys
-            .iter()
-            .map(|pubkey| loader.read(pubkey, |account| reader(pubkey, account)).ok().flatten())
-            .collect()
+    ) {
+        let _ = self.fetch(&[*pubkey], origin, "account", claims).await;
     }
 
     /// Decode and synchronize transaction keys; unlike account reads, fetch errors reject admission.
@@ -115,27 +101,6 @@ impl Accounts {
         let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&[scope]).start_timer();
         *claims += self.chainlink.ensure_accounts(pubkeys, origin).await?;
         Ok(())
-    }
-}
-
-/// A keyed RPC account whose pubkey uses the allocation-free Base58 serializer.
-#[derive(Serialize)]
-pub(crate) struct AccountWithPubkey {
-    pubkey: Serde32Bytes,
-    account: UiAccount,
-}
-
-impl AccountWithPubkey {
-    pub(crate) fn new(
-        pubkey: Pubkey,
-        account: &AccountSharedData,
-        encoding: UiAccountEncoding,
-        slice: Option<UiDataSliceConfig>,
-    ) -> Self {
-        Self {
-            pubkey: pubkey.into(),
-            account: encode_ui_account(&pubkey, account, encoding, None, slice),
-        }
     }
 }
 

@@ -5,11 +5,13 @@ use std::collections::HashSet;
 use keeper::testkit::{load_v42_lamports, store_v42};
 use setup::{PROGRAM_ID, RpcTestEnv, TOKEN_PROGRAM_ID, remote_account_claims_header};
 use solana_account::{AccountMode, accounts_equal};
+use solana_account_decoder::UiAccountData;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
     config::RpcProgramAccountsConfig,
     filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
-    request::{MAX_MULTIPLE_ACCOUNTS, TokenAccountsFilter},
+    request::{MAX_MULTIPLE_ACCOUNTS, RpcRequest, TokenAccountsFilter},
+    response::{Response, RpcKeyedAccount},
 };
 
 mod setup;
@@ -409,7 +411,7 @@ async fn test_get_program_accounts() {
     );
 }
 
-/// Verifies `getTokenAccountsByOwner` using both Mint and ProgramId filters.
+/// Verifies owner filters and that jsonParsed token amounts use the mint's decimals.
 #[tokio::test]
 async fn test_get_token_accounts_by_owner() {
     let env = RpcTestEnv::new().await;
@@ -433,6 +435,29 @@ async fn test_get_token_accounts_by_owner() {
         assert_eq!(accounts.len(), 2, "should return two token accounts");
         assert!(accounts.iter().any(|a| a.pubkey == acc1.to_string()));
         assert!(accounts.iter().any(|a| a.pubkey == acc2.to_string()));
+    }
+
+    let parsed: Response<Vec<RpcKeyedAccount>> = env
+        .rpc
+        .send(
+            RpcRequest::GetTokenAccountsByOwner,
+            json::json!([
+                owner.to_string(),
+                { "programId": TOKEN_PROGRAM_ID.to_string() },
+                { "encoding": "jsonParsed" },
+            ]),
+        )
+        .await
+        .expect("failed to fetch parsed token accounts by owner");
+    assert_eq!(parsed.value.len(), 2);
+    for row in parsed.value {
+        let UiAccountData::Json(data) = row.account.data else {
+            panic!("jsonParsed token account returned binary data");
+        };
+        let amount = &data.parsed["info"]["tokenAmount"];
+        assert_eq!(amount["amount"], RpcTestEnv::TOKEN_AMOUNT.to_string());
+        assert_eq!(amount["decimals"], 9);
+        assert_eq!(amount["uiAmount"], 10.0);
     }
 
     // Test with a non-existent mint

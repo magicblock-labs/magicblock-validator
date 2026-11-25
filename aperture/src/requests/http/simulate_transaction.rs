@@ -1,10 +1,9 @@
-use crate::account::TransactionKind;
-use crate::transaction::{live_inner_instructions, replace_blockhash};
 use std::{collections::HashMap, sync::Arc};
 
 use ::metrics::metrics::AccountFetchEntrypoint;
+use engine::Engine;
 use solana_account::AccountSharedData;
-use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
+use solana_account_decoder::{UiAccount, UiAccountEncoding};
 use solana_message::AccountKeys;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{
@@ -15,8 +14,13 @@ use solana_transaction_status::{UiTransactionEncoding, parse_ui_inner_instructio
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{
+    account::{
+        TransactionKind,
+        encoding::{AccountEncoder, TokenMint},
+    },
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
+    transaction::{live_inner_instructions, replace_blockhash},
 };
 
 impl RpcHandlers {
@@ -113,22 +117,12 @@ impl RpcHandlers {
                         claims,
                     )
                     .await;
-                let post_accounts = post_accounts.into_iter().collect::<HashMap<_, _>>();
-                let accessor = self.engine.accounts();
-                let loader = accessor.loader();
-                let mut accounts = Vec::with_capacity(pubkeys.len());
-                for pubkey in pubkeys {
-                    let encode = |account: &AccountSharedData| {
-                        encode_ui_account(&pubkey, account, accounts_encoding, None, None)
-                    };
-                    // Read current state only when simulation did not return this address.
-                    let account = match post_accounts.get(&pubkey) {
-                        Some(account) => Some(encode(account)),
-                        None => loader.read(&pubkey, encode).ok().flatten(),
-                    };
-                    accounts.push(account);
-                }
-                Some(accounts)
+                Some(encode_simulated_accounts(
+                    &self.engine,
+                    accounts_encoding,
+                    &pubkeys,
+                    post_accounts,
+                ))
             }
         } else {
             None
@@ -154,4 +148,33 @@ impl RpcHandlers {
         let slot = record.slot;
         ResponsePayload::encode(&request.id, result, slot)
     }
+}
+
+/// Prefer post-simulation images for both requested accounts and their mints.
+fn encode_simulated_accounts(
+    engine: &Engine,
+    encoding: UiAccountEncoding,
+    pubkeys: &[Pubkey],
+    post_accounts: Vec<(Pubkey, AccountSharedData)>,
+) -> Vec<Option<UiAccount>> {
+    let post_accounts = post_accounts.into_iter().collect::<HashMap<_, _>>();
+    let live_accounts = engine.accounts();
+    let loader = live_accounts.loader();
+    let unix_timestamp = engine.blocks().latest().time;
+    let encoder = AccountEncoder::new(encoding, None);
+    let load_mint = |mint: TokenMint| match post_accounts.get(&mint.address) {
+        Some(account) => mint.decode(account, unix_timestamp),
+        None => mint.read(&loader, unix_timestamp),
+    };
+
+    pubkeys
+        .iter()
+        .map(|pubkey| {
+            let encode = |account: &AccountSharedData| encoder.encode(pubkey, account, load_mint);
+            match post_accounts.get(pubkey) {
+                Some(account) => Some(encode(account)),
+                None => loader.read(pubkey, encode).ok().flatten(),
+            }
+        })
+        .collect()
 }

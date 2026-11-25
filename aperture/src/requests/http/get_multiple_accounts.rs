@@ -1,12 +1,10 @@
-use crate::account::Accounts;
 use ::metrics::metrics::AccountFetchEntrypoint;
-use solana_account::AccountSharedData;
-use solana_account_decoder::{UiAccountEncoding, encode_ui_account};
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{config::RpcAccountInfoConfig, request::MAX_MULTIPLE_ACCOUNTS};
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{
+    account::encoding::AccountEncoder,
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
 };
@@ -26,25 +24,21 @@ impl RpcHandlers {
         let pubkeys: Vec<Pubkey> = pubkeys.into_iter().map(Into::into).collect();
 
         let config = request.optional::<RpcAccountInfoConfig>(1)?.unwrap_or_default();
-        let encoding = config.encoding.unwrap_or(UiAccountEncoding::Base58);
-        let slice = config.data_slice;
-        let reader = |pubkey: &Pubkey, account: &AccountSharedData| {
-            Accounts::account_is_visible(account)
-                .then(|| encode_ui_account(pubkey, account, encoding, None, slice))
-        };
-
-        let ensured_accounts = self
-            .accounts
-            .read_many(
+        self.accounts
+            .ensure(
                 &pubkeys,
                 AccountFetchEntrypoint::RpcGetMultipleAccounts,
                 claims,
-                reader,
             )
             .await;
-        let accounts = ensured_accounts.into_iter().map(Option::flatten).collect::<Vec<_>>();
-
-        let slot = self.engine.blocks().latest().slot;
-        ResponsePayload::encode(&request.id, accounts, slot)
+        let block = self.engine.blocks().latest();
+        let encoder = AccountEncoder::from(config);
+        let accounts = self.engine.accounts();
+        let loader = accounts.loader();
+        let accounts = pubkeys
+            .iter()
+            .map(|pubkey| encoder.read_visible(&loader, pubkey, block.time))
+            .collect::<Vec<_>>();
+        ResponsePayload::encode(&request.id, accounts, block.slot)
     }
 }

@@ -22,6 +22,7 @@ tokio = { workspace = true }
 tokio-util = { workspace = true }
 
 # magicblock
+accountsdb = { workspace = true }
 engine = { workspace = true }
 ledger = { workspace = true }
 chainlink = { workspace = true }
@@ -46,7 +47,9 @@ solana-transaction = { workspace = true, features = ["wincode"] }
 solana-transaction-context = { workspace = true }
 solana-transaction-error = { workspace = true }
 solana-transaction-status = { workspace = true }
-spl-token-2022 = { workspace = true }
+spl-token = { workspace = true }
+# Match the mint extension types consumed by solana-account-decoder.
+spl-token-2022 = { package = "spl-token-2022-interface", version = "3.1" }
 
 
 # misc
