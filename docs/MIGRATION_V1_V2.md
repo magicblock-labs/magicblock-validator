@@ -3,6 +3,7 @@
 - [Prepare](#prepare)
 - [Configuration changes](#configuration-changes)
 - [Cutover](#cutover)
+- [Repair an already-migrated node](#repair-an-already-migrated-node)
 - [Validation](#validation)
 - [Replication](#replication)
 - [Retire legacy history](#retire-legacy-history)
@@ -10,21 +11,33 @@
 
 ## Prepare
 
-Stage **v2.0.0** binaries (`magicblock-validator`, `magicblock-verifier`, and
-`magicblock`) and [adb-migrator 1.5.0](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md).
-Before stopping V1, save a few account samples and transaction signatures for
-the post-migration checks.
+Stage `magicblock-validator`, `magicblock-verifier`, and `magicblock` from the
+[Validator v2.0.5 release](https://github.com/magicblock-labs/magicblock-validator/releases/tag/v2.0.5).
+For a fresh V1 cutover, build **adb-migrator 1.9.0** from its release tag with
+[`cargo build --release --locked`](https://github.com/magicblock-labs/adb-migrator/blob/1.9.0/README.md#2-build-and-configure).
+If V2 has already started on the migrated
+AccountsDB and needs a fix, see [Repair an already-migrated node](#repair-an-already-migrated-node)
+instead of rerunning the migration.
+
+Validator v2.0.5 uses Engine 0.26.3; the migrator writes the Engine 0.26.0
+AccountsDB format. Rehearse migration and startup with this exact pair before
+cutover. Save a few account samples and transaction signatures from V1 for the
+post-migration checks.
 
 Stage `hydra-cranker` as a separate systemd service/container on the ER host,
 with a keypair funded on the ER. For Linux x64:
 
 ```sh
-npm install -g @magicblock-labs/hydra-cranker-linux-x64@0.2.1
+npm install -g @magicblock-labs/hydra-cranker-linux-x64@0.2.2
 ```
 
-Use the matching platform package on other hosts. Ephemeral Hydra is already
-deployed on devnet and mainnet; no on-chain deployment is needed. See
-[Hydra operation](https://github.com/magicblock-labs/magicblock-validator/issues/1815).
+Use the matching platform package on other hosts. Before cutover, verify the
+target cluster's deployed **ephemeral Hydra program** supports the tasks you
+need to schedule. Hydra 0.2.2 raises the `Create` limit from 32 to 64 account
+metas **per scheduled instruction**. The migrator writes crank accounts directly,
+so an imported crank can trigger even if a later create or reschedule would
+hit the old limit. Upgrading the cranker or validator does not upgrade that
+program. See [Hydra operation](https://github.com/magicblock-labs/magicblock-validator/issues/1815).
 
 For Yellowstone, use the [MBV 2.0 branch](https://github.com/magicblock-labs/yellowstone-grpc/tree/mbv-2.0.0)
 and its [plugin build/config guide](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-2.0.0/yellowstone-grpc-geyser/README.md).
@@ -62,7 +75,7 @@ reflink support with `cp --reflink=always` on a nonempty temporary file.
 **Size ledger retention around the existing disk usage.** Engine's `size-limit`
 measures total used bytes on the ledger filesystem, including legacy RocksDB and
 any other files on that filesystem. A symlink to another filesystem doesn't count
-the target's usage against this limit. See [retention accounting](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/ledger/README.md#retention).
+the target's usage against this limit. See [retention accounting](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/ledger/README.md#retention).
 
 If the legacy ledger already occupies 60–70% of the filesystem, provision enough
 capacity for several days of coexistence. Set `size-limit` above the existing
@@ -76,11 +89,11 @@ allows roughly 200 GiB for V2 growth and leaves 124 GiB below filesystem capacit
 
 ### Programs and healthchecks
 
-Download [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/programs/v42-calculator-program/README.md)
+Download [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/programs/v42-calculator-program/README.md)
 from the same release as the validator for the operator healthcheck:
 
 ```sh
-gh release download v2.0.0 --repo magicblock-labs/magicblock-validator \
+gh release download v2.0.5 --repo magicblock-labs/magicblock-validator \
   --pattern v42_calculator_program.so --dir /opt/magicblock/programs
 ```
 
@@ -186,7 +199,7 @@ at the next slot divisible by `superblock`, plus archive time.
 persisted-state divergence between seals; followers use the upstream records.
 Checksumming pauses execution, so adjust the example cadence for your state size.
 Checkpoints don't create snapshots or recovery points.
-See [checkpoint validation](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md#stream-processing).
+See [checkpoint validation](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/replicator/README.md#stream-processing).
 
 ### Service environment and command line
 
@@ -228,7 +241,7 @@ claim schedule) with a cron job/systemd timer at the same cadence. Each invocati
 claims once and exits:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock claim-fees --config /etc/magicblock/validator-v2.toml
+/opt/magicblock/v2.0.5/magicblock claim-fees --config /etc/magicblock/validator-v2.toml
 ```
 
 The leader still initializes fee vaults at startup, but doesn't claim automatically.
@@ -240,7 +253,7 @@ values are unchanged. If the endpoint, block time, or fee metadata needs updatin
 run `sync` before reopening ingress:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock domain sync \
+/opt/magicblock/v2.0.5/magicblock domain sync \
   --config /etc/magicblock/validator-v2.toml \
   --country-code US --fqdn https://validator.example.com
 ```
@@ -259,16 +272,17 @@ commands and service lifecycle are covered in [validation](#validation).
 
 ### 1. Stop V1
 
-Drain ingress and stop the V1 leader and replicas. Keep them stopped. Retain the
-complete source: AccountsDB, both service SQLite databases, and their WAL/SHM files
-from the same stop.
+Drain ingress and stop the V1 leader and replicas. Keep them stopped. Wait for
+previously submitted base-chain transactions to finalize or expire before running
+the migrator. Retain the complete source: AccountsDB, both service SQLite
+databases, and their WAL/SHM files from the same stop.
 
 ### 2. Migrate
 
 Substitute deployment paths and the base-chain RPC URL:
 
 ```sh
-MIGRATOR=/opt/adb-migrator/1.5.0/adb-migrator
+MIGRATOR=/opt/adb-migrator/1.9.0/adb-migrator
 SOURCE=/home/magicblock/ledger
 DESTINATION=/srv/magicblock-v2/accountsdb/migrated
 BASE_RPC_URL=https://your-base-chain-rpc.example
@@ -284,12 +298,20 @@ SLOT_DURATION_MS=50
 
 `SOURCE` contains `accountsdb/main` and both SQLite databases; all three are
 required. `DESTINATION` must not exist, but its parent must exist on the CoW mount.
-Match `SLOT_DURATION_MS` to V2's block time. The RPC needs transaction history for
-base-chain reconciliation.
+Match `SLOT_DURATION_MS` to V2's block time. The base-chain RPC needs transaction
+history for reconciliation. It is required for delegated accounts even when
+SQLite already contains commit IDs: the migrator starts local commit counters
+from the current confirmed delegation, not historical SQLite rows.
 
-Review the dry-run account/service counts and every `Unresolved intent` ID.
-**Unresolved work may be omitted despite a successful exit.** Resolve or account
-for those omissions before migrating.
+Even a dry run can update V1 AccountsDB metadata or resize its index. Retain a
+separate copy of the original snapshot.
+
+Review the dry-run account/service counts, including closed, foreign, and stale
+delegation images. Investigate every `Unresolved intent` ID before proceeding;
+unresolved work can be omitted despite a successful exit. Migration stops if
+it cannot safely assign queued commit IDs or if dropping a closed delegation
+would cause V2 to skip attached actions. See the [dry-run report guide](https://github.com/magicblock-labs/adb-migrator/blob/1.9.0/README.md#3-dry-run-and-review)
+for what is retained or omitted.
 
 Run without `--dry-run`:
 
@@ -307,14 +329,16 @@ Require exit status `0`, `Outcome: ✅ Passed`, and matching `Migration digest` 
 Dry-run and migration digests can differ because recovery timestamps differ.
 
 The migration carries accounts, queued intents, active tasks as Hydra cranks, and
-recoverable committor work. No separate SQLite task migration is needed. Recovery rules:
+recoverable committor work. It preserves Magic rent backing, funds imported Hydra
+cranks from the validator sponsor, and preserves Magic ATA overlays as local
+Magic accounts. No separate scheduler migration is needed. Recovery rules:
 
 - Committor recovery uses a 14-day window; completed/expired groups are excluded.
 - Cancelled/exhausted tasks and task failure history are excluded.
 - Future task delays are preserved, with at least two destination slots before
   execution and no offline catch-up.
 
-See the [migrator's recovery rules](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md#recovery-behavior)
+See the [migrator's recovery rules](https://github.com/magicblock-labs/adb-migrator/blob/1.9.0/README.md#recovery-behavior)
 for reconciliation and sequence handling.
 
 ### 3. Link the legacy ledger and start V2
@@ -332,7 +356,7 @@ remain stopped while V2 uses them.
 Start the leader through its service unit, with the positional config path:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock-validator /etc/magicblock/validator-v2.toml
+/opt/magicblock/v2.0.5/magicblock-validator /etc/magicblock/validator-v2.toml
 ```
 
 Keep ingress closed for validation. Startup can submit fee-vault setup transactions
@@ -353,6 +377,39 @@ hydra-cranker --ephemeral \
 
 Run one for each ER. Scheduled tasks won't execute without it.
 
+## Repair an already-migrated node
+
+For a stopped, standalone **Validator v2.0.4** that has already run on a migrated
+AccountsDB, build [adb-migrator 2.1.0](https://github.com/magicblock-labs/adb-migrator/blob/2.1.0/README.md)
+from its release tag. This is a repair tool, not a V1 migrator. If the node is
+still on v2.0.3 and only needs the rent and Magic ATA repairs, see the
+[2.0.0 repair guide](https://github.com/magicblock-labs/adb-migrator/blob/2.0.0/README.md).
+Do not run either repair as a routine step after a fresh 1.9.0 migration.
+
+Use the **original V1 snapshot** (with its scheduler SQLite database and any
+WAL), the **current V2 AccountsDB**, and the **original migration slot duration**.
+Follow the linked guide and review the dry run before applying changes in place.
+The tool restores rent flags, funds matching Hydra cranks, and reclassifies
+matching Magic ATA overlays. It reports missing or changed candidates instead of
+recreating them.
+
+To repair stale commit counters with 2.1.0, also supply the original committor
+SQLite database with its WAL, if present, and add `--base-rpc-url` for the
+validator's base chain. The tool uses finalized state for the same delegation.
+It leaves accounts with pending commits, failed undelegations, or uncertain
+delegation history unchanged.
+
+Repair only when no verifiers are following the database and the leader can
+restart from the active AccountsDB without restoring an older snapshot or
+replaying ledger entries. Keep the ledger unchanged. After restart, wait for a
+new completed snapshot before relying on snapshot recovery or bootstrapping a
+verifier; replay does not reproduce offline edits.
+
+For an existing V2 deployment, the [v2.0.5 upgrade](https://github.com/magicblock-labs/magicblock-validator/releases/tag/v2.0.5)
+also assumes **no active replication and no replay of pre-upgrade ledger
+entries**. Keep leader and verifier builds aligned. A fresh V1 cutover starts
+with a new Engine ledger; the legacy RocksDB link serves history, not replay.
+
 ## Validation
 
 Run the live failure monitor alongside the leader, starting and stopping it with
@@ -360,7 +417,7 @@ the validator service. Keep it enabled after migration and wait for its subscrip
 before sending validation transactions:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock monitor --url http://127.0.0.1:8899
+/opt/magicblock/v2.0.5/magicblock monitor --url http://127.0.0.1:8899
 ```
 
 The command has no monitoring deadline and exits on WebSocket disconnection.
@@ -375,7 +432,7 @@ Chainlink and admission failures. See [monitor usage](../bins/magicblock/README.
 Then run the active healthcheck:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock healthcheck \
+/opt/magicblock/v2.0.5/magicblock healthcheck \
   --url http://127.0.0.1:8899 --timeout 10s
 ```
 
@@ -389,8 +446,14 @@ use `RUST_LOG=magicblock=debug`. See the [healthcheck guide](../bins/magicblock/
 - Query known V1 signatures/address history, then execute a small application
   transaction and verify its state changes and V2 history.
 - Complete a delegation → execution → commit/undelegation flow on the base chain.
+  Check representative commit and finalization bundles: v2.0.5 enforces a
+  64-account lock limit per settlement transaction, including keys loaded
+  through address lookup tables.
 - Check recovered committor work, callbacks, and scheduled tasks.
-  Confirm a migrated Hydra crank is triggered by the cranker.
+  Confirm a migrated Hydra crank is triggered by the cranker. Separately, use a
+  test crank to verify that cancellation refunds rent and an atomic reschedule
+  replaces the schedule and payload at the same address. A successful trigger
+  or standalone cancellation does not establish that rescheduling works.
 
 ## Replication
 
@@ -413,12 +476,12 @@ Wait for a **completed leader snapshot**: a finished `accountsdb.tar.zst` in the
 Engine ledger's superblock directories, not a `.tmp` file. Use the filesystem
 archive as the completion signal, not `getHighestSnapshotSlot`. The snapshot
 contains the migrated state needed to bootstrap the verifier.
-See [follower recovery](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md#follower-recovery).
+See [follower recovery](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/replicator/README.md#follower-recovery).
 
 Start each verifier:
 
 ```sh
-/opt/magicblock/v2.0.0/magicblock-verifier /etc/magicblock/verifier-v2.toml
+/opt/magicblock/v2.0.5/magicblock-verifier /etc/magicblock/verifier-v2.toml
 ```
 
 Expect snapshot staging, an internal Engine restart, then a live stream. Check:
@@ -451,11 +514,11 @@ will no longer be available through V2.
 
 ## References
 
-- [adb-migrator 1.5.0](https://github.com/magicblock-labs/adb-migrator/blob/1.5.0/README.md)
+- [Fresh migration: adb-migrator 1.9.0](https://github.com/magicblock-labs/adb-migrator/blob/1.9.0/README.md) · [Repair only: adb-migrator 2.1.0](https://github.com/magicblock-labs/adb-migrator/blob/2.1.0/README.md)
 - [Hydra cranker deployment](https://github.com/magicblock-labs/magicblock-validator/issues/1815)
 - [Yellowstone MBV 2.0 branch](https://github.com/magicblock-labs/yellowstone-grpc/tree/mbv-2.0.0) · [Plugin guide](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-2.0.0/yellowstone-grpc-geyser/README.md) · [Sample config](https://github.com/magicblock-labs/yellowstone-grpc/blob/mbv-2.0.0/yellowstone-grpc-geyser/config.json)
-- [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/programs/v42-calculator-program/README.md) · [Runtime program persistence](../runtime/README.md)
+- [v42 calculator](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/programs/v42-calculator-program/README.md) · [Runtime program persistence](../runtime/README.md)
 - [Leader](../bins/validator/README.md) · [Verifier](../bins/verifier/README.md)
 - [Configuration](../config/README.md) · [Operator commands](../bins/magicblock/README.md)
 - [Metrics](../metrics/README.md)
-- [Engine 0.25.0 replication](https://github.com/magicblock-labs/magicblock-engine/blob/0.25.0/replicator/README.md)
+- [Engine 0.26.3 replication](https://github.com/magicblock-labs/magicblock-engine/blob/0.26.3/replicator/README.md)
