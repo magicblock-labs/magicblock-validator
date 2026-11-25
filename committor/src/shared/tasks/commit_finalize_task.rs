@@ -1,11 +1,9 @@
 use delegation_program_api::{
     AccountSizeClass,
     args::CommitFinalizeArgs,
-    diff::compute_diff,
     instruction_builder::{commit_finalize_from_buffer_size_budget, commit_finalize_size_budget},
 };
 use mbv_core::intent::types::CommittedAccount;
-use solana_account::{Account, ReadableAccount};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
@@ -26,24 +24,11 @@ pub struct CommitFinalizeTask {
 
 impl CommitFinalizeTask {
     #[inline(always)]
-    fn commit_finalize_ix(
-        &self,
-        validator: &Pubkey,
-        base_account: Option<&Account>,
-    ) -> Instruction {
-        let (data, data_is_diff) = if let Some(base_account) = base_account {
-            (
-                compute_diff(base_account.data(), self.committed_account.account.data()).to_vec(),
-                true,
-            )
-        } else {
-            (self.committed_account.account.data.clone(), false)
-        };
-
+    fn commit_finalize_ix(&self, validator: &Pubkey, diff: Option<&[u8]>) -> Instruction {
         let mut args = CommitFinalizeArgs {
             commit_id: self.commit_id,
             lamports: self.committed_account.account.lamports,
-            data_is_diff: data_is_diff.into(),
+            data_is_diff: diff.is_some().into(),
             allow_undelegation: self.allow_undelegation.into(),
             bumps: Default::default(),
             reserved_padding: Default::default(),
@@ -53,7 +38,7 @@ impl CommitFinalizeTask {
             *validator,
             self.committed_account.pubkey,
             &mut args,
-            &data,
+            diff.unwrap_or(&self.committed_account.account.data),
         )
         .0
     }
@@ -62,7 +47,7 @@ impl CommitFinalizeTask {
     fn commit_finalize_from_buffer_ix(
         &self,
         validator: &Pubkey,
-        base_account: Option<&Account>,
+        data_is_diff: bool,
     ) -> Instruction {
         let (data_buffer_pubkey, _) = committor_interface::pdas::buffer_pda(
             validator,
@@ -73,7 +58,7 @@ impl CommitFinalizeTask {
         let mut args = CommitFinalizeArgs {
             commit_id: self.commit_id,
             lamports: self.committed_account.account.lamports,
-            data_is_diff: base_account.is_some().into(),
+            data_is_diff: data_is_diff.into(),
             allow_undelegation: self.allow_undelegation.into(),
             bumps: Default::default(),
             reserved_padding: Default::default(),
@@ -98,12 +83,10 @@ impl CommitFinalizeTask {
     pub fn instruction(&self, validator: &Pubkey) -> Instruction {
         match &self.delivery {
             CommitDelivery::StateInArgs => self.commit_finalize_ix(validator, None),
-            CommitDelivery::StateInBuffer => self.commit_finalize_from_buffer_ix(validator, None),
-            CommitDelivery::DiffInArgs { base_account } => {
-                self.commit_finalize_ix(validator, Some(base_account))
-            }
-            CommitDelivery::DiffInBuffer { base_account } => {
-                self.commit_finalize_from_buffer_ix(validator, Some(base_account))
+            CommitDelivery::StateInBuffer => self.commit_finalize_from_buffer_ix(validator, false),
+            CommitDelivery::DiffInArgs { diff } => self.commit_finalize_ix(validator, Some(diff)),
+            CommitDelivery::DiffInBuffer { .. } => {
+                self.commit_finalize_from_buffer_ix(validator, true)
             }
         }
     }
@@ -115,8 +98,8 @@ impl CommitFinalizeTask {
                 self.delivery = CommitDelivery::StateInBuffer;
                 true
             }
-            CommitDelivery::DiffInArgs { base_account } => {
-                self.delivery = CommitDelivery::DiffInBuffer { base_account };
+            CommitDelivery::DiffInArgs { diff } => {
+                self.delivery = CommitDelivery::DiffInBuffer { diff };
                 true
             }
             other @ (CommitDelivery::StateInBuffer | CommitDelivery::DiffInBuffer { .. }) => {

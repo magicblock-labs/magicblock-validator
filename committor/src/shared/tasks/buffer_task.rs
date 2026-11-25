@@ -8,7 +8,6 @@ use committor_interface::{
     },
     pdas,
 };
-use delegation_program_api::diff::compute_diff;
 use program::Pubkey;
 use solana_instruction::Instruction;
 
@@ -27,33 +26,18 @@ pub(crate) struct BufferPreparation {
 
 impl BufferPreparation {
     pub(crate) fn from_commit_finalize(task: &CommitFinalizeTask) -> Option<Self> {
-        match &task.delivery {
-            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => None,
-            CommitDelivery::StateInBuffer => {
-                let buffer_data = task.committed_account.account.data.clone();
-                let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    buffer_data,
-                    chunks,
-                })
-            }
-            CommitDelivery::DiffInBuffer { base_account } => {
-                let diff = compute_diff(
-                    base_account.data.as_ref(),
-                    &task.committed_account.account.data,
-                )
-                .to_vec();
-                let chunks = Chunks::from_data_length(diff.len(), MAX_WRITE_CHUNK_SIZE);
-                Some(Self {
-                    commit_id: task.commit_id,
-                    pubkey: task.committed_account.pubkey,
-                    buffer_data: diff,
-                    chunks,
-                })
-            }
-        }
+        let buffer_data = match &task.delivery {
+            CommitDelivery::StateInArgs | CommitDelivery::DiffInArgs { .. } => return None,
+            CommitDelivery::StateInBuffer => task.committed_account.account.data.clone(),
+            CommitDelivery::DiffInBuffer { diff } => diff.clone(),
+        };
+        let chunks = Chunks::from_data_length(buffer_data.len(), MAX_WRITE_CHUNK_SIZE);
+        Some(Self {
+            commit_id: task.commit_id,
+            pubkey: task.committed_account.pubkey,
+            buffer_data,
+            chunks,
+        })
     }
 
     /// Returns initialization [`Instruction`]

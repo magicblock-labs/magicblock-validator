@@ -1,5 +1,3 @@
-use solana_account::Account;
-
 /// Describes how commit data is delivered to the base layer.
 ///
 /// Small accounts send data directly in instruction args.
@@ -9,6 +7,6 @@ use solana_account::Account;
 pub enum CommitDelivery {
     StateInArgs,
     StateInBuffer,
-    DiffInArgs { base_account: Account },
-    DiffInBuffer { base_account: Account },
+    DiffInArgs { diff: Vec<u8> },
+    DiffInBuffer { diff: Vec<u8> },
 }
