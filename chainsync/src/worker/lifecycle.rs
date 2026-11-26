@@ -9,7 +9,8 @@ use super::Operations;
 use crate::{
     AccountProperty, ChainSyncAccount, Error, Result, SyncTarget, ata,
     delegation::{self, Delegation},
-    metrics::{self, Op},
+    http::BatchKind,
+    metrics::{self, EnsureCaller, Op},
 };
 
 impl<'a> Operations<'a> {
@@ -40,7 +41,8 @@ impl<'a> Operations<'a> {
         let mut dependencies = BTreeMap::new();
         let prepared = self.sync.prepare_delegation(delegation, &mut dependencies)?;
         self.sync
-            .ensure(
+            .ensure_for(
+                EnsureCaller::Lifecycle,
                 dependencies
                     .into_iter()
                     .map(|(pubkey, property)| ChainSyncAccount { pubkey, property }),
@@ -70,7 +72,11 @@ impl<'a> Operations<'a> {
                 continue;
             };
             if base.read().is(AccountMode::Magic) {
-                let fetched = self.sync.fetcher.fetch(&[ata], Some(raw.read().slot())).await?;
+                let fetched = self
+                    .sync
+                    .fetcher
+                    .fetch(BatchKind::Lifecycle, &[ata], Some(raw.read().slot()))
+                    .await?;
                 let Some(remote) = fetched.accounts.into_iter().next().flatten() else {
                     continue;
                 };
@@ -107,10 +113,13 @@ impl<'a> Operations<'a> {
             // Ordinary acquisition resolves the projection and activates its actions;
             // no lease is held here; acquisition also installs the readonly raw eATA.
             self.sync
-                .ensure(candidates.map(|pubkey| ChainSyncAccount {
-                    pubkey,
-                    property: AccountProperty::Readonly,
-                }))
+                .ensure_for(
+                    EnsureCaller::Lifecycle,
+                    candidates.map(|pubkey| ChainSyncAccount {
+                        pubkey,
+                        property: AccountProperty::Readonly,
+                    }),
+                )
                 .await?;
         }
         Ok(None)
@@ -159,7 +168,7 @@ impl<'a> Operations<'a> {
         if let Some(candidates) = resident {
             return Ok(candidates);
         }
-        let fetched = self.sync.fetcher.fetch(&[pubkey], Some(slot)).await?;
+        let fetched = self.sync.fetcher.fetch(BatchKind::Lifecycle, &[pubkey], Some(slot)).await?;
         let Some(account) = fetched.accounts.into_iter().next().flatten() else {
             return Ok(None);
         };

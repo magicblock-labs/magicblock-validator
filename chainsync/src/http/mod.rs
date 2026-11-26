@@ -43,6 +43,13 @@ type Result<T> = std::result::Result<T, Error>;
 
 pub(super) use fetcher::{FetchedAccounts, Fetcher};
 
+/// The purpose of a logical batch, independent of provider retries.
+pub(super) enum BatchKind {
+    Primary,
+    AtaCompanion,
+    Lifecycle,
+}
+
 impl Error {
     /// Shared classification for retry policy and provider attempt metrics.
     pub(crate) fn outcome(&self) -> Outcome {

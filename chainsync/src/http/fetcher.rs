@@ -17,7 +17,7 @@ use url::Url;
 use crate::metrics::{self, Op};
 use crate::rpc::{AccountConfig, ContextValue, Request, WireAccount};
 
-use super::{Error, Outcome, Result};
+use super::{BatchKind, Error, Outcome, Result};
 
 /// One confirmed RPC response with an optional account image per key, in request order.
 /// Decoded images enter in `Uninit` mode; separate fetches may have different context slots.
@@ -77,6 +77,17 @@ impl Fetcher {
     /// Transient failures retry within a ten-second budget. Malformed responses
     /// fail immediately.
     pub(crate) async fn fetch(
+        &self,
+        kind: BatchKind,
+        keys: &[Pubkey],
+        min_context_slot: Option<u64>,
+    ) -> Result<FetchedAccounts> {
+        let result = self.fetch_with_retry(keys, min_context_slot).await;
+        metrics::http_batch(kind, keys.len(), &result);
+        result
+    }
+
+    async fn fetch_with_retry(
         &self,
         keys: &[Pubkey],
         min_context_slot: Option<u64>,

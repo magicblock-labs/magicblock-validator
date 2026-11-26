@@ -14,7 +14,7 @@ mod rpc;
 mod websocket;
 mod worker;
 
-use std::{borrow::Borrow, sync::Arc};
+use std::{borrow::Borrow, sync::Arc, time::Instant};
 
 use engine::{Engine, EngineError};
 use nucleus::{
@@ -28,6 +28,7 @@ use url::Url;
 pub use account::{AccountProperty, ChainSyncAccount};
 use account::{AccountSubscription, SyncTarget};
 use acquisition::Acquisition;
+use metrics::EnsureCaller;
 
 use crate::http::Fetcher;
 use crate::websocket::Pool;
@@ -176,7 +177,7 @@ impl ChainSync {
             };
             ChainSyncAccount { pubkey, property }
         });
-        self.ensure(requests).await
+        self.ensure_for(EnsureCaller::Transaction, requests).await
     }
 
     /// Selects missing accounts under ordered Engine leases, then synchronizes them.
@@ -213,8 +214,22 @@ impl ChainSync {
         I: IntoIterator,
         I::Item: Borrow<ChainSyncAccount>,
     {
+        self.ensure_for(EnsureCaller::Accounts, requests).await
+    }
+
+    async fn ensure_for(
+        &self,
+        caller: EnsureCaller,
+        requests: impl IntoIterator<Item: Borrow<ChainSyncAccount>>,
+    ) -> Result<u64> {
+        let start = Instant::now();
         let accounts = requests.into_iter().map(|account| *account.borrow()).collect();
-        self.sync(self.missing(accounts).await?, None).await
+        let (result, rounds) = match self.missing(accounts).await {
+            Ok(targets) => Acquisition::new(self, None).run(targets).await,
+            Err(error) => (Err(error), 0),
+        };
+        metrics::ensure(caller, rounds, result.is_ok(), start.elapsed());
+        result
     }
 
     /// Synchronizes selected targets, whether absent or eligible resident state.
@@ -234,7 +249,8 @@ impl ChainSync {
         targets: Vec<SyncTarget<'_>>,
         min_context_slot: Option<u64>,
     ) -> Result<u64> {
-        Acquisition::new(self, min_context_slot).run(targets).await
+        let (result, _) = Acquisition::new(self, min_context_slot).run(targets).await;
+        result
     }
 
     /// Selects only accounts still missing after Engine's ordered lease acquisition.

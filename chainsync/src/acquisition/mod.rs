@@ -18,6 +18,7 @@ use self::{
 };
 use crate::{
     AccountSubscription, ChainSync, ChainSyncAccount, Result, SyncTarget,
+    http::BatchKind,
     metrics::{self, Op},
     websocket::{Reference, Retention},
 };
@@ -33,6 +34,8 @@ pub(super) struct Acquisition<'engine> {
     floor: Option<u64>,
     /// HTTP entries fetched, including companions, nulls, and repeated primary fetches.
     count: u64,
+    /// Primary passes entered across dependency waves, including passes that fail.
+    rounds: usize,
     /// Readonly raw companions installed only after all target leases have been released.
     raw: BTreeMap<Pubkey, AccountBuilder>,
 }
@@ -45,16 +48,20 @@ impl<'engine> Acquisition<'engine> {
             pending: BTreeSet::new(),
             floor,
             count: 0,
+            rounds: 0,
             raw: BTreeMap::new(),
         }
     }
 
     /// Releases unfinished references on failure without retiring completed mirrors.
-    pub(super) async fn run(mut self, targets: Vec<SyncTarget<'engine>>) -> Result<u64> {
+    pub(super) async fn run(mut self, targets: Vec<SyncTarget<'engine>>) -> (Result<u64>, usize) {
         let _timer = metrics::time(Op::ChainSync);
+        if targets.is_empty() {
+            return (Ok(0), 0);
+        }
         let result = self.waves(targets).await;
         self.sync.unsubscribe(self.pending).await;
-        result.map(|()| self.count)
+        (result.map(|()| self.count), self.rounds)
     }
 
     /// Resolves a whole wave before selecting action dependencies under new leases.
@@ -98,6 +105,7 @@ impl<'engine> Acquisition<'engine> {
     ) -> Result<Vec<PendingDelegation>> {
         let mut pending = Vec::new();
         while !targets.is_empty() {
+            self.rounds += 1;
             let mut inputs = targets.into_iter().peekable();
             let mut next = Vec::new();
             let mut min_context_slot = None;
@@ -125,7 +133,7 @@ impl<'engine> Acquisition<'engine> {
     async fn batch(&mut self, plan: FetchPlan<'engine>) -> Result<BatchOutcome<'engine>> {
         let sync = self.sync;
         self.pending.extend(sync.subscribe(&plan.subscriptions).await?);
-        let mut fetched = sync.fetcher.fetch(&plan.keys, self.floor).await?;
+        let mut fetched = sync.fetcher.fetch(BatchKind::Primary, &plan.keys, self.floor).await?;
         self.count += plan.keys.len() as u64;
         let prune = prepare_programs(&plan, &mut fetched, &sync.engine.rent())?;
         let projected = self.fetch_ata_companions(&plan, &fetched).await?;

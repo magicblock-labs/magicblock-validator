@@ -37,7 +37,11 @@ async fn failover_preserves_freshness_and_null_alignment_but_malformed_responses
             &[Some(Account::new(keys[0])), None, Some(Account::new(keys[2]))],
         );
     };
-    let result = scripted(fetcher.fetch(&keys, Some(FRESHNESS_FLOOR)), scenario).await;
+    let result = scripted(
+        fetcher.fetch(BatchKind::Primary, &keys, Some(FRESHNESS_FLOOR)),
+        scenario,
+    )
+    .await;
     let fetched = result.unwrap();
     assert_eq!(fetched.context_slot, RESPONSE_SLOT);
     assert!(fetched.accounts[0].is_some());
@@ -62,7 +66,7 @@ async fn failover_preserves_freshness_and_null_alignment_but_malformed_responses
         let script = async {
             first.next().await.respond(StatusCode::OK, body);
         };
-        let result = scripted(fetcher.fetch(&keys, None), script).await;
+        let result = scripted(fetcher.fetch(BatchKind::Primary, &keys, None), script).await;
         assert!(result.is_err());
         assert!(!second.pending());
     }
