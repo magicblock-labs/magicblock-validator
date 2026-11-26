@@ -2,9 +2,11 @@
 
 use crate::rpc::{DecodeError, Error as RpcError};
 
-/// HTTP fetch failures, retaining provider context and the latest retry cause.
+/// HTTP provider setup and fetch failures.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("at least one HTTP account provider is required")]
+    MissingProviders,
     /// Failure from a configured provider, identified by its input index.
     #[error("HTTP provider {provider}: {source}")]
     Provider {

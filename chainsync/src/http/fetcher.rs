@@ -53,6 +53,9 @@ impl Fetcher {
     /// Creates shared provider cooldowns with redirects and reqwest retries disabled.
     /// Fetch attempts and their overall budget are controlled by this fetcher.
     pub(crate) fn new(providers: Vec<Url>, engine: Engine) -> Result<Self> {
+        if providers.is_empty() {
+            return Err(Error::MissingProviders);
+        }
         let client = Client::builder().redirect(Policy::none()).retry(retry::never()).build()?;
         let providers = providers
             .into_iter()
