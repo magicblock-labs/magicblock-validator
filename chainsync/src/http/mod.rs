@@ -41,10 +41,6 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[expect(
-    unused_imports,
-    reason = "Service assembly consumes this private component in a later layer"
-)]
 pub(super) use fetcher::{FetchedAccounts, Fetcher};
 
 impl Error {
@@ -114,3 +110,6 @@ mod fetcher;
 
 #[cfg(test)]
 mod tests;
+
+/// Maximum account entries in one getMultipleAccounts request.
+pub(crate) const BATCH_LIMIT: usize = 100;

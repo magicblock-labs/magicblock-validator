@@ -106,11 +106,7 @@ pub(super) enum Event {
     },
 }
 
-#[expect(
-    unused_imports,
-    reason = "Service assembly consumes this private component in a later layer"
-)]
-pub(super) use pool::Pool;
+pub(super) use pool::{Pool, Reference, Retention};
 
 mod pool;
 mod session;

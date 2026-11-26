@@ -91,10 +91,6 @@ pub(super) enum Event {
     Lost(usize),
 }
 
-#[expect(
-    unused_imports,
-    reason = "Service assembly owns the client and commands in a later layer"
-)]
 pub(super) use session::{Client, Command, Session};
 
 /// Decodes a wire public key, rejecting any length other than 32 bytes.
