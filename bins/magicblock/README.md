@@ -4,8 +4,9 @@ Operator tools for claiming validator fees, managing a validator's domain record
 checking its RPC and execution paths, and monitoring transaction failures. These
 commands do not start or stop the validator or Engine.
 
-Outcomes and diagnostics are logged to stderr. `RUST_LOG` controls verbosity;
-`RUST_LOG=magicblock=debug` enables healthcheck stages and full failure diagnostics.
+Outcomes and diagnostics are logged to stderr. Healthcheck stages are logged at
+debug level by default; other commands default to info. Override verbosity with
+`RUST_LOG`; use `RUST_LOG=magicblock=debug` for full monitor failure diagnostics.
 
 ## Build
 
@@ -90,6 +91,28 @@ magicblock healthcheck --url http://127.0.0.1:7799 --timeout 10s
 This submits a test transaction and checks execution status and subscription
 notifications within the deadline. A successful check logs the transaction
 signature; a failed check exits nonzero with the failing stage and cause.
+
+To also check slot production, run about every 30 seconds against a directly
+addressed validator. Use a separate state file per validator in an existing,
+writable directory, and supply the validator's configured block time:
+
+```bash
+magicblock healthcheck --url http://127.0.0.1:7799 --timeout 10s \
+  --slot-state /var/lib/magicblock-healthcheck/leader.json --expected-slot-time 50ms
+```
+
+The first run records a baseline. Later runs compare slots advanced with actual
+elapsed time; retries less than ten expected slots apart don't move the baseline.
+A stall, slot regression, or rate below 90% of the expected rate only fails the
+check on the second consecutive anomalous interval or later. A healthy interval
+clears the strike. This tolerates one bad interval without assuming a restart
+duration; a restart affecting two intervals can still fail the check.
+
+An RPC or transaction-probe error still fails the check on the first occurrence.
+A failed `getSlot` request leaves the previous sample intact and neither adds nor
+clears a strike. Consecutive intervals are measured intervals, not consecutive
+command invocations. Start with a fresh state file if the target or its
+configured block time changes.
 
 ## Monitor failures
 
