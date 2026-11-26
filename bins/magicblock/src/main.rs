@@ -63,13 +63,19 @@ impl ConfigArgs {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    init_tracing();
-    Cli::parse().command.run().await
+    let Cli { command } = Cli::parse();
+    let default_filter = match &command {
+        Command::Healthcheck(_) => "info,magicblock=debug",
+        _ => "info",
+    };
+    init_tracing(default_filter);
+    command.run().await
 }
 
 /// Routes operator diagnostics to stderr, with verbosity controlled by `RUST_LOG`.
-fn init_tracing() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+fn init_tracing(default_filter: &str) {
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_filter));
     let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
