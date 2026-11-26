@@ -1,5 +1,4 @@
-use ::metrics::metrics::{AccountFetchEntrypoint, ENSURE_ACCOUNTS_TIME};
-use chainlink::{ProdChainlink, errors::ChainlinkResult};
+use chainsync::{AccountProperty, ChainSync, ChainSyncAccount, Result as ChainSyncResult};
 use engine::Engine;
 use nucleus::runtime::TransactionView;
 use serde::{Deserialize, Deserializer, de::Error as _};
@@ -21,34 +20,28 @@ pub(crate) mod encoding;
 /// Account synchronization and scoped reads used by fetch-capable RPCs.
 pub(crate) struct Accounts {
     engine: Engine,
-    chainlink: Arc<ProdChainlink>,
+    chainsync: Arc<ChainSync>,
 }
 
 impl Accounts {
-    pub(crate) fn new(engine: Engine, chainlink: Arc<ProdChainlink>) -> Self {
-        Self { engine, chainlink }
+    pub(crate) fn new(engine: Engine, chainsync: Arc<ChainSync>) -> Self {
+        Self { engine, chainsync }
     }
 
     /// Ensure best-effort, then project the account while its borrowed image is scoped.
     pub(crate) async fn read<R>(
         &self,
         pubkey: &Pubkey,
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
+        fetches: &mut u64,
         reader: impl Fn(&AccountSharedData) -> R,
     ) -> Option<R> {
-        self.ensure_one(pubkey, origin, claims).await;
+        self.ensure_one(pubkey, fetches).await;
         self.engine.accounts().loader().read(pubkey, reader).ok().flatten()
     }
 
     /// Single-account RPCs tolerate ensure failures and read any existing image.
-    pub(crate) async fn ensure_one(
-        &self,
-        pubkey: &Pubkey,
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
-    ) {
-        let _ = self.fetch(&[*pubkey], origin, "account", claims).await;
+    pub(crate) async fn ensure_one(&self, pubkey: &Pubkey, fetches: &mut u64) {
+        let _ = self.fetch(&[*pubkey], fetches).await;
     }
 
     /// Decode and synchronize transaction keys; unlike account reads, fetch errors reject admission.
@@ -56,50 +49,33 @@ impl Accounts {
         &self,
         transaction: &str,
         encoding: UiTransactionEncoding,
-        kind: TransactionKind,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> RpcResult<TransactionView> {
         let transaction = decode_transaction(transaction, encoding)?;
-        let signature = transaction.signatures()[0];
-        let origin = match kind {
-            TransactionKind::Send => AccountFetchEntrypoint::SendTransaction(signature),
-            TransactionKind::Simulate => AccountFetchEntrypoint::SimulateTransaction(signature),
-        };
-        self.fetch(
-            transaction.static_account_keys(),
-            origin,
-            "transaction",
-            claims,
-        )
-        .await
-        .inspect_err(|error| warn!(?error, "failed to ensure transaction accounts"))
-        .map_err(RpcError::transaction_verification)?;
+        *fetches += self
+            .chainsync
+            .ensure_transaction_accounts(&transaction)
+            .await
+            .inspect_err(|error| warn!(?error, "failed to ensure transaction accounts"))
+            .map_err(RpcError::transaction_verification)?;
         Ok(transaction)
     }
 
     /// Multi-account RPCs log ensure failures but continue with locally available images.
-    pub(crate) async fn ensure(
-        &self,
-        pubkeys: &[Pubkey],
-        origin: AccountFetchEntrypoint,
-        claims: &mut u64,
-    ) {
+    pub(crate) async fn ensure(&self, pubkeys: &[Pubkey], fetches: &mut u64) {
         let _ = self
-            .fetch(pubkeys, origin, "multi-account", claims)
+            .fetch(pubkeys, fetches)
             .await
             .inspect_err(|error| warn!(?error, "failed to ensure accounts"));
     }
 
     /// Account for successful synchronization before any later projection or admission error.
-    async fn fetch(
-        &self,
-        pubkeys: &[Pubkey],
-        origin: AccountFetchEntrypoint,
-        scope: &'static str,
-        claims: &mut u64,
-    ) -> ChainlinkResult<()> {
-        let _timer = ENSURE_ACCOUNTS_TIME.with_label_values(&[scope]).start_timer();
-        *claims += self.chainlink.ensure_accounts(pubkeys, origin).await?;
+    async fn fetch(&self, pubkeys: &[Pubkey], fetches: &mut u64) -> ChainSyncResult<()> {
+        let requests = pubkeys.iter().map(|&pubkey| ChainSyncAccount {
+            pubkey,
+            property: AccountProperty::Readonly,
+        });
+        *fetches += self.chainsync.ensure(requests).await?;
         Ok(())
     }
 }
@@ -124,6 +100,17 @@ pub(crate) struct ProgramConfig {
 /// A size-checked RPC filter with memcmp bytes decoded once, before scanning or subscribing.
 pub(crate) struct PreparedFilter(RpcFilterType);
 
+impl PreparedFilter {
+    /// Matches account data without repeating memcmp decoding.
+    pub(crate) fn matches(&self, data: &[u8]) -> bool {
+        match &self.0 {
+            RpcFilterType::DataSize(size) => data.len() as u64 == *size,
+            RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
+            RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
+        }
+    }
+}
+
 impl<'de> Deserialize<'de> for PreparedFilter {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         /// Wire variants whose memcmp bytes have not yet been decoded or validated.
@@ -146,12 +133,12 @@ impl<'de> Deserialize<'de> for PreparedFilter {
             Filter::DataSize(size) => RpcFilterType::DataSize(size),
             Filter::TokenAccountState => RpcFilterType::TokenAccountState,
             Filter::Memcmp(compare) => {
-                // Reject oversized wire values before allocating decoded bytes. These
-                // are Solana's encoded limits; verify below enforces the raw 128-byte limit.
+                // Bound decoding work using Solana's encoded limits. The upstream
+                // verify below enforces the 128-byte limit for all decoded/raw inputs.
                 let oversized = match &compare.bytes {
                     MemcmpEncodedBytes::Base58(bytes) => bytes.len() > 175,
                     MemcmpEncodedBytes::Base64(bytes) => bytes.len() > 172,
-                    MemcmpEncodedBytes::Bytes(bytes) => bytes.len() > 128,
+                    MemcmpEncodedBytes::Bytes(_) => false,
                 };
                 if oversized {
                     return Err(D::Error::custom(RpcFilterError::DataTooLarge));
@@ -164,11 +151,4 @@ impl<'de> Deserialize<'de> for PreparedFilter {
         filter.verify().map_err(D::Error::custom)?;
         Ok(Self(filter))
     }
-}
-
-/// Selects the transaction-specific synchronization origin used for metrics and fetches.
-#[derive(Clone, Copy)]
-pub(crate) enum TransactionKind {
-    Send,
-    Simulate,
 }

@@ -11,11 +11,9 @@ version.workspace = true
 [dependencies]
 engine = { workspace = true }
 futures-util = { workspace = true }
-chainlink = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }
 magic-program-api = { workspace = true }
-metrics = { workspace = true }
 program = { workspace = true }
 nucleus = { workspace = true }
 solana-hash = { workspace = true }

@@ -1,6 +1,5 @@
 use std::{collections::HashMap, sync::Arc};
 
-use ::metrics::metrics::AccountFetchEntrypoint;
 use engine::Engine;
 use solana_account::AccountSharedData;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
@@ -14,10 +13,7 @@ use solana_transaction_status::{UiTransactionEncoding, parse_ui_inner_instructio
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{
-    account::{
-        TransactionKind,
-        encoding::{AccountEncoder, TokenMint},
-    },
+    account::encoding::{AccountEncoder, TokenMint},
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
     transaction::{live_inner_instructions, replace_blockhash},
@@ -27,7 +23,7 @@ impl RpcHandlers {
     pub(crate) async fn simulate_transaction(
         &self,
         request: &JsonRequest,
-        claims: &mut u64,
+        fetches: &mut u64,
     ) -> HandlerResult {
         let transaction_str = request.required::<&str>(0)?;
         let config = request.optional::<RpcSimulateTransactionConfig>(1)?.unwrap_or_default();
@@ -38,10 +34,8 @@ impl RpcHandlers {
         }
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Base58);
 
-        let mut transaction = self
-            .accounts
-            .prepare_transaction(transaction_str, encoding, TransactionKind::Simulate, claims)
-            .await?;
+        let mut transaction =
+            self.accounts.prepare_transaction(transaction_str, encoding, fetches).await?;
         let number_of_accounts = transaction.static_account_keys().len();
 
         let replacement_blockhash = if config.replace_recent_blockhash {
@@ -109,14 +103,8 @@ impl RpcHandlers {
                     .into_iter()
                     .map(|address| address.parse::<Pubkey>().map_err(RpcError::invalid_params))
                     .collect::<Result<Vec<_>, _>>()?;
-                // Keep synchronization and claim accounting even for simulated images.
-                self.accounts
-                    .ensure(
-                        &pubkeys,
-                        AccountFetchEntrypoint::RpcGetMultipleAccounts,
-                        claims,
-                    )
-                    .await;
+                // Keep synchronization and fetch accounting even for simulated images.
+                self.accounts.ensure(&pubkeys, fetches).await;
                 Some(encode_simulated_accounts(
                     &self.engine,
                     accounts_encoding,

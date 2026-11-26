@@ -15,6 +15,8 @@
 //
 import http from "http";
 import path from "path";
+import fs from "fs";
+import os from "os";
 import { spawn, ChildProcess } from "child_process";
 import { parseStackArgs, vrfServiceConfigs } from "./mbStackConfig";
 
@@ -38,24 +40,26 @@ const BASE_PORT = port("MB_STACK_BASE_PORT", 8899);
 // what readiness is gated on.
 const CRANKER_PORT = port("MB_STACK_CRANKER_PORT", 9797);
 
-// Which base chain the ephemeral-validator clones from / commits to. Defaults to
-// the local mb-test-validator; override (comma-separated remotes, e.g.
-// MB_STACK_ER_REMOTES=devnet) to point the ER at a real provisioned base.
-function erRemotes(): string[] {
-  const override = process.env.MB_STACK_ER_REMOTES;
-  if (override) {
-    return override
-      .split(",")
-      .map((r) => r.trim())
-      .filter((r) => r.length > 0)
-      .flatMap((r) => ["--remotes", r]);
+// Explicit transport settings override the local base endpoints.
+function chainSyncEnv(): NodeJS.ProcessEnv {
+  const remotes = (process.env.MB_STACK_ER_REMOTES ?? "")
+    .split(",").map((value) => value.trim()).filter(Boolean).map((value) => new URL(value));
+  const http = remotes.filter((url) => ["http:", "https:"].includes(url.protocol));
+  const websocket = remotes.filter((url) => ["ws:", "wss:"].includes(url.protocol));
+  if ((remotes.length || process.env.MBV_CHAINSYNC__HTTP) &&
+      ((!http.length && !process.env.MBV_CHAINSYNC__HTTP) ||
+       (!websocket.length && !process.env.MBV_CHAINSYNC__WEBSOCKET) || !process.env.MBV_CHAINSYNC__GRPC)) {
+    throw new Error("External base requires HTTP/WS URLs in MB_STACK_ER_REMOTES and MBV_CHAINSYNC__GRPC");
   }
-  return [
-    "--remotes",
-    `http://${HOST}:${BASE_PORT}`,
-    "--remotes",
-    `ws://${HOST}:${BASE_PORT + 1}`,
-  ];
+  return {
+    MBV_CHAINSYNC__HTTP: process.env.MBV_CHAINSYNC__HTTP ?? JSON.stringify(
+      http.length ? http.map(String) : [`http://${HOST}:${BASE_PORT}`]),
+    MBV_CHAINSYNC__WEBSOCKET: process.env.MBV_CHAINSYNC__WEBSOCKET ?? JSON.stringify(
+      (websocket.length ? websocket.map(String) : [`ws://${HOST}:${BASE_PORT + 1}`])
+        .map((url) => ({ url, "max-connections": 4, "subs-per-connection": 1024 }))),
+    MBV_CHAINSYNC__GRPC: process.env.MBV_CHAINSYNC__GRPC ?? JSON.stringify([
+      { endpoint: `http://${HOST}:${BASE_PORT + 2}`, "duplication-delay": "1s" }]),
+  };
 }
 
 interface Service {
@@ -141,7 +145,7 @@ const SERVICES: Service[] = [
   {
     name: "ephemeral-validator",
     script: "ephemeralValidator.js",
-    args: ["--listen", `${HOST}:${ER_PORT}`, ...erRemotes()],
+    args: ["--listen", `${HOST}:${ER_PORT}`],
     healthPort: ER_PORT,
     tag: "er",
     color: "\x1b[32m", // green
@@ -462,10 +466,25 @@ async function main(): Promise<void> {
   // skip it so we don't boot an idle validator.
   const coreServices = SERVICES.filter((s) => {
     if (s.script === "mbTestValidator.js")
-      return !process.env.MB_STACK_ER_REMOTES;
+      return !process.env.MB_STACK_ER_REMOTES && !process.env.MBV_CHAINSYNC__HTTP;
     if (s.script === "hydraCranker.js") return WITH_CRANKER;
     return true;
   });
+  const er = coreServices.find((service) => service.script === "ephemeralValidator.js")!;
+  er.extraEnv = { ...er.extraEnv, ...chainSyncEnv() };
+  const base = coreServices.find((service) => service.script === "mbTestValidator.js");
+  let pluginDir: string | undefined;
+  if (base) {
+    const libpath = process.env.MB_STACK_GEYSER_PLUGIN;
+    if (!libpath || !fs.existsSync(libpath)) {
+      throw new Error("Local base requires MB_STACK_GEYSER_PLUGIN pointing to an Agave 4.2.2 Yellowstone plugin");
+    }
+    pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), "mb-stack-"));
+    const config = path.join(pluginDir, "geyser.json");
+    fs.writeFileSync(config, JSON.stringify({ libpath: path.resolve(libpath), grpc: { listen: [{ address: `${HOST}:${BASE_PORT + 2}` }] } }));
+    base.args.push("--geyser-plugin-config", config);
+    process.on("exit", () => fs.rmSync(pluginDir!, { recursive: true, force: true }));
+  }
   const services = [
     ...coreServices.slice(0, -1),
     ...vrfServices,

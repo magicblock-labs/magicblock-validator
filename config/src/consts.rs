@@ -22,18 +22,8 @@ pub const DEFAULT_VALIDATOR_KEYPAIR: &str =
 /// Default compute unit price in microlamports
 pub const DEFAULT_COMPUTE_UNIT_PRICE: u64 = 1_000_000;
 
-/// Remote URL Aliases - Mainnet, Testnet, Devnet, and Localhost
-/// Solana mainnet-beta RPC endpoint
-pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com/";
-
-/// Solana testnet RPC endpoint
-pub const TESTNET_URL: &str = "https://api.testnet.solana.com/";
-
 /// Solana devnet RPC endpoint (default for development)
 pub const DEVNET_URL: &str = "https://api.devnet.solana.com/";
-
-/// Localhost RPC endpoint for local development
-pub const LOCALHOST_URL: &str = "http://localhost:8899/";
 
 /// Figment Configuration
 /// Environment variable prefix for configuration (MBV_)
@@ -65,17 +55,3 @@ pub const DEFAULT_METRICS_ADDR: &str = "0.0.0.0:9000";
 
 /// Default frequency of metrics collection in seconds
 pub const DEFAULT_METRICS_COLLECT_FREQUENCY_SEC: u64 = 30;
-
-// ChainLink Defaults
-/// Default delay in milliseconds between resubscribing to accounts after a pubsub reconnection
-pub const DEFAULT_RESUBSCRIPTION_DELAY_MS: u64 = 50;
-
-/// Default period in seconds for scanning DLP undelegation request accounts.
-pub const DEFAULT_UNDELEGATION_REQUEST_POLL_INTERVAL_SECS: u64 = 5 * 60;
-
-/// Default URL of the risk server that performs address risk assessments.
-/// Matches the PER risk server's default `risk_listen_addr` (port 3001).
-pub const DEFAULT_RISK_SERVER_URL: &str = "http://127.0.0.1:3001";
-
-/// Default request timeout for risk server calls
-pub const DEFAULT_RISK_REQUEST_TIMEOUT_SEC: u64 = 5;
