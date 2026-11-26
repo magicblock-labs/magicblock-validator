@@ -13,6 +13,7 @@ use delegation_program_api::{
 };
 use engine::Engine;
 use futures::{SinkExt, StreamExt};
+use nucleus::shutdown::{Service, ShutdownManager, ShutdownReason};
 use solana_account::AccountBuilder;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
@@ -34,12 +35,40 @@ use yellowstone_grpc_proto::{
     tonic,
 };
 
-use super::{Error, Event, Result, StreamConfig, client::Command, matcher::Matcher, transaction};
+use super::{Error, Event, Result, StreamConfig, matcher::Matcher, transaction};
 use crate::metrics::{self, Transport};
 use crate::{AccountSubscription, delegation};
 
+/// Account-subscription changes processed by one Yellowstone stream.
+pub(crate) enum Command {
+    /// Newly tracked keys wait for the duplication delay before entering the filter.
+    Track {
+        sub: AccountSubscription,
+        /// Identifies the subscription that may accept the filter confirmation.
+        generation: u64,
+    },
+    /// Stops forwarding updates on receipt; filter removal waits for a rebuild.
+    Remove(Pubkey),
+}
+
+/// Handle for a running session. Commands never wait for the remote stream.
+pub(crate) struct Client {
+    commands: mpsc::UnboundedSender<Command>,
+    hostname: Option<Box<str>>,
+}
+
+impl Client {
+    pub(crate) fn hostname(&self) -> Option<&str> {
+        self.hostname.as_deref()
+    }
+
+    pub(crate) fn command(&self, command: Command) {
+        let _ = self.commands.send(command);
+    }
+}
+
 /// Account subscriptions and delegation matching for one Yellowstone provider stream.
-pub(super) struct Session {
+pub(crate) struct Session {
     id: usize,
     config: StreamConfig,
     pub(super) authority: Pubkey,
@@ -63,8 +92,8 @@ pub(super) struct TrackedAccount {
 }
 
 impl Session {
-    /// Creates empty tracking and delegation state; zero duplication delay is rejected.
-    pub(super) fn new(
+    /// Prepares tracking and delegation state without starting a service.
+    pub(crate) fn new(
         id: usize,
         config: StreamConfig,
         engine: Engine,
@@ -86,10 +115,26 @@ impl Session {
         })
     }
 
+    /// Starts the prepared session under coordinated shutdown.
+    pub(crate) fn start(self, manager: &mut ShutdownManager) -> Client {
+        let (commands, requests) = mpsc::unbounded_channel();
+        let hostname = self.config.endpoint.host_str().map(Box::from);
+        let mut shutdown = manager.handle(Service::ChainSyncGrpc(self.id));
+        tokio::spawn(async move {
+            let reason = tokio::select! {
+                biased;
+                _ = shutdown.signalled() => ShutdownReason::Signalled,
+                Err(error) = self.run(requests) => ShutdownReason::Error(Box::new(error)),
+            };
+            shutdown.terminate(reason);
+        });
+        Client { commands, hostname }
+    }
+
     /// Reports lost coverage before retrying recoverable stream failures.
     /// Yellowstone's reconnect backoff begins only after a subscription succeeds;
     /// initial connection and subscription failures need an outer retry delay.
-    pub(super) async fn run(mut self, mut commands: UnboundedReceiver<Command>) -> Result<()> {
+    async fn run(mut self, mut commands: UnboundedReceiver<Command>) -> Result<()> {
         loop {
             let Err(error) = self.subscribe(&mut commands).await else { return Ok(()) };
             let retryable = recoverable(&error);

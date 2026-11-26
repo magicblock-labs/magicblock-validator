@@ -95,7 +95,7 @@ pub(super) enum Event {
     unused_imports,
     reason = "Service assembly owns the client and commands in a later layer"
 )]
-pub(super) use client::{Client, Command};
+pub(super) use session::{Client, Command, Session};
 
 /// Decodes a wire public key, rejecting any length other than 32 bytes.
 fn pubkey(bytes: &[u8]) -> Result<Pubkey> {
@@ -105,7 +105,6 @@ fn pubkey(bytes: &[u8]) -> Result<Pubkey> {
         .map_err(|_| Error::Protocol("invalid public key"))
 }
 
-mod client;
 mod matcher;
 mod session;
 mod transaction;
