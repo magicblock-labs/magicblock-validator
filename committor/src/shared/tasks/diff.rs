@@ -1,51 +1,31 @@
 use std::ops::Range;
 
-use delegation_program_api::diff::{
-    SIZE_OF_CHANGED_LEN, SIZE_OF_NUM_OFFSET_PAIRS, SIZE_OF_SINGLE_OFFSET_PAIR,
-};
-
 const MAX_MERGED_GAP: usize = 8;
-const COMPARE_BLOCK: usize = 64;
 
+/// Merges segments with gaps <= MAX_MERGED_GAP
 pub(crate) fn compute_merged_diff(original: &[u8], changed: &[u8]) -> Option<Vec<u8>> {
     let mut segments: Vec<Range<usize>> = Vec::new();
-    let mut push = |i: usize| match segments.last_mut() {
-        Some(last) if i - last.end <= MAX_MERGED_GAP => last.end = i + 1,
-        _ => segments.push(i..i + 1),
-    };
-    let blocks = original.chunks(COMPARE_BLOCK).zip(changed.chunks(COMPARE_BLOCK));
-    for (block, (old, new)) in blocks.enumerate().filter(|(_, (old, new))| old != new) {
-        let start = block * COMPARE_BLOCK;
-        old.iter()
-            .zip(new)
-            .enumerate()
-            .filter(|(_, (a, b))| a != b)
-            .for_each(|(j, _)| push(start + j));
-    }
-    (original.len()..changed.len()).for_each(&mut push);
-
-    let changed_bytes: usize = segments.iter().map(|segment| segment.len()).sum();
-    let diff_len = SIZE_OF_CHANGED_LEN
-        + SIZE_OF_NUM_OFFSET_PAIRS
-        + SIZE_OF_SINGLE_OFFSET_PAIR * segments.len()
-        + changed_bytes;
-    if diff_len >= changed.len() {
-        return None;
+    for (offset, byte) in changed.iter().enumerate() {
+        if original.get(offset) == Some(byte) {
+            continue;
+        }
+        match segments.last_mut() {
+            Some(last) if offset - last.end <= MAX_MERGED_GAP => last.end = offset + 1,
+            _ => segments.push(offset..offset + 1),
+        }
     }
 
-    let mut diff = Vec::with_capacity(diff_len);
-    diff.extend_from_slice(&(changed.len() as u32).to_le_bytes());
-    diff.extend_from_slice(&(segments.len() as u32).to_le_bytes());
-    let mut offset_in_diff = 0u32;
+    let mut words = vec![changed.len(), segments.len()];
+    let mut offset_in_diff = 0;
     for segment in &segments {
-        diff.extend_from_slice(&offset_in_diff.to_le_bytes());
-        diff.extend_from_slice(&(segment.start as u32).to_le_bytes());
-        offset_in_diff += segment.len() as u32;
+        words.extend([offset_in_diff, segment.start]);
+        offset_in_diff += segment.len();
     }
+    let mut diff: Vec<u8> = words.iter().flat_map(|&word| (word as u32).to_le_bytes()).collect();
     for segment in segments {
         diff.extend_from_slice(&changed[segment]);
     }
-    Some(diff)
+    (diff.len() < changed.len()).then_some(diff)
 }
 
 #[cfg(test)]
