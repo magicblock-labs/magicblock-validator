@@ -48,14 +48,6 @@ type Result<T> = std::result::Result<T, Error>;
 pub(super) use fetcher::{FetchedAccounts, Fetcher};
 
 impl Error {
-    /// Distinguishes transient endpoint failures from final decoding failures.
-    fn retryable(&self) -> bool {
-        matches!(
-            self.outcome(),
-            Outcome::Timeout | Outcome::RateLimited | Outcome::Behind | Outcome::Unavailable
-        )
-    }
-
     /// Shared classification for retry policy and provider attempt metrics.
     pub(crate) fn outcome(&self) -> Outcome {
         match self {
@@ -96,6 +88,14 @@ pub(crate) enum Outcome {
 }
 
 impl Outcome {
+    /// Distinguishes transient endpoint failures from terminal failures.
+    fn retryable(self) -> bool {
+        matches!(
+            self,
+            Self::Timeout | Self::RateLimited | Self::Behind | Self::Unavailable
+        )
+    }
+
     pub(crate) fn label(self) -> &'static str {
         match self {
             Self::Success => "success",

@@ -17,7 +17,7 @@ use url::Url;
 use crate::metrics::{self, Op};
 use crate::rpc::{AccountConfig, ContextValue, Request, WireAccount};
 
-use super::{Error, Result};
+use super::{Error, Outcome, Result};
 
 /// One confirmed RPC response with an optional account image per key, in request order.
 /// Decoded images enter in `Uninit` mode; separate fetches may have different context slots.
@@ -99,7 +99,8 @@ impl Fetcher {
         while let Some((index, provider)) = self.available(deadline).await {
             let end = (Instant::now() + ATTEMPT).min(deadline);
             let result = self.attempt(provider, body.clone(), end, keys.len()).await;
-            metrics::http_attempt(&result);
+            let outcome = result.as_ref().err().map_or(Outcome::Success, Error::outcome);
+            metrics::http_attempt(outcome);
             let hostname = provider.url.host_str();
             let error = match result {
                 Ok(fetched) => {
@@ -110,7 +111,7 @@ impl Fetcher {
                 }
                 Err(error) => error,
             };
-            let retry = error.retryable();
+            let retry = outcome.retryable();
             if retry {
                 warn!(hostname, %error, min_context_slot, "HTTP attempt failed; retrying");
             } else {

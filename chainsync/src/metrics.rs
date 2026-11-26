@@ -1,5 +1,5 @@
 //! Process-wide snapshot and transport metrics.
-use crate::http::{Error as HttpError, Outcome};
+use crate::http::Outcome;
 use nucleus::metrics::{
     IntCounterVec, MetricOperation, MetricSpec, OperationCounters, OperationTimer, counter_vec,
     with_metrics,
@@ -45,9 +45,8 @@ pub(crate) fn time(op: Op) -> OperationTimer<'static> {
 }
 
 /// Counts a completed HTTP attempt using the retry policy's error categories.
-pub(crate) fn http_attempt<T>(result: &Result<T, HttpError>) {
+pub(crate) fn http_attempt(outcome: Outcome) {
     with_metrics(&METRICS, |metrics| {
-        let outcome = result.as_ref().err().map_or(Outcome::Success, HttpError::outcome);
         metrics.http.with_label_values(&[outcome.label()]).inc();
     });
 }
