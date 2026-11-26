@@ -13,7 +13,7 @@ version.workspace = true
 base64 = { workspace = true }
 derive_more = { workspace = true, features = ["debug", "display", "error"] }
 hyper = { workspace = true, features = ["client", "http1"] }
-json = { workspace = true }
+json = { package = "sonic-rs", version = "0.5.8" }
 engine = { workspace = true }
 nucleus = { workspace = true, features = ["metrics", "runtime"] }
 reqwest = { workspace = true, features = ["rustls-tls"] }

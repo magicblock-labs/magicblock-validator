@@ -64,6 +64,7 @@ unwrap_used = "warn"
 wildcard_dependencies = "deny"
 
 [workspace.dependencies]
+serde_json = "1.0.151"
 chainsync = { package = "magicblock-chainsync", path = "chainsync" }
 aml = { package = "magicblock-aml", path = "aml" }
 aperture = { package = "magicblock-aperture", path = "aperture" }
