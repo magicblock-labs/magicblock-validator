@@ -560,7 +560,7 @@ async fn last_source_loss_evicts_only_non_authoritative_accounts() {
     engine.close().await;
 }
 
-/// Source loss preserves remaining coverage; last loss removes it and stale generations cannot restore it.
+/// Partial loss keeps admitted updates valid, but last loss ends the subscription.
 #[test]
 fn coverage_survives_partial_loss_and_rejects_obsolete_generations() {
     for source in [Source::WebSocket, Source::Grpc] {
@@ -571,8 +571,8 @@ fn coverage_survives_partial_loss_and_rejects_obsolete_generations() {
         };
         let generation = coverage.acknowledged(sub);
         coverage.confirmed(2, sub.pubkey, generation);
-        assert!(coverage.ws_contains(sub));
-        assert!(coverage.grpc_contains(2, sub));
+        let ws = coverage.admit(UpdateSource::WebSocket, sub).unwrap();
+        let grpc = coverage.admit(UpdateSource::Grpc(2), sub).unwrap();
         assert!(!coverage.grpc_contains(1, sub));
         let wrong = AccountSubscription {
             program: Some(Pubkey::new_unique()),
@@ -580,21 +580,30 @@ fn coverage_survives_partial_loss_and_rejects_obsolete_generations() {
         };
         assert!(!coverage.ws_contains(wrong));
         assert!(!coverage.grpc_contains(2, wrong));
-        assert_eq!(coverage.lost(source, sub.pubkey), (false, None));
+        assert_eq!(coverage.lost(source, sub.pubkey), None);
         let remaining = match source {
-            Source::WebSocket => Source::Grpc,
-            Source::Grpc => Source::WebSocket,
+            Source::WebSocket => {
+                assert!(!coverage.ws_contains(sub));
+                Source::Grpc
+            }
+            Source::Grpc => {
+                assert!(!coverage.grpc_contains(2, sub));
+                Source::WebSocket
+            }
         };
-        assert_eq!(
-            coverage.lost(remaining, sub.pubkey),
-            (true, Some(sub.pubkey))
-        );
+        assert!(coverage.is_current(ws));
+        assert!(coverage.is_current(grpc));
+        assert_eq!(coverage.lost(remaining, sub.pubkey), Some(sub.pubkey));
+        assert!(!coverage.is_current(ws));
+        assert!(!coverage.is_current(grpc));
         assert!(!coverage.ws_contains(sub));
         assert!(!coverage.grpc_contains(2, sub));
         coverage.confirmed(2, sub.pubkey, generation);
         assert!(!coverage.grpc_contains(2, sub));
         let current = coverage.acknowledged(sub);
         assert_ne!(generation, current);
+        assert!(!coverage.is_current(ws));
+        assert!(!coverage.is_current(grpc));
         coverage.confirmed(0, sub.pubkey, generation);
         assert!(!coverage.grpc_contains(0, sub));
         coverage.confirmed(1, sub.pubkey, current);
@@ -616,11 +625,13 @@ fn program_and_program_data_loss_evict_the_same_local_program() {
         let mut coverage = Coverage::default();
         coverage.acknowledged(first);
         coverage.acknowledged(last);
-        assert_eq!(coverage.lost(Source::WebSocket, first.pubkey), (true, None));
         assert_eq!(
-            coverage.lost(Source::WebSocket, last.pubkey),
-            (true, Some(program))
+            coverage.lost(Source::WebSocket, first.pubkey),
+            Some(program)
         );
+        assert!(coverage.covers(program));
+        assert_eq!(coverage.lost(Source::WebSocket, last.pubkey), Some(program));
+        assert!(!coverage.covers(program));
     }
 }
 
@@ -693,14 +704,9 @@ async fn event_loop_drains_while_acquisition_or_leases_are_pending() {
             Pool::with_event_capacity(config.websocket, engine.shutdown(), 1);
         let fetcher = Fetcher::new(config.http, engine.clone()).unwrap();
         let (events, grpc_rx) = mpsc::channel(16);
-        let grpc = grpc::Client::new(
-            0,
-            config.grpc[0].clone(),
-            engine.clone(),
-            events.clone(),
-            engine.shutdown(),
-        )
-        .unwrap();
+        let grpc = grpc::Session::new(0, config.grpc[0].clone(), engine.clone(), events.clone())
+            .unwrap()
+            .start(engine.shutdown());
         let sync = Arc::new(ChainSync {
             aml: None,
             engine: engine.clone(),
@@ -737,7 +743,27 @@ async fn event_loop_drains_while_acquisition_or_leases_are_pending() {
         });
         let mut worker = Worker::new(&sync);
         let scenario = async {
-            ws.wait_for_connection().await;
+            // The provider handshake can finish before the pool observes the connection.
+            let probe = AccountSubscription {
+                pubkey: Pubkey::new_unique(),
+                program: None,
+            };
+            scripted(
+                async {
+                    loop {
+                        match sync.websocket.subscribe(probe, Retention::Acquire).await {
+                            Err(WebSocketError::Unavailable) => continue,
+                            result => break result.expect("readiness subscription"),
+                        }
+                    }
+                },
+                async {
+                    let call = ws.next().await;
+                    assert_eq!(call.pubkey, probe.pubkey);
+                    call.ack(FIRST_SUBSCRIPTION);
+                },
+            )
+            .await;
             let acquire = async {
                 if lifecycle {
                     events.send(grpc::Event::Delegated(delegation)).await.unwrap();
@@ -751,17 +777,18 @@ async fn event_loop_drains_while_acquisition_or_leases_are_pending() {
                 }
             };
             let providers = async {
-                ws.next().await.ack(FIRST_SUBSCRIPTION);
+                let first_id = FIRST_SUBSCRIPTION + 1;
+                ws.next().await.ack(first_id);
                 let call = ws.next().await;
                 assert_eq!(call.pubkey, keys[1]);
                 // More updates than the one-slot event queue can hold precede the second ACK.
                 // The caller holds both leases, or the lifecycle barrier is still running.
                 call.ack_with_updates(
-                    FIRST_SUBSCRIPTION + 1,
+                    first_id + 1,
                     &[
-                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 1, &updated),
-                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 2, &updated),
-                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 3, &updated),
+                        (first_id, DELEGATION_SLOT + 1, &updated),
+                        (first_id, DELEGATION_SLOT + 2, &updated),
+                        (first_id, DELEGATION_SLOT + 3, &updated),
                     ],
                 );
                 http.next().await.respond_accounts(
@@ -808,7 +835,8 @@ async fn scheduler_ordering_and_deferred_coverage_checks() {
         worker.coverage.acknowledged(sub);
     }
     let update = |sub, slot| Work::Update {
-        ticket: worker.coverage.ticket(UpdateSource::WebSocket, sub).unwrap(),
+        source: UpdateSource::WebSocket,
+        ticket: worker.coverage.admit(UpdateSource::WebSocket, sub).unwrap(),
         update: Update::Mirror(v42_builder(V42_INITIAL, AccountMode::Missing).slot(slot)),
     };
     let mut scheduler = Scheduler::new(8);
@@ -869,7 +897,8 @@ async fn outstanding_limit_triggers_coordinated_shutdown() {
     let mut coverage = Coverage::default();
     coverage.acknowledged(sub);
     let work = || Work::Update {
-        ticket: coverage.ticket(UpdateSource::WebSocket, sub).unwrap(),
+        source: UpdateSource::WebSocket,
+        ticket: coverage.admit(UpdateSource::WebSocket, sub).unwrap(),
         update: Update::Mirror(
             v42_builder(V42_INITIAL, AccountMode::Missing).slot(DELEGATION_SLOT),
         ),

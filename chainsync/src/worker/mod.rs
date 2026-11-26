@@ -51,7 +51,7 @@ enum Control {
         pubkey: Pubkey,
         reply: oneshot::Sender<Result<()>>,
     },
-    Authorize {
+    SubscriptionCurrent {
         ticket: Ticket,
         reply: oneshot::Sender<Result<bool>>,
     },
@@ -150,8 +150,8 @@ impl<'a> Worker<'a> {
             Control::Retire { pubkey, reply } => {
                 let _ = reply.send(self.unsubscribe_account(pubkey));
             }
-            Control::Authorize { ticket, reply } => {
-                let _ = reply.send(Ok(self.coverage.authorizes(ticket)));
+            Control::SubscriptionCurrent { ticket, reply } => {
+                let _ = reply.send(Ok(self.coverage.is_current(ticket)));
             }
             Control::Covered { pubkey, reply } => {
                 let _ = reply.send(Ok(self.coverage.covers(pubkey)));
@@ -176,17 +176,15 @@ impl<'a> Worker<'a> {
         sub: AccountSubscription,
         account: AccountBuilder,
     ) -> RunResult<()> {
-        if let Some(ticket) = self.coverage.ticket(source, sub) {
-            let update = if account.read().owner() == delegation_program_api::id()
-                && ata::is_raw_eata(sub.pubkey, &account)
-            {
-                Update::Refresh(account.read().slot())
-            } else {
-                Update::Mirror(account)
-            };
-            self.scheduler.admit(Work::Update { ticket, update })?;
-        }
-        Ok(())
+        let Some(ticket) = self.coverage.admit(source, sub) else { return Ok(()) };
+        let update = if account.read().owner() == delegation_program_api::id()
+            && ata::is_raw_eata(sub.pubkey, &account)
+        {
+            Update::Refresh(account.read().slot())
+        } else {
+            Update::Mirror(account)
+        };
+        self.scheduler.admit(Work::Update { source, ticket, update })
     }
 
     fn on_websocket(&mut self, event: websocket::Event) -> RunResult<()> {
@@ -213,12 +211,10 @@ impl<'a> Worker<'a> {
     }
 
     fn lost(&mut self, source: Source, pubkey: Pubkey) -> RunResult<()> {
-        let (ended, local_pubkey) = self.coverage.lost(source, pubkey);
-        if ended {
-            self.grpc_client(pubkey).command(Command::Remove(pubkey));
-        }
-        if let Some(pubkey) = local_pubkey {
-            self.scheduler.admit(Work::Evict { pubkey, cached: false })?;
+        let Some(local) = self.coverage.lost(source, pubkey) else { return Ok(()) };
+        self.grpc_client(pubkey).command(Command::Remove(pubkey));
+        if !self.coverage.covers(local) {
+            self.scheduler.admit(Work::Evict { pubkey: local, cached: false })?;
         }
         Ok(())
     }

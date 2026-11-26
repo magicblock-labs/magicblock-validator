@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use engine::{AccountAccessor, EngineError};
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData, ReadableAccount};
 use solana_pubkey::Pubkey;
@@ -35,8 +37,15 @@ impl<'a> Operations<'a> {
                 .await?;
             return Ok(());
         }
-        let (prepared, dependencies) = self.sync.prepare_delegation(delegation)?;
-        self.sync.ensure(dependencies).await?;
+        let mut dependencies = BTreeMap::new();
+        let prepared = self.sync.prepare_delegation(delegation, &mut dependencies)?;
+        self.sync
+            .ensure(
+                dependencies
+                    .into_iter()
+                    .map(|(pubkey, property)| ChainSyncAccount { pubkey, property }),
+            )
+            .await?;
         self.sync.materialize_delegation(prepared).await
     }
 

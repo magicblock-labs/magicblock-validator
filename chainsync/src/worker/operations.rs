@@ -20,11 +20,24 @@ use crate::{
 
 /// One logical operation occupies one scheduler slot until definitive completion or shutdown.
 pub(super) enum Work {
-    Update { ticket: Ticket, update: Update },
+    Update {
+        source: UpdateSource,
+        ticket: Ticket,
+        update: Update,
+    },
     Delegated(Delegation),
-    UndelegationRequested { pubkey: Pubkey, slot: u64 },
-    Undelegated { pubkey: Pubkey, slot: u64 },
-    Evict { pubkey: Pubkey, cached: bool },
+    UndelegationRequested {
+        pubkey: Pubkey,
+        slot: u64,
+    },
+    Undelegated {
+        pubkey: Pubkey,
+        slot: u64,
+    },
+    Evict {
+        pubkey: Pubkey,
+        cached: bool,
+    },
 }
 
 /// Ordinary images stay in their account lane; raw eATA observations require multi-account acquisition.
@@ -40,6 +53,7 @@ impl Work {
             Self::Update {
                 ticket,
                 update: Update::Mirror(_),
+                ..
             } => Some(ticket.sub.local_pubkey()),
             Self::Evict { pubkey, .. } => Some(*pubkey),
             Self::Update { update: Update::Refresh(_), .. }
@@ -67,42 +81,48 @@ impl Operations<'_> {
     pub(super) async fn execute(&self, work: Work) -> Completion {
         let lane = work.lane();
         let fatal = matches!(work, Work::Evict { .. });
-        let provider = if let Work::Update { ticket, .. } = &work
-            && let UpdateSource::Grpc(stream) = ticket.source
-        {
-            self.sync.grpc[stream].hostname()
-        } else {
-            None
-        };
-        let (pubkey, message, result) = match work {
-            Work::Update { ticket, update } => {
-                let message = match ticket.source {
-                    UpdateSource::WebSocket => "WS update failed",
-                    UpdateSource::Grpc(_) => "gRPC update failed",
+        let (pubkey, message, provider, result) = match work {
+            Work::Update { source, ticket, update } => {
+                let (message, provider) = match source {
+                    UpdateSource::WebSocket => ("WS update failed", None),
+                    UpdateSource::Grpc(stream) => {
+                        ("gRPC update failed", self.sync.grpc[stream].hostname())
+                    }
                 };
-                (ticket.sub.pubkey, message, self.apply(ticket, update).await)
+                (
+                    ticket.sub.pubkey,
+                    message,
+                    provider,
+                    self.apply(ticket, update).await,
+                )
             }
             Work::Delegated(delegation) => {
                 let pubkey = delegation.pubkey;
                 (
                     pubkey,
                     "delegation failed",
+                    None,
                     self.delegated(delegation).await,
                 )
             }
             Work::UndelegationRequested { pubkey, slot } => (
                 pubkey,
                 "undelegation scheduling failed",
+                None,
                 self.undelegation_requested(pubkey, slot).await,
             ),
             Work::Undelegated { pubkey, slot } => (
                 pubkey,
                 "undelegation failed",
+                None,
                 self.undelegated(pubkey, slot).await,
             ),
-            Work::Evict { pubkey, cached } => {
-                (pubkey, "eviction failed", self.evict(pubkey, cached).await)
-            }
+            Work::Evict { pubkey, cached } => (
+                pubkey,
+                "eviction failed",
+                None,
+                self.evict(pubkey, cached).await,
+            ),
         };
         if let Err(error) = &result {
             error!(provider, %pubkey, %error, "{message}");
@@ -140,12 +160,12 @@ impl Operations<'_> {
         Ok(())
     }
 
-    /// Authorization is checked after lease acquisition, not merely when the event was received.
+    /// Recheck the subscription generation after acquiring the lease.
     async fn apply(&self, ticket: Ticket, update: Update) -> Result<()> {
         let _timer = metrics::time(Op::Apply);
         let sub = ticket.sub;
         let accessor = self.sync.engine.account(sub.local_pubkey()).await?;
-        if !self.control(|reply| Control::Authorize { ticket, reply }).await? {
+        if !self.control(|reply| Control::SubscriptionCurrent { ticket, reply }).await? {
             return Ok(());
         }
         let account = match update {

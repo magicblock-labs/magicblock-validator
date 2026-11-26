@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use hyper::StatusCode;
 use keeper::testkit::{V42_ID, v42_builder};
@@ -105,7 +105,8 @@ async fn aml_errors_skip_rescue_but_rejected_signers_and_invalid_actions_schedul
         source_program: V42_ID,
         record: record.data,
     };
-    let (prepared, dependencies) = chain_sync.prepare_delegation(delegation).unwrap();
+    let mut dependencies = BTreeMap::new();
+    let prepared = chain_sync.prepare_delegation(delegation, &mut dependencies).unwrap();
     assert!(dependencies.is_empty());
     assert!(matches!(&prepared.actions, Err(Error::Actions(_))));
     within(chain_sync.materialize_delegation(prepared)).await.unwrap();

@@ -17,7 +17,6 @@ use self::{
     resolve::{BatchOutcome, PendingDelegation, prepare_programs},
 };
 use crate::{
-    AccountProperty::{Program, Readonly, Writable},
     AccountSubscription, ChainSync, ChainSyncAccount, Result, SyncTarget,
     metrics::{self, Op},
     websocket::{Reference, Retention},
@@ -64,16 +63,9 @@ impl<'engine> Acquisition<'engine> {
         while !targets.is_empty() {
             let pending = self.wave(targets).await?;
             let mut next = BTreeMap::new();
-            let mut ready = Vec::new();
+            let mut ready = Vec::with_capacity(pending.len());
             for PendingDelegation { delegation, unsubscribe } in pending {
-                let (prepared, dependencies) = self.sync.prepare_delegation(delegation)?;
-                for ChainSyncAccount { pubkey, property } in dependencies {
-                    // Preserve the companions required by either request for the same account.
-                    let current = next.entry(pubkey).or_insert(property);
-                    if property == Program || (*current == Readonly && property == Writable) {
-                        *current = property;
-                    }
-                }
+                let prepared = self.sync.prepare_delegation(delegation, &mut next)?;
                 ready.push((prepared, unsubscribe));
             }
             deferred.push(ready);

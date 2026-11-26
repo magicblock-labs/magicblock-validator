@@ -25,8 +25,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use url::Url;
 
-use account::AccountSubscription;
-pub use account::{AccountProperty, ChainSyncAccount, SyncTarget};
+pub use account::{AccountProperty, ChainSyncAccount};
+use account::{AccountSubscription, SyncTarget};
 use acquisition::Acquisition;
 
 use crate::http::Fetcher;
@@ -100,9 +100,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 impl ChainSync {
     /// Starts account synchronization services under the supplied shutdown manager.
     ///
-    /// Only one synchronizer may own an Engine's cache-eviction receiver; construction
-    /// fails if it is already taken. Provider connections start in the background,
-    /// so success does not mean they are ready for [`Self::sync`].
+    /// Prepares providers before claiming Engine's exclusive cache-eviction receiver.
+    /// If construction returns an error, no ChainSync services have been started.
+    /// Connections start in the background, so success does not mean they are
+    /// ready for [`Self::ensure`].
     /// See [`ChainSyncConfig`] for provider requirements.
     pub fn new(
         engine: Engine,
@@ -112,16 +113,21 @@ impl ChainSync {
         if config.grpc.is_empty() {
             return Err(Error::MissingGrpc);
         }
-        metrics::init();
         let aml = config.aml.map(aml::Client::new).transpose()?;
-        let (websocket, websocket_rx) = Pool::new(config.websocket, shutdown);
         let fetcher = Fetcher::new(config.http, engine.clone())?;
         let (events, grpc_rx) = mpsc::channel(8192);
-        let mut grpc = Vec::with_capacity(config.grpc.len());
-        for (id, stream) in config.grpc.into_iter().enumerate() {
-            let client = grpc::Client::new(id, stream, engine.clone(), events.clone(), shutdown)?;
-            grpc.push(client);
-        }
+        let sessions = config
+            .grpc
+            .into_iter()
+            .enumerate()
+            .map(|(id, stream)| grpc::Session::new(id, stream, engine.clone(), events.clone()))
+            .collect::<grpc::Result<Vec<_>>>()?;
+        // Claim the exclusive receiver only once all providers have been prepared.
+        let evictions = engine.accounts().subscribe_evictions().map_err(EngineError::from)?;
+
+        metrics::init();
+        let (websocket, websocket_rx) = Pool::new(config.websocket, shutdown);
+        let grpc = sessions.into_iter().map(|session| session.start(shutdown)).collect();
         let chain_sync = Arc::new(Self {
             aml,
             engine,
@@ -129,8 +135,6 @@ impl ChainSync {
             websocket,
             grpc,
         });
-        let evictions =
-            chain_sync.engine.accounts().subscribe_evictions().map_err(EngineError::from)?;
         let shutdown = shutdown.handle(Service::ChainSyncWorker);
         tokio::spawn(Self::run(
             Arc::clone(&chain_sync),
@@ -148,27 +152,30 @@ impl ChainSync {
     /// accounts. This classifies acquisition roles, not execution writability;
     /// Engine resolves execution permissions when processing the transaction.
     pub async fn ensure_transaction_accounts(&self, transaction: &TransactionView) -> Result<u64> {
+        // Program indices and the number of static keys are both wire-format u8s.
+        let mut invoked_programs = [false; 256];
+        for instruction in transaction.instructions_iter() {
+            invoked_programs[usize::from(instruction.program_id_index)] = true;
+        }
+
+        let keys = transaction.static_account_keys();
         let signed = usize::from(transaction.num_required_signatures());
         let writable_signed =
             signed - usize::from(transaction.num_readonly_signed_static_accounts());
-        let writable_end = transaction.static_account_keys().len()
-            - usize::from(transaction.num_readonly_unsigned_static_accounts());
-        let requests =
-            transaction.static_account_keys().iter().enumerate().map(|(index, &pubkey)| {
-                let property = if index == 0 {
-                    AccountProperty::Payer
-                } else if transaction
-                    .instructions_iter()
-                    .any(|ix| usize::from(ix.program_id_index) == index)
-                {
-                    AccountProperty::Program
-                } else if index < writable_signed || (index >= signed && index < writable_end) {
-                    AccountProperty::Writable
-                } else {
-                    AccountProperty::Readonly
-                };
-                ChainSyncAccount { pubkey, property }
-            });
+        let writable_end =
+            keys.len() - usize::from(transaction.num_readonly_unsigned_static_accounts());
+        let requests = keys.iter().enumerate().map(|(index, &pubkey)| {
+            let property = if index == 0 {
+                AccountProperty::Payer
+            } else if invoked_programs[index] {
+                AccountProperty::Program
+            } else if index < writable_signed || (index >= signed && index < writable_end) {
+                AccountProperty::Writable
+            } else {
+                AccountProperty::Readonly
+            };
+            ChainSyncAccount { pubkey, property }
+        });
         self.ensure(requests).await
     }
 
@@ -222,7 +229,7 @@ impl ChainSync {
     /// `min_context_slot` is a response freshness floor, never a replacement eligibility rule.
     /// Returns fetched HTTP entries, including companions, nulls, and dependency waves.
     /// Errors may leave earlier targets materialized; they do not roll back the batch.
-    pub async fn sync(
+    async fn sync(
         &self,
         targets: Vec<SyncTarget<'_>>,
         min_context_slot: Option<u64>,

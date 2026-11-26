@@ -12,16 +12,19 @@ use tracing::{error, warn};
 
 use super::{Delegation, appended, undelegation_action};
 use crate::{
-    AccountProperty, ChainSync, ChainSyncAccount, Error, Result, aml, ata,
+    AccountProperty,
+    AccountProperty::{Program, Readonly, Writable},
+    ChainSync, Error, Result, aml, ata,
     metrics::{self, Op},
 };
 
 impl ChainSync {
-    /// Decodes and decrypts actions, returning their dependencies without taking an account lease.
+    /// Decrypts actions and adds their dependencies to the current wave without taking leases.
     pub(crate) fn prepare_delegation(
         &self,
         delegation: Delegation,
-    ) -> Result<(PreparedDelegation, Vec<ChainSyncAccount>)> {
+        dependencies: &mut BTreeMap<Pubkey, AccountProperty>,
+    ) -> Result<PreparedDelegation> {
         let Delegation {
             pubkey,
             account,
@@ -32,17 +35,15 @@ impl ChainSync {
         // Retain decoding errors with the validated delegation so materialization
         // can schedule rescue instead of trying to fetch unusable action dependencies.
         let actions = self.decode_actions(appended);
-        let dependencies = match &actions {
-            Ok(Some(actions)) => action_dependencies(pubkey, actions),
-            _ => Vec::new(),
-        };
-        let prepared = PreparedDelegation {
+        if let Ok(Some(actions)) = &actions {
+            collect_dependencies(dependencies, pubkey, actions);
+        }
+        Ok(PreparedDelegation {
             pubkey,
             account,
             actions,
             source_program,
-        };
-        Ok((prepared, dependencies))
+        })
     }
 
     /// Decrypts an optional action payload; callers retain failures for activation rescue.
@@ -144,25 +145,27 @@ impl ChainSync {
     }
 }
 
-/// Collects sorted action dependencies, excluding the account being activated.
-/// Program roles replace earlier roles; writable metas override the role seen so far.
-fn action_dependencies(pubkey: Pubkey, actions: &[Instruction]) -> Vec<ChainSyncAccount> {
-    let mut dependencies = BTreeMap::new();
+/// Skip this delegation's target without removing dependencies added by other delegations.
+fn collect_dependencies(
+    dependencies: &mut BTreeMap<Pubkey, AccountProperty>,
+    target: Pubkey,
+    actions: &[Instruction],
+) {
     for action in actions {
-        dependencies.insert(action.program_id, AccountProperty::Program);
+        if action.program_id != target {
+            dependencies.insert(action.program_id, Program);
+        }
         for meta in &action.accounts {
-            let property = dependencies.entry(meta.pubkey).or_insert(AccountProperty::Readonly);
-            if meta.is_writable {
-                *property = AccountProperty::Writable;
+            if meta.pubkey == target {
+                continue;
+            }
+            // A writable meta must not replace an invoked program's acquisition role.
+            let property = dependencies.entry(meta.pubkey).or_insert(Readonly);
+            if *property == Readonly && meta.is_writable {
+                *property = Writable;
             }
         }
     }
-    // The delegated account itself is materialized later; do not fetch it as a dependency.
-    dependencies.remove(&pubkey);
-    dependencies
-        .into_iter()
-        .map(|(pubkey, property)| ChainSyncAccount { pubkey, property })
-        .collect()
 }
 
 /// Delegated account and action-decoding result held while action dependencies are fetched.

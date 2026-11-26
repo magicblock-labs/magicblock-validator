@@ -37,7 +37,7 @@ pub struct ChainSyncAccount {
 /// The lease must belong to the synchronizer's Engine. Selecting resident state
 /// requires lifecycle evidence permitting replacement; synchronization does not
 /// choose replacement eligibility on the caller's behalf.
-pub struct SyncTarget<'engine> {
+pub(super) struct SyncTarget<'engine> {
     /// Mutation ownership retained through primary and companion fetches.
     pub(crate) accessor: AccountAccessor<'engine>,
     /// Companion and normalization requirements for the current fetch.
@@ -48,7 +48,7 @@ pub struct SyncTarget<'engine> {
 
 impl<'engine> SyncTarget<'engine> {
     /// Selects a leased target; synchronization acquires its required subscriptions.
-    pub fn new(accessor: AccountAccessor<'engine>, property: AccountProperty) -> Self {
+    pub(super) fn new(accessor: AccountAccessor<'engine>, property: AccountProperty) -> Self {
         Self {
             accessor,
             property,

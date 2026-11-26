@@ -58,22 +58,24 @@ async fn synchronize(
 ```
 
 Replace the example endpoints and capacity limits with your provider settings.
-Construction starts background services but does not wait for providers to connect;
-an immediate synchronization request can fail if no WebSocket connection is ready.
-The services participate in coordinated shutdown through the supplied manager.
+Construction requires at least one HTTP provider and one gRPC stream. It
+prepares providers and claims Engine's exclusive eviction receiver before
+starting any services. Empty WebSocket capacity is supported, but acquisition
+that needs a subscription fails if no connection is ready. Construction does not
+wait for connections. The services participate in coordinated shutdown through
+the supplied manager.
 
 ## Synchronization flow
 
 `ensure` selects only accounts missing from Engine, rechecking presence under
-ordered leases before passing them to `sync`. It leaves resident accounts and
-their subscriptions unchanged. `ensure_transaction_accounts` classifies a
-transaction's static keys before applying that same missing-only selection.
+ordered leases. It leaves resident accounts and their subscriptions unchanged.
+`ensure_transaction_accounts` classifies a transaction's static keys before
+applying that same missing-only selection.
 
-`sync` consumes selected `SyncTarget` leases, including eligible resident accounts.
-The caller establishes replacement eligibility under each lease and may supply a
-minimum response context slot. Both entry points use the same fetch and dependency flow;
-synchronization itself has no undelegation-specific selection policy. Choose each
-target's role according to its use in the transaction:
+Internal refresh paths use the same fetch and dependency flow. They can select
+resident accounts after checking replacement eligibility under the lease and
+set a minimum response context slot. Choose each request's role according to
+its use in the transaction:
 
 | Property | Synchronization behavior |
 | --- | --- |
@@ -84,9 +86,9 @@ target's role according to its use in the transaction:
 
 Acquisition proceeds in waves:
 
-1. **Select targets.** Normal callers use `ensure`; lifecycle handling supplies an
-   eligible resident lease directly to `sync`. Overlapping missing-only requests
-   do not fetch accounts another request has already installed.
+1. **Select targets.** Normal callers use `ensure`; lifecycle handling selects
+   eligible resident accounts under their leases. Overlapping missing-only
+   requests do not fetch accounts another request has already installed.
 2. **Subscribe, then fetch.** Where the role requires live updates, WebSocket
    acknowledgement precedes HTTP acquisition. Batches contain at most 100 addresses,
    including delegation-record and ProgramData companions.
@@ -98,7 +100,9 @@ Acquisition proceeds in waves:
 4. **Resolve action dependencies.** After releasing all target leases, delegations
    with post-delegation actions wait while their account and program dependencies
    go through the same acquisition flow. Nested dependencies activate before the
-   delegation that needs them.
+   delegation that needs them. When actions refer to the same address, an invoked
+   program takes precedence over a writable meta, then a read-only meta. This
+   selects what to fetch; it does not change action order or permissions.
 
 | Acquired state | Local result |
 | --- | --- |
@@ -136,12 +140,19 @@ lamports. They do not infer delegation from ownership alone. Program updates are
 normalized to ELF; a Loader V3 ProgramData update replaces the local program image,
 not a separate local ProgramData account.
 
-Only currently covered subscriptions may apply ordinary updates. Released
-subscriptions, obsolete gRPC confirmations, and updates from the wrong stream are
-ignored. Engine enforces lifecycle transitions and slot ordering: older images and
-same-slot, same-mode duplicates are skipped; ordinary mirrors cannot overwrite a
-`Delegated` or `Magic` account. Per-account background application failures are
-logged, not returned to an earlier `sync` caller.
+An update must come from a covering source when queued. After acquiring the
+Engine lease, the worker checks that the same subscription generation is still
+active. Losing one source does not discard already queued updates as long as
+another source keeps that subscription alive. Retirement or last-source loss
+ends the generation; resubscribing cannot revive its queued updates.
+
+The event loop keeps draining providers while account work waits. Ordinary
+mutations run in FIFO order per local account; multi-account work waits for
+earlier mutations and blocks later ones, not event handling. Engine enforces
+lifecycle transitions and slot ordering: older images and same-slot, same-mode
+duplicates are skipped; ordinary mirrors cannot overwrite a `Delegated` or
+`Magic` account. Background application errors are logged, not returned to an
+earlier `ensure` caller.
 
 ## Delegation and undelegation
 
@@ -170,8 +181,8 @@ Optional AML assessment checks distinct post-delegation action signers. Rejected
 signers, invalid actions, and activation failures enter rescue undelegation unless
 local state already supersedes that delegation. Assessment service failures and
 dependency-acquisition failures propagate without rescue. Successful rescue
-scheduling can make `sync` succeed, but does not mean the intended actions ran or
-on-chain undelegation completed.
+scheduling can let acquisition succeed, but does not mean the intended actions
+ran or on-chain undelegation completed.
 
 **Undelegation has two separate signals:**
 
@@ -204,9 +215,9 @@ delegation resolution restores a recorded delegation slot. It is not an Engine
 checkpoint or a shared view across requests.
 
 HTTP retries use alternative providers without lowering the minimum context slot.
-Separate batches may observe different slots, and a failed `sync` can leave earlier
-accounts materialized: synchronization is not an atomic view of the chain or an
-all-or-nothing transaction.
+Separate batches may observe different slots, and a failed acquisition can leave
+earlier accounts materialized: synchronization is not an atomic view of the
+chain or an all-or-nothing transaction.
 
 If one ordinary update source is lost, the other can continue supplying updates.
 Losing the last source removes eligible local mirrors so a later `ensure` can reacquire
