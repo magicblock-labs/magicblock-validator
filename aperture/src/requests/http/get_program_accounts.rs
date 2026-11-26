@@ -1,6 +1,6 @@
 use super::{HandlerResult, RpcHandlers};
 use crate::{
-    account::{ProgramConfig, encoding::AccountEncoder, matches_filters},
+    account::{ProgramConfig, encoding::AccountEncoder},
     requests::{JsonHttpRequest as JsonRequest, params::Serde32Bytes, payload::ResponsePayload},
 };
 use solana_account::ReadableAccount;
@@ -15,7 +15,7 @@ impl RpcHandlers {
 
         let encoder = AccountEncoder::from(config.account_config);
         let accounts = encoder.scan_program(&self.engine, &program, |account| {
-            matches_filters(&filters, account.data())
+            filters.iter().all(|filter| filter.matches(account.data()))
         })?;
 
         if config.with_context.unwrap_or_default() {

@@ -80,15 +80,6 @@ impl Accounts {
     }
 }
 
-/// Match validated filters without decoding their bytes for each account.
-pub(crate) fn matches_filters(filters: &[PreparedFilter], data: &[u8]) -> bool {
-    filters.iter().all(|filter| match &filter.0 {
-        RpcFilterType::DataSize(size) => data.len() as u64 == *size,
-        RpcFilterType::Memcmp(memcmp) => memcmp.bytes_match(data),
-        RpcFilterType::TokenAccountState => TokenAccount::valid_account_data(data),
-    })
-}
-
 /// The upstream program config, with filters decoded during parameter parsing.
 #[derive(Deserialize, Default)]
 pub(crate) struct ProgramConfig {
