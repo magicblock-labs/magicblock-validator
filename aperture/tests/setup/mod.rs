@@ -12,6 +12,7 @@ use engine::testkit::TestEngine;
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
 use ledger_deprecated::Ledger;
 use magicblock_aperture::Aperture;
+use reqwest::Url;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::Instruction;
 use solana_program_pack::Pack;
@@ -70,9 +71,11 @@ fn shared_ledger() -> Arc<Ledger> {
 fn chainsync(engine: &mut TestEngine) -> Arc<ChainSync> {
     let handle = engine.clone();
     // RPC tests seed resident Engine state; no live provider observations are needed.
+    let endpoint: Url = "http://127.0.0.1:9".parse().unwrap();
     let config = ChainSyncConfig {
+        http: vec![endpoint.clone()],
         grpc: vec![GrpcStreamConfig {
-            endpoint: "http://127.0.0.1:9".parse().unwrap(),
+            endpoint,
             token: None,
             duplication_delay: Duration::from_secs(30 * 60),
         }],
