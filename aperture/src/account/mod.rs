@@ -40,11 +40,7 @@ impl Accounts {
     }
 
     /// Single-account RPCs tolerate ensure failures and read any existing image.
-    pub(crate) async fn ensure_one(
-        &self,
-        pubkey: &Pubkey,
-        fetches: &mut u64,
-    ) {
+    pub(crate) async fn ensure_one(&self, pubkey: &Pubkey, fetches: &mut u64) {
         let _ = self.fetch(&[*pubkey], fetches).await;
     }
 
