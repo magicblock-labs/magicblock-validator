@@ -20,7 +20,7 @@ use crate::support::{
     encode_record, http::Server, magic, scripted, start_chain_sync, start_handler_sync, websocket,
     within, yellowstone,
 };
-use crate::websocket::Event;
+use crate::websocket::{Event, Retention};
 use crate::{AccountSubscription, Error, HttpError, WebSocketError, ata};
 
 const LOCAL_BALANCE: i64 = 9;
@@ -82,43 +82,34 @@ async fn grpc_delegation_retires_tracking_and_rejects_buffered_mirror_updates() 
         let mode = delegation.account.read().mode();
         let slot = delegation.account.read().slot();
         let sub = AccountSubscription { pubkey: key, program: None };
-        let mut coverage = Coverage::default();
-        let generation = coverage.acknowledged(sub);
-        coverage.confirmed(0, key, generation);
+        let mut worker = Worker::new(&chain_sync);
+        let generation = worker.coverage.acknowledged(sub);
+        worker.coverage.confirmed(0, key, generation);
         if mode == AccountMode::Magic {
             // Delegation must also retire tracking when only its gRPC copy remains.
-            coverage.lost(Source::WebSocket, key);
+            worker.coverage.lost(Source::WebSocket, key);
         }
-        within(chain_sync.on_grpc(grpc::Event::Delegated(delegation), &mut coverage))
-            .await
-            .unwrap();
+        within(worker.handle_grpc(grpc::Event::Delegated(delegation))).await.unwrap();
         let accepted = engine.get_account(key).unwrap();
         assert_eq!(accepted.mode(), mode);
         assert_eq!(accepted.slot(), slot);
         // An old filter acknowledgement cannot re-enable coverage after delegation.
-        coverage.confirmed(0, key, generation);
-        assert!(!coverage.ws_contains(sub));
-        assert!(!coverage.grpc_contains(0, sub));
-        chain_sync
-            .on_websocket(
-                Event::Update {
-                    sub,
-                    account: v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(BUFFERED_SLOT),
-                },
-                &mut coverage,
-            )
+        worker.coverage.confirmed(0, key, generation);
+        assert!(!worker.coverage.ws_contains(sub));
+        assert!(!worker.coverage.grpc_contains(0, sub));
+        worker
+            .handle_websocket(Event::Update {
+                sub,
+                account: v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(BUFFERED_SLOT),
+            })
             .await
             .unwrap();
-        chain_sync
-            .on_grpc(
-                grpc::Event::Update {
-                    stream: 0,
-                    sub,
-                    account: v42_builder(LOCAL_BALANCE, AccountMode::Missing)
-                        .slot(BUFFERED_SLOT + 1),
-                },
-                &mut coverage,
-            )
+        worker
+            .handle_grpc(grpc::Event::Update {
+                stream: 0,
+                sub,
+                account: v42_builder(LOCAL_BALANCE, AccountMode::Missing).slot(BUFFERED_SLOT + 1),
+            })
             .await
             .unwrap();
         assert_eq!(engine.get_account(key).unwrap(), accepted);
@@ -140,7 +131,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
     let grpc = yellowstone::Server::new().await;
     let chain_sync = start_chain_sync(&mut engine, &http, Some(&ws), &grpc);
     ws.wait_for_connection().await;
-    let mut coverage = Coverage::default();
+    let mut worker = Worker::new(&chain_sync);
     let key = Pubkey::new_unique();
     engine
         .accounts()
@@ -154,18 +145,14 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         (DELEGATION_SLOT, AccountMode::Undelegating, 1),
         (DELEGATION_SLOT + 1, AccountMode::Undelegating, 1),
     ] {
-        within(chain_sync.undelegation_requested(key, slot)).await.unwrap();
+        within(worker.undelegation_requested(key, slot)).await.unwrap();
         assert_eq!(engine.get_account(key).unwrap().mode(), mode);
         assert_eq!(intents(&engine), count);
     }
     let readonly = store_v42(&engine, V42_INITIAL, AccountMode::Mirrored);
-    within(chain_sync.undelegation_requested(readonly, BUFFERED_SLOT))
-        .await
-        .unwrap();
+    within(worker.undelegation_requested(readonly, BUFFERED_SLOT)).await.unwrap();
     assert_eq!(intents(&engine), 1);
-    within(chain_sync.undelegated(key, DELEGATION_SLOT - 1, &mut coverage))
-        .await
-        .unwrap();
+    within(worker.undelegated(key, DELEGATION_SLOT - 1)).await.unwrap();
     assert_eq!(
         engine.get_account(key).unwrap().mode(),
         AccountMode::Undelegating
@@ -184,12 +171,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         );
         call.respond_accounts(DELEGATION_SLOT, &[Some(image)]);
     };
-    scripted(
-        chain_sync.undelegated(key, DELEGATION_SLOT, &mut coverage),
-        script,
-    )
-    .await
-    .unwrap();
+    scripted(worker.undelegated(key, DELEGATION_SLOT), script).await.unwrap();
     let refreshed = engine.get_account(key).unwrap();
     assert_eq!(refreshed.mode(), AccountMode::Mirrored);
     assert_eq!(refreshed.data(), &LOCAL_BALANCE.to_le_bytes());
@@ -206,9 +188,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
             .store(&[(key, v42_builder(V42_INITIAL, mode).slot(observed).build())])
             .unwrap();
         let before = engine.get_account(key).unwrap();
-        within(chain_sync.undelegated(key, DELEGATION_SLOT, &mut coverage))
-            .await
-            .unwrap();
+        within(worker.undelegated(key, DELEGATION_SLOT)).await.unwrap();
         assert_eq!(engine.get_account(key).unwrap(), before);
     }
     assert!(!http.pending());
@@ -218,12 +198,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         ws.next().await.ack(FIRST_SUBSCRIPTION + 1);
         http.next().await.respond_accounts(DELEGATION_SLOT, &[None]);
     };
-    scripted(
-        chain_sync.undelegated(absent, DELEGATION_SLOT, &mut coverage),
-        script,
-    )
-    .await
-    .unwrap();
+    scripted(worker.undelegated(absent, DELEGATION_SLOT), script).await.unwrap();
     let account = engine.get_account(absent).unwrap();
     assert_eq!(account.mode(), AccountMode::Missing);
     assert_eq!(account.slot(), DELEGATION_SLOT);
@@ -242,11 +217,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
             .unwrap();
         call.respond(StatusCode::OK, "{}");
     };
-    let result = scripted(
-        chain_sync.undelegated(protected, DELEGATION_SLOT, &mut coverage),
-        script,
-    )
-    .await;
+    let result = scripted(worker.undelegated(protected, DELEGATION_SLOT), script).await;
     assert!(matches!(result, Err(Error::Fetch(_))));
     assert_eq!(
         engine.get_account(protected).unwrap().mode(),
@@ -271,7 +242,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
         tokio::pin!(script);
         within(async {
             tokio::select! {
-                result = chain_sync.undelegated(failed, DELEGATION_SLOT, &mut coverage) => result,
+                result = worker.undelegated(failed, DELEGATION_SLOT) => result,
                 _ = &mut script => unreachable!("provider responds until the retry budget expires"),
             }
         })
@@ -295,7 +266,7 @@ async fn undelegation_transitions_once_and_confirmations_preserve_newer_or_autho
 async fn subscription_failure_deletes_only_eligible_undelegating_state() {
     let mut engine = TestEngine::new().await;
     let chain_sync = start_handler_sync(&mut engine, None);
-    let mut coverage = Coverage::default();
+    let mut worker = Worker::new(&chain_sync);
     for (mode, slot, delete) in [
         (AccountMode::Undelegating, DELEGATION_SLOT - 1, true),
         (AccountMode::Undelegating, NEWER_SLOT, false),
@@ -305,7 +276,7 @@ async fn subscription_failure_deletes_only_eligible_undelegating_state() {
         let key = Pubkey::new_unique();
         let account: AccountSharedData = v42_builder(V42_INITIAL, mode).slot(slot).build();
         engine.accounts().store(&[(key, account.clone())]).unwrap();
-        let result = chain_sync.undelegated(key, DELEGATION_SLOT, &mut coverage).await;
+        let result = worker.undelegated(key, DELEGATION_SLOT).await;
         if delete {
             // This fixture has no WebSocket providers, so subscription capacity is zero.
             assert!(matches!(
@@ -329,26 +300,26 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
     let chain_sync = start_handler_sync(&mut engine, None);
     let key = Pubkey::new_unique();
     let sub = AccountSubscription { pubkey: key, program: None };
-    let mut coverage = Coverage::default();
-    let old_generation = coverage.acknowledged(sub);
-    coverage.remove(sub);
-    let current_generation = coverage.acknowledged(sub);
+    let mut worker = Worker::new(&chain_sync);
+    let old_generation = worker.coverage.acknowledged(sub);
+    worker.coverage.remove(sub);
+    let current_generation = worker.coverage.acknowledged(sub);
     let mirror_update = |stream| grpc::Event::Update {
         stream,
         sub,
         account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(DELEGATION_SLOT),
     };
     // A delayed confirmation for the previous acquisition cannot grant coverage.
-    coverage.confirmed(0, key, old_generation);
-    chain_sync.on_grpc(mirror_update(0), &mut coverage).await.unwrap();
+    worker.coverage.confirmed(0, key, old_generation);
+    worker.handle_grpc(mirror_update(0)).await.unwrap();
     assert!(engine.get_account(key).is_none());
-    coverage.confirmed(0, key, current_generation);
-    chain_sync.on_grpc(mirror_update(1), &mut coverage).await.unwrap();
+    worker.coverage.confirmed(0, key, current_generation);
+    worker.handle_grpc(mirror_update(1)).await.unwrap();
     assert!(engine.get_account(key).is_none());
-    coverage.remove(sub);
-    chain_sync.on_grpc(mirror_update(0), &mut coverage).await.unwrap();
+    worker.coverage.remove(sub);
+    worker.handle_grpc(mirror_update(0)).await.unwrap();
     assert!(engine.get_account(key).is_none());
-    coverage.acknowledged(sub);
+    worker.coverage.acknowledged(sub);
     engine
         .accounts()
         .store(&[(
@@ -358,15 +329,12 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
         .unwrap();
     // Removal revokes coverage only. Deletion belongs to the eviction caller,
     // so delayed transport cleanup must not delete a newly installed account.
-    chain_sync.on_websocket(Event::Removed(key), &mut coverage).await.unwrap();
-    chain_sync
-        .on_websocket(
-            Event::Update {
-                sub,
-                account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(NEWER_SLOT + 1),
-            },
-            &mut coverage,
-        )
+    worker.handle_websocket(Event::Removed(key)).await.unwrap();
+    worker
+        .handle_websocket(Event::Update {
+            sub,
+            account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(NEWER_SLOT + 1),
+        })
         .await
         .unwrap();
     let account = engine
@@ -374,7 +342,7 @@ async fn stale_confirmations_wrong_streams_and_removed_subscriptions_reject_upda
         .expect("old cleanup must preserve the reacquired mirror");
     assert_eq!(account.data(), LOCAL_BALANCE.to_le_bytes());
     assert_eq!(account.slot(), NEWER_SLOT);
-    drop(coverage);
+    drop(worker);
     drop(chain_sync);
     engine.close().await;
 }
@@ -388,7 +356,7 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
     let grpc = yellowstone::Server::new().await;
     let chain_sync = start_chain_sync(&mut engine, &http, Some(&ws), &grpc);
     ws.wait_for_connection().await;
-    let mut coverage = Coverage::default();
+    let mut worker = Worker::new(&chain_sync);
     let authority = engine.authority();
     let Ata {
         ata: key,
@@ -443,7 +411,10 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
             loop {
                 match chain_sync
                     .websocket
-                    .subscribe(AccountSubscription { pubkey: eata, program: None }, true)
+                    .subscribe(
+                        AccountSubscription { pubkey: eata, program: None },
+                        Retention::Reuse,
+                    )
                     .await
                 {
                     Err(WebSocketError::Unavailable) => continue,
@@ -453,7 +424,7 @@ async fn raw_eata_undelegation_refreshes_only_eligible_ata_projection() {
                     }
                 }
             }
-            chain_sync.undelegated(eata, PROJECTION_SLOT, &mut coverage).await
+            worker.undelegated(eata, PROJECTION_SLOT).await
         },
         script,
     )
@@ -506,12 +477,13 @@ async fn raw_eata_requests_and_closure_preserve_the_projection_lifecycle() {
         .store(&[(fixture.ata, projected.build()), (fixture.eata, raw.clone())])
         .unwrap();
 
-    within(chain_sync.undelegation_requested(fixture.eata, PROJECTION_SLOT - 1))
+    let mut worker = Worker::new(&chain_sync);
+    within(worker.undelegation_requested(fixture.eata, PROJECTION_SLOT - 1))
         .await
         .unwrap();
     assert_eq!(intents(&engine), 0);
     for _ in 0..2 {
-        within(chain_sync.undelegation_requested(fixture.eata, PROJECTION_SLOT))
+        within(worker.undelegation_requested(fixture.eata, PROJECTION_SLOT))
             .await
             .unwrap();
     }
@@ -537,13 +509,7 @@ async fn raw_eata_requests_and_closure_preserve_the_projection_lifecycle() {
         );
         http.next().await.respond_accounts(slot, &[None, None]);
     };
-    let mut coverage = Coverage::default();
-    scripted(
-        chain_sync.undelegated(fixture.eata, slot, &mut coverage),
-        script,
-    )
-    .await
-    .unwrap();
+    scripted(worker.undelegated(fixture.eata, slot), script).await.unwrap();
     assert_eq!(
         engine.get_account(fixture.eata).unwrap().mode(),
         AccountMode::Missing
@@ -581,13 +547,13 @@ async fn last_source_loss_evicts_only_non_authoritative_accounts() {
                 v42_builder(LOCAL_BALANCE, mode).slot(DELEGATION_SLOT).build(),
             )])
             .unwrap();
-        let mut coverage = Coverage::default();
+        let mut worker = Worker::new(&chain_sync);
         let sub = AccountSubscription { pubkey: key, program: None };
-        let generation = coverage.acknowledged(sub);
-        coverage.confirmed(0, key, generation);
-        within(chain_sync.lost(&mut coverage, Source::WebSocket, key)).await.unwrap();
+        let generation = worker.coverage.acknowledged(sub);
+        worker.coverage.confirmed(0, key, generation);
+        within(worker.handle_lost(Source::WebSocket, key)).await.unwrap();
         assert!(engine.get_account(key).is_some());
-        within(chain_sync.lost(&mut coverage, Source::Grpc, key)).await.unwrap();
+        within(worker.handle_lost(Source::Grpc, key)).await.unwrap();
         assert_eq!(engine.get_account(key).is_some(), preserved);
     }
     drop(chain_sync);
@@ -650,7 +616,305 @@ fn program_and_program_data_loss_evict_the_same_local_program() {
         let mut coverage = Coverage::default();
         coverage.acknowledged(first);
         coverage.acknowledged(last);
-        assert_eq!(coverage.removed(first.pubkey), None);
-        assert_eq!(coverage.removed(last.pubkey), Some(program));
+        assert_eq!(coverage.lost(Source::WebSocket, first.pubkey), (true, None));
+        assert_eq!(
+            coverage.lost(Source::WebSocket, last.pubkey),
+            (true, Some(program))
+        );
     }
+}
+
+// Direct handler scenarios use the same executor and control handling, without starting another
+// transport consumer. The continuous-loop regressions below exercise dispatch and scheduling too.
+impl Worker<'_> {
+    async fn execute(&mut self, work: Work) -> Completion {
+        let (controls, mut requests) = mpsc::unbounded_channel();
+        let operations = Operations { sync: self.sync, controls };
+        let run = operations.execute(work);
+        tokio::pin!(run);
+        loop {
+            tokio::select! {
+                completion = &mut run => return completion,
+                Some(control) = requests.recv() => self.control(control),
+            }
+        }
+    }
+
+    async fn drain(&mut self) -> Result<()> {
+        // These direct-handler assertions need completion, not a second concurrent event loop.
+        while let Some(work) = self.scheduler.next() {
+            let completion = self.execute(work).await;
+            match self.complete(completion) {
+                Ok(()) => {}
+                Err(RunError::Operation(error)) => return Err(error),
+                Err(error) => panic!("unexpected scheduler failure: {error}"),
+            }
+        }
+        Ok(())
+    }
+
+    async fn handle_grpc(&mut self, event: grpc::Event) -> Result<()> {
+        self.on_grpc(event).unwrap();
+        self.drain().await
+    }
+
+    async fn handle_websocket(&mut self, event: Event) -> Result<()> {
+        self.on_websocket(event).unwrap();
+        self.drain().await
+    }
+
+    async fn handle_lost(&mut self, source: Source, pubkey: Pubkey) -> Result<()> {
+        self.lost(source, pubkey).unwrap();
+        self.drain().await
+    }
+
+    async fn undelegated(&mut self, pubkey: Pubkey, slot: u64) -> Result<()> {
+        self.execute(Work::Undelegated { pubkey, slot }).await.result
+    }
+
+    async fn undelegation_requested(&mut self, pubkey: Pubkey, slot: u64) -> Result<()> {
+        self.execute(Work::UndelegationRequested { pubkey, slot }).await.result
+    }
+}
+
+/// Real subscriptions progress through a full transport queue during both lifecycle and caller acquisition.
+#[tokio::test]
+async fn event_loop_drains_while_acquisition_or_leases_are_pending() {
+    use crate::{AccountProperty, ChainSyncAccount, http::Fetcher, websocket::Pool};
+    use nucleus::testkit::v42_sum;
+
+    for lifecycle in [false, true] {
+        let mut engine = TestEngine::new().await;
+        let mut http = Server::new().await;
+        let mut ws = websocket::Server::new().await;
+        let remote = yellowstone::Server::new().await;
+        let config = crate::support::config(&http.endpoint, Some(&ws), &[&remote.endpoint]);
+        let (websocket, websocket_rx) =
+            Pool::with_event_capacity(config.websocket, engine.shutdown(), 1);
+        let fetcher = Fetcher::new(config.http, engine.clone()).unwrap();
+        let (events, grpc_rx) = mpsc::channel(16);
+        let grpc = grpc::Client::new(
+            0,
+            config.grpc[0].clone(),
+            engine.clone(),
+            events.clone(),
+            engine.shutdown(),
+        )
+        .unwrap();
+        let sync = Arc::new(ChainSync {
+            aml: None,
+            engine: engine.clone(),
+            fetcher,
+            websocket,
+            grpc: vec![grpc],
+        });
+        let evictions = engine.accounts().subscribe_evictions().unwrap();
+        let mut keys = [Pubkey::new_unique(), Pubkey::new_unique()];
+        keys.sort_unstable();
+        let root = Pubkey::new_unique();
+        let mut applied = engine.accounts().subscribe(keys[0]).await;
+        let mut activated = engine.accounts().subscribe(root).await;
+        let base = keys
+            .map(|key| Account::from_builder(key, &v42_builder(V42_INITIAL, AccountMode::Missing)));
+        let updated =
+            Account::from_builder(keys[0], &v42_builder(LOCAL_BALANCE, AccountMode::Missing));
+        let (_, record) = delegation_images(
+            root,
+            V42_ID,
+            engine.authority(),
+            DELEGATION_SLOT,
+            &[v42_sum(root, &keys)],
+        );
+        let delegation = Delegation {
+            pubkey: root,
+            account: v42_builder(V42_INITIAL, AccountMode::Delegated).slot(DELEGATION_SLOT),
+            record: record.data,
+            source_program: V42_ID,
+        };
+        let requests = keys.map(|pubkey| ChainSyncAccount {
+            pubkey,
+            property: AccountProperty::Readonly,
+        });
+        let mut worker = Worker::new(&sync);
+        let scenario = async {
+            ws.wait_for_connection().await;
+            let acquire = async {
+                if lifecycle {
+                    events.send(grpc::Event::Delegated(delegation)).await.unwrap();
+                    loop {
+                        if activated.recv().await.unwrap().mode() == AccountMode::Delegated {
+                            break;
+                        }
+                    }
+                } else {
+                    crate::support::acquire(&sync, &requests).await.unwrap();
+                }
+            };
+            let providers = async {
+                ws.next().await.ack(FIRST_SUBSCRIPTION);
+                let call = ws.next().await;
+                assert_eq!(call.pubkey, keys[1]);
+                // More updates than the one-slot event queue can hold precede the second ACK.
+                // The caller holds both leases, or the lifecycle barrier is still running.
+                call.ack_with_updates(
+                    FIRST_SUBSCRIPTION + 1,
+                    &[
+                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 1, &updated),
+                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 2, &updated),
+                        (FIRST_SUBSCRIPTION, DELEGATION_SLOT + 3, &updated),
+                    ],
+                );
+                http.next().await.respond_accounts(
+                    DELEGATION_SLOT,
+                    &[Some(base[0].clone()), Some(base[1].clone())],
+                );
+            };
+            tokio::join!(acquire, providers);
+            loop {
+                let image = applied.recv().await.unwrap();
+                if image.slot() == DELEGATION_SLOT + 3 {
+                    assert_eq!(image.data(), LOCAL_BALANCE.to_le_bytes());
+                    break;
+                }
+            }
+        };
+        within(async {
+            tokio::select! {
+                result = worker.run_updates(websocket_rx, grpc_rx, evictions) => panic!("worker stopped: {result:?}"),
+                () = scenario => {},
+            }
+        }).await;
+        drop(worker);
+        drop(events);
+        drop(sync);
+        engine.close().await;
+        ws.close().await;
+        http.close().await;
+        remote.close().await;
+    }
+}
+
+/// FIFO lanes share program destinations, barriers preserve cross-account order, and stale coverage cannot authorize work.
+#[tokio::test]
+async fn scheduler_ordering_and_deferred_coverage_checks() {
+    let mut engine = TestEngine::new().await;
+    let sync = start_handler_sync(&mut engine, None);
+    let mut worker = Worker::new(&sync);
+    let a = store_v42(&engine, LOCAL_BALANCE, AccountMode::Mirrored);
+    let b = Pubkey::new_unique();
+    let [direct, data] = AccountSubscription::for_account(a);
+    let b_sub = AccountSubscription { pubkey: b, program: None };
+    for sub in [direct, data, b_sub] {
+        worker.coverage.acknowledged(sub);
+    }
+    let update = |sub, slot| Work::Update {
+        ticket: worker.coverage.ticket(UpdateSource::WebSocket, sub).unwrap(),
+        update: Update::Mirror(v42_builder(V42_INITIAL, AccountMode::Missing).slot(slot)),
+    };
+    let mut scheduler = Scheduler::new(8);
+    scheduler.admit(update(direct, 1)).unwrap();
+    scheduler.admit(update(data, 2)).unwrap();
+    scheduler.admit(update(b_sub, 3)).unwrap();
+    scheduler.admit(Work::UndelegationRequested { pubkey: a, slot: 4 }).unwrap();
+    scheduler.admit(update(b_sub, 5)).unwrap();
+    assert_eq!(scheduler.next().unwrap().lane(), Some(a));
+    assert_eq!(scheduler.next().unwrap().lane(), Some(b));
+    assert!(scheduler.next().is_none());
+    scheduler.finish(Some(a));
+    assert!(
+        matches!(scheduler.next(), Some(Work::Update { update: Update::Mirror(account), .. }) if account.read().slot() == 2)
+    );
+    scheduler.finish(Some(b));
+    assert!(
+        scheduler.next().is_none(),
+        "the barrier still waits for ProgramData's shared lane"
+    );
+    scheduler.finish(Some(a));
+    assert!(matches!(
+        scheduler.next(),
+        Some(Work::UndelegationRequested { slot: 4, .. })
+    ));
+    assert!(scheduler.next().is_none());
+    scheduler.finish(None);
+    assert!(
+        matches!(scheduler.next(), Some(Work::Update { update: Update::Mirror(account), .. }) if account.read().slot() == 5)
+    );
+    scheduler.finish(Some(b));
+    assert_eq!(scheduler.outstanding, 0);
+
+    let obsolete = update(direct, BUFFERED_SLOT);
+    worker.coverage.remove(direct);
+    worker.coverage.acknowledged(direct);
+    worker.execute(obsolete).await.result.unwrap();
+    assert_eq!(
+        engine.get_account(a).unwrap().data(),
+        LOCAL_BALANCE.to_le_bytes()
+    );
+    // A last-source eviction can already be queued when a fresh subscription restores coverage.
+    worker.execute(Work::Evict { pubkey: a, cached: false }).await.result.unwrap();
+    assert!(engine.get_account(a).is_some());
+    drop(worker);
+    drop(sync);
+    engine.close().await;
+}
+
+/// Outstanding work includes running heads; exceeding the production limit shuts down without waiting for their leases.
+#[tokio::test]
+async fn outstanding_limit_triggers_coordinated_shutdown() {
+    use nucleus::shutdown::{Service, ShutdownManager};
+    let mut engine = TestEngine::new().await;
+    let sync = start_handler_sync(&mut engine, None);
+    let key = Pubkey::new_unique();
+    let sub = AccountSubscription { pubkey: key, program: None };
+    let mut coverage = Coverage::default();
+    coverage.acknowledged(sub);
+    let work = || Work::Update {
+        ticket: coverage.ticket(UpdateSource::WebSocket, sub).unwrap(),
+        update: Update::Mirror(
+            v42_builder(V42_INITIAL, AccountMode::Missing).slot(DELEGATION_SLOT),
+        ),
+    };
+    let mut scheduler = Scheduler::new(2);
+    scheduler.admit(work()).unwrap();
+    assert!(scheduler.next().is_some());
+    scheduler.admit(work()).unwrap();
+    assert!(matches!(
+        scheduler.admit(work()),
+        Err(RunError::Capacity { limit: 2 })
+    ));
+    scheduler.finish(Some(key));
+    scheduler.admit(work()).unwrap();
+
+    let lease = engine.account(key).await.unwrap();
+    let (ws, ws_rx) = mpsc::channel(1);
+    let (_grpc, grpc_rx) = mpsc::channel(1);
+    let (_evictions, evictions) = mpsc::unbounded_channel();
+    let mut manager = ShutdownManager::default();
+    let shutdown = manager.handle(Service::ChainSyncWorker);
+    let task = tokio::spawn(ChainSync::run(
+        Arc::clone(&sync),
+        ws_rx,
+        grpc_rx,
+        evictions,
+        shutdown,
+    ));
+    ws.send(Event::Acknowledged(sub)).await.unwrap();
+    for _ in 0..=WORK_LIMIT {
+        ws.send(Event::Update {
+            sub,
+            account: v42_builder(V42_INITIAL, AccountMode::Missing).slot(DELEGATION_SLOT),
+        })
+        .await
+        .unwrap();
+    }
+    let reason = within(manager.wait()).await;
+    assert!(
+        matches!(&reason, ShutdownReason::Error(error) if error.to_string().contains("8192 outstanding operations"))
+    );
+    within(task).await.unwrap();
+    // The held lease is deliberately released only after termination: no backlog drain was needed.
+    drop(lease);
+    within(manager.terminate()).await;
+    drop(sync);
+    engine.close().await;
 }

@@ -11,15 +11,16 @@ use solana_sdk_ids::bpf_loader_upgradeable;
 
 use super::{
     Acquisition,
-    plan::{FetchPlan, PendingAccount},
+    plan::{Companion, FetchPlan, PendingAccount},
 };
 use crate::{
-    AccountProperty::{Payer, Program, Readonly, Writable},
+    AccountProperty,
+    AccountProperty::{Program, Readonly, Writable},
     Result, SyncTarget,
     account::mirror,
     ata,
     delegation::{self, Delegation},
-    http::FetchedAccounts,
+    http::{BATCH_LIMIT, FetchedAccounts},
     program,
 };
 
@@ -40,7 +41,7 @@ impl<'engine> Acquisition<'engine> {
         }
         let mut projected = Vec::new();
         let authority = self.sync.engine.authority();
-        for chunk in atas.chunks(50) {
+        for chunk in atas.chunks(BATCH_LIMIT / 2) {
             let mut keys = Vec::with_capacity(chunk.len() * 2);
             for &(_, eata, _) in chunk {
                 keys.push(eata);
@@ -106,64 +107,31 @@ impl<'engine> Acquisition<'engine> {
     async fn materialize_account(
         &mut self,
         pending: PendingAccount<'engine>,
-        mut account: AccountBuilder,
+        account: AccountBuilder,
         fetched: &FetchedAccounts,
         projection: Option<Delegation>,
         outcome: &mut BatchOutcome<'engine>,
     ) -> Result<()> {
-        let PendingAccount { mut target, index } = pending;
-        let pubkey = target.accessor.pubkey();
         let projected = projection.is_some();
-        // HTTP records stay borrowed; only projected records already own their bytes.
-        let record = if let Some(delegation) = projection {
-            account = delegation.account;
-            Some((delegation.source_program, Cow::Owned(delegation.record)))
-        } else if matches!(target.property, Payer | Writable)
-            && let Some((metadata, record)) = delegation::accepted_record(
-                &account,
-                fetched.accounts[index + 1].as_ref(),
-                self.sync.engine.authority(),
-            )
-        {
-            account = if metadata.owner == EATA_PROGRAM_ID && ata::is_raw_eata(pubkey, &account) {
-                ata::normalize_raw(account)
-            } else {
-                delegation::account(account, metadata)
-            };
-            Some((metadata.owner, Cow::Borrowed(record)))
-        } else {
-            None
-        };
-        if record.is_none() {
-            let image = account.read();
-            let executable = image.flags().contains(StateFlags::EXECUTABLE);
-            let refetch = match target.property {
-                Readonly if image.owner() == delegation_program_api::id() => Some(Writable),
-                Readonly if executable && image.owner() == bpf_loader_upgradeable::ID => {
-                    Some(Program)
-                }
-                Writable if executable => Some(Program),
-                // Readonly discovery already subscribed: rejected delegations must not loop.
-                Writable if !target.subscribed => Some(Readonly),
-                _ => None,
-            };
-            if let Some(property) = refetch {
-                // Keep companion reads at least as fresh as the response that discovered them,
-                // independently of any delegation slot restored during normalization.
+        let resolution = pending.resolve(
+            account,
+            fetched,
+            projection,
+            self.sync.engine.authority(),
+            &self.sync.engine.rent(),
+        )?;
+        let mut target = pending.target;
+        let pubkey = target.accessor.pubkey();
+        let (account, record) = match resolution {
+            Resolution::Refetch(property) => {
+                // Preserve the freshness of the response that revealed the companion.
                 outcome.min_context_slot = Some(fetched.context_slot);
                 target.property = property;
                 outcome.refetches.push(target);
                 return Ok(());
             }
-            // Incomplete images stay out of Engine until companions or tracking are acquired.
-            // Readonly program discovery must not leave raw loader layouts in the cache.
-            if target.property == Readonly && executable {
-                account = program::normalize(account, None, &self.sync.engine.rent())?;
-            }
-            if account.read().is(AccountMode::Missing) {
-                account = mirror(account);
-            }
-        }
+            Resolution::Ready { account, record } => (account, record),
+        };
         let unsubscribe = record.is_some() && (projected || target.subscribed);
         // Confined images never execute post-delegation actions.
         if account.read().is(AccountMode::Delegated)
@@ -195,6 +163,81 @@ impl<'engine> Acquisition<'engine> {
     }
 }
 
+/// Image resolution under the target's existing lease, before any Engine mutation.
+enum Resolution<'a> {
+    /// Fetch the primary again with this role's companion and subscription requirements.
+    Refetch(AccountProperty),
+    /// Companion resolution is complete; delegation actions may still need dependencies.
+    Ready {
+        /// Normalized mirror, absence, delegation, or ATA projection.
+        account: AccountBuilder,
+        /// Original owning program and full delegation record, if accepted.
+        /// For ATA projections the program is eSPL, not the ATA's token program.
+        /// HTTP records borrow response data; projections already own their record bytes.
+        record: Option<(Pubkey, Cow<'a, [u8]>)>,
+    },
+}
+
+impl PendingAccount<'_> {
+    /// Resolves an image without applying it or changing subscription ownership.
+    fn resolve<'a>(
+        &self,
+        mut account: AccountBuilder,
+        fetched: &'a FetchedAccounts,
+        projection: Option<Delegation>,
+        authority: Pubkey,
+        rent: &Rent,
+    ) -> Result<Resolution<'a>> {
+        let target = &self.target;
+        let pubkey = target.accessor.pubkey();
+        if let Some(delegation) = projection {
+            return Ok(Resolution::Ready {
+                account: delegation.account,
+                record: Some((delegation.source_program, Cow::Owned(delegation.record))),
+            });
+        }
+        let record_account = match self.companion {
+            Some(Companion::Record(index)) => fetched.accounts[index].as_ref(),
+            _ => None,
+        };
+        if let Some((metadata, record)) =
+            delegation::accepted_record(&account, record_account, authority)
+        {
+            account = if metadata.owner == EATA_PROGRAM_ID && ata::is_raw_eata(pubkey, &account) {
+                ata::normalize_raw(account)
+            } else {
+                delegation::account(account, metadata)
+            };
+            return Ok(Resolution::Ready {
+                account,
+                record: Some((metadata.owner, Cow::Borrowed(record))),
+            });
+        }
+        let image = account.read();
+        let executable = image.flags().contains(StateFlags::EXECUTABLE);
+        let refetch = match target.property {
+            Readonly if image.owner() == delegation_program_api::id() => Some(Writable),
+            Readonly if executable && image.owner() == bpf_loader_upgradeable::ID => Some(Program),
+            Writable if executable => Some(Program),
+            // Readonly discovery already subscribed: rejected delegations must not loop.
+            Writable if !target.subscribed => Some(Readonly),
+            _ => None,
+        };
+        if let Some(property) = refetch {
+            return Ok(Resolution::Refetch(property));
+        }
+        // Incomplete images stay out of Engine until companions or tracking are acquired.
+        // Readonly program discovery must not leave raw loader layouts in the cache.
+        if target.property == Readonly && executable {
+            account = program::normalize(account, None, rent)?;
+        }
+        if account.read().is(AccountMode::Missing) {
+            account = mirror(account);
+        }
+        Ok(Resolution::Ready { account, record: None })
+    }
+}
+
 /// Delegated account awaiting action dependencies after its initial lease is released.
 pub(super) struct PendingDelegation {
     /// Normalized account and record payload retained without an Engine lease.
@@ -223,11 +266,10 @@ pub(super) fn prepare_programs(
 ) -> Result<Vec<Pubkey>> {
     let mut prune = Vec::new();
     for pending in &plan.accounts {
-        if pending.target.property != Program {
+        let Some(Companion::ProgramData(data_index)) = pending.companion else {
             continue;
-        }
+        };
         let program_index = pending.index;
-        let data_index = program_index + 1;
         let Some(program) = fetched.accounts[program_index].take() else { continue };
         let index = if program.read().owner() == bpf_loader_upgradeable::ID {
             program_index

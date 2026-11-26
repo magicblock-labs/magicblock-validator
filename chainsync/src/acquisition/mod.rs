@@ -20,14 +20,16 @@ use crate::{
     AccountProperty::{Program, Readonly, Writable},
     AccountSubscription, ChainSync, ChainSyncAccount, Result, SyncTarget,
     metrics::{self, Op},
+    websocket::{Reference, Retention},
 };
 
 /// State shared by primary fetches, companion fetches, and action dependencies.
 pub(super) struct Acquisition<'engine> {
     /// Supplies transports, normalization policy, and materialization into Engine.
     sync: &'engine ChainSync,
-    /// References held for unfinished targets. Completed mirrors retain their own coverage.
-    subs: BTreeSet<Pubkey>,
+    /// Newly acquired references still owned by failure cleanup, keyed by remote address.
+    /// Reused resident references are excluded; completed mirrors keep their own coverage.
+    pending: BTreeSet<Pubkey>,
     /// Minimum response context slot, carried monotonically across dependency waves.
     floor: Option<u64>,
     /// HTTP entries fetched, including companions, nulls, and repeated primary fetches.
@@ -41,7 +43,7 @@ impl<'engine> Acquisition<'engine> {
     pub(super) fn new(sync: &'engine ChainSync, floor: Option<u64>) -> Self {
         Self {
             sync,
-            subs: BTreeSet::new(),
+            pending: BTreeSet::new(),
             floor,
             count: 0,
             raw: BTreeMap::new(),
@@ -52,7 +54,7 @@ impl<'engine> Acquisition<'engine> {
     pub(super) async fn run(mut self, targets: Vec<SyncTarget<'engine>>) -> Result<u64> {
         let _timer = metrics::time(Op::ChainSync);
         let result = self.waves(targets).await;
-        self.sync.unsubscribe(self.subs).await;
+        self.sync.unsubscribe(self.pending).await;
         result.map(|()| self.count)
     }
 
@@ -82,7 +84,7 @@ impl<'engine> Acquisition<'engine> {
             targets = self.sync.missing(requests).await?;
             for target in &mut targets {
                 // A dependency may revisit a delegation already deferred by this acquisition.
-                target.subscribed = self.subs.contains(&target.accessor.pubkey());
+                target.subscribed = self.pending.contains(&target.accessor.pubkey());
             }
         }
         // Children must activate before the actions that requested their dependencies.
@@ -91,7 +93,7 @@ impl<'engine> Acquisition<'engine> {
             self.sync.materialize_delegation(prepared).await?;
             if unsubscribe {
                 self.sync.unsubscribe([pubkey]).await;
-                self.subs.remove(&pubkey);
+                self.pending.remove(&pubkey);
             }
         }
         Ok(())
@@ -108,7 +110,8 @@ impl<'engine> Acquisition<'engine> {
             let mut next = Vec::new();
             let mut min_context_slot = None;
             while inputs.peek().is_some() {
-                let outcome = self.batch(FetchPlan::next(&mut inputs)).await?;
+                let plan = FetchPlan::next(&mut inputs);
+                let outcome = self.batch(plan).await?;
                 next.extend(outcome.refetches);
                 pending.extend(outcome.delegations);
                 min_context_slot = min_context_slot.max(outcome.min_context_slot);
@@ -121,7 +124,7 @@ impl<'engine> Acquisition<'engine> {
         for (pubkey, account) in take(&mut self.raw) {
             self.sync.engine.account(pubkey).await?.materialize(account, None).await?;
             self.sync.unsubscribe([pubkey]).await;
-            self.subs.remove(&pubkey);
+            self.pending.remove(&pubkey);
         }
         Ok(pending)
     }
@@ -129,7 +132,7 @@ impl<'engine> Acquisition<'engine> {
     /// Subscribes before fetching and installs only fully resolved account images.
     async fn batch(&mut self, plan: FetchPlan<'engine>) -> Result<BatchOutcome<'engine>> {
         let sync = self.sync;
-        self.subs.extend(sync.subscribe(&plan.subscriptions).await?);
+        self.pending.extend(sync.subscribe(&plan.subscriptions).await?);
         let mut fetched = sync.fetcher.fetch(&plan.keys, self.floor).await?;
         self.count += plan.keys.len() as u64;
         let prune = prepare_programs(&plan, &mut fetched, &sync.engine.rent())?;
@@ -138,15 +141,15 @@ impl<'engine> Acquisition<'engine> {
         // out of cleanup ownership, including when a later target fails materialization.
         sync.unsubscribe(prune.iter().copied()).await;
         for pubkey in prune {
-            self.subs.remove(&pubkey);
+            self.pending.remove(&pubkey);
         }
         self.materialize_batch(plan.accounts, &mut fetched, projected).await
     }
 
-    /// Stops failure cleanup from retiring a completed target's surviving mirror coverage.
+    /// Relinquishes cleanup ownership once a target has installed or retired its subscriptions.
     fn complete(&mut self, pubkey: Pubkey) {
         for sub in AccountSubscription::for_account(pubkey) {
-            self.subs.remove(&sub.pubkey);
+            self.pending.remove(&sub.pubkey);
         }
     }
 }
@@ -155,10 +158,11 @@ impl ChainSync {
     /// Waits for every request; partial failure releases only references acquired by this batch.
     async fn subscribe(
         &self,
-        subscriptions: &[(AccountSubscription, bool)],
+        subscriptions: &[(AccountSubscription, Retention)],
     ) -> Result<Vec<Pubkey>> {
-        let requests =
-            subscriptions.iter().map(|&(sub, reuse)| self.websocket.subscribe(sub, reuse));
+        let requests = subscriptions
+            .iter()
+            .map(|&(sub, retention)| self.websocket.subscribe(sub, retention));
         let mut subscribed = Vec::with_capacity(subscriptions.len());
         let mut failure = None;
         // Waiting for all results prevents a successful parallel request from going untracked.
@@ -166,8 +170,8 @@ impl ChainSync {
             subscriptions.iter().zip(future::join_all(requests).await)
         {
             match result {
-                Ok(true) => subscribed.push(subscription.pubkey),
-                Ok(false) => {}
+                Ok(Reference::Acquired) => subscribed.push(subscription.pubkey),
+                Ok(Reference::Reused) => {}
                 Err(error) => {
                     failure.replace(error);
                 }

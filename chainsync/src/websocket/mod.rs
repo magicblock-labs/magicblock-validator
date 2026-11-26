@@ -106,7 +106,7 @@ pub(super) enum Event {
     },
 }
 
-pub(super) use pool::Pool;
+pub(super) use pool::{Pool, Reference, Retention};
 
 mod pool;
 mod session;

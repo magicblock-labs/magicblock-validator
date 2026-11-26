@@ -5,6 +5,21 @@ use solana_pubkey::Pubkey;
 
 use crate::{AccountSubscription, metrics};
 
+/// Update origin, including the exact gRPC stream authorized to supply it.
+#[derive(Clone, Copy)]
+pub(super) enum UpdateSource {
+    WebSocket,
+    Grpc(usize),
+}
+
+/// Admission evidence rechecked after waiting for an Engine lease.
+#[derive(Clone, Copy)]
+pub(super) struct Ticket {
+    pub(super) source: UpdateSource,
+    pub(super) sub: AccountSubscription,
+    generation: u64,
+}
+
 /// Transport that supplied or lost an account subscription.
 pub(super) use crate::metrics::Transport as Source;
 
@@ -63,16 +78,26 @@ impl Coverage {
         generation
     }
 
-    /// Removes coverage for a remote address; returns the local address to evict if uncovered.
-    /// For ProgramData, the returned address is the program, not the removed remote address.
-    pub(super) fn removed(&mut self, pubkey: Pubkey) -> Option<Pubkey> {
-        let entry = self.entries.remove(&pubkey)?;
+    /// Revokes remote coverage, optionally requiring an exact subscription match.
+    pub(super) fn revoke(
+        &mut self,
+        pubkey: Pubkey,
+        expected: Option<AccountSubscription>,
+    ) -> Option<AccountSubscription> {
+        let Occupied(entry) = self.entries.entry(pubkey) else { return None };
+        if expected.is_some_and(|sub| entry.get().sub != sub) {
+            return None;
+        }
+        let entry = entry.remove();
         metrics::coverage(entry.coverage(), None);
-        let local_pubkey = entry.sub.local_pubkey();
-        let covered = AccountSubscription::for_account(local_pubkey)
+        Some(entry.sub)
+    }
+
+    /// Whether any current direct or ProgramData subscription feeds this local account.
+    pub(super) fn covers(&self, local_pubkey: Pubkey) -> bool {
+        AccountSubscription::for_account(local_pubkey)
             .into_iter()
-            .any(|sub| self.entries.get(&sub.pubkey).is_some_and(|entry| entry.sub == sub));
-        (!covered).then_some(local_pubkey)
+            .any(|sub| self.entries.get(&sub.pubkey).is_some_and(|entry| entry.sub == sub))
     }
 
     /// Drops one transport for a remote address; returns whether that address lost all coverage
@@ -90,7 +115,8 @@ impl Coverage {
             return (false, None);
         }
         metrics::lost(source);
-        (true, self.removed(pubkey))
+        let local = self.revoke(pubkey, None).map(AccountSubscription::local_pubkey);
+        (true, local.filter(|&pubkey| !self.covers(pubkey)))
     }
 
     /// Records a sent gRPC filter only if its generation still matches the current subscription.
@@ -104,15 +130,34 @@ impl Coverage {
     }
 
     /// Accepts an update only if this exact subscription still has WebSocket coverage.
+    #[cfg(test)]
     pub(super) fn ws_contains(&self, sub: AccountSubscription) -> bool {
-        self.entries.get(&sub.pubkey).is_some_and(|entry| entry.sub == sub && entry.ws)
+        self.ticket(UpdateSource::WebSocket, sub).is_some()
     }
 
     /// Accepts an update only if this exact subscription is still covered by the sending gRPC stream.
+    #[cfg(test)]
     pub(super) fn grpc_contains(&self, stream: usize, sub: AccountSubscription) -> bool {
-        self.entries
-            .get(&sub.pubkey)
-            .is_some_and(|entry| entry.sub == sub && entry.grpc == Some(stream))
+        self.ticket(UpdateSource::Grpc(stream), sub).is_some()
+    }
+
+    /// Captures coverage without allowing a later reacquisition to authorize this update.
+    pub(super) fn ticket(&self, source: UpdateSource, sub: AccountSubscription) -> Option<Ticket> {
+        let entry = self.entries.get(&sub.pubkey)?;
+        let covered = match source {
+            UpdateSource::WebSocket => entry.ws,
+            UpdateSource::Grpc(stream) => entry.grpc == Some(stream),
+        };
+        (covered && entry.sub == sub).then_some(Ticket {
+            source,
+            sub,
+            generation: entry.generation,
+        })
+    }
+
+    pub(super) fn authorizes(&self, ticket: Ticket) -> bool {
+        self.ticket(ticket.source, ticket.sub)
+            .is_some_and(|current| current.generation == ticket.generation)
     }
 
     /// Lists keys covered by a failed gRPC stream before removing that source.
@@ -126,13 +171,7 @@ impl Coverage {
     /// Removes coverage only if the stored subscription matches; returns whether it was removed.
     /// Used during cache eviction, so no further Engine eviction is requested.
     pub(super) fn remove(&mut self, sub: AccountSubscription) -> bool {
-        let Occupied(entry) = self.entries.entry(sub.pubkey) else { return false };
-        if entry.get().sub != sub {
-            return false;
-        }
-        let entry = entry.remove();
-        metrics::coverage(entry.coverage(), None);
-        true
+        self.revoke(sub.pubkey, Some(sub)).is_some()
     }
 }
 

@@ -237,11 +237,9 @@ impl ChainSync {
         let keys: Vec<_> = requests.iter().map(|request| request.pubkey).collect();
         let mut accessors = self.engine.missing_accounts(&keys).await?.into_iter().peekable();
         let mut targets = Vec::with_capacity(accessors.len());
-        for request in requests {
-            if let Some(accessor) =
-                accessors.next_if(|accessor| accessor.pubkey() == request.pubkey)
-            {
-                targets.push(SyncTarget::new(accessor, request.property));
+        for r in requests {
+            if let Some(accessor) = accessors.next_if(|a| a.pubkey() == r.pubkey) {
+                targets.push(SyncTarget::new(accessor, r.property));
             }
         }
         Ok(targets)

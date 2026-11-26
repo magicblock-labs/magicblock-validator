@@ -24,6 +24,16 @@ impl Call {
         self.reply.send(rpc_result(&self.id, subscription)).unwrap();
     }
 
+    /// Orders updates ahead of this acknowledgement in one frame, exposing blocked event delivery.
+    pub(crate) fn ack_with_updates(self, subscription: u64, updates: &[(u64, u64, &Account)]) {
+        let mut messages: Vec<_> = updates
+            .iter()
+            .map(|&(id, slot, account)| notification(id, slot, account))
+            .collect();
+        messages.push(rpc_result(&self.id, subscription));
+        self.reply.send(Value::Array(messages)).unwrap();
+    }
+
     /// Rejects only this subscription without disconnecting the socket.
     pub(crate) fn reject(self) {
         self.reply
@@ -125,8 +135,7 @@ impl Server {
 
     /// Queues a confirmed notification; retired IDs deliberately exercise late delivery.
     pub(crate) fn notify(&self, subscription: u64, slot: u64, account: &Account) {
-        let update = json!({"jsonrpc":RPC_VERSION, "method":"accountNotification", "params":{
-            "subscription":subscription, "result":{"context":{"slot":slot},"value":account.rpc()}}});
+        let update = notification(subscription, slot, account);
         self.output.send(Message::Text(update.to_string().into())).unwrap();
     }
 
@@ -139,4 +148,9 @@ impl Server {
     pub(crate) async fn close(self) {
         self.tasks.close().await;
     }
+}
+
+fn notification(subscription: u64, slot: u64, account: &Account) -> Value {
+    json!({"jsonrpc":RPC_VERSION, "method":"accountNotification", "params":{
+        "subscription":subscription, "result":{"context":{"slot":slot},"value":account.rpc()}}})
 }

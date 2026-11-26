@@ -110,3 +110,6 @@ mod fetcher;
 
 #[cfg(test)]
 mod tests;
+
+/// Maximum account entries in one getMultipleAccounts request.
+pub(crate) const BATCH_LIMIT: usize = 100;
