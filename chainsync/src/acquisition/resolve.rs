@@ -20,7 +20,7 @@ use crate::{
     account::mirror,
     ata,
     delegation::{self, Delegation},
-    http::{BATCH_LIMIT, FetchedAccounts},
+    http::{BATCH_LIMIT, BatchKind, FetchedAccounts},
     program,
 };
 
@@ -47,7 +47,11 @@ impl<'engine> Acquisition<'engine> {
                 keys.push(eata);
                 keys.push(delegation_record_pda_from_delegated_account(&eata));
             }
-            let companions = self.sync.fetcher.fetch(&keys, Some(fetched.context_slot)).await?;
+            let companions = self
+                .sync
+                .fetcher
+                .fetch(BatchKind::AtaCompanion, &keys, Some(fetched.context_slot))
+                .await?;
             self.count += keys.len() as u64;
             for (&(pubkey, eata, base), pair) in
                 chunk.iter().zip(companions.accounts.chunks_exact(2))

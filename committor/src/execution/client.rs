@@ -1,7 +1,7 @@
 use std::{ops::ControlFlow, time::Duration};
 
+use crate::metrics;
 use delegation_program_api::pda::commit_record_pda_from_delegated_account;
-use metrics::metrics;
 use rpc_client::{
     MagicBlockRpcClientError, MagicBlockRpcClientResult, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
@@ -154,7 +154,7 @@ impl IntentExecutionClient {
         signatures: &[Signature],
         commitment_config: CommitmentConfig,
     ) -> MagicBlockRpcClientResult<Vec<Option<Result<(), TransactionError>>>> {
-        let _timer = metrics::start_rpc_client_signature_history_timer();
+        let _timer = metrics::time_history();
         let response = self
             .rpc_client
             .get_inner()
@@ -225,9 +225,7 @@ impl IntentExecutionClient {
         };
 
         match cu_metrics().await {
-            Ok(Some(cu)) => {
-                metrics::set_commmittor_intent_cu_usage(i64::try_from(cu).unwrap_or(i64::MAX))
-            }
+            Ok(Some(cu)) => metrics::compute_units(cu),
             Err(err) => warn!(error = ?err, "Failed to fetch CUs for intent"),
             _ => {}
         }

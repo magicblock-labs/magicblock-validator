@@ -125,6 +125,19 @@ again; provider retries do not. Empty inputs return zero; `ensure` also returns 
 when every requested account is resident.
 Background lifecycle work and AML requests are not included.
 
+### Acquisition metrics
+
+`engine_chainsync_ensure_duration_seconds_count` counts completed ensures by
+caller, outcome, and primary fetch round (`0`, `1`, `2`, `3`, or `4+`).
+A successful zero-round call needed no acquisition; it may still have waited
+for another caller to fill a miss. Role refetches and action dependency passes
+add rounds, but splitting a pass into batches does not.
+
+`engine_chainsync_http_batch_size` records requested entries per completed
+logical batch, including ATA companion batches and HTTP lookups made directly
+by lifecycle handlers. Its count excludes retries; the HTTP attempt counter
+includes them.
+
 ## Keeping accounts up to date
 
 ChainSync separates ordinary mirrors from locally authoritative accounts:
