@@ -7,6 +7,7 @@ use solana_pubkey::Pubkey;
 pub(crate) mod buffer_task;
 pub(crate) mod commit_delivery;
 pub(crate) mod commit_finalize_task;
+pub(crate) mod diff;
 pub(crate) mod task_strategist;
 pub(crate) mod utils;
 

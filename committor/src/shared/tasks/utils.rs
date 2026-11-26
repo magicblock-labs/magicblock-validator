@@ -17,6 +17,7 @@ use crate::shared::tasks::{
     BaseActionTask, BaseActionTaskV1, BaseActionTaskV2, Task,
     commit_delivery::CommitDelivery,
     commit_finalize_task::CommitFinalizeTask,
+    diff::compute_merged_diff,
     task_strategist::{TaskStrategistError, TaskStrategistResult},
 };
 
@@ -36,17 +37,13 @@ pub(crate) fn create_action_tasks(actions: &[BaseAction]) -> impl Iterator<Item 
 }
 
 fn commit_delivery(account: &CommittedAccount, base_account: Option<Account>) -> CommitDelivery {
-    let base_account = if account.account.data.len() > COMMIT_STATE_SIZE_THRESHOLD {
-        base_account
-    } else {
-        None
-    };
-
-    if let Some(base_account) = base_account {
-        CommitDelivery::DiffInArgs { base_account }
-    } else {
-        CommitDelivery::StateInArgs
-    }
+    let data = &account.account.data;
+    base_account
+        .filter(|_| data.len() > COMMIT_STATE_SIZE_THRESHOLD)
+        .and_then(|base_account| compute_merged_diff(&base_account.data, data))
+        .map_or(CommitDelivery::StateInArgs, |diff| {
+            CommitDelivery::DiffInArgs { diff }
+        })
 }
 
 /// Builds a combined commit and finalization task for `account`.
