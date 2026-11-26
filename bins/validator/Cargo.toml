@@ -18,7 +18,6 @@ committor = { workspace = true }
 config = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }
-ledger-deprecated = { workspace = true }
 metrics = { workspace = true }
 program = { workspace = true }
 runtime = { workspace = true }

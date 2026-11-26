@@ -112,7 +112,7 @@ blocktime = "400ms"
 superblock = 72000
 
 [engine.ledger]
-# Shared durable root for the engine ledger, deprecated ledger, and service databases.
+# Durable root for Engine ledger files and snapshot archives.
 directory = "magicblock-test-storage"
 size-limit = 536_870_912
 
@@ -141,28 +141,6 @@ geyser-plugins = ["config.json"]
 # Default: 1_000_000
 # Env: MBV_COMMIT__COMPUTE_UNIT_PRICE
 compute-unit-price = 1_000_000
-
-# ==============================================================================
-# Deprecated Ledger Compatibility
-# ==============================================================================
-[ledger]
-# Capacity in bytes of the RocksDB block cache shared by all ledger columns.
-# This is the only read caching layer (the ledger bypasses the OS page cache),
-# so production nodes should set 16 GB or more.
-# Default: 536_870_912 (512 MB)
-# Env: MBV_LEDGER__BLOCK_CACHE_SIZE
-block-cache-size = 536_870_912
-
-# Whether to verify that the ledger on disk belongs to the configured keypair.
-# Default: true
-# Env: MBV_LEDGER__VERIFY_KEYPAIR
-verify-keypair = true
-
-# If true, deletes the existing ledger directory on startup.
-# Default: false
-# Env: MBV_LEDGER__RESET
-reset = false
-
 
 # ==============================================================================
 # Chainlink (cloning pipeline)

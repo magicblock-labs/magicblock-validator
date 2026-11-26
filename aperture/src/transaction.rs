@@ -25,31 +25,21 @@ use solana_transaction::{
 };
 use solana_transaction_context::transaction::TransactionReturnData;
 use solana_transaction_status::{
-    ConfirmedTransactionWithStatusMeta, InnerInstruction, InnerInstructions, TransactionStatusMeta,
-    TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
+    InnerInstruction, InnerInstructions, TransactionStatusMeta, TransactionWithStatusMeta,
+    VersionedTransactionWithStatusMeta,
 };
 
 use crate::error::RpcError;
 
-/// Converts one retained engine transaction into the canonical Solana status
-/// representation shared by transaction and block RPC responses.
-pub(crate) fn confirmed_transaction(
+/// Converts a retained Engine transaction and its metadata for RPC encoding.
+pub(crate) fn retained_transaction(
     response: TransactionResponse,
-    block_time: Option<i64>,
-) -> Result<ConfirmedTransactionWithStatusMeta, RpcError> {
+) -> Result<TransactionWithStatusMeta, RpcError> {
     let transaction = deserialize_transaction(&response.transaction, "invalid engine transaction")?;
-    let slot = response.execution.header.slot;
     let meta = transaction_meta(response.execution);
-    Ok(ConfirmedTransactionWithStatusMeta {
-        slot,
-        tx_with_meta: TransactionWithStatusMeta::Complete(VersionedTransactionWithStatusMeta {
-            transaction,
-            meta,
-        }),
-        block_time,
-        // The engine does not currently persist a transaction's block index.
-        index: 0,
-    })
+    Ok(TransactionWithStatusMeta::Complete(
+        VersionedTransactionWithStatusMeta { transaction, meta },
+    ))
 }
 
 /// Projects retained Engine metadata without repairing balances or optional fields.

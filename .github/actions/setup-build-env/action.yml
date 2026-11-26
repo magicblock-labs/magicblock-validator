@@ -8,9 +8,6 @@ inputs:
   cache-key:
     description: Cargo cache lane (separates lint, tests, and build profiles)
     required: true
-  libclang:
-    description: Install Linux libclang for bindgen
-    default: "true"
 
 outputs:
   save-key:
@@ -30,13 +27,6 @@ runs:
       working-directory: ${{ github.workspace }}/${{ inputs.workspace }}
       run: rustup toolchain install
 
-    - name: Install libclang for bindgen
-      if: runner.os == 'Linux' && inputs.libclang == 'true'
-      shell: bash
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y libclang-dev
-
     - name: Identify Cargo cache
       id: cargo-cache
       shell: bash
@@ -51,7 +41,7 @@ runs:
           {
             rustc --version --verbose
             env | LC_ALL=C sort |
-              sed -n -E '/^(CARGO|RUST|CC=|CXX=|CFLAGS|CXXFLAGS|CMAKE|LDFLAGS=|LIBCLANG_PATH=|OPENSSL|PROTOC=)/p'
+              sed -n -E '/^(CARGO|RUST|CC=|CXX=|CFLAGS|CXXFLAGS|CMAKE|LDFLAGS=|OPENSSL|PROTOC=)/p'
           } | shasum -a 256 | cut -d ' ' -f 1
         )
         dependencies=$(

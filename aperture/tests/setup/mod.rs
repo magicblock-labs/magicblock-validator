@@ -1,16 +1,12 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 #![allow(dead_code)]
 
-use std::{
-    sync::{Arc, OnceLock},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use chainlink::ProdChainlink;
 use config::config::aperture::ApertureConfig;
 use engine::{Engine, testkit::TestEngine};
 use keeper::testkit::{V42_ID, load_v42_lamports, signed_view, store_v42};
-use ledger_deprecated::Ledger;
 use magicblock_aperture::Aperture;
 use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
 use solana_instruction::Instruction;
@@ -55,18 +51,6 @@ pub(crate) struct RpcTestEnv {
     pub pubsub: PubsubClient,
 }
 
-fn shared_ledger() -> Arc<Ledger> {
-    static SHARED: OnceLock<Arc<Ledger>> = OnceLock::new();
-    SHARED
-        .get_or_init(|| {
-            let dir = keeper::testkit::tempdir();
-            let ledger = Ledger::open(dir.path()).expect("open test ledger");
-            std::mem::forget(dir);
-            Arc::new(ledger)
-        })
-        .clone()
-}
-
 fn chainlink(engine: &Engine) -> Arc<ProdChainlink> {
     Arc::new(ProdChainlink::try_new(engine.clone(), None).expect("create chainlink"))
 }
@@ -88,7 +72,6 @@ impl RpcTestEnv {
             },
             (*engine).clone(),
             chainlink(&engine),
-            shared_ledger(),
             Duration::from_millis(100),
             cancel.clone(),
         )

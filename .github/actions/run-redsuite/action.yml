@@ -15,32 +15,39 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Download RedSuite release artifacts
+    # Use the matching runner from source until the ledger config removal ships.
+    - name: Checkout RedSuite
+      uses: actions/checkout@v5
+      with:
+        repository: magicblock-labs/redsuite
+        ref: 419c980ca09fdb63a2af8d8229a2d5b629454037
+        path: redsuite
+        persist-credentials: false
+
+    - uses: ./magicblock-validator/.github/actions/setup-build-env
+      id: redsuite-build-env
+      with:
+        workspace: redsuite
+        cache-key: redsuite-release
+
+    - name: Build RedSuite runner
+      shell: bash
+      working-directory: redsuite
+      run: cargo build --release --locked -p redsuite
+
+    - uses: ./magicblock-validator/.github/actions/save-build-cache
+      with:
+        key: ${{ steps.redsuite-build-env.outputs.save-key }}
+        path: ${{ steps.redsuite-build-env.outputs.cache-paths }}
+        workspace: redsuite
+
+    - name: Stage RedSuite runner and download fixtures
       id: redsuite
       shell: bash
-      env:
-        REDSUITE_VERSION: "3.7.2"
       run: |
         set -euo pipefail
 
-        download() (
-          local release=$1 archive=$2.tar.gz checksum
-          local base="https://github.com/magicblock-labs/redsuite/releases/download/$release"
-          echo "Downloading $archive from RedSuite $release"
-          cd "$downloads"
-          curl --fail-early --fail --silent --show-error --location --retry 3 --remote-name-all \
-            "$base/$archive" "$base/$archive.sha256"
-          read -r checksum _ < "$archive.sha256"
-          printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check -
-        )
-
-        downloads=$(mktemp -d)
-        trap 'rm -rf "$downloads"' EXIT
-        runner="redsuite-runner-$REDSUITE_VERSION-x86_64-unknown-linux-gnu"
-        download "$REDSUITE_VERSION" "$runner"
-        tar -xzf "$downloads/$runner.tar.gz" -C "$downloads"
-
-        pins=$(python3 - "$downloads/$runner/components.toml" <<'PYTHON'
+        pins=$(python3 - redsuite/shared/components.toml <<'PYTHON'
         import sys
         import tomllib
 
@@ -55,10 +62,20 @@ runs:
         read -r fixture_release fixture_version yellowstone_tag <<< "$pins"
 
         fixtures="redsuite-fixtures-$fixture_version"
-        download "$fixture_release" "$fixtures"
+        archive="$fixtures.tar.gz"
+        base="https://github.com/magicblock-labs/redsuite/releases/download/$fixture_release"
+        downloads=$(mktemp -d)
+        trap 'rm -rf "$downloads"' EXIT
         mkdir -p redsuite-dist
-        tar -xzf "$downloads/$fixtures.tar.gz" -C redsuite-dist
-        install -m 755 "$downloads/$runner/bin/redsuite" redsuite-dist/redsuite
+        (
+          cd "$downloads"
+          curl --fail-early --fail --silent --show-error --location --retry 3 --remote-name-all \
+            "$base/$archive" "$base/$archive.sha256"
+          read -r checksum _ < "$archive.sha256"
+          printf '%s  %s\n' "$checksum" "$archive" | sha256sum --check -
+          tar -xzf "$archive" -C "$GITHUB_WORKSPACE/redsuite-dist"
+        )
+        install -m 755 redsuite/target/release/redsuite redsuite-dist/redsuite
 
         {
           echo "REDSUITE_ROOT=$GITHUB_WORKSPACE/runroot"
