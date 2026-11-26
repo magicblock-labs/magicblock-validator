@@ -21,7 +21,7 @@ futures = { workspace = true }
 http-body-util = { workspace = true }
 hyper = { workspace = true, features = ["client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio"] }
-json = { workspace = true }
+json = { package = "sonic-rs", version = "0.5.8" }
 engine = { workspace = true }
 nucleus = { workspace = true, features = ["metrics", "runtime"] }
 delegation-program-api = { workspace = true, features = ["encryption", "instruction"] }
