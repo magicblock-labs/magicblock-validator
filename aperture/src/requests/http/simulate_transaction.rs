@@ -13,9 +13,7 @@ use solana_transaction_status::{UiTransactionEncoding, parse_ui_inner_instructio
 
 use super::{HandlerResult, RpcHandlers};
 use crate::{
-    account::{
-        encoding::{AccountEncoder, TokenMint},
-    },
+    account::encoding::{AccountEncoder, TokenMint},
     error::RpcError,
     requests::{JsonHttpRequest as JsonRequest, payload::ResponsePayload},
     transaction::{live_inner_instructions, replace_blockhash},

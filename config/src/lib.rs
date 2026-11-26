@@ -226,7 +226,11 @@ impl fmt::Display for LeaderParams {
             self.chainsync.aml.is_some(),
         )?;
         let mut upstreams = f.debug_list();
-        let remotes = self.chainsync.http.iter().map(|url| ("HTTP", url))
+        let remotes = self
+            .chainsync
+            .http
+            .iter()
+            .map(|url| ("HTTP", url))
             .chain(self.chainsync.websocket.0.iter().map(|provider| ("WS", &provider.url)))
             .chain(self.chainsync.grpc.iter().map(|stream| ("gRPC", &stream.endpoint)));
         for (protocol, url) in remotes {
