@@ -60,7 +60,6 @@ pub(super) enum Notice {
 
 /// Connection and RPC acknowledgement budget.
 const TIMEOUT: Duration = Duration::from_secs(10);
-pub(super) const COMMAND_CAP: usize = 256;
 /// Fixed-size subscribe/unsubscribe RPCs fit Solana PubSub's default 4 KiB frame limit.
 const RPC_BATCH: usize = 16;
 /// Ping cadence; a missing pong invalidates the connection.
