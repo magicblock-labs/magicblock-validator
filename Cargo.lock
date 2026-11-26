@@ -3918,8 +3918,11 @@ dependencies = [
 name = "magicblock-chainsync"
 version = "2.0.5"
 dependencies = [
+ "ahash 0.8.12",
  "base64 0.22.1",
  "derive_more",
+ "fastwebsockets",
+ "futures",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -3928,14 +3931,19 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha1",
  "solana-account 4.3.1",
+ "solana-loader-v3-interface",
  "solana-pubkey 4.2.0",
  "sonic-rs",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "url",
+ "webpki-roots 1.0.9",
  "zstd",
 ]
 
