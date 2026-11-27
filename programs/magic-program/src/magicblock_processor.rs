@@ -170,9 +170,7 @@ declare_process_instruction!(
 declare_process_instruction!(CrankEntrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context| {
     let instruction: CrankInstruction = deserialize_instruction(invoke_context)?;
     match instruction {
-        CrankInstruction::ExecuteCrank { authority, task_id, instructions } => {
-            process_execute_crank(invoke_context, &authority, task_id, instructions)
-        }
+        CrankInstruction::ExecuteCrank => process_execute_crank(invoke_context),
     }
 });
 

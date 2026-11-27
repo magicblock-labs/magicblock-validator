@@ -455,27 +455,23 @@ pub enum CallbackInstruction {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 #[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
 pub enum CrankInstruction {
-    /// Executes a scheduled task's instructions with the crank signer PDA of
-    /// `authority` (see [`crate::pda::crank_signer_pda`]) as an extra signer.
+    /// Runs the scheduled instructions stored in a hydra crank, signing for
+    /// the crank signer PDA (see [`crate::pda::crank_signer_pda`]) that they
+    /// mark as a signer.
     ///
-    /// Only valid as the scheduled follow-up of a hydra ephemeral `Trigger`:
-    /// it must sit directly after `Trigger` of the crank passed at index `0`,
-    /// and that crank must have been created by the validator authority for
-    /// `(authority, task_id)`. Hydra's `Trigger` already verified that this
-    /// instruction is byte-identical to the template the validator stored.
+    /// Tasks are stored in their hydra crank as scheduled. Hydra cannot sign
+    /// for a PDA, so the cranker sends this instruction instead of the stored
+    /// instructions when they need the crank signer. It must sit directly
+    /// after hydra's ephemeral `Trigger` of the crank passed at index `0`, and
+    /// that crank must have been created by the validator authority.
     ///
     /// # Account references
     /// | Index | Account | Access |
     /// | --- | --- | --- |
-    /// | `0` | Hydra crank. Validator-created crank for `(authority, task_id)`. | WRITE |
-    /// | `1` | Crank signer PDA of `authority`. | - |
-    /// | `2` | Instructions sysvar. | - |
-    /// | `3..n` | Programs and accounts required by the embedded instructions. | - |
-    ExecuteCrank {
-        authority: Pubkey,
-        task_id: i64,
-        instructions: Vec<Instruction>,
-    },
+    /// | `0` | Hydra crank. Validator-created crank of the task. | - |
+    /// | `1` | Instructions sysvar. | - |
+    /// | `2..n` | Programs and accounts of the stored instructions. | - |
+    ExecuteCrank,
 }
 
 /// Instruction(s) for the ephemeral system builtin-program: creates,

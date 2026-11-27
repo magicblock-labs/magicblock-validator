@@ -3,7 +3,10 @@
 
 use std::collections::HashSet;
 
-use magic_program_api::args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest};
+use magic_program_api::{
+    args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest},
+    pda::crank_signer_pda,
+};
 use nucleus::tls::TlsManager;
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -90,7 +93,11 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    validate_cranks_instructions(invoke_context, &payer_pubkey, &args.instructions)?;
+    validate_cranks_instructions(
+        invoke_context,
+        &crank_signer_pda(&payer_pubkey),
+        &args.instructions,
+    )?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,
@@ -241,7 +248,7 @@ mod test {
     #[test]
     fn test_process_schedule_task_with_own_crank_signer() {
         let (payer, _pdas, transaction_accounts) = setup_accounts(0);
-        let signer = magic_program_api::pda::crank_signer_pda(&payer.pubkey());
+        let signer = crank_signer_pda(&payer.pubkey());
         let ix = schedule_with(&payer, create_complex_ix(&[signer], false, true));
         process_instruction(&ix.data, transaction_accounts, ix.accounts, Ok(()));
     }
@@ -250,7 +257,7 @@ mod test {
     fn fail_process_schedule_task_with_invalid_crank_signer_use() {
         // Another authority's crank signer.
         let (payer, _pdas, tx_accs) = setup_accounts(0);
-        let other = magic_program_api::pda::crank_signer_pda(&Pubkey::new_unique());
+        let other = crank_signer_pda(&Pubkey::new_unique());
         let ix = schedule_with(&payer, create_complex_ix(&[other], false, true));
         process_instruction(
             &ix.data,
@@ -261,7 +268,7 @@ mod test {
 
         // Writable crank signer.
         let (payer, _pdas, tx_accs) = setup_accounts(0);
-        let signer = magic_program_api::pda::crank_signer_pda(&payer.pubkey());
+        let signer = crank_signer_pda(&payer.pubkey());
         let ix = schedule_with(&payer, create_complex_ix(&[signer], true, true));
         process_instruction(
             &ix.data,

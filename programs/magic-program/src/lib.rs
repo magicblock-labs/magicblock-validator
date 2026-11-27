@@ -1,6 +1,5 @@
 #![doc = include_str!("../README.md")]
 
-pub mod crank;
 mod ephemeral_accounts;
 pub mod errors;
 mod magic_context;

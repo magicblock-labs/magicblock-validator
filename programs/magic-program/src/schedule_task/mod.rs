@@ -5,9 +5,7 @@ mod process_cancel_task;
 mod process_execute_crank;
 mod process_schedule_task;
 
-use magic_program_api::{
-    CRANK_PROGRAM_ID, instruction::MagicBlockInstruction, pda::crank_signer_pda,
-};
+use magic_program_api::{CRANK_PROGRAM_ID, instruction::MagicBlockInstruction};
 pub(crate) use process_cancel_task::*;
 pub(crate) use process_execute_crank::*;
 pub(crate) use process_schedule_task::*;
@@ -18,17 +16,16 @@ use solana_pubkey::Pubkey;
 
 use crate::validator::authority as engine_authority;
 
-// Assert that the task instructions do not have signers aside from the
-// authority's crank signer, which must stay read-only
+// Assert that the task instructions do not have signers aside from
+// `crank_signer`, the task authority's crank signer, which must stay read-only
 // Assert they don't use the validator either
 // Assert they don't invoke the Crank program themselves
 // Assert they are not a privileged instruction
 pub(crate) fn validate_cranks_instructions(
     invoke_context: &mut InvokeContext<'_, '_>,
-    authority: &Pubkey,
+    crank_signer: &Pubkey,
     instructions: &[Instruction],
 ) -> Result<(), InstructionError> {
-    let crank_signer = crank_signer_pda(authority);
     for instruction in instructions {
         if instruction.program_id == CRANK_PROGRAM_ID {
             ic_msg!(
@@ -38,14 +35,14 @@ pub(crate) fn validate_cranks_instructions(
             return Err(InstructionError::IncorrectProgramId);
         }
         for account in &instruction.accounts {
-            if account.is_signer && account.pubkey != crank_signer {
+            if account.is_signer && account.pubkey != *crank_signer {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: only the crank signer PDA can be a signer in cranks (invalid signer: '{}')",
                     account.pubkey,
                 );
                 return Err(InstructionError::MissingRequiredSignature);
-            } else if account.is_writable && account.pubkey == crank_signer {
+            } else if account.is_writable && account.pubkey == *crank_signer {
                 ic_msg!(
                     invoke_context,
                     "Crank ERR: the crank signer PDA cannot be a writable account in cranks",

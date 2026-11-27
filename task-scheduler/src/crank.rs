@@ -3,15 +3,17 @@
 
 use std::time::Duration as StdDuration;
 
-use hydra_api::{
-    MAX_ACCOUNTS, MAX_DATA_LEN,
-    instruction::{CreateArgs, SchedMeta, ScheduledIx, ephemeral},
-};
-use program::crank::{execute_crank_instruction, task_crank_seed as crank_seed, uses_crank_signer};
+use hydra_api::instruction::{CreateArgs, SchedMeta, ScheduledIx, ephemeral};
 use solana_instruction::Instruction;
 use solana_pubkey::Pubkey;
 
-use crate::errors::{TaskSchedulerError, TaskSchedulerResult};
+/// Magic Program cranks used a u64 ID, Hydra cranks use a 32-byte seed.
+/// The seed is `hash(authority, task_id)`, so each authority gets its own crank
+/// namespace: a different authority scheduling the same `task_id` gets an
+/// independent crank, and cancel/reschedule need no database lookup.
+fn crank_seed(authority: &Pubkey, task_id: i64) -> [u8; 32] {
+    solana_sha256_hasher::hashv(&[authority.as_ref(), &task_id.to_le_bytes()]).to_bytes()
+}
 
 /// Derives the deterministic hydra crank account address for a task.
 pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
@@ -19,43 +21,13 @@ pub fn crank_pubkey(authority: &Pubkey, task_id: i64) -> Pubkey {
     ephemeral::find_crank_pda(&seed).0
 }
 
-/// Returns the instructions hydra stores and replays for a task.
+/// Builds the hydra `Create` instruction embedding the task's instructions as
+/// the scheduled crank payload, as scheduled.
 ///
-/// Tasks that do not use their crank signer run as-is, as top-level siblings of
-/// hydra's `Trigger`. Hydra cannot sign for the crank signer PDA, so a task
-/// that does is wrapped into a single Crank program `ExecuteCrank`, which
-/// invokes the task's instructions with that signer.
-pub fn scheduled_instructions(
-    authority: &Pubkey,
-    task_id: i64,
-    crank: Pubkey,
-    instructions: &[Instruction],
-) -> TaskSchedulerResult<Vec<Instruction>> {
-    let scheduled = if uses_crank_signer(authority, instructions) {
-        vec![execute_crank_instruction(crank, *authority, task_id, instructions.to_vec())]
-    } else {
-        instructions.to_vec()
-    };
-    // Surface hydra's per-instruction limits here rather than as an opaque
-    // `Create` failure.
-    for ix in &scheduled {
-        if ix.accounts.len() > MAX_ACCOUNTS || ix.data.len() > MAX_DATA_LEN {
-            return Err(TaskSchedulerError::CrankTooLarge {
-                task_id,
-                accounts: ix.accounts.len(),
-                max_accounts: MAX_ACCOUNTS,
-                data_len: ix.data.len(),
-                max_data_len: MAX_DATA_LEN,
-            });
-        }
-    }
-    Ok(scheduled)
-}
-
-/// Builds the hydra `Create` instruction embedding the task's
-/// [`scheduled_instructions`] as the crank payload. Account signer flags are
-/// intentionally dropped: hydra rejects scheduled instructions that declare
-/// signers.
+/// `ScheduleTask` only accepts one signer: the authority's read-only crank
+/// signer PDA. Its signer flag is kept, so the hydra cranker runs the crank
+/// through the Crank program, which signs for it. Hydra accepts signer flags
+/// on PDAs only. Tasks without a signer are replayed top-level as before.
 #[allow(clippy::too_many_arguments)]
 pub fn build_create_ix(
     sponsor: &Pubkey,
@@ -66,9 +38,8 @@ pub fn build_create_ix(
     interval_slots: u64,
     iterations: u64,
     instructions: &[Instruction],
-) -> TaskSchedulerResult<Instruction> {
+) -> Instruction {
     let seed = crank_seed(authority, task_id);
-    let instructions = scheduled_instructions(authority, task_id, crank, instructions)?;
 
     let metas_per_ix: Vec<Vec<SchedMeta>> = instructions
         .iter()
@@ -78,6 +49,7 @@ pub fn build_create_ix(
                 .map(|acc| SchedMeta {
                     pubkey: acc.pubkey.to_bytes(),
                     is_writable: acc.is_writable,
+                    is_signer: acc.is_signer,
                 })
                 .collect()
         })
@@ -105,7 +77,7 @@ pub fn build_create_ix(
         scheduled: scheduled.as_slice(),
     };
 
-    Ok(ephemeral::create(*sponsor, crank, &args))
+    ephemeral::create(*sponsor, crank, &args)
 }
 
 pub fn is_valid_task_interval(interval: i64) -> bool {
@@ -124,10 +96,38 @@ pub fn interval_slots(interval_millis: i64, slot_interval: StdDuration) -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use program::{CRANK_PROGRAM_ID, pda::crank_signer_pda};
+    use hydra_api::consts::{META_FLAG_SIGNER, META_FLAG_WRITABLE};
+    use program::pda::crank_signer_pda;
     use solana_instruction::AccountMeta;
 
     use super::*;
+
+    /// The flag byte `Create` stores for `meta` in its scheduled ix.
+    fn stored_flag(create: &Instruction, meta: &Pubkey) -> u8 {
+        let at = create
+            .data
+            .windows(32)
+            .position(|window| window == meta.as_ref())
+            .expect("meta in Create data");
+        create.data[at - 1]
+    }
+
+    #[test]
+    fn test_tasks_are_stored_as_scheduled_with_the_crank_signer_flag() {
+        let sponsor = Pubkey::new_unique();
+        let authority = Pubkey::new_unique();
+        let signer = crank_signer_pda(&authority);
+        let account = Pubkey::new_unique();
+        let ix = Instruction::new_with_bytes(
+            Pubkey::new_unique(),
+            &[1],
+            vec![AccountMeta::new_readonly(signer, true), AccountMeta::new(account, false)],
+        );
+        let crank = crank_pubkey(&authority, 1);
+        let create = build_create_ix(&sponsor, &authority, 1, crank, 0, 1, 0, &[ix]);
+        assert_eq!(stored_flag(&create, &signer), META_FLAG_SIGNER);
+        assert_eq!(stored_flag(&create, &account), META_FLAG_WRITABLE);
+    }
 
     #[test]
     fn test_interval_millis_rounds_up_to_slots() {
@@ -136,54 +136,6 @@ mod tests {
         assert_eq!(interval_slots(50, slot), 1);
         assert_eq!(interval_slots(51, slot), 2);
         assert_eq!(interval_slots(100, slot), 2);
-    }
-
-    #[test]
-    fn test_tasks_without_crank_signer_run_unwrapped() {
-        let authority = Pubkey::new_unique();
-        let ix = Instruction::new_with_bytes(
-            Pubkey::new_unique(),
-            &[1],
-            vec![AccountMeta::new(Pubkey::new_unique(), false)],
-        );
-        let crank = crank_pubkey(&authority, 1);
-        let scheduled =
-            scheduled_instructions(&authority, 1, crank, std::slice::from_ref(&ix)).unwrap();
-        assert_eq!(scheduled, vec![ix]);
-    }
-
-    #[test]
-    fn test_tasks_with_crank_signer_run_through_the_crank_program() {
-        let authority = Pubkey::new_unique();
-        let ixs = vec![Instruction::new_with_bytes(
-            Pubkey::new_unique(),
-            &[1],
-            vec![AccountMeta::new_readonly(crank_signer_pda(&authority), true)],
-        )];
-        let crank = crank_pubkey(&authority, 1);
-        let scheduled = scheduled_instructions(&authority, 1, crank, &ixs).unwrap();
-        assert_eq!(
-            scheduled,
-            vec![execute_crank_instruction(crank, authority, 1, ixs)]
-        );
-        assert_eq!(scheduled[0].program_id, CRANK_PROGRAM_ID);
-        // Hydra stores no signer metas.
-        assert!(scheduled[0].accounts.iter().all(|meta| !meta.is_signer));
-    }
-
-    #[test]
-    fn test_oversized_wrapped_task_is_rejected() {
-        let authority = Pubkey::new_unique();
-        let ixs = vec![Instruction::new_with_bytes(
-            Pubkey::new_unique(),
-            &[0; MAX_DATA_LEN],
-            vec![AccountMeta::new_readonly(crank_signer_pda(&authority), true)],
-        )];
-        let crank = crank_pubkey(&authority, 1);
-        assert!(matches!(
-            scheduled_instructions(&authority, 1, crank, &ixs),
-            Err(TaskSchedulerError::CrankTooLarge { .. })
-        ));
     }
 
     #[test]

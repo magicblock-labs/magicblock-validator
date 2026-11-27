@@ -158,7 +158,7 @@ impl Processor {
             interval_slots,
             iterations,
             &task.instructions,
-        )?;
+        );
 
         let ixs = if crank_exists {
             let cancel_ix = ephemeral::cancel(sponsor, crank, sponsor);

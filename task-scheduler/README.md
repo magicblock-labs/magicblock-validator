@@ -23,14 +23,15 @@ equivalent). The crank signer is kept for existing tasks and will be removed.
 
 A task's instructions may sign with its authority's crank signer, the PDA
 `["crank-executor", authority]` under `Crank11111111111111111111111111111111111111`.
-Hydra cannot produce that signature, so such a task is stored in its Hydra crank
-as a single Crank program `ExecuteCrank` wrapping the task's instructions. The
-Hydra cranker fires it like any other crank. The Crank program signs only when
-it directly follows Hydra's `Trigger` of a crank that the validator created for
-that authority and task. Tasks that do not use the crank signer run unwrapped.
+Every task is stored in its Hydra crank as scheduled, including the crank
+signer's signer flag. Hydra cannot produce that signature, so the Hydra cranker
+runs such a crank through the Crank program's `ExecuteCrank` instead of
+replaying it. The Crank program reads the instructions from the crank and signs
+for the crank signer only when it directly follows Hydra's `Trigger` of a crank
+that the validator created. Tasks that do not use the crank signer are replayed
+top-level, unchanged.
 
-The crank signer must stay read-only. Wrapped tasks share Hydra's per-instruction
-account and data limits, which the scheduler checks before creating the crank.
+The crank signer must stay read-only, and it is the only signer a task may use.
 
 ## Configuration
 

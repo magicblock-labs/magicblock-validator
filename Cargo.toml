@@ -244,6 +244,9 @@ spl-token-2022 = { package = "spl-token-2022-interface", version = "2.1" }
 
 
 [patch.crates-io]
+# Hydra PR "run cranks with PDA signers through the Crank program"; repin to a
+# hydra-api release before merging.
+hydra-api = { git = "https://github.com/magicblock-labs/hydra.git", rev = "13c7bfd570af8145d177c1d2e664fd7abe816a2b" }
 libsodium-rs = { git = "https://github.com/jedisct1/libsodium-rs.git", rev = "0397a6c5785233f9f2ac91f3eedc3cceb74e0060" }
 
 agave-transaction-view = { git = "https://github.com/magicblock-labs/magicblock-engine.git", rev = "c23cf16df5c9c32a27c5dcd3d87477e947e979e7" }
