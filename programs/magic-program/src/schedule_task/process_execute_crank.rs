@@ -281,6 +281,8 @@ mod tests {
 
 /// Real Engine transactions: `ExecuteCrank` reads its preceding sibling from
 /// the instructions sysvar, which the single-instruction mock cannot model.
+/// The embedded instruction targets the `crank-signer-check` test program,
+/// which fails unless the authority's crank signer actually signed.
 /// Hydra is not loadable here, so a stub builtin at hydra's program id stands
 /// in for `Trigger`; the byte-for-byte template check is hydra's own and is
 /// covered in the hydra repository.
@@ -288,6 +290,7 @@ mod tests {
 mod engine_tests {
     use engine::testkit::{Pacing, TestEngine};
     use keeper::testkit::{Dirs, keeper_builder};
+    use solana_account::ReadableAccount;
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
     use solana_program_runtime::{
@@ -298,19 +301,10 @@ mod engine_tests {
     use super::*;
     use crate::{crank::execute_crank_instruction, magicblock_processor::CrankEntrypoint};
 
-    const PROBE_ID: Pubkey = Pubkey::from_str_const("SignerProbe11111111111111111111111111111111");
+    const CHECK_PROGRAM_ELF: &[u8] =
+        include_bytes!("../../../crank-signer-check/bin/crank_signer_check.so");
 
     declare_process_instruction!(TriggerStub, 1, |_invoke_context| { Ok(()) });
-
-    // Succeeds only when its first account signed.
-    declare_process_instruction!(SignerProbe, 1, |invoke_context| {
-        let ix_ctx = invoke_context.transaction_context.get_current_instruction_context()?;
-        if ix_ctx.is_instruction_account_signer(0)? {
-            Ok(())
-        } else {
-            Err(InstructionError::MissingRequiredSignature)
-        }
-    });
 
     fn crank_account(
         authority: [u8; 32],
@@ -329,6 +323,7 @@ mod engine_tests {
     struct Setup {
         engine: TestEngine,
         user: Pubkey,
+        counter: Pubkey,
         good: Pubkey,
         foreign: Pubkey,
         misbound: Pubkey,
@@ -346,18 +341,23 @@ mod engine_tests {
         builder
             .builtins
             .insert(HYDRA_PROGRAM_ID, (TriggerStub::vm, TriggerStub::codegen));
-        builder.builtins.insert(PROBE_ID, (SignerProbe::vm, SignerProbe::codegen));
+        builder.programs.insert(crank_signer_check::ID, CHECK_PROGRAM_ELF.to_vec());
         // The validator authority is only known once the engine starts, so the
         // validator-created cranks are seeded with the builder's authority.
         let validator = builder.authority.pubkey();
         let user = Pubkey::new_unique();
         let seed = task_crank_seed(&user, TASK_ID);
-        let (good, foreign, misbound) = (
+        let (counter, good, foreign, misbound) = (
+            Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
             Pubkey::new_unique(),
         );
         for (key, account) in [
+            (
+                counter,
+                AccountSharedData::new(1_000_000, 8, &crank_signer_check::ID),
+            ),
             (good, crank_account(validator.to_bytes(), seed, 1)),
             // Claims the validator as authority without its signature.
             (foreign, crank_account(validator.to_bytes(), seed, 0)),
@@ -377,6 +377,7 @@ mod engine_tests {
         Setup {
             engine,
             user,
+            counter,
             good,
             foreign,
             misbound,
@@ -395,8 +396,9 @@ mod engine_tests {
         )
     }
 
-    fn probe(signer: Pubkey) -> Instruction {
-        Instruction::new_with_bytes(PROBE_ID, &[], vec![AccountMeta::new_readonly(signer, true)])
+    fn count(engine: &TestEngine, counter: Pubkey) -> u64 {
+        let account = engine.get_account(counter).unwrap();
+        u64::from_le_bytes(account.data()[..8].try_into().unwrap())
     }
 
     fn instruction_error(result: Result<(), TransactionError>) -> InstructionError {
@@ -412,16 +414,33 @@ mod engine_tests {
         let Setup {
             engine,
             user,
+            counter,
             good,
             foreign,
             misbound,
         } = setup().await;
         let cranker = engine.authority();
-        let signer = crank_signer_pda(&user);
-        let execute = |crank| execute_crank_instruction(crank, user, TASK_ID, vec![probe(signer)]);
+        let check = crank_signer_check::check_instruction(user, counter);
+        assert_eq!(check.accounts[0].pubkey, crank_signer_pda(&user));
+        let execute = |crank| execute_crank_instruction(crank, user, TASK_ID, vec![check.clone()]);
 
-        // Hydra-triggered crank of the task: the inner instruction is signed.
+        // Hydra-triggered crank of the task: the check program sees the
+        // authority's crank signer as a signer.
         engine.execute(&[trigger(good, cranker), execute(good)]).await.unwrap();
+        // A distinct transaction for the second fire; the stub ignores the byte.
+        let mut again = trigger(good, cranker);
+        again.data.push(1);
+        engine.execute(&[again, execute(good)]).await.unwrap();
+        assert_eq!(count(&engine, counter), 2);
+
+        // The check program itself rejects an unsigned crank signer.
+        let mut unsigned = check.clone();
+        unsigned.accounts[0].is_signer = false;
+        let unsigned = execute_crank_instruction(good, user, TASK_ID, vec![unsigned]);
+        assert_eq!(
+            instruction_error(engine.execute(&[trigger(good, cranker), unsigned]).await),
+            InstructionError::MissingRequiredSignature
+        );
 
         // Without the preceding Trigger anyone could replay arbitrary payloads.
         assert_eq!(
@@ -450,11 +469,13 @@ mod engine_tests {
             good,
             user,
             TASK_ID,
-            vec![probe(crank_signer_pda(&Pubkey::new_unique()))],
+            vec![crank_signer_check::check_instruction(Pubkey::new_unique(), counter)],
         );
         assert_eq!(
             instruction_error(engine.execute(&[trigger(good, cranker), other]).await),
             InstructionError::MissingRequiredSignature
         );
+        // Only the two authorized executions ran.
+        assert_eq!(count(&engine, counter), 2);
     }
 }

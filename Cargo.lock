@@ -1435,6 +1435,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "crank-signer-check"
+version = "2.0.0-rc.2"
+dependencies = [
+ "magicblock-magic-program-api",
+ "solana-program 4.0.0",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4414,6 +4422,7 @@ name = "magicblock-program"
 version = "2.0.0-rc.2"
 dependencies = [
  "assert_matches",
+ "crank-signer-check",
  "hydra-api",
  "lazy_static",
  "magicblock-chainlink",

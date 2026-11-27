@@ -1,0 +1,28 @@
+[package]
+authors.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license.workspace = true
+name = "crank-signer-check"
+publish = false
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+solana-program = { workspace = true }
+
+[dev-dependencies]
+magic-program-api = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+doctest = false
+
+[features]
+custom-heap = []
+custom-panic = []
+default = []
+no-entrypoint = []
+
+[lints]
+workspace = true
