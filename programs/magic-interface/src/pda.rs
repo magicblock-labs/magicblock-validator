@@ -1,5 +1,16 @@
 use crate::Pubkey;
 
+/// Crank signer PDA seed. The signer is derived per task authority under the
+/// Crank program, so it is identical to the address used before cranks moved
+/// to hydra: `["crank-executor", authority]`.
+pub const CRANK_SEED: &[u8] = b"crank-executor";
+
+/// Derives the crank signer PDA a scheduled task authorized by `authority`
+/// may use as a signer in its instructions.
+pub fn crank_signer_pda(authority: &Pubkey) -> Pubkey {
+    Pubkey::find_program_address(&[CRANK_SEED, authority.as_ref()], &crate::CRANK_PROGRAM_ID).0
+}
+
 /// Callback signer PDA info
 pub const CALLBACK_SEED: &[u8] = b"callback-executor";
 const CALLBACK_SIGNER_PDA: ([u8; 32], u8) = const_crypto::ed25519::derive_program_address(

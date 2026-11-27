@@ -14,6 +14,19 @@ guarantees. Persisted tasks resume after restart. Execution and progress recordi
 are separate operations, so applications should tolerate re-execution after a
 crash.
 
+## Crank signer
+
+A task's instructions may sign with its authority's crank signer, the PDA
+`["crank-executor", authority]` under `Crank11111111111111111111111111111111111111`.
+Hydra cannot produce that signature, so such a task is stored in its Hydra crank
+as a single Crank program `ExecuteCrank` wrapping the task's instructions. The
+Hydra cranker fires it like any other crank. The Crank program signs only when
+it directly follows Hydra's `Trigger` of a crank that the validator created for
+that authority and task. Tasks that do not use the crank signer run unwrapped.
+
+The crank signer must stay read-only. Wrapped tasks share Hydra's per-instruction
+account and data limits, which the scheduler checks before creating the crank.
+
 ## Configuration
 
 Use the `[task-scheduler]` section of the

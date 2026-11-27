@@ -8,6 +8,7 @@ repository = { workspace = true }
 version = { workspace = true }
 
 [dependencies]
+hydra-api = { workspace = true }
 lazy_static = { workspace = true }
 mbv-core = { workspace = true }
 delegation-program-api = { workspace = true }
@@ -31,6 +32,7 @@ solana-program-runtime = { workspace = true }
 solana-pubkey = { workspace = true }
 solana-sdk-ids = { workspace = true }
 solana-seed-derivable = { workspace = true }
+solana-sha256-hasher = { workspace = true }
 solana-signature = { workspace = true }
 solana-sysvar = { workspace = true }
 solana-transaction-context = { workspace = true }

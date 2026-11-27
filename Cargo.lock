@@ -4414,6 +4414,7 @@ name = "magicblock-program"
 version = "2.0.0-rc.2"
 dependencies = [
  "assert_matches",
+ "hydra-api",
  "lazy_static",
  "magicblock-chainlink",
  "magicblock-core",
@@ -4443,6 +4444,7 @@ dependencies = [
  "solana-pubkey 4.2.0",
  "solana-sdk-ids 3.1.0",
  "solana-seed-derivable",
+ "solana-sha256-hasher 3.1.0",
  "solana-signature 3.4.1",
  "solana-signer",
  "solana-svm-log-collector",
@@ -4595,7 +4597,6 @@ dependencies = [
  "solana-keypair",
  "solana-pubkey 4.2.0",
  "solana-rpc-client",
- "solana-sha256-hasher 3.1.0",
  "solana-signer",
  "solana-system-interface 3.2.0",
  "solana-transaction",

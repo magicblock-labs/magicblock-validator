@@ -19,7 +19,6 @@ solana-account = { workspace = true }
 solana-instruction = { workspace = true, features = ["wincode"] }
 solana-keypair = { workspace = true }
 solana-pubkey = { workspace = true }
-solana-sha256-hasher = { workspace = true }
 solana-signer = { workspace = true }
 solana-system-interface = { workspace = true, features = ["bincode"] }
 solana-transaction = { workspace = true }

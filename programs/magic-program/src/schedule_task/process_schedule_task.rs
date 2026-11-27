@@ -87,7 +87,7 @@ pub(crate) fn process_schedule_task(
         return Err(InstructionError::InvalidInstructionData);
     }
 
-    validate_cranks_instructions(invoke_context, &args.instructions)?;
+    validate_cranks_instructions(invoke_context, &payer_pubkey, &args.instructions)?;
 
     let schedule_request = ScheduleTaskRequest {
         id: args.task_id,
@@ -222,6 +222,61 @@ mod test {
             tx_accs,
             ix.accounts,
             Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    fn schedule_with(payer: &Keypair, instruction: Instruction) -> Instruction {
+        let args = ScheduleTaskArgs {
+            task_id: 1,
+            execution_interval_millis: 1000,
+            iterations: 1,
+            instructions: vec![instruction],
+        };
+        InstructionUtils::schedule_task_instruction(&payer.pubkey(), args)
+    }
+
+    #[test]
+    fn test_process_schedule_task_with_own_crank_signer() {
+        let (payer, _pdas, transaction_accounts) = setup_accounts(0);
+        let signer = magic_program_api::pda::crank_signer_pda(&payer.pubkey());
+        let ix = schedule_with(&payer, create_complex_ix(&[signer], false, true));
+        process_instruction(&ix.data, transaction_accounts, ix.accounts, Ok(()));
+    }
+
+    #[test]
+    fn fail_process_schedule_task_with_invalid_crank_signer_use() {
+        // Another authority's crank signer.
+        let (payer, _pdas, tx_accs) = setup_accounts(0);
+        let other = magic_program_api::pda::crank_signer_pda(&Pubkey::new_unique());
+        let ix = schedule_with(&payer, create_complex_ix(&[other], false, true));
+        process_instruction(
+            &ix.data,
+            tx_accs,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
+        );
+
+        // Writable crank signer.
+        let (payer, _pdas, tx_accs) = setup_accounts(0);
+        let signer = magic_program_api::pda::crank_signer_pda(&payer.pubkey());
+        let ix = schedule_with(&payer, create_complex_ix(&[signer], true, true));
+        process_instruction(
+            &ix.data,
+            tx_accs,
+            ix.accounts,
+            Err(InstructionError::Immutable),
+        );
+
+        // Crank program invoked from a crank.
+        let (payer, _pdas, tx_accs) = setup_accounts(0);
+        let mut nested = create_simple_ix();
+        nested.program_id = magic_program_api::CRANK_PROGRAM_ID;
+        let ix = schedule_with(&payer, nested);
+        process_instruction(
+            &ix.data,
+            tx_accs,
+            ix.accounts,
+            Err(InstructionError::IncorrectProgramId),
         );
     }
 

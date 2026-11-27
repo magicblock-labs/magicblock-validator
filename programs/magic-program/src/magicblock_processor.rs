@@ -1,5 +1,6 @@
 use magic_program_api::instruction::{
-    CallbackInstruction, EphemeralSystemInstruction, MagicBlockInstruction, OutboxIntentInstruction,
+    CallbackInstruction, CrankInstruction, EphemeralSystemInstruction, MagicBlockInstruction,
+    OutboxIntentInstruction,
 };
 use solana_instruction::error::InstructionError;
 use solana_log_collector::ic_msg;
@@ -18,7 +19,7 @@ use crate::{
         process_scheduled_commit_sent::process_scheduled_commit_sent,
         process_set_intent_execution_stage::process_set_intent_execution_stage,
     },
-    schedule_task::{process_cancel_task, process_schedule_task},
+    schedule_task::{process_cancel_task, process_execute_crank, process_schedule_task},
     schedule_transactions::{
         ProcessScheduleCommitOptions, process_accept_scheduled_commits,
         process_add_action_callback, process_execute_callback, process_schedule_commit,
@@ -130,7 +131,7 @@ declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context|
         _ExecuteCrank => {
             solana_log_collector::ic_msg!(
                 invoke_context,
-                "ExecuteCrank is no longer supported: crank execution is handled by hydra"
+                "ExecuteCrank moved to the Crank program"
             );
             Err(InstructionError::InvalidInstructionData)
         }
@@ -165,6 +166,15 @@ declare_process_instruction!(
         }
     }
 );
+
+declare_process_instruction!(CrankEntrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context| {
+    let instruction: CrankInstruction = deserialize_instruction(invoke_context)?;
+    match instruction {
+        CrankInstruction::ExecuteCrank { authority, task_id, instructions } => {
+            process_execute_crank(invoke_context, &authority, task_id, instructions)
+        }
+    }
+});
 
 declare_process_instruction!(
     EphemeralSystemEntrypoint,

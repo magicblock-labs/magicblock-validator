@@ -353,7 +353,8 @@ pub enum MagicBlockInstruction {
     /// | `1` | Account. Account to evict. | WRITE |
     EvictAccount { pubkey: Pubkey },
 
-    /// Reserved: crank execution moved to hydra. The variant is kept so
+    /// Reserved: crank execution moved to the Crank program's
+    /// [`CrankInstruction::ExecuteCrank`]. The variant is kept so
     /// `CloseMagicAta` retains its wire discriminant for existing clients
     /// (MagicRoot / eSPL).
     _ExecuteCrank,
@@ -448,6 +449,33 @@ pub enum CallbackInstruction {
     /// | `1` | Callback signer PDA | - |
     /// | `2..n` | Accounts required by the embedded instructions | - |
     ExecuteCallback { instruction: Instruction },
+}
+
+/// Instruction(s) for the Crank Executor builtin-program
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[cfg_attr(not(feature = "backward-compat"), derive(SchemaRead, SchemaWrite))]
+pub enum CrankInstruction {
+    /// Executes a scheduled task's instructions with the crank signer PDA of
+    /// `authority` (see [`crate::pda::crank_signer_pda`]) as an extra signer.
+    ///
+    /// Only valid as the scheduled follow-up of a hydra ephemeral `Trigger`:
+    /// it must sit directly after `Trigger` of the crank passed at index `0`,
+    /// and that crank must have been created by the validator authority for
+    /// `(authority, task_id)`. Hydra's `Trigger` already verified that this
+    /// instruction is byte-identical to the template the validator stored.
+    ///
+    /// # Account references
+    /// | Index | Account | Access |
+    /// | --- | --- | --- |
+    /// | `0` | Hydra crank. Validator-created crank for `(authority, task_id)`. | WRITE |
+    /// | `1` | Crank signer PDA of `authority`. | - |
+    /// | `2` | Instructions sysvar. | - |
+    /// | `3..n` | Programs and accounts required by the embedded instructions. | - |
+    ExecuteCrank {
+        authority: Pubkey,
+        task_id: i64,
+        instructions: Vec<Instruction>,
+    },
 }
 
 /// Instruction(s) for the ephemeral system builtin-program: creates,

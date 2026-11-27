@@ -12,6 +12,9 @@ instruction builders, IDs, and response types. The
 leader services handle settlement and
 [scheduled tasks](../../task-scheduler/README.md).
 
+Scheduled tasks that sign with their authority's crank signer run through the
+Crank program; see the [task scheduler](../../task-scheduler/README.md#crank-signer).
+
 Callbacks run separately from the base-chain actions they report. Ephemeral-account
 operations manage local account creation, resizing, closing, and sponsorship;
 their signer and accounting checks are enforced during execution.
