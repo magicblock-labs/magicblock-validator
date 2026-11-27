@@ -6,6 +6,9 @@
 //! crank as a single [`CrankInstruction::ExecuteCrank`] that wraps the task's
 //! instructions. The Crank program then invokes them with the crank signer.
 
+// The crank signer is deprecated for programs but still executed here.
+#![allow(deprecated)]
+
 use std::collections::HashMap;
 
 use magic_program_api::{CRANK_PROGRAM_ID, instruction::CrankInstruction, pda::crank_signer_pda};

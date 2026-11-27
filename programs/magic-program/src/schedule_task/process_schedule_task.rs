@@ -1,3 +1,6 @@
+// The crank signer is deprecated for programs but still executed here.
+#![allow(deprecated)]
+
 use std::collections::HashSet;
 
 use magic_program_api::args::{ScheduleTaskArgs, ScheduleTaskRequest, TaskRequest};

@@ -1,3 +1,6 @@
+// The crank signer is deprecated for programs but still executed here.
+#![allow(deprecated)]
+
 use std::time::Duration as StdDuration;
 
 use hydra_api::{

@@ -1,3 +1,6 @@
+// The crank signer is deprecated for programs but still executed here.
+#![allow(deprecated)]
+
 mod process_cancel_task;
 mod process_execute_crank;
 mod process_schedule_task;

@@ -1,3 +1,6 @@
+// The crank signer is deprecated for programs but still executed here.
+#![allow(deprecated)]
+
 use std::mem::offset_of;
 
 use hydra_api::{CRANK_HEADER_SIZE, consts::ix::TRIGGER, ephemeral, state::Crank};

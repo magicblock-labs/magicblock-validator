@@ -16,6 +16,11 @@ crash.
 
 ## Crank signer
 
+**Deprecated.** New programs should not check the crank signer. Verify Hydra
+crank execution from the instructions sysvar instead, with
+`ephemeral_rollups_sdk::crank::hydra::require_hydra_crank` (or the Pinocchio
+equivalent). The crank signer is kept for existing tasks and will be removed.
+
 A task's instructions may sign with its authority's crank signer, the PDA
 `["crank-executor", authority]` under `Crank11111111111111111111111111111111111111`.
 Hydra cannot produce that signature, so such a task is stored in its Hydra crank

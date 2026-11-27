@@ -14,6 +14,8 @@ leader services handle settlement and
 
 Scheduled tasks that sign with their authority's crank signer run through the
 Crank program; see the [task scheduler](../../task-scheduler/README.md#crank-signer).
+The crank signer is deprecated: programs should verify Hydra crank execution
+from the instructions sysvar instead.
 
 Callbacks run separately from the base-chain actions they report. Ephemeral-account
 operations manage local account creation, resizing, closing, and sponsorship;
