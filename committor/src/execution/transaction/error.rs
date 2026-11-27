@@ -60,6 +60,18 @@ impl TransactionExecutionError {
         }
     }
 
+    pub fn is_unconfirmed(&self) -> bool {
+        matches!(
+            self,
+            Self::InternalError(InternalError::MagicBlockRpcClientError(err))
+                if matches!(
+                    err.as_ref(),
+                    MagicBlockRpcClientError::CannotGetTransactionSignatureStatus(..)
+                        | MagicBlockRpcClientError::CannotConfirmTransactionSignatureStatus(..)
+                )
+        )
+    }
+
     pub fn is_recoverable_by_splitting(&self) -> bool {
         matches!(
             self,
