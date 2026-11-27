@@ -8,6 +8,8 @@ pub(crate) mod buffer_task;
 pub(crate) mod commit_delivery;
 pub(crate) mod commit_finalize_task;
 pub(crate) mod diff;
+#[allow(dead_code)]
+pub(crate) mod patch;
 pub(crate) mod task_strategist;
 pub(crate) mod utils;
 
