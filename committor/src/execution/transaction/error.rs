@@ -21,6 +21,8 @@ pub enum TransactionExecutionError {
     CpiLimitError(#[source] TransactionError, Option<Signature>),
     #[error("Loaded accounts data size exceeded: {0}. {1:?}")]
     LoadedAccountsDataSizeExceeded(#[source] TransactionError, Option<Signature>),
+    #[error("Insufficient funds for rent: {0}. {1:?}")]
+    InsufficientFundsForRent(#[source] TransactionError, Option<Signature>),
     #[error("Unfinalized account error: {0}, {1:?}")]
     UnfinalizedAccountError(#[source] TransactionError, Option<Signature>),
     #[error("Transaction too large to send over the wire: {0}")]
@@ -91,7 +93,8 @@ impl TransactionExecutionError {
             | Self::UndelegationError(_, signature)
             | Self::UnfinalizedAccountError(_, signature)
             | Self::CpiLimitError(_, signature)
-            | Self::LoadedAccountsDataSizeExceeded(_, signature) => *signature,
+            | Self::LoadedAccountsDataSizeExceeded(_, signature)
+            | Self::InsufficientFundsForRent(_, signature) => *signature,
         }
     }
 
@@ -128,6 +131,9 @@ impl TransactionExecutionError {
             )),
             err @ TransactionError::MaxLoadedAccountsDataSizeExceeded => Ok(
                 TransactionExecutionError::LoadedAccountsDataSizeExceeded(err, signature),
+            ),
+            err @ TransactionError::InsufficientFundsForRent { .. } => Ok(
+                TransactionExecutionError::InsufficientFundsForRent(err, signature),
             ),
             // Map per-task InstructionError into CommitID / Actions / Undelegation errors when possible
             TransactionError::InstructionError(index, instruction_err) => {
@@ -196,6 +202,7 @@ impl metrics::LabelValue for TransactionExecutionError {
             Self::ActionsError(_, _) => "actions_failed",
             Self::CpiLimitError(_, _) => "cpi_limit_failed",
             Self::LoadedAccountsDataSizeExceeded(_, _) => "loaded_accounts_data_limit_exceeded",
+            Self::InsufficientFundsForRent(_, _) => "insufficient_funds_for_rent",
             Self::CommitIDError(_, _) => "commit_nonce_failed",
             Self::UndelegationError(_, _) => "undelegation_failed",
             Self::UnfinalizedAccountError(_, _) => "unfinalized_account_failed",
