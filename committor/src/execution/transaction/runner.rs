@@ -251,6 +251,14 @@ impl<'a> TransactionExecutor<'a> {
                 .send_signed_tx_with_retries(&prepared_transaction, &self.current.tasks)
                 .await;
 
+            if let Err(err) = &execution_result
+                && err.is_unconfirmed()
+                && self.current_attempt < TRANSACTION_LOOP_CEILING
+            {
+                warn!(%signature, error = ?err, "Resolving unconfirmed transaction");
+                continue;
+            }
+
             // Result returned, cleanup pending signature
             self.pending_transaction = None;
 
