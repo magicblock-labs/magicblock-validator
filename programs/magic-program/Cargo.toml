@@ -43,7 +43,7 @@ thiserror = { workspace = true }
 wincode = { workspace = true }
 
 [dev-dependencies]
-crank-signer-check = { workspace = true }
+v42-calculator-interface = { workspace = true }
 engine = { workspace = true, features = ["testkit"] }
 keeper = { workspace = true, features = ["testkit"] }
 tokio = { workspace = true }

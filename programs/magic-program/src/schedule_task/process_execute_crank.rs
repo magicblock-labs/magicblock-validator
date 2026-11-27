@@ -281,15 +281,15 @@ mod tests {
 
 /// Real Engine transactions: `ExecuteCrank` reads its preceding sibling from
 /// the instructions sysvar, which the single-instruction mock cannot model.
-/// The embedded instruction targets the `crank-signer-check` test program,
-/// which fails unless the authority's crank signer actually signed.
+/// The embedded instruction is a v42 expression that fails unless the
+/// authority's crank signer actually signed, and counts each execution.
 /// Hydra is not loadable here, so a stub builtin at hydra's program id stands
 /// in for `Trigger`; the byte-for-byte template check is hydra's own and is
 /// covered in the hydra repository.
 #[cfg(test)]
 mod engine_tests {
     use engine::testkit::{Pacing, TestEngine};
-    use keeper::testkit::{Dirs, keeper_builder};
+    use keeper::testkit::{Dirs, V42_ID, keeper_builder};
     use solana_account::ReadableAccount;
     use solana_account::{AccountBuilder, AccountMode, AccountSharedData};
     use solana_instruction::{AccountMeta, Instruction, error::InstructionError};
@@ -297,12 +297,10 @@ mod engine_tests {
         declare_process_instruction, solana_sbpf::program::BuiltinFunctionDefinition,
     };
     use solana_transaction::TransactionError;
+    use v42_calculator_interface::builder::{Expr as E, transfer};
 
     use super::*;
     use crate::{crank::execute_crank_instruction, magicblock_processor::CrankEntrypoint};
-
-    const CHECK_PROGRAM_ELF: &[u8] =
-        include_bytes!("../../../crank-signer-check/bin/crank_signer_check.so");
 
     declare_process_instruction!(TriggerStub, 1, |_invoke_context| { Ok(()) });
 
@@ -330,6 +328,8 @@ mod engine_tests {
     }
 
     const TASK_ID: i64 = 7;
+    /// v42 account the counting transfers draw from.
+    const SOURCE: Pubkey = Pubkey::from_str_const("Source1111111111111111111111111111111111111");
 
     async fn setup() -> Setup {
         let dirs = Dirs::default();
@@ -341,7 +341,6 @@ mod engine_tests {
         builder
             .builtins
             .insert(HYDRA_PROGRAM_ID, (TriggerStub::vm, TriggerStub::codegen));
-        builder.programs.insert(crank_signer_check::ID, CHECK_PROGRAM_ELF.to_vec());
         // The validator authority is only known once the engine starts, so the
         // validator-created cranks are seeded with the builder's authority.
         let validator = builder.authority.pubkey();
@@ -354,10 +353,8 @@ mod engine_tests {
             Pubkey::new_unique(),
         );
         for (key, account) in [
-            (
-                counter,
-                AccountSharedData::new(1_000_000, 8, &crank_signer_check::ID),
-            ),
+            (counter, AccountSharedData::new(1_000_000, 8, &V42_ID)),
+            (SOURCE, AccountSharedData::new(1_000_000, 8, &V42_ID)),
             (good, crank_account(validator.to_bytes(), seed, 1)),
             // Claims the validator as authority without its signature.
             (foreign, crank_account(validator.to_bytes(), seed, 0)),
@@ -396,6 +393,21 @@ mod engine_tests {
         )
     }
 
+    /// Task instructions: a v42 expression that fails unless the crank signer
+    /// of `authority` signed, then a v42 transfer that bumps `counter` by one.
+    /// Under CPI v42 returns its result instead of writing it, so the transfer
+    /// does the counting; it lands only if the check before it passed.
+    fn task(authority: Pubkey, counter: Pubkey, signed: bool) -> Vec<Instruction> {
+        let signer = crank_signer_pda(&authority);
+        let expr = E::lit(1).require_signer(1);
+        let check = if signed {
+            expr.compose_signed(counter, &[signer], signer)
+        } else {
+            expr.compose(counter, &[signer])
+        };
+        vec![check, transfer(SOURCE, counter, 1)]
+    }
+
     fn count(engine: &TestEngine, counter: Pubkey) -> u64 {
         let account = engine.get_account(counter).unwrap();
         u64::from_le_bytes(account.data()[..8].try_into().unwrap())
@@ -420,11 +432,10 @@ mod engine_tests {
             misbound,
         } = setup().await;
         let cranker = engine.authority();
-        let check = crank_signer_check::check_instruction(user, counter);
-        assert_eq!(check.accounts[0].pubkey, crank_signer_pda(&user));
-        let execute = |crank| execute_crank_instruction(crank, user, TASK_ID, vec![check.clone()]);
+        let execute =
+            |crank| execute_crank_instruction(crank, user, TASK_ID, task(user, counter, true));
 
-        // Hydra-triggered crank of the task: the check program sees the
+        // Hydra-triggered crank of the task: the v42 check sees the
         // authority's crank signer as a signer.
         engine.execute(&[trigger(good, cranker), execute(good)]).await.unwrap();
         // A distinct transaction for the second fire; the stub ignores the byte.
@@ -433,10 +444,8 @@ mod engine_tests {
         engine.execute(&[again, execute(good)]).await.unwrap();
         assert_eq!(count(&engine, counter), 2);
 
-        // The check program itself rejects an unsigned crank signer.
-        let mut unsigned = check.clone();
-        unsigned.accounts[0].is_signer = false;
-        let unsigned = execute_crank_instruction(good, user, TASK_ID, vec![unsigned]);
+        // The v42 check itself rejects an unsigned crank signer.
+        let unsigned = execute_crank_instruction(good, user, TASK_ID, task(user, counter, false));
         assert_eq!(
             instruction_error(engine.execute(&[trigger(good, cranker), unsigned]).await),
             InstructionError::MissingRequiredSignature
@@ -469,7 +478,7 @@ mod engine_tests {
             good,
             user,
             TASK_ID,
-            vec![crank_signer_check::check_instruction(Pubkey::new_unique(), counter)],
+            task(Pubkey::new_unique(), counter, true),
         );
         assert_eq!(
             instruction_error(engine.execute(&[trigger(good, cranker), other]).await),
