@@ -24,7 +24,7 @@ impl RpcHandlers {
             &self.engine.accounts().loader(),
             &pubkey,
             block.time,
-        );
+        )?;
         ResponsePayload::encode(&request.id, account, block.slot)
     }
 }

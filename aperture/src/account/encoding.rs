@@ -7,7 +7,8 @@ use engine::Engine;
 use serde::Serialize;
 use solana_account::{AccountMode, AccountSharedData, ReadableAccount};
 use solana_account_decoder::{
-    UiAccount, UiAccountData, UiAccountEncoding, UiDataSliceConfig, encode_ui_account,
+    MAX_BASE58_BYTES, UiAccount, UiAccountData, UiAccountEncoding, UiDataSliceConfig,
+    encode_ui_account,
     parse_account_data::{AccountAdditionalDataV3, SplTokenAdditionalDataV2},
     parse_token::{get_token_account_mint, is_known_spl_token_id},
 };
@@ -72,16 +73,22 @@ impl AccountEncoder {
         loader: &AccountLoader<'_>,
         pubkey: &Pubkey,
         unix_timestamp: i64,
-    ) -> Option<UiAccount> {
+    ) -> RpcResult<Option<UiAccount>> {
         // Reuse the loader's LMDB transaction for the mint instead of opening a nested one.
         loader
             .read(pubkey, |account| {
                 // Missing images are storage placeholders, not RPC-visible accounts.
-                (!account.is(AccountMode::Missing))
-                    .then(|| self.encode(pubkey, account, |mint| mint.read(loader, unix_timestamp)))
+                (!account.is(AccountMode::Missing)).then(|| {
+                    let metadata = self
+                        .token_mint(account)
+                        .and_then(|mint| mint.resolve(|mint| mint.read(loader, unix_timestamp)));
+                    self.encode_checked(pubkey, account, metadata)
+                })
             })
-            .ok()?
+            .ok()
             .flatten()
+            .flatten()
+            .transpose()
     }
 
     pub(crate) fn scan_program(
@@ -94,17 +101,19 @@ impl AccountEncoder {
         if !self.parses_token_program(program) {
             let rows = accounts
                 .program(program, |pubkey, account| {
-                    accepts(account).then(|| KeyedAccount {
-                        pubkey: (*pubkey).into(),
-                        account: self.encode_ui(pubkey, account, None),
+                    accepts(account).then(|| -> RpcResult<KeyedAccount> {
+                        Ok(KeyedAccount {
+                            pubkey: (*pubkey).into(),
+                            account: self.encode_checked(pubkey, account, None)?,
+                        })
                     })
                 })
                 .map_err(RpcError::internal)?;
-            return Ok(rows.filter_map(|(_, row)| row).collect());
+            return rows.filter_map(|(_, row)| row).collect();
         }
 
         enum PendingRow {
-            Encoded(UiAccount),
+            Encoded(RpcResult<UiAccount>),
             NeedsMint { account: AccountSharedData, mint: TokenMint },
         }
 
@@ -117,7 +126,7 @@ impl AccountEncoder {
                 }
                 Some(match self.token_mint(account) {
                     Some(mint) => PendingRow::NeedsMint { account: account.clone(), mint },
-                    None => PendingRow::Encoded(self.encode_ui(pubkey, account, None)),
+                    None => PendingRow::Encoded(self.encode_checked(pubkey, account, None)),
                 })
             })
             .map_err(RpcError::internal)?
@@ -127,8 +136,7 @@ impl AccountEncoder {
         let loader = accounts.loader();
         let unix_timestamp = engine.blocks().latest().time;
         let mut mint_cache = HashMap::new();
-        Ok(rows
-            .into_iter()
+        rows.into_iter()
             .filter_map(|(pubkey, row)| {
                 let account = match row {
                     PendingRow::Encoded(account) => account,
@@ -138,12 +146,12 @@ impl AccountEncoder {
                                 .entry(mint)
                                 .or_insert_with(|| mint.read(&loader, unix_timestamp))
                         });
-                        self.encode_ui(&pubkey, &account, metadata)
+                        self.encode_checked(&pubkey, &account, metadata)
                     }
                 };
-                self.program_row(program, pubkey, account)
+                account.map(|account| self.program_row(program, pubkey, account)).transpose()
             })
-            .collect())
+            .collect()
     }
 
     /// Unlike direct reads, parsed token program results omit rows that fall back to binary.
@@ -168,6 +176,34 @@ impl AccountEncoder {
         }
         let address = get_token_account_mint(account.data())?;
         Some(TokenMint { address, program })
+    }
+
+    /// Encode for an HTTP read. Like Agave's RPC, this rejects base58 data over
+    /// `MAX_BASE58_BYTES` instead of returning the decoder's placeholder string
+    /// "error: data too large for bs58 encoding". Subscriptions go through
+    /// [`Self::encode`] and keep the placeholder, matching Agave's pubsub.
+    fn encode_checked(
+        &self,
+        pubkey: &Pubkey,
+        account: &AccountSharedData,
+        mint: Option<SplTokenAdditionalDataV2>,
+    ) -> RpcResult<UiAccount> {
+        if matches!(
+            self.encoding,
+            UiAccountEncoding::Binary | UiAccountEncoding::Base58
+        ) {
+            let len = account.data().len();
+            let len = self.data_slice.map_or(len, |slice| {
+                slice.length.min(len.saturating_sub(slice.offset))
+            });
+            if len > MAX_BASE58_BYTES {
+                return Err(RpcError::invalid_request(format!(
+                    "Encoded binary (base 58) data should be less than {MAX_BASE58_BYTES} bytes, \
+                     please use Base64 encoding."
+                )));
+            }
+        }
+        Ok(self.encode_ui(pubkey, account, mint))
     }
 
     fn encode_ui(
