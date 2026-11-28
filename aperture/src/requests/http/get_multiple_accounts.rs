@@ -1,4 +1,5 @@
 use ::metrics::metrics::AccountFetchEntrypoint;
+use solana_account_decoder::UiAccountEncoding;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::{config::RpcAccountInfoConfig, request::MAX_MULTIPLE_ACCOUNTS};
 
@@ -32,13 +33,17 @@ impl RpcHandlers {
             )
             .await;
         let block = self.engine.blocks().latest();
-        let encoder = AccountEncoder::from(config);
+        // Agave defaults this method to base64, unlike the single-account reads.
+        let encoder = AccountEncoder::new(
+            config.encoding.unwrap_or(UiAccountEncoding::Base64),
+            config.data_slice,
+        );
         let accounts = self.engine.accounts();
         let loader = accounts.loader();
         let accounts = pubkeys
             .iter()
             .map(|pubkey| encoder.read_visible(&loader, pubkey, block.time))
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         ResponsePayload::encode(&request.id, accounts, block.slot)
     }
 }
